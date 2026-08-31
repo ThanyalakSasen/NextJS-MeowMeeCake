@@ -96,14 +96,9 @@ src/
 7. `.env.local`: ผู้ใช้ต้องจัดหา `MONGODB_URI`, `JWT_SECRET`, `JWT_EXPIRE`, `JWT_COOKIE_EXPIRE` (Google OAuth / email / omise = optional ตาม feature ที่จะเปิด)
 8. คัดลอก `public/`: `pictures/logoMoewMeeCake.png`, svg ต่าง ๆ (รูปสินค้า/สลิปตัวอย่างเป็น optional สำหรับ demo)
 
-### เฟส 0.5 — i18n foundation (ทำก่อน component/screen — ดู `I18N_PLAN.md`)
-1. ติดตั้ง `next-intl` · สร้าง `src/i18n/{config,request,format,useLocale}.ts` + `messages/{th,en}.json` (โครง namespace)
-2. เดินสาย provider: `proxy.ts` set cookie `mmc_locale` → `app/layout.tsx` `NextIntlClientProvider` + `<html lang>` → `providers.tsx` antd locale + `dayjs.locale`
-3. ย้าย label map เดิม (`entityLabels`, `fieldLabels`, `unitContext`, `promotionChannel`, `sidebar` menu, breadcrumb `ROUTE_LABELS`) เข้า catalog — เติม `th` (จากต้นทาง) + `en` (แปลใหม่)
-4. `src/i18n/format.ts` แทน `formatCurrency`/`fmtBaht`/`fmt`/`fmtDateTH`/`fmtPct`
-5. `enums` namespace ครบทุกกลุ่ม + DB-enum ใช้แนวทาง A (คงค่าใน DB, map ตอนแสดง)
-6. Locale switcher (TH/EN) ใน `UserMenuDropdown`
-7. สคริปต์ lint หา literal อักษรไทยนอก `messages/`
+### เฟส 0.5 — i18n foundation  ✅ **เสร็จ 2026-08-31** (`build` + `lint` + `lint:i18n` ผ่าน · smoke test cookie th↔en ผ่าน)
+> ทำจริง: ติดตั้ง `next-intl@4.14.1` (v3 peer ไม่รับ next 16) · `src/i18n/{config,request,format,useSetLocale}.ts` + `messages/{th,en}.json` · `next.config.ts` wrap `createNextIntlPlugin("./src/i18n/request.ts")` · `layout.tsx` async + `NextIntlClientProvider` + `<html lang={locale}>` · `providers.tsx` antd locale (thTH/enUS) + `dayjs.locale` ตาม `useLocale()` · `messages` เติม namespace: `common`, `nav`, `auth`, `errors`, `actions`, `entities` (37), `fields` (~130), `enums` (20 กลุ่ม รวม DB-enum แนวทาง A) + screen namespaces ว่าง 13 อัน · `src/components/base/LocaleSwitcher.tsx` (เฟส 3 Navbar จะ mount) · `scripts/check-i18n.mjs` + `npm run lint:i18n`
+> ยังไม่ทำ (เลื่อนไปเฟสที่เกี่ยวข้อง): set cookie จาก `Accept-Language` ใน `proxy.ts` (เฟส 2) · port ฟังก์ชัน `entityLabelTh`/`fieldLabelTh`/`formatFieldValue`/`computeFieldDiff` เป็น util + i18n wrapper (เฟส 2 คู่กับ createCrudController) · mount LocaleSwitcher ใน Navbar (เฟส 3)
 
 ### เฟส 1 — Data layer
 1. Normalize line ending model ทั้ง 38 ไฟล์เป็น LF + เพิ่ม `.gitattributes` (`* text=auto eol=lf`)

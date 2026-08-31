@@ -171,3 +171,29 @@ share component (ใช้หลายที่) + base component (atom) + compo
 - Git เตือน LF→CRLF — จะแก้ด้วย `.gitattributes` (`eol=lf`) เฟส 1 (D2)
 
 **ถัดไป:** เฟส 0.5 (i18n foundation)
+
+---
+
+## #11 — 2026-08-31  ▶ เฟส 0.5 (i18n foundation) เสร็จ
+
+**ผู้ใช้สั่ง:** เริ่มเฟส 0.5
+
+**ทำจริง:**
+- ติดตั้ง **`next-intl@4.14.1`** (v3.26 peer ไม่รับ next 16 → ใช้ v4 ที่รองรับ `next ^16` + `react ^18`)
+- `src/i18n/config.ts` — `locales ['th','en']`, `defaultLocale 'th'`, `LOCALE_COOKIE 'mmc_locale'`, `localeNames` (endonym), `resolveLocale()`
+- `src/i18n/request.ts` — `getRequestConfig` อ่าน cookie → โหลด `messages/<locale>.json` (แบบไม่มี i18n routing)
+- `src/i18n/format.ts` — `formatCurrency` (THB) / `formatNumber` / `formatPercent` / `formatDate` รับ locale (แทน fmtBaht/formatCurrency/fmt/fmtDateTH/fmtPct ที่ต้นทางกระจาย)
+- `src/i18n/useSetLocale.ts` — hook สลับภาษา (เขียน cookie + `router.refresh()` ใน `useTransition`)
+- `src/i18n/messages/{th,en}.json` — namespace: `common`, `nav` (เมนู+breadcrumb labels), `auth`, `errors`, `actions`, `entities` (37 model), `fields` (~130 field), `enums` (20 กลุ่ม — order/payment/production/stock/unit/promotion/sales/recipe/notification + DB-enum ค่าไทย 3 กลุ่มแบบแนวทาง A) + screen namespace ว่าง 13 อัน
+- `next.config.ts` — wrap `createNextIntlPlugin("./src/i18n/request.ts")` (คง `reactCompiler`)
+- `src/app/layout.tsx` — async, `getLocale()` → `<html lang={locale}>`, ครอบ `NextIntlClientProvider`
+- `src/app/providers.tsx` — antd `ConfigProvider locale` = thTH/enUS + `dayjs.locale` ตาม `useLocale()` (useEffect)
+- `src/app/page.tsx` — ใช้ `getTranslations("common")`
+- `src/components/base/LocaleSwitcher.tsx` — ปุ่ม TH/EN (เฟส 3 Navbar จะ mount)
+- `scripts/check-i18n.mjs` + `npm run lint:i18n` — หา literal อักษรไทยนอก `src/i18n|mocks|models|types`
+- **ผล: `npm run build` ✅ · `lint` ✅ · `lint:i18n` ✅ (clean)**
+- **smoke test** (`next start` + curl): ไม่มี cookie → `<html lang="th">` + ข้อความไทย · `mmc_locale=en` → `<html lang="en">` + ข้อความอังกฤษ ✅
+
+**เลื่อนไปเฟสถัดไป:** set locale cookie จาก `Accept-Language` ใน `proxy.ts` (เฟส 2) · port `entityLabelTh`/`fieldLabelTh`/`formatFieldValue`/`computeFieldDiff` (เฟส 2) · mount LocaleSwitcher ใน Navbar (เฟส 3)
+
+**ถัดไป:** เฟส 1 (models normalize + types + mocks)
