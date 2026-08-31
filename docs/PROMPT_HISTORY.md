@@ -148,3 +148,26 @@ share component (ใช้หลายที่) + base component (atom) + compo
 - D14 = เพิ่ม `requireSession` ทุก GET + `can_view` เมื่อมี `menuKey`
 - อัปเดต `REBUILD_PLAN.md` + `AUTH_PLAN.md`: mark ตัดสินแล้ว
 - **D1–D14 ครบทั้งหมด — แผนพร้อม เริ่มเฟส 0 ได้เมื่อผู้ใช้ไฟเขียว**
+
+---
+
+## #10 — 2026-08-31  ▶ เริ่มเขียนโค้ด: เฟส 0 (เสร็จ)
+
+**ผู้ใช้สั่ง:** เริ่มเขียนโค้ดเฟส 0
+
+**ทำจริง:**
+- `package.json`: downgrade `next` 16.2.6 · `react`/`react-dom` 18.3.1 · `eslint-config-next` 16.2.6 · `@types/react(-dom)` ^18 · เพิ่ม deps: `antd`, `mongoose`, `bcryptjs`, `jsonwebtoken`, `dayjs`, `axios`, `@heroicons/react`, `lucide-react`, `recharts`, `sweetalert2`, `qrcode` · devDeps: `@types/bcryptjs|jsonwebtoken|qrcode`, `babel-plugin-react-compiler@1.0.0`
+- `next.config.ts`: `reactCompiler: true` (D3)
+- port จากต้นทาง: `src/app/globals.css` (ธีมกาแฟ), `src/app/providers.tsx` (antd ConfigProvider + th_TH + dayjs), `src/app/favicon.ico`, `public/pictures/logoMoewMeeCake.png`, `public/*.svg`
+- `src/app/layout.tsx`: ตัด `next/font/google` (Geist), ใช้แบบต้นทาง (`<html lang="th">` + `<Providers>`)
+- `src/app/page.tsx`: placeholder (เฟส 5 จะใส่ redirect ตาม session)
+- `.env.local` (mock mode — ไม่มี `MONGODB_URI`) + `.env.example` + `.gitignore` เพิ่ม `!.env.example`
+- `npm install` สำเร็จ (539 pkg) — ยืนยัน react 18.3.1 / next 16.2.6 / antd 6.6.2
+- **อ่าน `node_modules/next/dist/docs/`** (กฎ AGENTS.md): ยืนยัน `proxy.ts` = convention ปัจจุบัน (middleware deprecated v16) → `src/proxy.ts` ของต้นทางถูกต้องแล้ว · runtime = Node.js
+- **ผล: `npm run build` ✅ · `npm run lint` ✅**
+
+**ติดปัญหา/เลื่อน:**
+- `next-intl@3.26` peer ไม่รับ next 16 → **เลื่อนติดตั้งไปเฟส 0.5** ด้วย `next-intl@^4` (บันทึกใน `I18N_PLAN.md` + `REBUILD_PLAN.md`)
+- Git เตือน LF→CRLF — จะแก้ด้วย `.gitattributes` (`eol=lf`) เฟส 1 (D2)
+
+**ถัดไป:** เฟส 0.5 (i18n foundation)

@@ -23,6 +23,8 @@
 
 **สรุป: `next-intl`** — เพราะ providers.tsx/layout เป็น server component ได้ และคุมทั้ง server (API error message) + client ด้วย catalog เดียว
 
+> ⚠️ เวอร์ชัน: `next-intl@3.26` peer = `next ^10..^15` **ไม่รับ next 16** → ต้องใช้ **`next-intl@^4`** (v4 รองรับ Next 15+/16) · ตรวจ peer + API เปลี่ยน (`getRequestConfig`, `requestLocale`) ตอนติดตั้งจริงเฟส 0.5
+
 ---
 
 ## 3. โครงไฟล์

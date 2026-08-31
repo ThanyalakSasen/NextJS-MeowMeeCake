@@ -77,12 +77,15 @@ src/
 
 ## 4. เดิน plan เป็นเฟส
 
-### เฟส 0 — Setup & tooling
+### เฟส 0 — Setup & tooling  ✅ **เสร็จ 2026-08-31** (`npm run build` + `lint` ผ่าน)
+> ทำจริง: `package.json` downgrade → next 16.2.6 / react 18.3.1 + deps (antd 6.6.2, mongoose, bcryptjs, jsonwebtoken, dayjs, axios, heroicons, lucide-react, recharts, sweetalert2, qrcode) · `next.config.ts` `reactCompiler:true` · port `globals.css` + `providers.tsx` + favicon + `public/pictures/logoMoewMeeCake.png` + svg · `layout.tsx` ตัด Geist · `page.tsx` placeholder · `.env.local` (mock) + `.env.example` · `.gitignore` `!.env.example` · อ่าน `node_modules/next/dist/docs/` (ยืนยัน `proxy.ts` = convention ถูกต้อง)
+> ยังไม่ทำในเฟสนี้: `next-intl` (peer เก่าไม่รับ next 16 → ย้ายไปติดตั้งเวอร์ชันที่รองรับในเฟส 0.5)
+
 1. **Downgrade framework ให้ตรงต้นทาง** (D1 = ตัดสินแล้ว): `next` 16.2.6, `react`/`react-dom` 18.3.1, `eslint-config-next` 16.2.6, `@types/react` ^18.3, `@types/react-dom` ^18.3
    - ลบ `next/font/google` (Geist) ออกจาก `layout.tsx` — ต้นทางไม่ใช้
    - `next dev` จะเขียน `AGENTS.md` block ใหม่ตามเวอร์ชันที่ downgrade แล้ว — commit ไปกับงาน
 2. รวม `package.json`: เพิ่ม dependency จากต้นทาง + `@types/*` ที่เกี่ยว
-   - deps: `antd`, `mongoose`, `bcryptjs`, `jsonwebtoken`, `@heroicons/react`, `lucide-react`, `recharts`, `sweetalert2`, `qrcode`, `dayjs`, `axios` (เฟส 2.5), `next-intl` (เฟส 0.5)
+   - deps: `antd`, `mongoose`, `bcryptjs`, `jsonwebtoken`, `@heroicons/react`, `lucide-react`, `recharts`, `sweetalert2`, `qrcode`, `dayjs`, `axios` — `next-intl` เลื่อนไปเฟส 0.5 (v3.26 peer ไม่รับ next 16 → ต้อง v4.x)
    - **ไม่เอา** `@material-tailwind/react` (D4)
    - devDeps: `@types/bcryptjs`, `@types/jsonwebtoken`, `@types/qrcode`, `babel-plugin-react-compiler@1.0.0` (D3)
 3b. `next.config.ts`: `reactCompiler: true` (D3)
