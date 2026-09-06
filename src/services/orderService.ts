@@ -541,11 +541,35 @@ export async function updateOrderStatus(
   return getOrderById(id);
 }
 
+/** สถานะที่ "ลูกค้า" ยกเลิกออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน */
+export const CUSTOMER_CANCELABLE_STATUSES: readonly OrderStatus[] = ["pending", "confirmed"];
+
 export async function cancelOrder(
   id: string,
-  opts: { cancelled_by?: string; cancelled_reason?: string } = {}
+  opts: {
+    cancelled_by?: string;
+    cancelled_reason?: string;
+    /** ถ้าระบุ: ยกเลิกได้เฉพาะเมื่อสถานะปัจจุบันอยู่ในลิสต์นี้ (ใช้จำกัดสิทธิ์ฝั่งลูกค้า — แอดมินไม่ส่ง = ยกเลิกได้ทุกสถานะที่ยังไม่ completed) */
+    allowedFrom?: readonly OrderStatus[];
+  } = {}
 ) {
-  return updateOrderStatus(id, "cancelled", opts);
+  const { allowedFrom, ...rest } = opts;
+  if (allowedFrom) {
+    await dbConnect();
+    assertObjectId(id);
+    const order = await orderModel
+      .findOne({ _id: id, deleted_at: null })
+      .select("order_status")
+      .lean<{ order_status: OrderStatus } | null>();
+    if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
+    if (!allowedFrom.includes(order.order_status)) {
+      throw conflict(
+        `ยกเลิกออเดอร์เองได้เฉพาะตอนสถานะ ${allowedFrom.join(" / ")} เท่านั้น ` +
+          `(สถานะปัจจุบัน: "${order.order_status}") — หากต้องการยกเลิกกรุณาติดต่อร้าน`
+      );
+    }
+  }
+  return updateOrderStatus(id, "cancelled", rest);
 }
 
 // ── อัปเดตสถานะการชำระเงิน (เรียกจาก paymentService) ────────
