@@ -23,6 +23,7 @@ import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import orderModel from "../models/orderModel";
 import orderItemModel from "../models/orderItemModel";
+import paymentModel from "../models/paymentModel";
 import productModel from "../models/productModel";
 import productVariantModel from "../models/productVariantModel";
 import productOptionModel from "../models/productOptionModel";
@@ -534,6 +535,30 @@ export async function updateOrderStatus(
     }
     // คืนสิทธิ์โปรโมชัน (ถ้ามี) — best-effort
     await promotionUsageService.revokeUsage({ order_id: String(order._id) }).catch(() => undefined);
+
+    // ออเดอร์ที่จ่ายเงินแล้ว → คืนเงินอัตโนมัติ (best-effort — ไม่ให้ล้มการยกเลิก)
+    // ป้องกันสภาพ "order = cancelled แต่ payment ยัง paid" (BACKLOG 2.8)
+    if (order.payment_status === "paid") {
+      const paidPayment = await paymentModel
+        .findOne({ order_id: order._id, status: "paid", deleted_at: null })
+        .lean<{ _id: unknown } | null>();
+      if (paidPayment && opts.cancelled_by) {
+        try {
+          // dynamic import — เลี่ยง circular import (paymentService → orderService)
+          const { refundPayment } = await import("./paymentService");
+          await refundPayment(String(paidPayment._id), { verified_by: opts.cancelled_by });
+        } catch (e) {
+          console.error("[order] คืนเงินอัตโนมัติตอนยกเลิกออเดอร์ไม่สำเร็จ:", e);
+        }
+      } else {
+        console.error(
+          "[order] ยกเลิกออเดอร์ที่จ่ายแล้วแต่คืนเงินอัตโนมัติไม่ได้ " +
+            "(ไม่พบ payment ที่ paid หรือไม่มี cancelled_by):",
+          String(order._id)
+        );
+      }
+    }
+
     order.cancelled_at = new Date();
     if (opts.cancelled_by) {
       assertObjectId(opts.cancelled_by, "cancelled_by");

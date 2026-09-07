@@ -92,7 +92,7 @@ const result = await orderService.cancelOrder(id, {
 |---|---|---|
 | `pending` (ยังไม่จ่าย) | ✅ ได้ | ✅ ได้ |
 | `confirmed` (ยังไม่จ่าย) | ✅ ได้ | ✅ ได้ |
-| **จ่ายเงินแล้ว** (`payment_status = "paid"`) | ❌ **409** — "ติดต่อร้านเพื่อขอยกเลิกและคืนเงิน" | ✅ ได้ (คืนเงินเองผ่าน `refundPayment`) |
+| **จ่ายเงินแล้ว** (`payment_status = "paid"`) | ❌ **409** — "ติดต่อร้านเพื่อขอยกเลิกและคืนเงิน" | ✅ ได้ — **คืนเงินอัตโนมัติ** (`refundPayment` ในตัว) |
 | `preparing` | ❌ **409** — "ติดต่อร้าน" | ✅ ได้ |
 | `ready` | ❌ **409** | ✅ ได้ |
 | `completed` | ❌ 409 (state machine) | ❌ 409 (state machine) |
@@ -101,9 +101,28 @@ const result = await orderService.cancelOrder(id, {
 > เช็ค `payment_status = "paid"` แยกจาก state machine — ออเดอร์ที่ auto ขยับเป็น `confirmed` ตอนจ่ายเงินสำเร็จ
 > (`setPaymentStatus`) จะติดเงื่อนไขนี้ ไม่ใช่เงื่อนไขสถานะ
 
-การยกเลิกที่ผ่าน ยังทำงานเหมือนเดิม: คืนสต็อก (`restockForOrder`) + คืนสิทธิ์โปรโมชัน (`revokeUsage`) + set `cancelled_at` / `cancelled_by` / `cancelled_reason` (ทั้งหมดอยู่ใน `updateOrderStatus`)
+การยกเลิกที่ผ่าน (ใน `updateOrderStatus` สาขา cancel):
+1. คืนสต็อก — `restockForOrder`
+2. คืนสิทธิ์โปรโมชัน — `revokeUsage({ order_id })`
+3. **ถ้า `payment_status === "paid"` → คืนเงินอัตโนมัติ** (BACKLOG 2.8, เพิ่ม 2026-09-07):
+   ```ts
+   const paidPayment = await paymentModel
+     .findOne({ order_id: order._id, status: "paid", deleted_at: null }).lean();
+   if (paidPayment && opts.cancelled_by) {
+     const { refundPayment } = await import("./paymentService");   // dynamic — เลี่ยง circular import
+     await refundPayment(String(paidPayment._id), { verified_by: opts.cancelled_by });
+   }
+   ```
+   - best-effort (`try/catch` + log) — ถ้าคืนเงินไม่สำเร็จ **ไม่ล้ม**การยกเลิก แอดมินไปกด `refundPayment` เองได้
+   - `refundPayment` → `propagateStatus` → `setPaymentStatus(orderId, "refunded")` → `order.payment_status = "refunded"`
+     (`order.save()` ท้าย `updateOrderStatus` เขียนเฉพาะ path ที่แก้ = `order_status`/`cancelled_*` จึงไม่ทับค่า `refunded`)
+   - ต้องมี `cancelled_by` (ใช้เป็น `verified_by` ของ refund) — route แอดมินส่ง `session.user_id` เสมอ ·
+     ถ้าไม่มี → log แล้วข้าม (ไม่คืนเงินอัตโนมัติ)
+   - เช็ค `=== "paid"` เท่านั้น → ออเดอร์ที่ refund ไปแล้ว (`payment_status = "refunded"`) ยกเลิกซ้ำไม่คืนเงินซ้ำ
+4. set `cancelled_at` / `cancelled_by` / `cancelled_reason`
 
-**ยังไม่ทำ (ฝั่งแอดมิน):** เมื่อแอดมินยกเลิกออเดอร์ที่ `paid` `updateOrderStatus` ไม่สร้าง refund record / ไม่ผูกกับ `refundPayment` ให้อัตโนมัติ — แอดมินต้องกดคืนเงินแยกเอง (ดู BACKLOG §2.8)
+**ยังเปิดค้าง:** ยังไม่มี audit log แยกสำหรับ auto-refund นี้ (route audit แค่ "เปลี่ยนสถานะเป็น cancelled") ·
+แอดมินยังยกเลิกออเดอร์ `paid` แบบ "ไม่คืนเงิน" (ยึดเงิน) ไม่ได้ — ถ้าต้องการต้องเพิ่ม flag
 
 ---
 
