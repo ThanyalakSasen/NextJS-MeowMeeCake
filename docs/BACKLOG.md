@@ -67,6 +67,9 @@
 
 ## 3. 🟡 คุณภาพ / hardening (ชั้น D ในแผน)
 
+> **แผนงาน + ลำดับ + effort/ความเสี่ยงต่อข้อ → [`hardening-plan.md`](hardening-plan.md)**
+> ก่อน production อย่างน้อย: 3.2 · 3.9 · 3.10 · ทำก่อนได้กำไรทบต้น: 3.6 → 3.3 → 3.4 → 3.1 · งานเดี่ยวเสี่ยงสูง: 3.11
+
 | # | เรื่อง | หมายเหตุ |
 |---|---|---|
 | 3.1 | ไม่มี validation layer (zod) | service ทำ whitelist ไว้แล้วส่วนใหญ่ แต่ยังไม่ validate shape/type ของ body เป็นระบบ → error message ไม่ละเอียด, type coercion บางเคสหลุด · แนะนำ `src/lib/validate.ts` + zod schema ต่อ route |
