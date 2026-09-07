@@ -17,7 +17,7 @@
  *    (ส่ง promotion_code/promotion_id มา ระบบคิดเอง — ไม่เชื่อ discount_amount จาก client เมื่อมีโปรโมชัน)
  */
 import dbConnect from "../lib/dbConnect";
-import { badRequest, conflict, notFound } from "../lib/httpError";
+import { badRequest, conflict, notFound, isHttpError } from "../lib/httpError";
 import { assertObjectId, pick } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
@@ -341,28 +341,32 @@ async function persistOrder(
     await orderItemModel.insertMany(
       itemsPayload.map((it) => ({ ...it, order_id: order._id }))
     );
+
+    // 4) บันทึกการใช้โปรโมชัน — จองสิทธิ์แบบ atomic (กันใช้เกิน usage_limit / per-user)
+    //    computeDiscount reject ส่วนลด 0 ไปแล้ว → มี appliedPromotion = discount > 0 เสมอ
+    //    limit เต็ม (HttpError 422) = reject จริง → โยนต่อให้ catch ล้มออเดอร์
+    //    error อื่น (transient) = best-effort ไม่ล้มออเดอร์ที่สร้างสำเร็จแล้ว
+    if (appliedPromotion) {
+      try {
+        await promotionUsageService.recordUsage({
+          promotion_id: appliedPromotion.promotion_id,
+          user_id: userId,
+          order_id: String(order._id),
+          discount_applied: appliedPromotion.discount_amount,
+        });
+      } catch (e) {
+        if (isHttpError(e) && e.status === 422) throw e;
+        console.error("[order] บันทึกการใช้โปรโมชันไม่สำเร็จ:", e);
+      }
+    }
   } catch (err) {
-    // ชดเชย: คืนสต็อก + ลบออเดอร์ที่ค้าง
+    // ชดเชย: คืนสต็อก + ลบออเดอร์ที่ค้าง (recordUsage rollback used_count ของตัวเองแล้ว)
     await productService.restockForOrder(stockItems).catch(() => undefined);
     if (order?._id) {
       await orderModel.deleteOne({ _id: order._id }).catch(() => undefined);
       await orderItemModel.deleteMany({ order_id: order._id }).catch(() => undefined);
     }
     throw err;
-  }
-
-  // 4) บันทึกการใช้โปรโมชัน (best-effort — ไม่ให้ล้มออเดอร์ที่สร้างสำเร็จแล้ว)
-  // computeDiscount reject ส่วนลด 0 ไปแล้ว → ถ้ามี appliedPromotion แปลว่า discount > 0 เสมอ
-  // (จับคู่กับ order.promotion_id ที่เซ็ตเฉพาะตอนมี appliedPromotion — ไม่มีเคส "ผูกโปรแต่ไม่บันทึก usage")
-  if (appliedPromotion) {
-    await promotionUsageService
-      .recordUsage({
-        promotion_id: appliedPromotion.promotion_id,
-        user_id: userId,
-        order_id: String(order._id),
-        discount_applied: appliedPromotion.discount_amount,
-      })
-      .catch((e) => console.error("[order] บันทึกการใช้โปรโมชันไม่สำเร็จ:", e));
   }
 
   return getOrderById(String(order._id));
