@@ -559,13 +559,20 @@ export async function cancelOrder(
     assertObjectId(id);
     const order = await orderModel
       .findOne({ _id: id, deleted_at: null })
-      .select("order_status")
-      .lean<{ order_status: OrderStatus } | null>();
+      .select("order_status payment_status")
+      .lean<{ order_status: OrderStatus; payment_status?: PaymentStatus } | null>();
     if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
     if (!allowedFrom.includes(order.order_status)) {
       throw conflict(
         `ยกเลิกออเดอร์เองได้เฉพาะตอนสถานะ ${allowedFrom.join(" / ")} เท่านั้น ` +
           `(สถานะปัจจุบัน: "${order.order_status}") — หากต้องการยกเลิกกรุณาติดต่อร้าน`
+      );
+    }
+    // ออเดอร์ที่ชำระเงินแล้ว: ลูกค้ายกเลิกเองไม่ได้ — ต้องให้แอดมินยกเลิก + คืนเงิน (refundPayment)
+    // ไม่งั้นจะได้ order_status = cancelled แต่ payment_status ยัง paid โดยไม่มี refund record
+    if (order.payment_status === "paid") {
+      throw conflict(
+        "ออเดอร์นี้ชำระเงินแล้ว ยกเลิกเองไม่ได้ — กรุณาติดต่อร้านเพื่อขอยกเลิกและคืนเงิน"
       );
     }
   }

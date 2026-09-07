@@ -1,8 +1,10 @@
 /**
  * POST /api/shop/orders/[id]/cancel — ลูกค้ายกเลิกออเดอร์ของตัวเอง
  *   body: { reason? }
- *   ลูกค้ายกเลิกเองได้เฉพาะสถานะ pending / confirmed (CUSTOMER_CANCELABLE_STATUSES) —
- *   พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องให้แอดมินยกเลิกผ่าน /api/admin/orders/[id]/status
+ *   ลูกค้ายกเลิกเองได้เฉพาะสถานะ pending / confirmed (CUSTOMER_CANCELABLE_STATUSES)
+ *   และเฉพาะออเดอร์ที่ยังไม่ได้ชำระเงิน (payment_status != "paid") —
+ *   พอร้านเริ่มเตรียม (preparing ขึ้นไป) หรือจ่ายเงินแล้ว ต้องให้แอดมินยกเลิก + คืนเงิน
+ *   ผ่าน /api/admin/orders/[id]/status + paymentService.refundPayment
  *   service คืนสต็อก + คืนสิทธิ์โปรโมชันให้อัตโนมัติ
  */
 import { ok } from "@/lib/apiResponse";

@@ -51,13 +51,20 @@ export async function cancelOrder(
     assertObjectId(id);
     const order = await orderModel
       .findOne({ _id: id, deleted_at: null })
-      .select("order_status")
-      .lean<{ order_status: OrderStatus } | null>();
+      .select("order_status payment_status")
+      .lean<{ order_status: OrderStatus; payment_status?: PaymentStatus } | null>();
     if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
     if (!allowedFrom.includes(order.order_status)) {
       throw conflict(
         `ยกเลิกออเดอร์เองได้เฉพาะตอนสถานะ ${allowedFrom.join(" / ")} เท่านั้น ` +
         `(สถานะปัจจุบัน: "${order.order_status}") — หากต้องการยกเลิกกรุณาติดต่อร้าน`
+      );
+    }
+    // ออเดอร์ที่ชำระเงินแล้ว: ลูกค้ายกเลิกเองไม่ได้ (กัน order=cancelled แต่ payment ยัง paid
+    // โดยไม่มี refund record) — ต้องให้แอดมินยกเลิก + คืนเงินผ่าน refundPayment
+    if (order.payment_status === "paid") {
+      throw conflict(
+        "ออเดอร์นี้ชำระเงินแล้ว ยกเลิกเองไม่ได้ — กรุณาติดต่อร้านเพื่อขอยกเลิกและคืนเงิน"
       );
     }
   }
@@ -83,14 +90,20 @@ const result = await orderService.cancelOrder(id, {
 
 | สถานะออเดอร์ | ลูกค้ายกเลิกเอง (`/api/shop/.../cancel`) | แอดมิน (`/api/admin/.../status`) |
 |---|---|---|
-| `pending` | ✅ ได้ | ✅ ได้ |
-| `confirmed` | ✅ ได้ | ✅ ได้ |
+| `pending` (ยังไม่จ่าย) | ✅ ได้ | ✅ ได้ |
+| `confirmed` (ยังไม่จ่าย) | ✅ ได้ | ✅ ได้ |
+| **จ่ายเงินแล้ว** (`payment_status = "paid"`) | ❌ **409** — "ติดต่อร้านเพื่อขอยกเลิกและคืนเงิน" | ✅ ได้ (คืนเงินเองผ่าน `refundPayment`) |
 | `preparing` | ❌ **409** — "ติดต่อร้าน" | ✅ ได้ |
 | `ready` | ❌ **409** | ✅ ได้ |
 | `completed` | ❌ 409 (state machine) | ❌ 409 (state machine) |
 | `cancelled` | ❌ 409 (เดิมเป็น no-op สำเร็จ — ดูหมายเหตุ) | ผ่าน (no-op) |
 
+> เช็ค `payment_status = "paid"` แยกจาก state machine — ออเดอร์ที่ auto ขยับเป็น `confirmed` ตอนจ่ายเงินสำเร็จ
+> (`setPaymentStatus`) จะติดเงื่อนไขนี้ ไม่ใช่เงื่อนไขสถานะ
+
 การยกเลิกที่ผ่าน ยังทำงานเหมือนเดิม: คืนสต็อก (`restockForOrder`) + คืนสิทธิ์โปรโมชัน (`revokeUsage`) + set `cancelled_at` / `cancelled_by` / `cancelled_reason` (ทั้งหมดอยู่ใน `updateOrderStatus`)
+
+**ยังไม่ทำ (ฝั่งแอดมิน):** เมื่อแอดมินยกเลิกออเดอร์ที่ `paid` `updateOrderStatus` ไม่สร้าง refund record / ไม่ผูกกับ `refundPayment` ให้อัตโนมัติ — แอดมินต้องกดคืนเงินแยกเอง (ดู BACKLOG §2.8)
 
 ---
 
