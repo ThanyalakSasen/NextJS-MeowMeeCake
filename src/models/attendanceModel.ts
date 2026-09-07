@@ -54,7 +54,12 @@ const attendanceSchema = new mongoose.Schema(
   }
 );
 
-attendanceSchema.index({ user_id: 1, work_date: 1 });
+// 1 คน ต่อ 1 วันทำงาน มีได้แค่ 1 เอกสารที่ยังไม่ถูกลบ (partial unique)
+// รายการที่ถูก soft delete แล้วไม่บล็อกการสร้างใหม่
+attendanceSchema.index(
+  { user_id: 1, work_date: 1 },
+  { unique: true, partialFilterExpression: { deleted_at: null } }
+);
 attendanceSchema.index({ work_date: -1 });
 attendanceSchema.index({ deleted_at: 1 });
 

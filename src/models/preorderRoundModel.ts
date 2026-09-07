@@ -8,7 +8,12 @@ const preorderRoundSchema = new mongoose.Schema(
     open_date: { type: Date, required: true },
     close_date: { type: Date, required: true },
     pickup_date: { type: Date, required: true },
-    round_status: { type: String, enum: ["open", "closed", "cancelled"], default: "open" },
+    // scheduled = ตั้งเวลาไว้ (open_date ยังไม่ถึง) , open = เปิดรับพรีออเดอร์ , closed = ปิดรับแล้ว , cancelled = ยกเลิกรอบ
+    round_status: {
+      type: String,
+      enum: ["scheduled", "open", "closed", "cancelled"],
+      default: "scheduled",
+    },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }

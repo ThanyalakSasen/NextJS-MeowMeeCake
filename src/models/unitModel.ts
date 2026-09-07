@@ -31,7 +31,7 @@ const unitSchema = new mongoose.Schema({
   usage_context: {
     type: [String], // ลิสต์ของประเภทที่สามารถใช้หน่วยนี้ได้ เช่น ["Ingredient", "Product"] หรือ ["Both"]
     required: true,
-    enum: ["Ingredient", "Product", "Both"], // กำหนดว่าใช้กับวัตถุดิบ, สินค้า หรือทั้งสองอย่าง
+    enum: ["Ingredient", "Product", "Both"],
   },
   deleted_at: {
       type: Date,
