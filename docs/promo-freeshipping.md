@@ -89,14 +89,20 @@ if (appliedPromotion && appliedPromotion.discount_amount > 0) {
 
 ---
 
-## 4. ยังไม่ได้แก้ (นอกสโคป 2.6)
+## 4. เคสทั่วไป: ส่วนลดออกมา 0 จากโปรชนิดอื่น (BACKLOG 2.11 — ✅ แก้แล้ว 2026-09-07)
 
-เคสทั่วไปกว่า: **โปรชนิด `Amount` หรือ `Percentage` ที่คิดออกมาได้ `discount_amount = 0`**
-(เช่น `Amount` ที่ `discount_value` เล็กกว่าที่คิด, หรือ eligibleAmount = 0) — ออเดอร์ก็ยังผูก `promotion_id` โดยไม่บันทึก usage เหมือนกัน
+เดิม: **โปรชนิด `Amount` หรือ `Percentage` ที่คิดออกมาได้ `discount_amount = 0`**
+(เช่น `discount_value = 0`, `eligibleAmount` น้อยมาก, config ผิด) — ออเดอร์ยังผูก `promotion_id` โดยไม่บันทึก usage เหมือนกัน
 
-ทางแก้ถ้าจะทำต่อ — เลือกอย่างใดอย่างหนึ่งใน `persistOrder`:
-- ไม่เซ็ต `order.promotion_id` เมื่อ `discount_amount === 0` (โปรที่ไม่ให้ส่วนลด = ถือว่าไม่ได้ใช้), หรือ
-- ย้าย guard: บันทึก usage ทุกครั้งที่มี `appliedPromotion` ไม่ว่า discount จะเป็น 0 หรือไม่ (ถือว่าใช้สิทธิ์ไปแล้ว)
+แก้: `computeDiscount` เพิ่มเช็คหลัง `discount = round2(Math.max(0, discount))`:
+```ts
+if (discount <= 0) {
+  throw unprocessable("โปรโมชันนี้ไม่ให้ส่วนลดกับออเดอร์นี้ (ส่วนลดเป็น 0)");
+}
+```
+- ครอบทั้ง 2 path เหมือน 2.6 (สร้างออเดอร์ + พรีวิว)
+- FreeShipping ไม่โดนเช็คนี้ เพราะถูก reject ก่อนแล้วตอน `!(ctx.delivery_fee > 0)` (และถ้าผ่าน = `delivery_fee > 0` แน่นอน)
+- `persistOrder` ตัด guard `discount_amount > 0` ที่ `recordUsage` ทิ้ง → เหลือ `if (appliedPromotion)` เพราะตอนนี้ `discount > 0` เสมอเมื่อมี `appliedPromotion` · `order.promotion_id` ก็เซ็ตเฉพาะตอนมี `appliedPromotion` → ไม่มีเคส "ผูกโปรแต่ไม่บันทึก usage" อีก
 
 ---
 

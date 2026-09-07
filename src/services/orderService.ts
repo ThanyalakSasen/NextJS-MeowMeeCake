@@ -352,7 +352,9 @@ async function persistOrder(
   }
 
   // 4) บันทึกการใช้โปรโมชัน (best-effort — ไม่ให้ล้มออเดอร์ที่สร้างสำเร็จแล้ว)
-  if (appliedPromotion && appliedPromotion.discount_amount > 0) {
+  // computeDiscount reject ส่วนลด 0 ไปแล้ว → ถ้ามี appliedPromotion แปลว่า discount > 0 เสมอ
+  // (จับคู่กับ order.promotion_id ที่เซ็ตเฉพาะตอนมี appliedPromotion — ไม่มีเคส "ผูกโปรแต่ไม่บันทึก usage")
+  if (appliedPromotion) {
     await promotionUsageService
       .recordUsage({
         promotion_id: appliedPromotion.promotion_id,

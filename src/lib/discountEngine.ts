@@ -115,6 +115,12 @@ export function computeDiscount(promo: any, ctx: DiscountContext): DiscountResul
 
   discount = round2(Math.max(0, discount));
 
+  // ส่วนลดออกมา 0 (เช่น discount_value = 0, eligibleAmount น้อยมาก, หรือ config ผิด) —
+  // ถ้าปล่อยผ่านออเดอร์จะผูก promotion_id โดยไม่บันทึก usage → reject เหมือนกรณี FreeShipping
+  if (discount <= 0) {
+    throw unprocessable("โปรโมชันนี้ไม่ให้ส่วนลดกับออเดอร์นี้ (ส่วนลดเป็น 0)");
+  }
+
   return {
     promotion_id: String(promo._id),
     promotion_code: promo.promotion_code,

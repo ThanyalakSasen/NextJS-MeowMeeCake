@@ -105,6 +105,8 @@ eligibleQty    = Σ eligibleLine.quantity
 discount_amount = round2( max(0, discount) )
 ```
 
+ถ้า `discount_amount ≤ 0` (config โปรผิด / eligibleAmount น้อยมาก) → **reject 422** `"โปรโมชันนี้ไม่ให้ส่วนลดกับออเดอร์นี้"` ไม่ให้ออเดอร์ผูก `promotion_id` โดยไม่มี usage
+
 ถ้า **ไม่ได้ใช้โปรโมชัน**: `discount_amount = max(0, discount_amount ที่แอดมินกรอก)` (ลูกค้ากรอกเองไม่ได้)
 
 **ตัวอย่าง Percentage + cap:** โปรโมชันลด 20% สูงสุด 100 บาท, ตะกร้า `subtotal = 800` (ไม่จำกัดสินค้า)
