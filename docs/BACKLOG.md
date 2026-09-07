@@ -12,7 +12,7 @@
 | API routes | ✅ `/api/auth` · `/api/catalog` (สาธารณะ อ่านอย่างเดียว) · `/api/shop` (ลูกค้า) · `/api/admin` (พนักงาน + permission) |
 | Auth layer (JWT + middleware + RBAC 3 ชั้น) | ✅ ใช้อยู่ |
 | `product_type` = `inStore` / `online` / `preorder` | ✅ รองรับทั้งระบบ |
-| **§2 บั๊ก / ความถูกต้องข้อมูล (2.1–2.11)** | ✅ **ปิดครบทั้ง 11 ข้อ** (branch `Debug-Validate-data`) — เหลือแค่ขั้น deploy: `npm run sync-indexes` + ลบข้อมูลซ้ำกับ DB จริง (ดู §6) · สรุปรวม → [`data-integrity-fixes.md`](data-integrity-fixes.md) |
+| **§2 บั๊ก / ความถูกต้องข้อมูล (2.1–2.11)** | ✅ **ปิดครบทั้ง 11 ข้อ** — branch `Debug-Validate-data` · issue [#4](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/issues/4) · PR [#3](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/3) — เหลือแค่ขั้น deploy: `npm run sync-indexes` + ลบข้อมูลซ้ำกับ DB จริง (ดู §6) · สรุปรวม → [`data-integrity-fixes.md`](data-integrity-fixes.md) |
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
 | อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — บันทึกลงดิสก์ (self-host เท่านั้น, ดู §3.13) |
 | Preorder (เฟส 5) | 🟡 service + API เสร็จ (ดู §8 · [preorder.md](preorder.md)) — เหลือผูก payment/production/promotion |
@@ -46,6 +46,7 @@
 ## 2. ✅ บั๊ก / ความถูกต้องข้อมูล — ปิดครบ 11/11 (2.1–2.11)
 
 > ทั้งหมดแก้ในโค้ดแล้ว (branch `Debug-Validate-data`) · typecheck + build ผ่าน · สรุปรวม 2.8–2.11 → [`data-integrity-fixes.md`](data-integrity-fixes.md)
+> tracking: issue [#4](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/issues/4) · PR [#3](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/3) (`Closes #4`, base `addModels`)
 > **ค้างเป็นขั้น deploy เท่านั้น:** `npm run sync-indexes` กับ DB จริง (2.3 / 2.4 / 2.10) + ลบ payment `pending` ซ้ำก่อน (2.10) — ดู §6
 
 | # | เรื่อง | ที่ไฟล์ | รายละเอียด / วิธีแก้ |
