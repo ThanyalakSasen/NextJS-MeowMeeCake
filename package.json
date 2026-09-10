@@ -25,7 +25,8 @@
     "next": "^15.1.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "sweetalert2": "^11.26.25"
+    "sweetalert2": "^11.26.25",
+    "zod": "^4.6.1"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
