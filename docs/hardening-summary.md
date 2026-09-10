@@ -15,14 +15,17 @@
 | **§3 D2 — security** (3.2 rate-limit · 3.9 Google · 3.10 CSRF) | ✅ | #7 |
 | **§3 D3 — consistency/robustness** (3.3b Saga · integration test · 3.7 envelope) | ✅ | #8 #9 #10 #11 |
 | **§3 3.5 audit log** | ✅ (นอกชุด D — `src/lib/audit.ts`) → [`auditLog.md`](auditLog.md) | — |
+| **§3 รอบ 4a — ปิด infra** (CI · lint gate · zod crud-factory + shop routes · `createInject`) | ✅ core → [`hardening-4a-plan.md`](hardening-4a-plan.md) | #13–#17 |
+| **§3 รอบ 4b — จบ 3.1/3.6** (`/admin/orders`+`/admin/attendances` zod · รื้อ `pick()` · `no-explicit-any` error บน `src/lib`) | ⬜ _(แผน: `hardening-4b-plan.md` — รอเริ่ม)_ | — |
 | **§3 D4 — feature/ops** (3.8 · 3.12–3.16) | ⬜ หลัง launch | — |
 | **§3 3.11 เงินเป็น integer** | ⬜ งานเดี่ยว | — |
 
-ทุก PR merge เข้า branch `addModels` · ทุก commit ผ่าน `typecheck` · `typecheck:test` · `lint` · `test` (unit) · `test:integration` · `build`
+ทุก PR merge เข้า branch `addModels` · ทุก commit ผ่าน `typecheck` · `typecheck:test` · `lint` · `test` (unit) · `test:integration` · `build` · **CI (`.github/workflows/ci.yml`) รันครบทุกขั้นทุก PR ตั้งแต่ #13**
 
 **ลำดับที่ทำจริง** = ตามแผน [`hardening-plan.md`](hardening-plan.md) §ลำดับที่แนะนำ:
 D1 (3.6 → 3.3 → 3.4 → 3.1 infra) → D2 (3.2 → 3.9 → 3.10) →
-D3 (**3.3b compensation → integration test → 3.7 envelope** ตาม [`hardening-d3-plan.md`](hardening-d3-plan.md)) → 3.5 audit log
+D3 (**3.3b compensation → integration test → 3.7 envelope** ตาม [`hardening-d3-plan.md`](hardening-d3-plan.md)) → 3.5 audit log →
+รอบ 4a (CI #13 → 3.6 cleanup #14 → 3.1 crud-factory #15/#16 → shop routes + `createInject` #17)
 
 ---
 
@@ -112,22 +115,32 @@ envelope · list · HTTP status ↔ `error.code` · zod `details.issues` · auth
 
 ---
 
+## รอบ 4a — ปิด infra (✅ core เสร็จ, PR #13–#17) → [`hardening-4a-plan.md`](hardening-4a-plan.md)
+
+| ข้อ | ทำแล้ว | PR |
+|---|---|---|
+| **CI pipeline** | `.github/workflows/ci.yml` — typecheck/typecheck:test/lint/test/test:integration/build ทุก push+PR (Node 22, cache mongo binary) | #13 |
+| **3.6 lint gate** | ลบ `eslint.ignoreDuringBuilds` · `no-explicit-any` `off`→`warn` ทั้ง repo + `error` บน `src/schemas`+`tests` · เก็บ warning `no-anonymous-default-export` | #14 |
+| **3.1 zod — crud-factory** | `product-options`/`product-variants`/`aspects`/`semantic-terms`/`roles` (#15) · `components`/`recipes` BOM (#16) — schema `catalog`/`sentiment`/`rbac`/`bom.ts` | #15 #16 |
+| **3.1 zod — shop custom routes** | `PATCH /shop/me` · `POST/PATCH /shop/addresses` · `POST/PATCH /shop/reviews` — schema `user`/`address`/`review.ts` | #17 |
+| **createInject** | `collectionRoutes` option ใหม่ → `components`/`recipes` `created_by` inject จาก session (ไม่รับจาก body) | #17 |
+
+test: unit 91→**115** / 15 ไฟล์ · lint = **0 error / 13 warning** (`no-explicit-any` ใน `src/app/api/**/route.ts` + `crudRoutes.ts`)
+
+---
+
 ## ที่เหลือ (ยังไม่ทำ)
 
-> **ลำดับที่แนะนำสำหรับงานที่เหลือ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"**
-> รอบ 4a (CI → 3.6 cleanup → 3.1 adopt เพิ่ม) · รอบ 4b (3.8 · 3.12 · 3.16 · integration test เพิ่ม) · รอบ 4c (3.13→3.14 · 3.15) · รอบ 5 (3.11)
+> **ลำดับ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"** · รอบ 4b (จบ 3.1/3.6) · รอบ 4c (3.8/3.12/3.16) · รอบ 4d (3.13→3.14 · 3.15) · รอบ 5 (3.11)
 
-### §3.1 zod — adopt เพิ่ม
-recipes / product-options / product-variants / aspects / semantic-terms / reviews / attendances ·
-shop reviews/addresses/me · admin orders (custom route) · **รื้อ `pick()` / `Number()` ใน service** (ให้ zod เป็นด่านเดียว)
+### รอบ 4b — จบ §3.1 + §3.6
+- `/api/admin/orders` (POST/PATCH) + `/api/admin/attendances` adopt zod (custom route ซับซ้อน)
+- รื้อ `pick()` / `createFields` / `pickWritable()` ที่ซ้ำกับ zod (8 service) — ให้ zod เป็นด่านเดียว
+- `no-explicit-any` = `error` บน `src/lib` (ลบ `/* eslint-disable */` header 5 ไฟล์) + เก็บ 13 warning ใน route
+- (option) type-aware `no-floating-promises`
 
 ### §3.4 integration test — เพิ่ม
-`cartService` · `ingredientTransactionService` · `deliveryService.quoteForCart` · **CI pipeline**
-(`typecheck → typecheck:test → lint → test → test:integration → build`)
-
-### §3.6 — เก็บงานค้าง
-เปิด `@typescript-eslint/no-explicit-any` (pass แยก, ไล่ใส่ type ให้ `.lean<T>()`) → ลบ `/* eslint-disable */` เหมาไฟล์ →
-เปิด `reportUnusedDisableDirectives` กลับ → เปิด type-aware `no-floating-promises` → ลบ `eslint.ignoreDuringBuilds`
+`cartService` · `ingredientTransactionService` · `deliveryService.quoteForCart`
 
 ### §3 D4 — หลัง launch → [`hardening-plan.md`](hardening-plan.md) §4
 3.8 address→checkout · 3.12 `notify.ts` (LINE) · 3.13 object storage → 3.14 ลบรูปที่ไม่ใช้ ·
@@ -152,8 +165,10 @@ shop reviews/addresses/me · admin orders (custom route) · **รื้อ `pick
 | [`data-integrity-fixes.md`](data-integrity-fixes.md) | §2.8–2.11 เชิงลึก |
 | [`reprice.md`](reprice.md) · [`promo-freeshipping.md`](promo-freeshipping.md) · [`order-cancel.md`](order-cancel.md) · [`concurrency-guards.md`](concurrency-guards.md) | §2.5 / §2.6+2.11 / §2.7+2.8 / §2.9+2.10 |
 | [`hardening-plan.md`](hardening-plan.md) | แผน §3 ทั้งหมด (D1–D4) |
+| [`hardening-d3-plan.md`](hardening-d3-plan.md) | §3.7 envelope + §3.3b compensation (D3.1–D3.6 + D3.4b) |
+| [`hardening-4a-plan.md`](hardening-4a-plan.md) | รอบ 4a — CI + 3.6 lint gate + 3.1 crud-factory/shop routes (PR #13–#17) |
+| `hardening-4b-plan.md` _(รอเริ่ม)_ | รอบ 4b — `/admin/orders`+`/admin/attendances` zod · รื้อ `pick()` · `no-explicit-any` บน `src/lib` |
 | [`infra-tooling.md`](infra-tooling.md) | §3.6 eslint · §3.3 logger · §3.4 testing |
 | [`validation.md`](validation.md) | §3.1 zod — สถานะ adopt ราย route |
 | [`security-hardening.md`](security-hardening.md) | §3.2 rate-limit · §3.9 Google · §3.10 CSRF |
-| [`hardening-d3-plan.md`](hardening-d3-plan.md) | §3.7 envelope + §3.3b compensation (D3.1–D3.6 + D3.4b) |
 | [`Summary.md`](Summary.md) · [`env.md`](env.md) · [`auditLog.md`](auditLog.md) · [`preorder.md`](preorder.md) | สูตรเงิน · env vars · audit log · preorder |

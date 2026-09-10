@@ -17,7 +17,7 @@
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
 | อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — บันทึกลงดิสก์ (self-host เท่านั้น, ดู §3.13) |
 | Preorder (เฟส 5) | 🟡 service + API เสร็จ (ดู §8 · [preorder.md](preorder.md)) — เหลือผูก payment/production/promotion |
-| §3 คุณภาพ / hardening | 🟡 ✅ D1 (eslint/logger/test/zod-infra) · ✅ D2 (rate-limit/Google/CSRF) · ✅ D3 (Saga/integration test/response envelope) · ✅ audit log (3.5) — PR #5–#12 · ยังค้าง: 3.1 adopt route ที่เหลือ + รื้อ `pick()` · D4 (3.8/3.11/3.12–3.16) · CI pipeline |
+| §3 คุณภาพ / hardening | 🟡 ✅ D1/D2/D3 + audit log (PR #5–#12) · ✅ รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · ยังค้าง: **รอบ 4b** (`/admin/orders`+`/admin/attendances` zod · รื้อ `pick()` · `no-explicit-any` บน `src/lib`) · 4c (3.8/3.12/3.16) · 4d (3.13–3.15) · 3.11 |
 | Notification | ❌ ตัดออก (แจ้งเตือนผ่าน LINE แยกภายหลัง — ดู §3.12) |
 
 **คำสั่งตรวจสอบ:** `npm run typecheck` · `typecheck:test` · `npm run lint` · `npm test` (unit) · `npm run test:integration` · `npm run build` — ปัจจุบันผ่านทั้งหมด
@@ -70,46 +70,50 @@
 
 > **แผน + effort/ความเสี่ยงต่อข้อ → [`hardening-plan.md`](hardening-plan.md)** · สรุปงานที่ทำ + PR → [`hardening-summary.md`](hardening-summary.md)
 >
-> **สถานะ (2026-09-11):** ✅ D1 (3.6/3.3/3.4/3.1-infra, PR #5–#6) · ✅ D2 (3.2/3.9/3.10, PR #7) · ✅ D3 (3.3b/3.7 + integration test, PR #8–#11) · ✅ 3.5 (audit log)
-> ลำดับที่ทำจริง (D1→D2→D3) = ตาม [`hardening-plan.md`](hardening-plan.md) §ลำดับ (D3 ย่อยตาม [`hardening-d3-plan.md`](hardening-d3-plan.md))
+> **สถานะ (2026-09-11):** ✅ D1 (3.6/3.3/3.4/3.1-infra, PR #5–#6) · ✅ D2 (3.2/3.9/3.10, PR #7) · ✅ D3 (3.3b/3.7 + integration test, PR #8–#11) · ✅ 3.5 (audit log) · ✅ **รอบ 4a** (CI + lint gate + zod crud-factory/shop routes, PR #13–#17)
+> ลำดับที่ทำจริง = ตาม [`hardening-plan.md`](hardening-plan.md) §ลำดับ (D3 ย่อยตาม [`hardening-d3-plan.md`](hardening-d3-plan.md) · 4a ตาม [`hardening-4a-plan.md`](hardening-4a-plan.md))
 
 ### ลำดับการแก้ที่เหลือ (แนะนำ)
 
-> รายละเอียด + วิธีการรอบ 4a → [`hardening-4a-plan.md`](hardening-4a-plan.md)
+**✅ รอบ 4a — ปิดงาน infra (เสร็จ core, PR #13–#17)** → [`hardening-4a-plan.md`](hardening-4a-plan.md)
 
-**รอบ 4a — ปิดงาน infra ให้จบ (ทำก่อน · ก่อน launch)**
+1. ✅ **CI pipeline** — `.github/workflows/ci.yml` รัน `typecheck → typecheck:test → lint → test → test:integration → build` ทุก push+PR (PR #13)
+2. ✅ **3.6 lint gate** — ลบ `eslint.ignoreDuringBuilds` · `no-explicit-any` `off`→`warn` + `error` บน `src/schemas`+`tests` · เก็บ warning `no-anonymous-default-export` (PR #14)
+3. ✅ **3.1 adopt (บางส่วน)** — crud-factory ทั้งหมด (`product-options`/`variants`/`aspects`/`semantic-terms`/`roles`/`components`/`recipes`) + shop `me`/`addresses`/`reviews` + `createInject` inject `created_by` (PR #15–#17)
 
-1. **CI pipeline** _(หาง 3.4)_ — GitHub Actions รัน `typecheck → typecheck:test → lint → test → test:integration → build` ทุก PR · ล็อกผลงาน D1–D3 ไม่ให้ถอยหลัง · **S**
-2. **3.6 cleanup** — ลบ `next.config.ts` `eslint.ignoreDuringBuilds` · เก็บ warning `import/no-anonymous-default-export` (`productService.ts:797`) · เปิด `@typescript-eslint/no-explicit-any` เป็น `warn` แล้วไล่ใส่ type ให้ `.lean<T>()` → ลบ `/* eslint-disable */` เหมาไฟล์ → เปิด `reportUnusedDisableDirectives` กลับ · (option) type-aware `no-floating-promises` · **S–M**
-3. **3.1 adopt route ที่เหลือ** — `recipes` (BOM ซ้อน) · `product-options`/`product-variants` · `aspects`/`semantic-terms`/`reviews`/`attendances` · `admin/orders` (custom) · `shop/reviews`·`addresses`·`me` → จากนั้น **รื้อ `pick()`/`Number()` ใน service** ให้ zod เป็นด่านเดียว · **M**
+**รอบ 4b — จบ §3.1 + §3.6** _(แผนละเอียด: `hardening-4b-plan.md` — รอเริ่ม)_
 
-**รอบ 4b — feature เล็ก + เทสเพิ่ม (หลัง launch ได้)**
+4. **`/admin/orders` (POST/PATCH) + `/admin/attendances` adopt zod** — custom route ซับซ้อน (order create + override, `recorded_by` inject) · **M**
+5. **รื้อ `pick()` / `createFields` / `pickWritable()` ที่ซ้ำ zod** — 8 service · ให้ zod เป็นด่านเดียว, service เหลือแค่ business rule · **M**
+6. **`no-explicit-any` = `error` บน `src/lib`** — ลบ `/* eslint-disable */` header 5 ไฟล์ + type `crudRoutes.ts` `doc:` · เก็บ 13 warning ใน `src/app/api/**/route.ts` · (option) `no-floating-promises` · **S–M**
 
-4. **3.8 address_id → checkout** — zod `oneOf([{address_id},{delivery_address}])` + `addressService.getById` แล้ว snapshot ลง order · ต่อยอดจากข้อ 3 · **S–M**
-5. **3.12 `src/lib/notify.ts`** — no-op + log ก่อน · wire `paymentService.verifyPayment` / `orderService.updateOrderStatus` / ingredient low-stock · ต่อ LINE ทีหลังแก้ไฟล์เดียว · **S**
-6. **3.16 `purchase_cost`** — field ใน `productModel` + `getUnitCostByProduct` fallback เมื่อไม่มีสูตร · แก้ COGS/กำไรใน dashboard ให้ตรง · **S**
-7. **3.4 integration tests เพิ่ม** — `cartService` · `ingredientTransactionService` · `deliveryService.quoteForCart` · ทยอยทำ · **S–M**
+**รอบ 4c — feature เล็ก + เทสเพิ่ม (หลัง launch ได้)**
 
-**รอบ 4c — ขึ้นกับการตัดสินใจ hosting**
+7. **3.8 address_id → checkout** — zod `oneOf([{address_id},{delivery_address}])` + `addressService.getById` snapshot ลง order · **S–M**
+8. **3.12 `src/lib/notify.ts`** — no-op + log ก่อน · wire `paymentService.verifyPayment` / `orderService.updateOrderStatus` / ingredient low-stock · **S**
+9. **3.16 `purchase_cost`** — field ใน `productModel` + `getUnitCostByProduct` fallback เมื่อไม่มีสูตร · แก้ COGS/กำไรใน dashboard · **S**
+10. **3.4 integration tests เพิ่ม** — `cartService` · `ingredientTransactionService` · `deliveryService.quoteForCart` · **S–M**
 
-8. **3.13 object storage** — abstract `upload.ts` เป็น interface (`localDisk` + `s3`/R2/GCS) เลือกด้วย env `UPLOAD_DRIVER` · **จำเป็นถ้า deploy serverless** (Vercel `public/` read-only) · ถอน `multer` ที่ไม่ได้ใช้ · **M**
-9. **3.14 ลบรูปสินค้าที่ไม่ใช้** — เรียก `upload.delete(oldKey)` best-effort ตอน `updateProduct` เปลี่ยนรูป / `deleteProduct` · ต่อจากข้อ 8 (ต้องมี `delete` ใน interface) · **S**
-10. **3.15 delivery zone เป็น DB** — model `deliveryZone` + admin CRUD (`match_type: province|zipcode|district`) + cache TTL · fallback config เดิมถ้าตารางว่าง · **M**
+**รอบ 4d — ขึ้นกับการตัดสินใจ hosting**
+
+11. **3.13 object storage** — abstract `upload.ts` เป็น interface (`localDisk` + `s3`/R2/GCS) เลือกด้วย env `UPLOAD_DRIVER` · **จำเป็นถ้า deploy serverless** · ถอน `multer` · **M**
+12. **3.14 ลบรูปสินค้าที่ไม่ใช้** — `upload.delete(oldKey)` best-effort ตอน `updateProduct`/`deleteProduct` · ต่อจากข้อ 11 · **S**
+13. **3.15 delivery zone เป็น DB** — model `deliveryZone` + admin CRUD + cache TTL · fallback config เดิม · **M**
 
 **รอบ 5 — งานเดี่ยวเสี่ยงสูง (branch แยก · ทำท้ายสุด)**
 
-11. **3.11 เงินเป็น integer (สตางค์)** — กระทบทุก model/service (order/orderItem/payment/promotion/expense) + `discountEngine`/`deliveryService`/`dashboardService` + migration ×100 · **ต้องมี integration test ครอบเต็มก่อน + freeze feature อื่นชั่วคราว** · **L**
+14. **3.11 เงินเป็น integer (สตางค์)** — กระทบทุก model/service + `discountEngine`/`deliveryService`/`dashboardService` + migration ×100 · **ต้องมี integration test ครอบเต็มก่อน + freeze feature อื่น** · **L**
 
-> เกณฑ์จัดลำดับ: (1) ป้องกันการถอยหลังก่อน (CI) → (2) ทำ lint/type ให้กั้น build จริง → (3) งานที่ปลดล็อกข้ออื่น (3.1 → 3.8) → (4) งานเดี่ยวเล็กความเสี่ยงต่ำ → (5) งานที่รอ decision ภายนอก → (6) งาน migration เสี่ยงสูงไว้ท้ายสุด
+> เกณฑ์จัดลำดับ: (1) ป้องกันการถอยหลังก่อน (CI ✅) → (2) lint/type กั้น build จริง (✅ core) → (3) จบด่าน zod ให้ครบ (4b) → (4) งานเดี่ยวเล็กเสี่ยงต่ำ (4c) → (5) งานที่รอ decision ภายนอก (4d) → (6) migration เสี่ยงสูงท้ายสุด (5)
 
 | # | เรื่อง | หมายเหตุ |
 |---|---|---|
-| 3.1 | 🟡 validation layer (zod) — infra + `/auth/*` + `/shop/*` + `crudRoutes` option + admin CRUD หลักตัว (2026-09-11) | `zod` v4 · `src/lib/validate.ts` (`parseBody`/`parseQuery`/`parse` → `badRequest(400, { issues })` เข้าทาง `route()` เดิม) · `src/schemas/` (`common`,`auth`,`order`,`cart`,`payment`,`catalog`,`expense`,`inventory`,`promotion`) · **`crudRoutes` option `validate: { create, update }`** · adopt: `/auth/register`+`/login` · `/shop/orders`(POST+GET) · `/shop/cart/items`(+`/[id]`) · `/shop/payments`(+`/[id]/slip`) · `/admin/{units,product-categories,banners,ingredients,ingredient-categories,component-categories,expenses}`(+`/[id]`) · `/admin/promotions`(POST+PATCH) · รายละเอียด + ตาราง adopt ราย route → [`validation.md`](validation.md) · **ยังไม่ทำ:** recipes (BOM ซ้อน) · product-options/variants · aspects/semantic-terms/reviews/attendances · admin orders custom route · shop reviews/addresses/me · รื้อ `pick()`/`Number()` ใน service |
+| 3.1 | 🟡 validation layer (zod) — infra + auth/shop/admin CRUD ทั้งหมด + shop custom routes (2026-09-11, PR #6/#15–#17) | `zod` v4 · `src/lib/validate.ts` · `src/schemas/` (`common`,`auth`,`order`,`cart`,`payment`,`catalog`,`expense`,`inventory`,`promotion`,`sentiment`,`rbac`,`bom`,`user`,`address`,`review`) · **`crudRoutes` option `validate` + `createInject`** · adopt: `/auth/*` · `/shop/{orders,cart,payments,me,addresses,reviews}` · **crud-factory ทั้งหมด** (units/categories/banners/ingredients/expenses/**product-options/variants/aspects/semantic-terms/roles/components/recipes**) · `/admin/promotions` · ตาราง adopt ราย route → [`validation.md`](validation.md) · **เหลือ (รอบ 4b):** `/admin/orders` (custom, ซับซ้อน) · `/admin/attendances` · รื้อ `pick()`/`createFields` ใน service |
 | 3.2 | ~~ไม่มี rate-limit ที่ `/api/auth/login`~~ | ✅ แก้แล้ว (2026-09-11) — `src/lib/rateLimit.ts` (in-memory sliding window → `tooMany()` 429 + `retry_after_seconds`) · wire: `auth/login` 10/นาที · `auth/register` 5 · `auth/google` 10 · `shop/me/password` 5 (ต่อ IP, ทับ account-lockout ต่อบัญชี) · `httpError` เพิ่ม `tooMany()` + `TOO_MANY_REQUESTS` · รายละเอียด → [`security-hardening.md`](security-hardening.md) §1 · **หมายเหตุ:** in-memory = ไม่ share ข้าม instance → หลาย instance ต้องเปลี่ยนเป็น Redis (แก้ไฟล์เดียว) |
 | 3.3 | ✅ `logger.ts` (2026-09-10) · `compensation.ts` `Saga` + adopt `preorderService.createPreorder` / `orderService.persistOrder` / `updateOrderStatus` cancel (2026-09-11) | **logger:** `src/lib/logger.ts` (JSON บรรทัดเดียว, level, `LOG_LEVEL`, serialize `err`) แทน `console.error` 5 จุด · → [`infra-tooling.md`](infra-tooling.md) §2 · **compensation:** `src/lib/compensation.ts` `Saga` (`onRollback` / `rollback` reverse-order best-effort / `commit`) · adopt `createPreorder` + `persistOrder` + `updateOrderStatus` cancel (แทน nested try/catch + `if (order?._id)` + `.catch(()=>undefined)`) · validate ด้วย integration test (persistOrder + cancelOrder) · → [`hardening-d3-plan.md`](hardening-d3-plan.md) |
-| 3.4 | 🟡 unit + integration (2026-09-10 → 2026-09-11) — เหลือ CI | vitest **2 projects**: `unit` (`tests/lib/`, ไม่ต่อ DB) + `integration` (`tests/integration/`, `mongodb-memory-server`) · scripts: `test` (unit) / `test:integration` / `test:all` / `typecheck:test` · **unit 91 / 12 ไฟล์** · **integration 13 / 3 ไฟล์:** `promotionUsage` (§2.9 atomic + concurrency), `persistOrder` (happy/re-price/compensation/preorder-reject), `cancelOrder` (restock/revoke/auto-refund/409) · `tests/` ถูก exclude จาก `tsconfig.json` หลัก → typecheck ผ่าน `tsconfig.test.json` · รายละเอียด → [`infra-tooling.md`](infra-tooling.md) §3 · **ยังไม่ทำ:** integration `cartService`/`ingredientTransactionService`/`deliveryService.quoteForCart` · **CI pipeline** (`typecheck → typecheck:test → lint → test → test:integration → build`) |
+| 3.4 | 🟡 unit + integration + CI (2026-09-10 → 2026-09-11) | vitest **2 projects**: `unit` (`tests/lib/`, ไม่ต่อ DB) + `integration` (`tests/integration/`, `mongodb-memory-server`) · scripts: `test` / `test:integration` / `test:all` / `typecheck:test` · **unit 115 / 15 ไฟล์** · **integration 13 / 3 ไฟล์:** `promotionUsage`, `persistOrder`, `cancelOrder` · ✅ **CI** `.github/workflows/ci.yml` (PR #13) รัน `typecheck → typecheck:test → lint → test → test:integration → build` ทุก push+PR · `tests/` exclude จาก `tsconfig.json` หลัก → `tsconfig.test.json` · → [`infra-tooling.md`](infra-tooling.md) §3 · **ยังไม่ทำ:** integration `cartService`/`ingredientTransactionService`/`deliveryService.quoteForCart` |
 | 3.5 | ~~audit log แทบว่าง~~ | ✅ แก้แล้ว — `src/lib/audit.ts` (`audit(req, {...})` fire-and-forget) · wire เข้า mutation สำคัญแล้ว: **ออเดอร์** (สร้าง/เปลี่ยนสถานะ/จัดส่ง/ลบ/ลูกค้ายกเลิก) · **payment** (verify/refund/ลบ) · **สต็อก** (ingredient transaction สร้าง/void, product stock PUT/PATCH) · **สิทธิ์** (permission สร้าง/แก้/ถอน/กู้คืน, role CRUD, user สร้าง/ลบ/กู้คืน/ปลดล็อก/ตั้งรหัสผ่าน/เปลี่ยน role) · **การผลิต** (start/complete/cancel, consume/reverse stock) · **แคตตาล็อก** (product CRUD + อัปโหลดรูป, recipe/component/ingredient/promotion/expense CRUD ผ่าน `crudRoutes` option `audit: { entity }`) · **ยังไม่ครอบ:** unit/หมวดหมู่/banner/variant/option/aspect/semantic-term (เพิ่ม `audit:{entity}` ในไฟล์ factory ได้), shop payment create/slip, before/after snapshot (ตอนนี้ log แค่ action + entity_id + details ย่อ) |
-| 3.6 | ~~ไม่มี eslint config~~ | ✅ แก้แล้ว (2026-09-10) — `eslint.config.mjs` (flat config, ESLint 9 + `eslint-config-next` 15) · `npm run lint` / `lint:fix` · `next.config.ts` `eslint.ignoreDuringBuilds: true` **ชั่วคราว** (ลบเมื่อ lint สะอาด) · เก็บ dead import (`bcrypt` ใน userModel, `Model` ใน productionOrderService) + `prefer-const` · เหลือ 1 warning (`import/no-anonymous-default-export` ใน productService) · รายละเอียด → [`infra-tooling.md`](infra-tooling.md) §1 |
+| 3.6 | ~~ไม่มี eslint config~~ | ✅ แก้แล้ว (2026-09-10) + lint gate (รอบ 4a PR #14) — `eslint.config.mjs` (ESLint 9 flat) · **ลบ `eslint.ignoreDuringBuilds` แล้ว** (lint = 0 error) · `no-explicit-any` = `warn` ทั้ง repo + `error` บน `src/schemas`+`tests` · เหลือ **13 warning** (`no-explicit-any` ใน `src/app/api/**/route.ts` + `crudRoutes.ts`) → เก็บใน **รอบ 4b** พร้อมยก `src/lib` เป็น `error` · → [`infra-tooling.md`](infra-tooling.md) §1 |
 | 3.7 | ~~response envelope ไม่คงที่~~ | ✅ แก้แล้ว (2026-09-11) — มาตรฐาน `data = { items, meta \| null }` ทุก list endpoint · `apiResponse.okList(items, meta?)` + `PageMeta` type · แก้ 7 endpoint ที่ไม่ conform (5 ตัวคืน array เปล่า, `getProducts` key `pagination`→`meta`) + `crudRoutes` GET · **⚠️ BREAKING** ต่อ frontend — ตาราง 7 endpoint ใน [`api-conventions.md`](api-conventions.md) §2 · รายละเอียดเต็ม → [`api-conventions.md`](api-conventions.md) (envelope / status code / validation issues / auth / query params) |
 | 3.8 | สมุดที่อยู่ไม่เชื่อม checkout | `shop/orders` รับ `delivery_address` เป็น object ดิบ ไม่รองรับ `address_id` จาก `addressService` |
 | 3.9 | ~~Google login = ID token flow เท่านั้น (env บอกใบ้ code flow)~~ | ✅ แก้แล้ว (2026-09-11) — `loginWithGoogle` ใช้ ID-token flow + `jose.jwtVerify` ตรวจ sig/iss/aud/exp ครบอยู่แล้ว · ลบ `GOOGLE_CLIENT_SECRET`/`GOOGLE_CALLBACK_URL` ออกจาก `.env.example` (เหลือ `GOOGLE_CLIENT_ID` + คอมเมนต์) · เพิ่มเช็ค `email_verified === false` → reject (กันสวมสิทธิ์ผ่าน link-by-email) · `docs/env.md` อัปเดต · รายละเอียด → [`security-hardening.md`](security-hardening.md) §2 |
