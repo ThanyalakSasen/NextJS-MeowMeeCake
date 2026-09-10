@@ -42,28 +42,34 @@ eslint-config-next ^15  — preset ของ Next 15 (ตรงกับ next ^1
 "lint:fix": "eslint . --fix"
 ```
 
-**`next.config.ts`:** เพิ่ม `eslint: { ignoreDuringBuilds: true }` **ชั่วคราว**
-- repo ไม่เคย lint → มี warning ค้าง · ไม่ให้ `next build` แดง
-- รัน `npm run lint` แยก แล้วทยอยเก็บ → เมื่อสะอาด **ให้ลบบรรทัดนี้ออก** เพื่อให้ lint กั้น build จริง
+**`next.config.ts`:** เคยมี `eslint: { ignoreDuringBuilds: true }` ชั่วคราว → **ลบออกแล้ว (รอบ 4a, PR B)** — `npm run lint` = 0 error แล้ว `next build` จึงรัน eslint เองได้เป็น safety net ที่สอง
 
 **quick fixes ที่ทำไปพร้อมกัน:**
 - ลบ dead `import bcrypt` ใน `src/models/userModel.ts` (hash ย้ายไป `userService` แล้ว)
 - ลบ dead `import type { Model }` ใน `src/services/productionOrderService.ts`
 - `--fix`: `let round_status` → `const` ใน `preorderRoundService.ts`
 
-### สถานะหลังทำ
+### สถานะหลังทำ (อัปเดต รอบ 4a — PR B, 2026-09-11)
 ```
-npm run lint  → 0 errors, 1 warning
-  └ src/services/productService.ts:797  import/no-anonymous-default-export
-    (export default { ... } — style nit, ไม่บล็อก · เก็บทีหลังตอนแตะไฟล์นั้น)
-npm run typecheck / npm run build → ผ่าน
+npm run lint  → 0 errors, 13 warnings (@typescript-eslint/no-explicit-any)
+  └ 12 × src/app/api/**/route.ts  (const result: any = await service(...) เพื่ออ่าน ._id ตอน audit())
+  └  1 × src/lib/crudRoutes.ts:84 (readBody() → doc: any)
+  ทั้งหมดจะหายเมื่อ service คืน type จริง (รอบ 4a ข้อ 3 / PR C–D)
+npm run typecheck · typecheck:test · npm test (91) · npm run build → ผ่าน
 ```
 
+**สิ่งที่ทำใน PR B:**
+- `productService` `export default { ... }` → ตั้งชื่อ `const productService` ก่อน export (เก็บ warning `no-anonymous-default-export`)
+- ลบ `eslint.ignoreDuringBuilds`
+- `eslint.config.mjs`: `no-explicit-any` `off` → **`warn`** ทั้ง repo · เอา `reportUnusedDisableDirectives: "off"` ออก (กลับ default) — directive `/* eslint-disable */` เหมาไฟล์ใน service (36 ไฟล์) กลับมา "ถูกใช้" จึงไม่ถูกเตือน
+- เพิ่ม override: `src/schemas/**` + `tests/**` → `no-explicit-any` = **`error`** (โค้ดใหม่/สะอาด กันถอยหลัง)
+- ลบ dead directive ใน `deliveryService.ts` (ไม่มี `any` ในไฟล์แล้ว)
+
 ### งานต่อ (pass แยก)
-1. เก็บ warning `import/no-anonymous-default-export` (productService)
-2. เปิด `@typescript-eslint/no-explicit-any` เป็น `warn` → ไล่ใส่ type ให้ `.lean<T>()` → ลบ `/* eslint-disable */` เหมาทั้งไฟล์ → เปิด `reportUnusedDisableDirectives` กลับ
-3. เพิ่ม type-aware linting (`@typescript-eslint/no-floating-promises`) — ต้องตั้ง `parserOptions.projectService` · จะจับ fire-and-forget (`audit()`, `notify()`, best-effort `.catch()` ที่ลืม)
-4. ลบ `eslint.ignoreDuringBuilds` เมื่อ lint สะอาด
+1. เก็บ 13 warning `no-explicit-any` — ให้ service คืน type จริง (`ReturnType<...>` / `.lean<T>()`) แล้ว route ไม่ต้อง `: any` — ทำคู่กับ **รอบ 4a ข้อ 3** (adopt zod + รื้อ `pick()`)
+2. ยก `src/lib/**` → `no-explicit-any` = `error` (หลังลบ `/* eslint-disable */` header 5 ไฟล์: `crudRoutes`, `crudService`, `discountEngine`, `refs`, `bom`)
+3. ยก `src/services/**` → `error` ทีละไฟล์ (36 ไฟล์ที่มี disable header) — ratchet
+4. type-aware `@typescript-eslint/no-floating-promises` — ตั้ง `parserOptions.projectService` · จับ fire-and-forget (`audit()`, `notify()`, best-effort `.catch()` ที่ลืม) · lint ช้าลง → เปิดเป็น `warn`
 
 ---
 

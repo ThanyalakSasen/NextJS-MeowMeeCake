@@ -9,7 +9,6 @@
  * ต่อยอดภายหลัง: เปลี่ยนไปอ่านตารางโซนจาก DB (admin แก้เองได้) — แก้เฉพาะไฟล์นี้
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import dbConnect from "../lib/dbConnect";
 import * as cartService from "./cartService";
 

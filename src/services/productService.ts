@@ -794,7 +794,7 @@ function escapeRegExp(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-export default {
+const productService = {
   // CRUD
   createProduct,
   getProducts,
@@ -814,3 +814,5 @@ export default {
   restockForOrder,
   getLowStockProducts,
 };
+
+export default productService;
