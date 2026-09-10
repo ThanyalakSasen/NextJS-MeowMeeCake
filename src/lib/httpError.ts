@@ -12,7 +12,8 @@ export type HttpErrorCode =
   | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFLICT"
-  | "UNPROCESSABLE";
+  | "UNPROCESSABLE"
+  | "TOO_MANY_REQUESTS";
 
 export class HttpError extends Error {
   readonly status: number;
@@ -51,6 +52,9 @@ export const conflict = (msg = "ข้อมูลขัดแย้งกับ
 
 export const unprocessable = (msg = "ข้อมูลไม่ผ่านเงื่อนไขทางธุรกิจ", details?: unknown) =>
   new HttpError(msg, 422, "UNPROCESSABLE", details);
+
+export const tooMany = (msg = "คำขอถี่เกินไป กรุณาลองใหม่ภายหลัง", details?: unknown) =>
+  new HttpError(msg, 429, "TOO_MANY_REQUESTS", details);
 
 export function isHttpError(err: unknown): err is HttpError {
   return err instanceof HttpError;
