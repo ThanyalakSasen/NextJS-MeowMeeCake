@@ -1,7 +1,7 @@
 # แผน รอบ 4a — ปิดงาน infra ให้จบ (ก่อน launch)
 
 > อัปเดตล่าสุด: 2026-09-11
-> สถานะ: 🟡 **กำลังทำ** — ✅ PR A (CI #13) · ✅ PR B (3.6 cleanup #14) · 🟡 PR C (crud-factory 5 กลุ่ม) · ⬜ PR D (BOM) · ⬜ PR E (custom routes + รื้อ pick())
+> สถานะ: 🟡 **กำลังทำ** — ✅ PR A (CI #13) · ✅ PR B (3.6 #14) · ✅ PR C (crud-factory 5 กลุ่ม #15) · 🟡 PR D (BOM: component/recipe) · ⬜ PR E (custom routes + รื้อ pick())
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ" รอบ 4a · ต่อจาก [`hardening-summary.md`](hardening-summary.md)
 
 รอบ 4a = หางงานของ D1/D3 ที่ควรปิดก่อน launch · 3 งานเรียงตาม**ลำดับพึ่งพา**:
@@ -192,7 +192,8 @@ const data = await parseBody(req, updateMeBody);
   - `update` ของ option/variant = `.omit({ product_id }).partial()` (ตรงกับ `updateFields` เดิมที่ห้ามย้ายสินค้า)
   - **คง** `createFields`/`updateFields` ใน `createCrudService` ไว้เป็น defense-in-depth (zod strip unknown อยู่แล้ว) — รื้อใน PR E
   - test: `tests/lib/schemas-crud.test.ts` (+9)
-- **PR D** ⬜ — BOM-shaped: `components` (`ingredients[]` + `created_by` inject) · `recipes` (recipe→component[]→ingredient[] ซ้อน + `superRefine` qty>0)
+- **PR D** ✅ — BOM-shaped: `components` (`ingredients[]`) · `recipes` (`ingredients[]` + `components[]` ซ้อน) — `bom.ts` schema (array ของ `{ id, quantity≥0, unit_id }`, coerce) · `update` `.omit()` category/product + created_by · test `schemas-bom.test.ts` (+8 → unit 108/14)
+  - **หมายเหตุ security:** `created_by` ยังรับจาก body (พฤติกรรมเดิม + factory route ไม่ inject session) — schema validate เป็น ObjectId, service เช็ค user มีจริง · **ย้ายไป inject จาก session ใน PR E**
 - **PR E** ⬜ — custom routes: `admin/orders` (POST/PATCH) · `admin/attendances` · `shop/reviews` · `shop/addresses` · `shop/me` → `parseBody(req, schema)` · **แล้วรื้อ** `pick()` (8 ไฟล์) + `createFields`/`updateFields` ที่ซ้ำกับ zod
 
 ### รื้อ `pick()` / `Number()` (→ PR E)
@@ -211,9 +212,9 @@ schema เข้มขึ้น → payload ที่เดิมหลุด (f
 |---|---|---|
 | **A** | `.github/workflows/ci.yml` | ✅ #13 merged |
 | **B** | 3.6 — 2a (fix warning) + 2b (ลบ `ignoreDuringBuilds`) + 2c ทางเลือก B | ✅ #14 merged |
-| **C** | 3.1 — crud-factory 5 กลุ่ม (option/variant/aspect/semantic-term/role) + schema + test | 🟡 กำลังทำ |
-| **D** | 3.1 — `components` + `recipes` (BOM) + ปิด ⬜ ใน [`validation.md`](validation.md) §3 | ⬜ |
-| **E** | 3.1 — custom routes (admin orders/attendances, shop reviews/addresses/me) + รื้อ `pick()`/`createFields` | ⬜ |
+| **C** | 3.1 — crud-factory 5 กลุ่ม (option/variant/aspect/semantic-term/role) + schema + test | ✅ #15 merged |
+| **D** | 3.1 — `components` + `recipes` (BOM) `bom.ts` + test | 🟡 กำลังทำ |
+| **E** | 3.1 — custom routes (admin orders/attendances, shop reviews/addresses/me) + inject `created_by` จาก session + รื้อ `pick()`/`createFields` | ⬜ |
 
 แต่ละ PR merge เข้า `addModels` ตามเดิม
 
