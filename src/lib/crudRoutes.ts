@@ -26,6 +26,7 @@ import { ok, okList, created, route } from "./apiResponse";
 import { parseBool, parsePagination, parseSort } from "./queryParams";
 import { parseBody } from "./validate";
 import { requireAuth, requirePermission, type PermAction } from "./authGuard";
+import type { SessionUser } from "./session";
 import { audit } from "./audit";
 import type { MenuKey } from "../services/permissionService";
 import type { CrudService } from "./crudService";
@@ -100,6 +101,9 @@ export interface CollectionRoutesOptions {
   auth?: CrudAuth;
   audit?: CrudAudit;
   validate?: CrudValidate;
+  /** ฟิลด์ที่ inject จาก session ตอน POST (เช่น { created_by: s.user_id }) — merge ทับ body
+   *  กัน client ตั้งค่าเอง (mass-assign) · ต้องตั้ง `auth` ด้วยเพื่อให้มี session */
+  createInject?: (session: SessionUser) => Record<string, unknown>;
 }
 
 export function collectionRoutes(
@@ -127,7 +131,8 @@ export function collectionRoutes(
   const POST = route(async (req: NextRequest) => {
     await guard(req, opts.auth, "create");
     const body = await readBody(req, opts.validate?.create);
-    const doc = await service.create(body);
+    const injected = opts.createInject ? opts.createInject(requireAuth(req)) : undefined;
+    const doc = await service.create(injected ? { ...body, ...injected } : body);
     logMutation(req, opts.audit, "create", doc);
     return created(doc);
   });

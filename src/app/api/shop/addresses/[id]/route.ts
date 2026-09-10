@@ -6,6 +6,8 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withAuth } from "@/lib/authGuard";
+import { parseBody } from "@/lib/validate";
+import { addressUpdate } from "@/schemas/address";
 import * as addressService from "@/services/addressService";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -17,8 +19,8 @@ export const GET = withAuth(async (session, _req, ctx: Ctx) => {
 
 export const PATCH = withAuth(async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
-  const body = await req.json();
-  return ok(await addressService.update(session.user_id, id, body));
+  const data = await parseBody(req, addressUpdate);
+  return ok(await addressService.update(session.user_id, id, data));
 });
 
 export const DELETE = withAuth(async (session, _req, ctx: Ctx) => {

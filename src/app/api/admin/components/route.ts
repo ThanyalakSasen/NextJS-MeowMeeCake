@@ -12,4 +12,5 @@ export const { GET, POST } = collectionRoutes(componentService, {
   auth: { menu: "recipes" },
   audit: { entity: "Component" },
   validate: { create: componentCreate },
+  createInject: (s) => ({ created_by: s.user_id }),
 });

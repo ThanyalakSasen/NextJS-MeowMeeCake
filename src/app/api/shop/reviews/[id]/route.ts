@@ -5,18 +5,20 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withAuth } from "@/lib/authGuard";
+import { parseBody } from "@/lib/validate";
+import { reviewUpdateBody } from "@/schemas/review";
 import * as reviewService from "@/services/reviewService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const PATCH = withAuth(async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
-  const body = await req.json();
+  const data = await parseBody(req, reviewUpdateBody);
   return ok(
     await reviewService.updateReview(id, session.user_id, {
-      rating: body.rating,
-      review_text: body.review_text,
-      image: body.image,
+      rating: data.rating,
+      review_text: data.review_text,
+      image: data.image,
     })
   );
 });
