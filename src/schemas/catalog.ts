@@ -1,8 +1,10 @@
 /**
- * schemas/catalog — validation ของ CRUD แคตตาล็อกเรียบง่าย (unit / product-category / banner)
+ * schemas/catalog — validation ของ CRUD แคตตาล็อกเรียบง่าย
+ * (unit / product-category / banner / product-option / product-variant)
  * ใช้กับ crudRoutes option `validate: { create, update }`
  */
 import { z } from "zod";
+import { objectId } from "./common";
 
 const UNIT_TYPES = [
   "IngredientWeight",
@@ -52,3 +54,27 @@ export const bannerCreate = z.object({
   is_active: z.boolean().optional(),
 });
 export const bannerUpdate = bannerCreate.partial();
+
+// ── Product option (ตัวเลือกเสริม — เขียนข้อความ / ท็อปปิ้ง) ──
+// business rule is_text_input ↔ max_text_length ตรวจต่อใน productOptionService.validateShape
+export const productOptionCreate = z.object({
+  product_id: objectId,
+  option_name: z.string().trim().min(1).max(120),
+  is_text_input: z.boolean().optional(),
+  max_text_length: z.coerce.number().int().min(1).max(500).nullable().optional(),
+  extra_price: z.coerce.number().min(0).optional(),
+  is_required: z.boolean().optional(),
+});
+// update: ห้ามย้าย product_id (ตรงกับ updateFields ใน service)
+export const productOptionUpdate = productOptionCreate.omit({ product_id: true }).partial();
+
+// ── Product variant (รสชาติ / ขนาด — มีราคาเพิ่ม + สต็อกแยก) ──
+export const productVariantCreate = z.object({
+  product_id: objectId,
+  variant_name: z.string().trim().min(1).max(120),
+  variant_price: z.coerce.number().min(0).optional(),
+  variant_stock: z.coerce.number().min(0).optional(),
+  unit_id: objectId.optional(),
+});
+// update: ห้ามย้าย product_id (ตรงกับ updateFields ใน service)
+export const productVariantUpdate = productVariantCreate.omit({ product_id: true }).partial();

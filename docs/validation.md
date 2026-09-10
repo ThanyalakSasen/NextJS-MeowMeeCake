@@ -40,7 +40,7 @@ parse(value, schema)     // parse ค่าที่ resolve เอง เช่
 
 ### `src/schemas/`
 - `common.ts` — ชิ้นที่ใช้ซ้ำ: `objectId`, `phone`, `deliveryAddress`, `pageQuery`, `sortQuery`, `nonEmpty(max)`
-- `<domain>.ts` — `auth.ts` · `order.ts` · `cart.ts` · `payment.ts` · `catalog.ts` (unit/หมวดหมู่/banner) · `expense.ts` · `inventory.ts` (ingredient) · `promotion.ts`
+- `<domain>.ts` — `auth.ts` · `order.ts` · `cart.ts` · `payment.ts` · `catalog.ts` (unit/หมวดหมู่/banner/product-option/product-variant) · `expense.ts` · `inventory.ts` (ingredient) · `promotion.ts` · `sentiment.ts` (aspect/semantic-term) · `rbac.ts` (role)
 - export `type X = z.infer<typeof xSchema>` ไปใช้ที่ route (ไม่ต้องเขียน interface ซ้ำ)
 - schema ที่มี cross-field `.refine()` (`order`, `payment`, `promotion`) → `.partial()` ไม่ได้ตรง ๆ → แยก `base` object ไว้ทำ `promotionUpdate = base.partial()` (PATCH ข้าม refine ข้ามฟิลด์ — service ตรวจซ้ำ)
 
@@ -88,10 +88,13 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 | CRUD via factory — `units`, `product-categories`, `banners` | ✅ | `crudRoutes` option `validate: { create, update }` + `catalog.ts` |
 | CRUD via factory — `ingredients`, `ingredient-categories`, `component-categories`, `expenses` | ✅ | `inventory.ts` / `catalog.ts` / `expense.ts` |
 | `/api/admin/promotions` POST + `[id]` PATCH (custom route) | ✅ | `promotion.ts` — `parseBody` ตรง (refine: end≥start, Percentage ≤100) |
-| CRUD via factory — ที่เหลือ (`recipes`, `product-options`, `product-variants`, `aspects`, `semantic-terms`, `reviews`, …) | ⬜ | เพิ่ม schema + บรรทัด `validate` (option พร้อมแล้ว) · recipes มี BOM ซ้อน — ต้องออกแบบ schema เพิ่ม |
-| `POST/PATCH /api/admin/orders*` (custom route) | ⬜ | `order.ts` (admin variant — รับ `delivery_fee`/`discount_amount` override ได้) |
-| `/api/admin/attendances`, `/api/shop/reviews`, `/api/shop/addresses`, `/api/shop/me` ฯลฯ | ⬜ | ทยอย |
-| รื้อ `pick()` / `Number()` ใน service | ⬜ | หลัง adopt ครบ — ให้ zod เป็นด่านเดียว, service เหลือแค่ business rule |
+| CRUD via factory — `product-options`, `product-variants` (+ `[id]`) | ✅ (รอบ 4a PR C) | `catalog.ts` — `productOptionCreate/Update`, `productVariantCreate/Update` (`update` `.omit({product_id})` = ห้ามย้ายสินค้า) |
+| CRUD via factory — `aspects`, `semantic-terms` (+ `[id]`) | ✅ (รอบ 4a PR C) | `sentiment.ts` — `aspectCreate/Update`, `semanticTermCreate/Update` |
+| CRUD via factory — `roles` (+ `[id]`) | ✅ (รอบ 4a PR C) | `rbac.ts` — `roleCreate/Update` (`role_type` enum) |
+| CRUD via factory — `components`, `recipes` (BOM ซ้อน) | ⬜ (รอบ 4a PR D) | `ingredients[]` (component) / recipe → component[] → ingredient[] ซ้อน + `created_by` inject จาก session |
+| `POST/PATCH /api/admin/orders*` (custom route) | ⬜ (รอบ 4a PR E) | `order.ts` (admin variant — รับ `delivery_fee`/`discount_amount` override ได้) |
+| `/api/admin/attendances`, `/api/shop/reviews`, `/api/shop/addresses`, `/api/shop/me` ฯลฯ | ⬜ (รอบ 4a PR E) | ทยอย |
+| รื้อ `pick()` / `createFields` / `Number()` ใน service | ⬜ (รอบ 4a PR E) | หลัง adopt route ครบ — ให้ zod เป็นด่านเดียว, service เหลือแค่ business rule · ตอนนี้ `createFields`/`updateFields` ใน `createCrudService` ยังคงไว้เป็น defense-in-depth |
 
 ---
 
@@ -114,6 +117,7 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
   `payment` (order/preorder xor, amount > 0, slip ห้ามว่าง)
 - `tests/lib/catalog.test.ts` — `unit` (enum, required, update partial), `productCategory`, `banner` (required, `start_date` coerce/reject)
 - `tests/lib/schemas-admin.test.ts` — `expense` (enum, amount ≥0), `ingredient` (ObjectId ref, `current_stock` omit ใน update), `promotion` (end≥start, Percentage ≤100), ingredient/component category
+- `tests/lib/schemas-crud.test.ts` (รอบ 4a PR C) — `productOption` / `productVariant` (objectId, ราคาติดลบ, `update` strip `product_id`), `aspect` / `semanticTerm` (required, objectId array), `role` (`role_type` enum)
 
-ไฟล์เทสฝั่ง validation = `validate`, `schemas`, `catalog`, `schemas-admin` (4 ไฟล์)
+ไฟล์เทสฝั่ง validation = `validate`, `schemas`, `catalog`, `schemas-admin`, `schemas-crud` (5 ไฟล์)
 รวมทั้ง suite ปัจจุบัน: `npm test` = **91 passed / 12 ไฟล์** · `npm run test:integration` = **13 / 3 ไฟล์** (ดู [`hardening-summary.md`](hardening-summary.md) §3.4)
