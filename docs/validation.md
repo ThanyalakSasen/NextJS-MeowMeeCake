@@ -40,8 +40,9 @@ parse(value, schema)     // parse ค่าที่ resolve เอง เช่
 
 ### `src/schemas/`
 - `common.ts` — ชิ้นที่ใช้ซ้ำ: `objectId`, `phone`, `deliveryAddress`, `pageQuery`, `sortQuery`, `nonEmpty(max)`
-- `<domain>.ts` — schema ต่อโดเมน: `auth.ts`, `order.ts`, `cart.ts`, `payment.ts`, `catalog.ts`
+- `<domain>.ts` — `auth.ts` · `order.ts` · `cart.ts` · `payment.ts` · `catalog.ts` (unit/หมวดหมู่/banner) · `expense.ts` · `inventory.ts` (ingredient) · `promotion.ts`
 - export `type X = z.infer<typeof xSchema>` ไปใช้ที่ route (ไม่ต้องเขียน interface ซ้ำ)
+- schema ที่มี cross-field `.refine()` (`order`, `payment`, `promotion`) → `.partial()` ไม่ได้ตรง ๆ → แยก `base` object ไว้ทำ `promotionUpdate = base.partial()` (PATCH ข้าม refine ข้ามฟิลด์ — service ตรวจซ้ำ)
 
 ### `crudRoutes` factory — option `validate`
 ```ts
@@ -85,9 +86,12 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 | `POST /api/shop/cart/items` · `PATCH /api/shop/cart/items/[id]` | ✅ | `cart.addCartItemBody` / `cart.updateCartItemBody` (+ `parse(id, objectId)`) |
 | `POST /api/shop/payments` · `GET` · `PATCH .../[id]/slip` | ✅ | `payment.createPaymentBody` (xor order/preorder), `listPaymentQuery`, `submitSlipBody` |
 | CRUD via factory — `units`, `product-categories`, `banners` | ✅ | `crudRoutes` option `validate: { create, update }` + `catalog.ts` |
-| CRUD via factory — ที่เหลือ (`ingredients`, `recipes`, `promotions`, `expenses`, …) | ⬜ | เพิ่ม schema + `validate` ในไฟล์ route (option พร้อมแล้ว) |
-| `POST/PATCH /api/admin/orders*` (custom route) | ⬜ | `order.ts` (admin variant) |
-| รื้อ `pick()` / `Number()` ใน service | ⬜ | หลัง adopt ครบ |
+| CRUD via factory — `ingredients`, `ingredient-categories`, `component-categories`, `expenses` | ✅ | `inventory.ts` / `catalog.ts` / `expense.ts` |
+| `/api/admin/promotions` POST + `[id]` PATCH (custom route) | ✅ | `promotion.ts` — `parseBody` ตรง (refine: end≥start, Percentage ≤100) |
+| CRUD via factory — ที่เหลือ (`recipes`, `product-options`, `product-variants`, `aspects`, `semantic-terms`, `reviews`, …) | ⬜ | เพิ่ม schema + บรรทัด `validate` (option พร้อมแล้ว) · recipes มี BOM ซ้อน — ต้องออกแบบ schema เพิ่ม |
+| `POST/PATCH /api/admin/orders*` (custom route) | ⬜ | `order.ts` (admin variant — รับ `delivery_fee`/`discount_amount` override ได้) |
+| `/api/admin/attendances`, `/api/shop/reviews`, `/api/shop/addresses`, `/api/shop/me` ฯลฯ | ⬜ | ทยอย |
+| รื้อ `pick()` / `Number()` ใน service | ⬜ | หลัง adopt ครบ — ให้ zod เป็นด่านเดียว, service เหลือแค่ business rule |
 
 ---
 
@@ -109,5 +113,6 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 - `tests/lib/schemas.test.ts` — `order` (source default, items required, promo xor, enum), `cart` (objectId, quantity),
   `payment` (order/preorder xor, amount > 0, slip ห้ามว่าง)
 - `tests/lib/catalog.test.ts` — `unit` (enum, required, update partial), `productCategory`, `banner` (required, `start_date` coerce/reject)
+- `tests/lib/schemas-admin.test.ts` — `expense` (enum, amount ≥0), `ingredient` (ObjectId ref, `current_stock` omit ใน update), `promotion` (end≥start, Percentage ≤100), ingredient/component category
 
-รวม `npm test` = 61 passed / 8 ไฟล์
+รวม `npm test` = 72 passed / 8 ไฟล์

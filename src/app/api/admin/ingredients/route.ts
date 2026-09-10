@@ -1,5 +1,6 @@
 /** /api/admin/ingredients — GET/POST (ingredients) ; ?search= ?ingredient_category_id= */
 import { collectionRoutes } from "@/lib/crudRoutes";
+import { ingredientCreate } from "@/schemas/inventory";
 import { ingredientService } from "@/services/ingredientService";
 
 export const { GET, POST } = collectionRoutes(ingredientService, {
@@ -10,4 +11,5 @@ export const { GET, POST } = collectionRoutes(ingredientService, {
   }),
   auth: { menu: "ingredients" },
   audit: { entity: "Ingredient" },
+  validate: { create: ingredientCreate },
 });

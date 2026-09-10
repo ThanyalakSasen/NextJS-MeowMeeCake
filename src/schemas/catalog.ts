@@ -28,11 +28,17 @@ export const unitCreate = z.object({
 });
 export const unitUpdate = unitCreate.partial();
 
-// ── Product category ────────────────────────────────────────
-export const productCategoryCreate = z.object({
-  product_category_name: z.string().trim().min(1).max(100),
-});
+// ── หมวดหมู่แบบชื่อล้วน (product / ingredient / component category) ──
+const nameOnly = (field: string, max = 100) => z.object({ [field]: z.string().trim().min(1).max(max) });
+
+export const productCategoryCreate = nameOnly("product_category_name");
 export const productCategoryUpdate = productCategoryCreate.partial();
+
+export const ingredientCategoryCreate = nameOnly("ingredient_category_name");
+export const ingredientCategoryUpdate = ingredientCategoryCreate.partial();
+
+export const componentCategoryCreate = nameOnly("component_category_name");
+export const componentCategoryUpdate = componentCategoryCreate.partial();
 
 // ── Banner ─────────────────────────────────────────────────
 export const bannerCreate = z.object({
