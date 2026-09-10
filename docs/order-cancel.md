@@ -101,7 +101,10 @@ const result = await orderService.cancelOrder(id, {
 > เช็ค `payment_status = "paid"` แยกจาก state machine — ออเดอร์ที่ auto ขยับเป็น `confirmed` ตอนจ่ายเงินสำเร็จ
 > (`setPaymentStatus`) จะติดเงื่อนไขนี้ ไม่ใช่เงื่อนไขสถานะ
 
-การยกเลิกที่ผ่าน (ใน `updateOrderStatus` สาขา cancel):
+การยกเลิกที่ผ่าน (ใน `updateOrderStatus` สาขา cancel) — 3 ขั้น cleanup รันผ่าน `Saga`
+(`cleanup.onRollback(...)` ต่อขั้น → `await cleanup.rollback()` · best-effort · ขั้นที่ fail →
+`log.error("saga.rollback_step_failed")` แทน `.catch(() => undefined)` เดิมที่กลืน error เงียบ —
+D3.4b, 2026-09-11 · มี integration test `cancelOrder.test.ts` ครอบ):
 1. คืนสต็อก — `restockForOrder`
 2. คืนสิทธิ์โปรโมชัน — `revokeUsage({ order_id })`
 3. **ถ้า `payment_status === "paid"` → คืนเงินอัตโนมัติ** (BACKLOG 2.8, เพิ่ม 2026-09-07):

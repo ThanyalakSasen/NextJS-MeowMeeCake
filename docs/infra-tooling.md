@@ -141,9 +141,10 @@ log.error("order.auto_refund_failed", { order_id, err });   // err: Error → { 
   binary โหลดอัตโนมัติครั้งแรก (cache ไว้)
 - `promotionUsage.test.ts` (5) — §2.9: atomic claim / ถึง limit → 422 / **ยิงพร้อมกัน 8 กับ limit=3 → สำเร็จ 3** / per-user rollback / revoke
 - `persistOrder.test.ts` (4) — happy path / re-price / **compensation: สต็อกไม่พอ → ไม่มีออเดอร์** / preorder reject
-- **ยังไม่ครอบ:** `updateOrderStatus` cancel path, `cartService`, `ingredientTransactionService`
+- `cancelOrder.test.ts` (4) — cancel ไม่จ่าย (restock+status) / cancel + โปรฯ (revoke → `used_count` กลับ) / cancel จ่ายแล้ว (auto-refund) / ลูกค้ายกเลิกจ่ายแล้ว → 409
+- **ยังไม่ครอบ:** `cartService`, `ingredientTransactionService`, `deliveryService.quoteForCart`
 
-ตรวจ (ทั้งหมด): `npm run typecheck` · `typecheck:test` · `lint` · `npm test` (86) · `test:integration` (9) · `npm run build` — ผ่าน
+ตรวจ (ทั้งหมด): `npm run typecheck` · `typecheck:test` · `lint` · `npm test` (unit **91**) · `test:integration` (**13**) · `npm run build` — ผ่าน
 
 ### งานต่อ
 - CI: step `typecheck && typecheck:test && lint && test && test:integration && build`

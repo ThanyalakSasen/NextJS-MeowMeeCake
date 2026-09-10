@@ -1,7 +1,7 @@
 # แผน D3 — Consistency / robustness (BACKLOG §3.7, §3.3b)
 
 > อัปเดตล่าสุด: 2026-09-11
-> สถานะ: **D3 เสร็จทั้งหมด (D3.1–D3.6)** · เหลือ D3.4b (`updateOrderStatus` cancel → Saga) เป็น follow-up
+> สถานะ: **D3 เสร็จทั้งหมด (D3.1–D3.6 + D3.4b)**
 > ที่มา: [`hardening-plan.md`](hardening-plan.md) เฟส D3 · [`BACKLOG.md`](BACKLOG.md) §3.7 / §3.3 · มาตรฐาน API → [`api-conventions.md`](api-conventions.md)
 
 D3 มี 2 งาน อิสระต่อกัน:
@@ -47,9 +47,13 @@ D3 มี 2 งาน อิสระต่อกัน:
 - **D3.6** [`docs/api-conventions.md`](api-conventions.md) — envelope, list, HTTP status + code,
   validation issues, auth, query params, soft delete
 
-### ⬜ ยังไม่ทำ (follow-up)
-- **D3.4b** `orderService.updateOrderStatus` (cancel branch) — ยังใช้ `.catch(()=>undefined)`
-  · รอ integration test ของ cancel path ก่อน (หลักการเดียวกับ persistOrder D3.4)
+- **D3.4b** `orderService.updateOrderStatus` (cancel branch) → `Saga`
+  - `tests/integration/cancelOrder.test.ts` (4) — cancel ไม่จ่าย (restock + status) / cancel + โปรฯ
+    (revoke → `used_count` กลับ) / cancel จ่ายแล้ว admin (auto-refund → payment + `order.payment_status`
+    = `refunded`) / ลูกค้ายกเลิกจ่ายแล้ว → 409 · เขียนก่อน refactor (baseline) แล้วยัง pass หลัง
+  - cleanup 3 ขั้น (`restock` / `revoke-promo-usage` / `auto-refund`) → `cleanup.onRollback(...)` +
+    `await cleanup.rollback()` (best-effort · step ที่ fail → `log.error("saga.rollback_step_failed")`
+    แทน `.catch(() => undefined)` ที่กลืน error เงียบ)
 
 ---
 
