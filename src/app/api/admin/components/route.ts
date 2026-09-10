@@ -1,5 +1,6 @@
 /** /api/admin/components — GET/POST (recipes) ; ?componentcategory_id= */
 import { collectionRoutes } from "@/lib/crudRoutes";
+import { componentCreate } from "@/schemas/bom";
 import { componentService } from "@/services/componentService";
 
 export const { GET, POST } = collectionRoutes(componentService, {
@@ -10,4 +11,5 @@ export const { GET, POST } = collectionRoutes(componentService, {
   }),
   auth: { menu: "recipes" },
   audit: { entity: "Component" },
+  validate: { create: componentCreate },
 });
