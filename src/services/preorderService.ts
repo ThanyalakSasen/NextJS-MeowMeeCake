@@ -8,10 +8,11 @@
  *   - โปรโมชัน/ส่วนลด: v1 รองรับเฉพาะส่วนลดกรอกมือของแอดมิน (allowManualDiscount) — ยังไม่ผูก discountEngine
  *   - จองโควตาผ่าน preorderRoundService.commitQty (กันจองเกิน max_qty_total) ; ยกเลิกแล้วคืนด้วย releaseQty
  *
- * ข้อจำกัด: ไม่มี transaction — ใช้ best-effort + ชดเชย (คืนโควตา/ลบเอกสาร) เมื่อผิดพลาดกลางคัน
+ * ข้อจำกัด: ไม่มี transaction — ใช้ best-effort + ชดเชย (คืนโควตา/ลบเอกสาร) ผ่าน Saga เมื่อผิดพลาดกลางคัน
  */
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
+import { Saga } from "../lib/compensation";
 import { assertObjectId, pick } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
@@ -201,12 +202,15 @@ export async function createPreorder(
     lines.map((l) => String(l.product_id))
   );
 
-  // ── จองโควตา (ชดเชยคืนถ้าพลาดกลางคัน) ──
-  const committed: Array<{ round_item_id: string; quantity: number }> = [];
+  // ── จองโควตา + สร้างเอกสาร — ชดเชยผ่าน Saga ถ้าพลาดกลางคัน ──
+  const saga = new Saga();
   try {
     for (const l of lines) {
-      await preorderRoundService.commitQty(String(l.round_item_id), l.quantity);
-      committed.push({ round_item_id: String(l.round_item_id), quantity: l.quantity });
+      const roundItemId = String(l.round_item_id);
+      await preorderRoundService.commitQty(roundItemId, l.quantity);
+      saga.onRollback(`releaseQty:${roundItemId}`, () =>
+        preorderRoundService.releaseQty(roundItemId, l.quantity)
+      );
     }
 
     // สร้างเอกสารพรีออเดอร์ (retry เมื่อเลขชนกัน)
@@ -229,33 +233,31 @@ export async function createPreorder(
         throw err;
       }
     }
+    saga.onRollback("deletePreorder", () => preorderModel.deleteOne({ _id: preorder._id }));
 
-    try {
-      await preorderItemModel.insertMany(
-        lines.map((l) => ({
-          preorder_id: preorder._id,
-          round_item_id: l.round_item_id,
-          product_id: l.product_id,
-          product_snapshot: l.product_snapshot,
-          pickup_date: round.pickup_date,
-          special_request: l.special_request,
-          quantity: l.quantity,
-          unit_price: l.unit_price,
-          total_price: l.total_price,
-          cost_per_unit: costByProduct.get(String(l.product_id)) ?? null,
-        }))
-      );
-    } catch (err) {
-      await preorderModel.deleteOne({ _id: preorder._id }).catch(() => undefined);
-      await preorderItemModel.deleteMany({ preorder_id: preorder._id }).catch(() => undefined);
-      throw err;
-    }
+    await preorderItemModel.insertMany(
+      lines.map((l) => ({
+        preorder_id: preorder._id,
+        round_item_id: l.round_item_id,
+        product_id: l.product_id,
+        product_snapshot: l.product_snapshot,
+        pickup_date: round.pickup_date,
+        special_request: l.special_request,
+        quantity: l.quantity,
+        unit_price: l.unit_price,
+        total_price: l.total_price,
+        cost_per_unit: costByProduct.get(String(l.product_id)) ?? null,
+      }))
+    );
+    saga.onRollback("deletePreorderItems", () =>
+      preorderItemModel.deleteMany({ preorder_id: preorder._id })
+    );
 
+    // ทุกขั้นสำเร็จ → ทิ้ง undo ก่อนอ่านผลลัพธ์ (getPreorderById อาจ throw โดยไม่ต้อง rollback)
+    saga.commit();
     return getPreorderById(String(preorder._id));
   } catch (err) {
-    for (const c of committed) {
-      await preorderRoundService.releaseQty(c.round_item_id, c.quantity).catch(() => undefined);
-    }
+    await saga.rollback();
     throw err;
   }
 }
