@@ -13,6 +13,7 @@
 import { NextResponse } from "next/server";
 import mongoose from "mongoose";
 import { isHttpError } from "./httpError";
+import type { PageMeta } from "./queryParams";
 import { log } from "./logger";
 
 export function ok<T>(data: T, status = 200): NextResponse {
@@ -21,6 +22,16 @@ export function ok<T>(data: T, status = 200): NextResponse {
 
 export function created<T>(data: T): NextResponse {
   return NextResponse.json({ success: true, data }, { status: 201 });
+}
+
+/**
+ * response มาตรฐานของ list endpoint — data = { items, meta }
+ *   - paginate → ส่ง meta (จาก buildMeta)
+ *   - ลิสต์เต็ม (ไม่ paginate เช่น banners/units) → meta = null
+ * frontend rule เดียว: อ่าน data.items เสมอ · ถ้าทำ pagination อ่าน data.meta
+ */
+export function okList<T>(items: T[], meta: PageMeta | null = null): NextResponse {
+  return NextResponse.json({ success: true, data: { items, meta } }, { status: 200 });
 }
 
 export function noContent(): NextResponse {

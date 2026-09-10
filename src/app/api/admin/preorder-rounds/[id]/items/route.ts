@@ -5,7 +5,7 @@
  *          body: { product_id, price_override?, min_order_qty?, max_qty_total, is_active? }
  *          product_id ต้องเป็นสินค้า product_type = "preorder"
  */
-import { ok, created } from "@/lib/apiResponse";
+import { okList, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
 import { parseBool } from "@/lib/queryParams";
@@ -20,7 +20,7 @@ export const GET = withPermission("preorder", "view", async (_s, req, ctx: Ctx) 
     activeOnly: parseBool(sp.get("activeOnly")) ?? false,
     includeDeleted: parseBool(sp.get("includeDeleted")) ?? false,
   });
-  return ok(items);
+  return okList(items);
 });
 
 export const POST = withPermission("preorder", "update", async (_s, req, ctx: Ctx) => {

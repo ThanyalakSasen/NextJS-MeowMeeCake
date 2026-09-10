@@ -3,7 +3,7 @@
  *   GET  — รายการสินค้าทั้งหมด (products.view ; เห็นสินค้าที่ซ่อน/ถูกลบด้วยได้)
  *   POST — สร้างสินค้าใหม่ (products.create)
  */
-import { ok, created } from "@/lib/apiResponse";
+import { okList, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
 import { parseBool } from "@/lib/queryParams";
@@ -23,7 +23,7 @@ export const GET = withPermission("products", "view", async (_s, req) => {
     sortBy: sp.get("sortBy") ?? undefined,
     sortOrder: (sp.get("sortOrder") as "asc" | "desc" | null) ?? undefined,
   });
-  return ok(result);
+  return okList(result.items, result.meta);
 });
 
 export const POST = withPermission("products", "create", async (_s, req) => {

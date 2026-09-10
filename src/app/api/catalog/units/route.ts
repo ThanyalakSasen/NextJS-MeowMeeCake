@@ -1,6 +1,6 @@
 /** GET /api/catalog/units — หน่วยนับ (สาธารณะ ใช้แสดงผลหน้าร้าน) ?usage_context=Product */
 import type { NextRequest } from "next/server";
-import { ok, route } from "@/lib/apiResponse";
+import { okList, route } from "@/lib/apiResponse";
 import { unitService } from "@/services/unitService";
 
 export const GET = route(async (req: NextRequest) => {
@@ -10,5 +10,5 @@ export const GET = route(async (req: NextRequest) => {
     sort: { unit_name: 1 },
     filter: usage ? { usage_context: usage } : {},
   });
-  return ok(result.items);
+  return okList(result.items);
 });

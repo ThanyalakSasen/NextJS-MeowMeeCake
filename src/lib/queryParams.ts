@@ -52,7 +52,17 @@ export function parseNumber(value: string | null): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
-export function buildMeta(total: number, { page, limit }: Pagination) {
+/** meta ของ list ที่ paginate — โครงมาตรฐานเดียวของทุก list endpoint (ดู docs/api-conventions.md) */
+export interface PageMeta {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}
+
+export function buildMeta(total: number, { page, limit }: Pagination): PageMeta {
   return {
     page,
     limit,

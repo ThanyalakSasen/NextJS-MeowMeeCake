@@ -1,8 +1,8 @@
 # แผน D3 — Consistency / robustness (BACKLOG §3.7, §3.3b)
 
 > อัปเดตล่าสุด: 2026-09-11
-> สถานะ: **D3.1–D3.4 เสร็จ** · D3.5 (§3.7 envelope, BREAKING) + D3.6 ยังไม่ลงมือ
-> ที่มา: [`hardening-plan.md`](hardening-plan.md) เฟส D3 · [`BACKLOG.md`](BACKLOG.md) §3.7 / §3.3
+> สถานะ: **D3 เสร็จทั้งหมด (D3.1–D3.6)** · เหลือ D3.4b (`updateOrderStatus` cancel → Saga) เป็น follow-up
+> ที่มา: [`hardening-plan.md`](hardening-plan.md) เฟส D3 · [`BACKLOG.md`](BACKLOG.md) §3.7 / §3.3 · มาตรฐาน API → [`api-conventions.md`](api-conventions.md)
 
 D3 มี 2 งาน อิสระต่อกัน:
 1. **§3.7** — response envelope ของ list endpoint ให้เป็นรูปแบบเดียว
@@ -36,10 +36,20 @@ D3 มี 2 งาน อิสระต่อกัน:
   - validate โดย integration test (compensation case ผ่าน)
   - ตรวจ: typecheck · typecheck:test · lint · unit 86 · integration 9 · build — ผ่าน
 
-### ⬜ ยังไม่ทำ (ต่อ)
-- **D3.4b** `orderService.updateOrderStatus` (cancel branch) — ยังใช้ `.catch(()=>undefined)` อยู่
-  · รอ integration test ของ cancel path ก่อน (เหมือนหลักการเดียวกับ persistOrder)
-- **D3.5** §3.7 response envelope (BREAKING) · **D3.6** `docs/api-conventions.md`
+- **D3.5** §3.7 response envelope — มาตรฐาน `data = { items, meta|null }` ทุก list endpoint
+  - `apiResponse.okList(items, meta?)` + `PageMeta` type (ย้ายมา export จาก `queryParams`)
+  - แก้ 7 endpoint ที่ไม่ conform: 5 ตัวคืน array เปล่า → `okList(items)` · `getProducts` เปลี่ยน key
+    `pagination` → `meta` → `catalog/products` + `admin/products` ใช้ `okList(items, meta)`
+  - `crudRoutes` collection GET → `okList(result.items, result.meta)` (output เดิม — ทำให้ pattern ชัด)
+  - endpoint อื่นที่เป็น `{ items, meta }` อยู่แล้ว = ไม่แตะ (`ok({items,meta})` byte-identical กับ `okList`)
+  - `tests/lib/apiResponse.test.ts` (+5) — ok/created/okList (meta default null / with meta / `[]`)
+  - **⚠️ BREAKING** — ตาราง 7 endpoint ใน [`api-conventions.md`](api-conventions.md) §2
+- **D3.6** [`docs/api-conventions.md`](api-conventions.md) — envelope, list, HTTP status + code,
+  validation issues, auth, query params, soft delete
+
+### ⬜ ยังไม่ทำ (follow-up)
+- **D3.4b** `orderService.updateOrderStatus` (cancel branch) — ยังใช้ `.catch(()=>undefined)`
+  · รอ integration test ของ cancel path ก่อน (หลักการเดียวกับ persistOrder D3.4)
 
 ---
 

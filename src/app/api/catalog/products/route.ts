@@ -6,7 +6,7 @@
  *   (การอัปโหลดรูปสินค้าย้ายไป POST /api/admin/products/images — ต้องมีสิทธิ์)
  */
 import type { NextRequest } from "next/server";
-import { ok, route } from "@/lib/apiResponse";
+import { okList, route } from "@/lib/apiResponse";
 import * as productService from "@/services/productService";
 import type { ProductType } from "@/lib/productCode";
 
@@ -23,5 +23,5 @@ export const GET = route(async (req: NextRequest) => {
     sortBy: sp.get("sortBy") ?? undefined,
     sortOrder: (sp.get("sortOrder") as "asc" | "desc" | null) ?? undefined,
   });
-  return ok(result);
+  return okList(result.items, result.meta);
 });

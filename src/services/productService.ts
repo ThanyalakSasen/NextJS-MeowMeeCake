@@ -328,13 +328,14 @@ export async function getProducts(query: ListProductQuery = {}) {
     productModel.countDocuments(filter),
   ]);
 
+  // key `meta` (เดิม `pagination`) — โครงมาตรฐานเดียวของ list endpoint · ดู docs/api-conventions.md
   return {
     items,
-    pagination: {
+    meta: {
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit) || 1,
       hasNextPage: page * limit < total,
       hasPrevPage: page > 1,
     },
