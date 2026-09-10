@@ -34,7 +34,8 @@ D3 มี 2 งาน อิสระต่อกัน:
     `insertMany` → `onRollback("delete-order-items")` · `recordUsage` (422 → throw) · `commit()` ·
     catch → `saga.rollback()` · แทน nested try/catch + `if (order?._id)` + `.catch(()=>undefined)`
   - validate โดย integration test (compensation case ผ่าน)
-  - ตรวจ: typecheck · typecheck:test · lint · unit 86 · integration 9 · build — ผ่าน
+  - ตรวจ (ณ ขั้น D3.4): typecheck · typecheck:test · lint · unit 86 · integration 9 · build — ผ่าน
+    _(หลัง D3.4b + apiResponse test: รวมล่าสุด unit **91** / integration **13**)_
 
 - **D3.5** §3.7 response envelope — มาตรฐาน `data = { items, meta|null }` ทุก list endpoint
   - `apiResponse.okList(items, meta?)` + `PageMeta` type (ย้ายมา export จาก `queryParams`)
@@ -224,12 +225,13 @@ D3.6  docs/api-conventions.md                          (S)
 
 ---
 
-## 4. คำถามเปิดสำหรับทบทวน
+## 4. คำถามเปิดสำหรับทบทวน — ✅ สรุปแล้ว (ทำตามข้อเสนอทุกข้อ)
 
 1. §3.7: `meta` ของ endpoint ที่ไม่ paginate → ให้เป็น `null` หรือ synthesize (`{page:1,total:N,totalPages:1,...}`) ?
-   - เสนอ `null` — สื่อชัดว่า "ไม่มี pagination"
+   - ✅ ใช้ `null` — สื่อชัดว่า "ไม่มี pagination"
 2. §3.7: จะบังคับ list endpoint ทุกตัวผ่าน `okList` เลย หรือแค่แก้ 7 ตัวที่ผิดมาตรฐาน (ที่เหลือปล่อย `ok(result)` เพราะ shape ตรงอยู่แล้ว) ?
-   - เสนอ: แก้ 7 ตัวก่อน + ค่อย ๆ ย้ายที่เหลือมาใช้ `okList` (ไม่เร่ง)
+   - ✅ แก้ 7 ตัว + `crudRoutes` GET · ที่เหลือทยอยย้ายมาใช้ `okList`
 3. §3.3b: จะดึง integration test (D3.3) ขึ้นมาก่อน refactor เลย หรือ refactor `preorderService` อย่างเดียวในรอบนี้แล้วเว้น `persistOrder` ไว้ ?
-   - เสนอ: รอบนี้ทำถึง D3.2 · `persistOrder` refactor แยกไปหลังมี integration test
+   - ✅ D3.2 (preorder) → D3.3 integration test → D3.4 refactor `persistOrder` → D3.4b `updateOrderStatus` cancel
 4. timing ของ D3.5 (breaking) — มี frontend ที่ใช้งานอยู่แล้วหรือยัง? ถ้ายัง frontend ยังไม่เสถียร ทำเลยได้ทันที
+   - ✅ ทำเป็น PR #10 หัวข้อ BREAKING + ตาราง 7 endpoint ใน [`api-conventions.md`](api-conventions.md) §2

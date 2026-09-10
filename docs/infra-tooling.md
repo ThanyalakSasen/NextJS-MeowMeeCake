@@ -1,8 +1,8 @@
 # Infra / tooling — ESLint · Logger · Testing
 
-> อัปเดตล่าสุด: 2026-09-10
-> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3 (ชั้น D) · แผนเต็ม → [`hardening-plan.md`](hardening-plan.md)
-> เฟส D1 = 3.6 ESLint → 3.3 Logger → 3.4 Testing → 3.1 zod (เก็บไว้ทำทีหลัง)
+> อัปเดตล่าสุด: 2026-09-11
+> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3 (ชั้น D) · แผนเต็ม → [`hardening-plan.md`](hardening-plan.md) · สรุป + PR → [`hardening-summary.md`](hardening-summary.md)
+> เฟส D1 = 3.6 ESLint → 3.3 Logger → 3.4 Testing → 3.1 zod (infra + adopt หลัก — ดู [`validation.md`](validation.md))
 
 ---
 
@@ -54,7 +54,7 @@ eslint-config-next ^15  — preset ของ Next 15 (ตรงกับ next ^1
 ### สถานะหลังทำ
 ```
 npm run lint  → 0 errors, 1 warning
-  └ src/services/productService.ts:796  import/no-anonymous-default-export
+  └ src/services/productService.ts:797  import/no-anonymous-default-export
     (export default { ... } — style nit, ไม่บล็อก · เก็บทีหลังตอนแตะไฟล์นั้น)
 npm run typecheck / npm run build → ผ่าน
 ```
@@ -127,7 +127,7 @@ log.error("order.auto_refund_failed", { order_id, err });   // err: Error → { 
 > `integration` (`tests/integration/`, `mongodb-memory-server`) · `tests/` ถูก exclude จาก `tsconfig.json`
 > หลัก (กัน `next build` compile top-level await ใน setup) → typecheck tests ด้วย `tsconfig.test.json`
 
-**ชุดแรก — unit ล้วน (`tests/lib/`), 35 tests / 4 ไฟล์:**
+**ชุดแรก (PR #5) — unit ล้วน (`tests/lib/`), 4 ไฟล์** _(ภายหลังโตเป็น 12 ไฟล์ / 91 tests — ดูสรุปท้ายหัวข้อ + [`hardening-summary.md`](hardening-summary.md) §3.4)_:
 | ไฟล์ | ครอบ |
 |---|---|
 | `discountEngine.test.ts` | Percentage (+cap), Amount (clamp), FreeShipping (reject fee=0 → §2.6), zero-discount reject (§2.11), channel, min_order/min_qty, scoped products |

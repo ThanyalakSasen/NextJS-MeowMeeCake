@@ -1,8 +1,8 @@
 # Validation layer (zod) — BACKLOG §3.1
 
-> อัปเดตล่าสุด: 2026-09-10
-> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.1 · แผน: [`hardening-plan.md`](hardening-plan.md) เฟส D1
-> สถานะ: 🟡 infra + adopt นำร่อง (`/api/auth/*`) เสร็จ — ทยอย adopt route ที่เหลือ
+> อัปเดตล่าสุด: 2026-09-11
+> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.1 · แผน: [`hardening-plan.md`](hardening-plan.md) เฟส D1 · PR #6
+> สถานะ: 🟡 infra + `crudRoutes` option `validate` + adopt `/auth/*` · `/shop/{orders,cart,payments}` · admin CRUD หลัก + `/admin/promotions` เสร็จ — เหลือ route รอง + รื้อ `pick()`/`Number()` ใน service (ดู §3)
 
 ---
 
@@ -59,7 +59,7 @@ export const { GET, PATCH, DELETE } = itemRoutes(unitService, {
 ```
 - ไม่ใส่ `validate` = พฤติกรรมเดิม (`req.json().catch(() => ({}))` → service ตรวจ)
 - ใส่แล้ว = `parseBody` (บาด JSON / schema ผิด → 400 + issues) ก่อนถึง service
-- adopt แล้ว: `units`, `product-categories`, `banners` (collection + item) · ที่เหลือแค่เพิ่ม schema + บรรทัด `validate` ในไฟล์ route
+- adopt แล้ว (collection + item): `units`, `product-categories`, `banners`, `ingredients`, `ingredient-categories`, `component-categories`, `expenses` · ที่เหลือแค่เพิ่ม schema + บรรทัด `validate` ในไฟล์ route (ดูตาราง §3)
 
 ### รูปแบบ adopt ที่ route
 ```ts
@@ -115,4 +115,5 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 - `tests/lib/catalog.test.ts` — `unit` (enum, required, update partial), `productCategory`, `banner` (required, `start_date` coerce/reject)
 - `tests/lib/schemas-admin.test.ts` — `expense` (enum, amount ≥0), `ingredient` (ObjectId ref, `current_stock` omit ใน update), `promotion` (end≥start, Percentage ≤100), ingredient/component category
 
-รวม `npm test` = 72 passed / 8 ไฟล์
+ไฟล์เทสฝั่ง validation = `validate`, `schemas`, `catalog`, `schemas-admin` (4 ไฟล์)
+รวมทั้ง suite ปัจจุบัน: `npm test` = **91 passed / 12 ไฟล์** · `npm run test:integration` = **13 / 3 ไฟล์** (ดู [`hardening-summary.md`](hardening-summary.md) §3.4)

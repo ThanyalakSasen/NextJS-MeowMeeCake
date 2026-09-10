@@ -17,7 +17,7 @@
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
 | อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — บันทึกลงดิสก์ (self-host เท่านั้น, ดู §3.13) |
 | Preorder (เฟส 5) | 🟡 service + API เสร็จ (ดู §8 · [preorder.md](preorder.md)) — เหลือผูก payment/production/promotion |
-| §3 คุณภาพ / hardening | 🟡 ทำแล้ว: audit log (3.5) · ยังค้าง ~15 ข้อ (zod, rate-limit, test, eslint ฯลฯ) |
+| §3 คุณภาพ / hardening | 🟡 ✅ D1 (eslint/logger/test/zod-infra) · ✅ D2 (rate-limit/Google/CSRF) · ✅ D3 (Saga/integration test/response envelope) · ✅ audit log (3.5) — PR #5–#12 · ยังค้าง: 3.1 adopt route ที่เหลือ + รื้อ `pick()` · D4 (3.8/3.11/3.12–3.16) · CI pipeline |
 | Notification | ❌ ตัดออก (แจ้งเตือนผ่าน LINE แยกภายหลัง — ดู §3.12) |
 
 **คำสั่งตรวจสอบ:** `npm run typecheck` · `typecheck:test` · `npm run lint` · `npm test` (unit) · `npm run test:integration` · `npm run build` — ปัจจุบันผ่านทั้งหมด
