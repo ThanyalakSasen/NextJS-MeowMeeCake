@@ -1,7 +1,7 @@
 # แผน D3 — Consistency / robustness (BACKLOG §3.7, §3.3b)
 
 > อัปเดตล่าสุด: 2026-09-11
-> สถานะ: **D3.1 + D3.2 เสร็จ** · D3.3–D3.6 ยังไม่ลงมือ
+> สถานะ: **D3.1–D3.4 เสร็จ** · D3.5 (§3.7 envelope, BREAKING) + D3.6 ยังไม่ลงมือ
 > ที่มา: [`hardening-plan.md`](hardening-plan.md) เฟส D3 · [`BACKLOG.md`](BACKLOG.md) §3.7 / §3.3
 
 D3 มี 2 งาน อิสระต่อกัน:
@@ -19,11 +19,26 @@ D3 มี 2 งาน อิสระต่อกัน:
     → `rollback()` รันย้อน: ลบ items → ลบ preorder → คืนโควตา
   - **แถมแก้บั๊กเล็ก:** เดิม `getPreorderById` ตอนท้ายอยู่ใน try ที่ compensate → ถ้ามัน throw
     จะไป rollback preorder ที่สร้างสำเร็จแล้ว · ตอนนี้ `saga.commit()` **ก่อน** อ่านผลลัพธ์
-  - ตรวจ: typecheck · lint · test (86 passed / 11 ไฟล์) · build — ผ่าน
+- **D3.3** integration test (mongodb-memory-server) — **vitest projects** `unit` / `integration`
+  - `vitest.config.mts` แยก 2 project · `tests/integration/setup.ts` — top-level await เริ่ม
+    `MongoMemoryServer` → ตั้ง `MONGODB_URI` + `mongoose.connect` + pre-populate `global._mongoose`
+    (cache ของ `dbConnect`) · `afterEach` เคลียร์ทุก collection
+  - `tests/integration/promotionUsage.test.ts` (5) — §2.9: atomic claim, ถึง limit → 422 + used_count
+    ไม่ขยับ, **ยิงพร้อมกัน 8 กับ limit=3 → สำเร็จ 3**, `max_user_per_user` rollback, `revokeUsage`
+  - `tests/integration/persistOrder.test.ts` (4) — happy path (ยอด/ตัดสต็อก/snapshot), re-price,
+    **compensation: สต็อกไม่พอ → throw + ไม่มีออเดอร์ + สต็อกไม่เปลี่ยน**, preorder product → reject
+  - scripts: `test` = unit เท่านั้น (เร็ว, ไม่ต้องมี mongo binary) · `test:integration` (โหลด binary
+    อัตโนมัติครั้งแรก) · `test:all` · `typecheck:test` (`tsconfig.test.json` — tests ไม่อยู่ใน `tsc`/`next build` หลัก)
+- **D3.4** refactor `orderService.persistOrder` ใช้ `Saga`
+  - `deductStock` → `onRollback("restock")` · `create order` → `onRollback("delete-order")` ·
+    `insertMany` → `onRollback("delete-order-items")` · `recordUsage` (422 → throw) · `commit()` ·
+    catch → `saga.rollback()` · แทน nested try/catch + `if (order?._id)` + `.catch(()=>undefined)`
+  - validate โดย integration test (compensation case ผ่าน)
+  - ตรวจ: typecheck · typecheck:test · lint · unit 86 · integration 9 · build — ผ่าน
 
 ### ⬜ ยังไม่ทำ (ต่อ)
-- **D3.3** integration test `persistOrder` / `recordUsage` (mongodb-memory-server)
-- **D3.4** refactor `orderService.persistOrder` + `updateOrderStatus` ใช้ `Saga` (รอ D3.3)
+- **D3.4b** `orderService.updateOrderStatus` (cancel branch) — ยังใช้ `.catch(()=>undefined)` อยู่
+  · รอ integration test ของ cancel path ก่อน (เหมือนหลักการเดียวกับ persistOrder)
 - **D3.5** §3.7 response envelope (BREAKING) · **D3.6** `docs/api-conventions.md`
 
 ---

@@ -18,6 +18,7 @@
  */
 import dbConnect from "../lib/dbConnect";
 import { log } from "../lib/logger";
+import { Saga } from "../lib/compensation";
 import { badRequest, conflict, notFound, isHttpError } from "../lib/httpError";
 import { assertObjectId, pick } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
@@ -310,16 +311,20 @@ async function persistOrder(
   }
   const total_amount = round2(subtotal - discount_amount + delivery_fee);
 
-  // 1) ตัดสต็อก (productService ข้าม preorder ให้เอง, คืนสต็อกอัตโนมัติถ้ารายการใดไม่พอ)
   const stockItems = lines.map((l) => ({
     product_id: String(l.product_id),
     quantity: l.quantity,
   }));
-  await productService.deductStockForOrder(stockItems);
 
-  // 2) สร้างออเดอร์ (retry เมื่อเลขออเดอร์ชนกัน)
+  // ── สร้างออเดอร์แบบ best-effort + ชดเชยผ่าน Saga (MongoDB standalone ไม่มี transaction) ──
+  const saga = new Saga();
   let order: any = null;
   try {
+    // 1) ตัดสต็อก (productService ข้าม preorder ให้เอง, คืนสต็อกอัตโนมัติถ้ารายการใดไม่พอ)
+    await productService.deductStockForOrder(stockItems);
+    saga.onRollback("restock", () => productService.restockForOrder(stockItems));
+
+    // 2) สร้างออเดอร์ (retry เมื่อเลขออเดอร์ชนกัน)
     for (let attempt = 0; attempt < 5 && !order; attempt++) {
       try {
         order = await orderModel.create({
@@ -338,16 +343,19 @@ async function persistOrder(
         throw err;
       }
     }
+    saga.onRollback("delete-order", () => orderModel.deleteOne({ _id: order._id }));
 
     // 3) สร้าง order items
     await orderItemModel.insertMany(
       itemsPayload.map((it) => ({ ...it, order_id: order._id }))
     );
+    saga.onRollback("delete-order-items", () => orderItemModel.deleteMany({ order_id: order._id }));
 
     // 4) บันทึกการใช้โปรโมชัน — จองสิทธิ์แบบ atomic (กันใช้เกิน usage_limit / per-user)
     //    computeDiscount reject ส่วนลด 0 ไปแล้ว → มี appliedPromotion = discount > 0 เสมอ
-    //    limit เต็ม (HttpError 422) = reject จริง → โยนต่อให้ catch ล้มออเดอร์
+    //    limit เต็ม (HttpError 422) = reject จริง → โยนต่อให้ saga.rollback ล้มออเดอร์
     //    error อื่น (transient) = best-effort ไม่ล้มออเดอร์ที่สร้างสำเร็จแล้ว
+    //    (recordUsage rollback used_count ของตัวเองแล้ว จึงไม่ต้อง onRollback ที่นี่)
     if (appliedPromotion) {
       try {
         await promotionUsageService.recordUsage({
@@ -361,13 +369,10 @@ async function persistOrder(
         log.error("order.record_usage_failed", { order_id: String(order._id), err: e });
       }
     }
+
+    saga.commit();
   } catch (err) {
-    // ชดเชย: คืนสต็อก + ลบออเดอร์ที่ค้าง (recordUsage rollback used_count ของตัวเองแล้ว)
-    await productService.restockForOrder(stockItems).catch(() => undefined);
-    if (order?._id) {
-      await orderModel.deleteOne({ _id: order._id }).catch(() => undefined);
-      await orderItemModel.deleteMany({ order_id: order._id }).catch(() => undefined);
-    }
+    await saga.rollback();
     throw err;
   }
 
