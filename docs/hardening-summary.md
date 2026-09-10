@@ -14,10 +14,15 @@
 | **§3 D1 — infra/tooling** (3.6 eslint · 3.3 logger · 3.4 test · 3.1 zod) | ✅ (3.1 = infra + adopt หลัก) | #5 #6 |
 | **§3 D2 — security** (3.2 rate-limit · 3.9 Google · 3.10 CSRF) | ✅ | #7 |
 | **§3 D3 — consistency/robustness** (3.3b Saga · integration test · 3.7 envelope) | ✅ | #8 #9 #10 #11 |
+| **§3 3.5 audit log** | ✅ (นอกชุด D — `src/lib/audit.ts`) → [`auditLog.md`](auditLog.md) | — |
 | **§3 D4 — feature/ops** (3.8 · 3.12–3.16) | ⬜ หลัง launch | — |
-| **3.11 เงินเป็น integer** | ⬜ งานเดี่ยว | — |
+| **§3 3.11 เงินเป็น integer** | ⬜ งานเดี่ยว | — |
 
 ทุก PR merge เข้า branch `addModels` · ทุก commit ผ่าน `typecheck` · `typecheck:test` · `lint` · `test` (unit) · `test:integration` · `build`
+
+**ลำดับที่ทำจริง** = ตามแผน [`hardening-plan.md`](hardening-plan.md) §ลำดับที่แนะนำ:
+D1 (3.6 → 3.3 → 3.4 → 3.1 infra) → D2 (3.2 → 3.9 → 3.10) →
+D3 (**3.3b compensation → integration test → 3.7 envelope** ตาม [`hardening-d3-plan.md`](hardening-d3-plan.md)) → 3.5 audit log
 
 ---
 
@@ -94,6 +99,16 @@
 
 ### `docs/api-conventions.md` (PR #10) — เอกสารอ้างอิงถาวร
 envelope · list · HTTP status ↔ `error.code` · zod `details.issues` · auth · query params · soft delete
+
+---
+
+## §3.5 — audit log (นอกชุด D) → [`auditLog.md`](auditLog.md)
+
+`src/lib/audit.ts` — `audit(req, {...})` fire-and-forget · wire เข้า mutation สำคัญแล้ว:
+ออเดอร์ (สร้าง/เปลี่ยนสถานะ/จัดส่ง/ลบ/ลูกค้ายกเลิก) · payment (verify/refund/ลบ) ·
+สต็อก (ingredient transaction, product stock PUT/PATCH) · สิทธิ์ (permission/role/user CRUD + ปลดล็อก/ตั้งรหัสผ่าน) ·
+การผลิต (start/complete/cancel + consume/reverse) · แคตตาล็อก (product + recipe/component/ingredient/promotion/expense ผ่าน `crudRoutes` option `audit: { entity }`)
+**ยังไม่ครอบ:** unit/หมวดหมู่/banner/variant/option/aspect/semantic-term · shop payment create/slip · before/after snapshot
 
 ---
 
