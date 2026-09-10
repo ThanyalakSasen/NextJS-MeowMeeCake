@@ -1,12 +1,30 @@
 # แผน D3 — Consistency / robustness (BACKLOG §3.7, §3.3b)
 
 > อัปเดตล่าสุด: 2026-09-11
-> สถานะ: **ร่างเพื่อทบทวน** — ยังไม่ลงมือ
+> สถานะ: **D3.1 + D3.2 เสร็จ** · D3.3–D3.6 ยังไม่ลงมือ
 > ที่มา: [`hardening-plan.md`](hardening-plan.md) เฟส D3 · [`BACKLOG.md`](BACKLOG.md) §3.7 / §3.3
 
 D3 มี 2 งาน อิสระต่อกัน:
 1. **§3.7** — response envelope ของ list endpoint ให้เป็นรูปแบบเดียว
 2. **§3.3b** — `src/lib/compensation.ts` : รวม pattern best-effort rollback
+
+### ✅ ทำแล้ว
+- **D3.1** `src/lib/compensation.ts` — class `Saga`
+  - `onRollback(label, undo)` บันทึก undo หลัง action สำเร็จ · `rollback()` รัน undo **ย้อนลำดับ**
+    best-effort (undo ที่ throw = `log.error("saga.rollback_step_failed")` แล้วไปต่อ) · `commit()` ทิ้ง undo
+  - `tests/lib/compensation.test.ts` — reverse order, commit ปิด rollback, undo throw ไม่ล้ม, rollback ซ้ำไม่รันอีก
+- **D3.2** adopt `Saga` ที่ `preorderService.createPreorder`
+  - แทน `committed[]` array + nested try/catch + `.catch(() => undefined)` กระจาย
+  - undo ที่บันทึก: `releaseQty` (ต่อ line) → `deletePreorder` → `deletePreorderItems`
+    → `rollback()` รันย้อน: ลบ items → ลบ preorder → คืนโควตา
+  - **แถมแก้บั๊กเล็ก:** เดิม `getPreorderById` ตอนท้ายอยู่ใน try ที่ compensate → ถ้ามัน throw
+    จะไป rollback preorder ที่สร้างสำเร็จแล้ว · ตอนนี้ `saga.commit()` **ก่อน** อ่านผลลัพธ์
+  - ตรวจ: typecheck · lint · test (86 passed / 11 ไฟล์) · build — ผ่าน
+
+### ⬜ ยังไม่ทำ (ต่อ)
+- **D3.3** integration test `persistOrder` / `recordUsage` (mongodb-memory-server)
+- **D3.4** refactor `orderService.persistOrder` + `updateOrderStatus` ใช้ `Saga` (รอ D3.3)
+- **D3.5** §3.7 response envelope (BREAKING) · **D3.6** `docs/api-conventions.md`
 
 ---
 
