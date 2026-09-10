@@ -40,8 +40,25 @@ parse(value, schema)     // parse ค่าที่ resolve เอง เช่
 
 ### `src/schemas/`
 - `common.ts` — ชิ้นที่ใช้ซ้ำ: `objectId`, `phone`, `deliveryAddress`, `pageQuery`, `sortQuery`, `nonEmpty(max)`
-- `<domain>.ts` — schema ต่อโดเมน วางคู่กับ service เช่น `auth.ts`, (ต่อไป) `order.ts`, `cart.ts`, `payment.ts`
+- `<domain>.ts` — schema ต่อโดเมน: `auth.ts`, `order.ts`, `cart.ts`, `payment.ts`, `catalog.ts`
 - export `type X = z.infer<typeof xSchema>` ไปใช้ที่ route (ไม่ต้องเขียน interface ซ้ำ)
+
+### `crudRoutes` factory — option `validate`
+```ts
+// src/app/api/admin/units/route.ts
+export const { GET, POST } = collectionRoutes(unitService, {
+  ...,
+  validate: { create: unitCreate },     // parse body ของ POST
+});
+// src/app/api/admin/units/[id]/route.ts
+export const { GET, PATCH, DELETE } = itemRoutes(unitService, {
+  ...,
+  validate: { update: unitUpdate },     // ปกติ = createSchema.partial()
+});
+```
+- ไม่ใส่ `validate` = พฤติกรรมเดิม (`req.json().catch(() => ({}))` → service ตรวจ)
+- ใส่แล้ว = `parseBody` (บาด JSON / schema ผิด → 400 + issues) ก่อนถึง service
+- adopt แล้ว: `units`, `product-categories`, `banners` (collection + item) · ที่เหลือแค่เพิ่ม schema + บรรทัด `validate` ในไฟล์ route
 
 ### รูปแบบ adopt ที่ route
 ```ts
@@ -67,8 +84,9 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 | `GET /api/shop/orders` | ✅ | `order.listOrderQuery` (เฉพาะ enum · page/limit/sort ยังใช้ `parsePagination`/`parseSort`) |
 | `POST /api/shop/cart/items` · `PATCH /api/shop/cart/items/[id]` | ✅ | `cart.addCartItemBody` / `cart.updateCartItemBody` (+ `parse(id, objectId)`) |
 | `POST /api/shop/payments` · `GET` · `PATCH .../[id]/slip` | ✅ | `payment.createPaymentBody` (xor order/preorder), `listPaymentQuery`, `submitSlipBody` |
-| `POST/PATCH /api/admin/orders*` | ⬜ | `order.ts` (admin variant) |
-| CRUD ทั่วไป (units, categories, banners, …) | ⬜ | เพิ่ม option `validate` ใน `crudRoutes` factory |
+| CRUD via factory — `units`, `product-categories`, `banners` | ✅ | `crudRoutes` option `validate: { create, update }` + `catalog.ts` |
+| CRUD via factory — ที่เหลือ (`ingredients`, `recipes`, `promotions`, `expenses`, …) | ⬜ | เพิ่ม schema + `validate` ในไฟล์ route (option พร้อมแล้ว) |
+| `POST/PATCH /api/admin/orders*` (custom route) | ⬜ | `order.ts` (admin variant) |
 | รื้อ `pick()` / `Number()` ใน service | ⬜ | หลัง adopt ครบ |
 
 ---
@@ -90,5 +108,6 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
   `parseQuery` (coerce + default + enum fail), `schemas/auth` (normalize email, password สั้น, อีเมลผิด)
 - `tests/lib/schemas.test.ts` — `order` (source default, items required, promo xor, enum), `cart` (objectId, quantity),
   `payment` (order/preorder xor, amount > 0, slip ห้ามว่าง)
+- `tests/lib/catalog.test.ts` — `unit` (enum, required, update partial), `productCategory`, `banner` (required, `start_date` coerce/reject)
 
-รวม `npm test` = 53 passed / 6 ไฟล์
+รวม `npm test` = 61 passed / 8 ไฟล์
