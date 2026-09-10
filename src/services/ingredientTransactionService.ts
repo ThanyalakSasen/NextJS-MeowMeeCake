@@ -1,0 +1,204 @@
+/**
+ * ingredientTransactionService — รายการเคลื่อนไหวสต็อกวัตถุดิบ (IngredientTransactions)
+ *
+ * เป็น "แหล่งความจริง" ของการเปลี่ยนแปลง current_stock ของวัตถุดิบ:
+ *   type "receive" → เพิ่มสต็อก (+qty)
+ *   type "use"     → ลดสต็อก  (-qty)   กันติดลบ เว้นแต่ allowNegative
+ *   type "adjust"  → ตั้งยอดนับจริง current_stock = qty (บันทึกส่วนต่างไว้ใน note ให้ด้วย)
+ *
+ * ทุกครั้งจะอัปเดต current_stock แบบ atomic แล้วจึงบันทึกรายการ ถ้าบันทึกล้มเหลวจะย้อนสต็อกกลับ
+ */
+import dbConnect from "../lib/dbConnect";
+import { badRequest, conflict, notFound } from "../lib/httpError";
+import { assertObjectId } from "../lib/objectId";
+import { assertRefExists } from "../lib/refs";
+import { buildMeta, type Pagination } from "../lib/queryParams";
+import ingredientTransactionModel from "../models/ingredientTransactionModel";
+import ingredientModel from "../models/ingredientModel";
+import unitModel from "../models/unitModel";
+import userModel from "../models/userModel";
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+export const TRANSACTION_TYPES = ["use", "receive", "adjust"] as const;
+export type TransactionType = (typeof TRANSACTION_TYPES)[number];
+
+export interface CreateTransactionInput {
+  ingredient_id: string;
+  type: TransactionType;
+  qty: number;
+  performed_by: string;
+  unit_id?: string | null;
+  note?: string;
+  po_ref?: string | null;
+  transaction_date?: string | Date | null;
+  expiry_date?: string | Date | null;
+  allowNegative?: boolean;
+}
+
+export interface ListTransactionQuery {
+  pagination: Pagination;
+  ingredient_id?: string;
+  type?: TransactionType;
+  performed_by?: string;
+  date_from?: string;
+  date_to?: string;
+  includeDeleted?: boolean;
+}
+
+// ── CREATE (+ ปรับ current_stock) ───────────────────────────
+export async function createTransaction(input: CreateTransactionInput) {
+  await dbConnect();
+
+  if (!TRANSACTION_TYPES.includes(input.type)) {
+    throw badRequest(`type ต้องเป็นหนึ่งใน: ${TRANSACTION_TYPES.join(", ")}`);
+  }
+  if (!input.performed_by) throw badRequest("กรุณาระบุ performed_by");
+
+  const qty = Number(input.qty);
+  if (!Number.isFinite(qty) || qty < 0) throw badRequest("qty ต้องเป็นตัวเลขไม่ติดลบ");
+  if ((input.type === "use" || input.type === "receive") && qty <= 0) {
+    throw badRequest('type "use"/"receive" ต้องมี qty มากกว่า 0');
+  }
+
+  assertObjectId(input.ingredient_id, "ingredient_id");
+  const ingredient = await ingredientModel
+    .findOne({ _id: input.ingredient_id, deleted_at: null })
+    .lean<any>();
+  if (!ingredient) throw notFound("ไม่พบวัตถุดิบที่ระบุ");
+
+  await assertRefExists(userModel, input.performed_by, "ผู้ทำรายการ", "performed_by");
+
+  const unitId = input.unit_id || String(ingredient.unit_id);
+  await assertRefExists(unitModel, unitId, "หน่วยนับ", "unit_id");
+
+  const before = ingredient.current_stock ?? 0;
+  let after: number;
+  let noteExtra = "";
+
+  if (input.type === "receive") {
+    await ingredientModel.updateOne(
+      { _id: ingredient._id },
+      { $inc: { current_stock: qty } }
+    );
+    after = before + qty;
+  } else if (input.type === "use") {
+    const filter: Record<string, any> = { _id: ingredient._id, deleted_at: null };
+    if (!input.allowNegative) filter.current_stock = { $gte: qty };
+    const res = await ingredientModel.updateOne(filter, { $inc: { current_stock: -qty } });
+    if (res.modifiedCount === 0) {
+      throw conflict(`สต็อกวัตถุดิบไม่พอ (คงเหลือ ${before}, ต้องการ ${qty})`);
+    }
+    after = before - qty;
+  } else {
+    // adjust: ตั้งยอดนับจริง
+    await ingredientModel.updateOne(
+      { _id: ingredient._id },
+      { $set: { current_stock: qty } }
+    );
+    after = qty;
+    noteExtra = ` [ปรับยอด: ${before} → ${after} (${after - before >= 0 ? "+" : ""}${after - before})]`;
+  }
+
+  try {
+    const txn = await ingredientTransactionModel.create({
+      ingredient_id: ingredient._id,
+      type: input.type,
+      qty,
+      unit_id: unitId,
+      note: (input.note ?? "") + noteExtra,
+      po_ref: input.po_ref ?? null,
+      transaction_date: input.transaction_date ? new Date(input.transaction_date) : new Date(),
+      expiry_date: input.expiry_date ? new Date(input.expiry_date) : null,
+      performed_by: input.performed_by,
+    });
+
+    return {
+      transaction: txn.toObject(),
+      stock: { ingredient_id: String(ingredient._id), before, after },
+    };
+  } catch (err) {
+    // ย้อนสต็อกกลับ (best-effort)
+    if (input.type === "receive") {
+      await ingredientModel.updateOne({ _id: ingredient._id }, { $inc: { current_stock: -qty } });
+    } else if (input.type === "use") {
+      await ingredientModel.updateOne({ _id: ingredient._id }, { $inc: { current_stock: qty } });
+    } else {
+      await ingredientModel.updateOne({ _id: ingredient._id }, { $set: { current_stock: before } });
+    }
+    throw err;
+  }
+}
+
+// ── READ ────────────────────────────────────────────────────
+export async function listTransactions(query: ListTransactionQuery) {
+  await dbConnect();
+
+  const filter: Record<string, any> = {};
+  if (!query.includeDeleted) filter.deleted_at = null;
+  if (query.ingredient_id) {
+    assertObjectId(query.ingredient_id, "ingredient_id");
+    filter.ingredient_id = query.ingredient_id;
+  }
+  if (query.type) filter.type = query.type;
+  if (query.performed_by) {
+    assertObjectId(query.performed_by, "performed_by");
+    filter.performed_by = query.performed_by;
+  }
+  if (query.date_from || query.date_to) {
+    filter.transaction_date = {};
+    if (query.date_from) filter.transaction_date.$gte = new Date(query.date_from);
+    if (query.date_to) filter.transaction_date.$lte = new Date(query.date_to);
+  }
+
+  const [items, total] = await Promise.all([
+    ingredientTransactionModel
+      .find(filter)
+      .sort({ transaction_date: -1, created_at: -1 })
+      .skip(query.pagination.skip)
+      .limit(query.pagination.limit)
+      .populate("ingredient_id", "ingredient_name")
+      .populate("unit_id", "unit_name unit_abbr")
+      .populate("performed_by", "user_fullname email")
+      .lean(),
+    ingredientTransactionModel.countDocuments(filter),
+  ]);
+
+  return { items, meta: buildMeta(total, query.pagination) };
+}
+
+export async function getTransactionById(id: string) {
+  await dbConnect();
+  assertObjectId(id);
+  const doc = await ingredientTransactionModel
+    .findOne({ _id: id, deleted_at: null })
+    .populate("ingredient_id", "ingredient_name current_stock")
+    .populate("unit_id", "unit_name unit_abbr")
+    .populate("performed_by", "user_fullname email")
+    .lean();
+  if (!doc) throw notFound("ไม่พบรายการเคลื่อนไหวที่ระบุ");
+  return doc;
+}
+
+// ── VOID (ยกเลิก + ย้อนผลต่อสต็อก) — เฉพาะ use/receive ──────
+export async function voidTransaction(id: string) {
+  await dbConnect();
+  assertObjectId(id);
+
+  const txn = await ingredientTransactionModel.findOne({ _id: id, deleted_at: null });
+  if (!txn) throw notFound("ไม่พบรายการเคลื่อนไหวที่ระบุ หรือถูกยกเลิกไปแล้ว");
+  if (txn.type === "adjust") {
+    throw badRequest("รายการชนิด adjust ยกเลิกไม่ได้ (ไม่มียอดก่อนหน้าให้ย้อน) — ให้ทำ adjust ใหม่แทน");
+  }
+
+  const inc = txn.type === "receive" ? -txn.qty : txn.qty; // receive→ลบออก, use→คืนกลับ
+  await ingredientModel.updateOne(
+    { _id: txn.ingredient_id },
+    { $inc: { current_stock: inc } }
+  );
+
+  txn.deleted_at = new Date();
+  txn.note = `${txn.note ?? ""} [ยกเลิกรายการ]`.trim();
+  await txn.save();
+  return txn.toObject();
+}

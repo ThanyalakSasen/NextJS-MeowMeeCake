@@ -89,6 +89,10 @@ dist
 # https://nextjs.org/blog/next-9-1#public-directory-support
 # public
 
+# ไฟล์ที่ผู้ใช้อัปโหลด (รูปสินค้า ฯลฯ) — ดู src/lib/upload.ts
+/public/uploads/
+/upload-products/
+
 # vuepress build output
 .vuepress/dist
 
