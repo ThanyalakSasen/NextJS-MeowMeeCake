@@ -1,5 +1,6 @@
 /** /api/admin/units — GET (products.view) / POST (products.create) */
 import { collectionRoutes } from "@/lib/crudRoutes";
+import { unitCreate } from "@/schemas/catalog";
 import { unitService } from "@/services/unitService";
 
 export const { GET, POST } = collectionRoutes(unitService, {
@@ -10,4 +11,5 @@ export const { GET, POST } = collectionRoutes(unitService, {
     usage_context: sp.get("usage_context") ?? undefined,
   }),
   auth: { menu: "products" },
+  validate: { create: unitCreate },
 });

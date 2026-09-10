@@ -6,6 +6,7 @@
  */
 import { collectionRoutes } from "@/lib/crudRoutes";
 import { parseBool } from "@/lib/queryParams";
+import { expenseCreate } from "@/schemas/expense";
 import { expenseService } from "@/services/expenseService";
 
 export const { GET, POST } = collectionRoutes(expenseService, {
@@ -28,4 +29,5 @@ export const { GET, POST } = collectionRoutes(expenseService, {
   },
   auth: { menu: "reports" },
   audit: { entity: "Expense" },
+  validate: { create: expenseCreate },
 });

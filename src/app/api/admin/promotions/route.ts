@@ -10,6 +10,8 @@ import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
 import { parseBool, parsePagination } from "@/lib/queryParams";
+import { parseBody } from "@/lib/validate";
+import { promotionCreate } from "@/schemas/promotion";
 import * as promotionService from "@/services/promotionService";
 
 export const GET = withPermission("promotions", "view", async (_s, req) => {
@@ -26,8 +28,8 @@ export const GET = withPermission("promotions", "view", async (_s, req) => {
 });
 
 export const POST = withPermission("promotions", "create", async (session, req) => {
-  const body = await req.json();
-  const result: any = await promotionService.createPromotion(body, session.user_id);
+  const body = await parseBody(req, promotionCreate);
+  const result = await promotionService.createPromotion(body, session.user_id);
   audit(req, {
     action: `สร้างโปรโมชัน ${body.promotion_code ?? ""}`.trim(),
     action_type: "CREATE",

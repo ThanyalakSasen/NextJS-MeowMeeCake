@@ -15,10 +15,16 @@
  * auth (ไม่ใส่ = เปิดหมด — ใช้กับ endpoint ภายในเท่านั้น):
  *   - publicRead: true  → GET ไม่ต้องล็อกอิน ; POST/PATCH/DELETE ต้องมีสิทธิ์ create/update/delete ของ menu
  *   - publicRead: false → GET ต้องมีสิทธิ์ view ด้วย
+ *
+ * validate (ไม่ใส่ = รับ body ดิบเหมือนเดิม, service ตรวจเอง):
+ *   - validate.create → parse body ของ POST ด้วย zod schema (บาด JSON / schema ผิด → 400 + issues)
+ *   - validate.update → parse body ของ PATCH (ปกติเป็น createSchema.partial())
  */
 import type { NextRequest } from "next/server";
+import type { z } from "zod";
 import { ok, created, route } from "./apiResponse";
 import { parseBool, parsePagination, parseSort } from "./queryParams";
+import { parseBody } from "./validate";
 import { requireAuth, requirePermission, type PermAction } from "./authGuard";
 import { audit } from "./audit";
 import type { MenuKey } from "../services/permissionService";
@@ -30,6 +36,20 @@ export interface CrudAuth {
   menu: MenuKey;
   /** GET (list/get) เปิดสาธารณะ ไม่ต้องล็อกอิน */
   publicRead?: boolean;
+}
+
+/** zod schema สำหรับ body ของ crud factory (ไม่ใส่ = รับ body ดิบ) */
+export interface CrudValidate {
+  create?: z.ZodType;
+  update?: z.ZodType;
+}
+
+/** อ่าน body: มี schema → parseBody (throw 400 ถ้าไม่ผ่าน) · ไม่มี → req.json() แบบ tolerant เดิม
+ *  (คืน any เพื่อคง behavior เดิม — service.create/update รับ Doc generic) */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function readBody(req: NextRequest, schema: z.ZodType | undefined): Promise<any> {
+  if (schema) return parseBody(req, schema);
+  return req.json().catch(() => ({}));
 }
 
 /** บันทึก audit log สำหรับ mutation ของ crud factory (ถ้าตั้ง opts.audit) */
@@ -79,6 +99,7 @@ export interface CollectionRoutesOptions {
   defaultLimit?: number;
   auth?: CrudAuth;
   audit?: CrudAudit;
+  validate?: CrudValidate;
 }
 
 export function collectionRoutes(
@@ -105,7 +126,7 @@ export function collectionRoutes(
 
   const POST = route(async (req: NextRequest) => {
     await guard(req, opts.auth, "create");
-    const body = await req.json().catch(() => ({}));
+    const body = await readBody(req, opts.validate?.create);
     const doc = await service.create(body);
     logMutation(req, opts.audit, "create", doc);
     return created(doc);
@@ -117,6 +138,7 @@ export function collectionRoutes(
 export interface ItemRoutesOptions {
   auth?: CrudAuth;
   audit?: CrudAudit;
+  validate?: CrudValidate;
 }
 
 export function itemRoutes(
@@ -133,7 +155,7 @@ export function itemRoutes(
   const PATCH = route(async (req: NextRequest, ctx: RouteContext) => {
     await guard(req, opts.auth, "update");
     const { id } = await ctx.params;
-    const body = await req.json().catch(() => ({}));
+    const body = await readBody(req, opts.validate?.update);
     const doc = await service.update(id, body);
     logMutation(req, opts.audit, "update", doc ?? { _id: id });
     return ok(doc);
