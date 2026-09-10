@@ -22,7 +22,7 @@
  */
 import type { NextRequest } from "next/server";
 import type { z } from "zod";
-import { ok, created, route } from "./apiResponse";
+import { ok, okList, created, route } from "./apiResponse";
 import { parseBool, parsePagination, parseSort } from "./queryParams";
 import { parseBody } from "./validate";
 import { requireAuth, requirePermission, type PermAction } from "./authGuard";
@@ -121,7 +121,7 @@ export function collectionRoutes(
       includeDeleted: parseBool(sp.get("includeDeleted")) ?? false,
       filter,
     });
-    return ok(result);
+    return okList(result.items, result.meta);
   });
 
   const POST = route(async (req: NextRequest) => {

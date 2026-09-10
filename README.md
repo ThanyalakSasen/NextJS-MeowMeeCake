@@ -27,6 +27,7 @@
 - **บันทึกกิจกรรมผู้ใช้ (audit log) → [`docs/auditLog.md`](docs/auditLog.md)**
 - **ระบบพรีออเดอร์ (รอบ / โควตา / API) → [`docs/preorder.md`](docs/preorder.md)**
 - **สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก + Migration checklist → [`docs/BACKLOG.md`](docs/BACKLOG.md)**
+- **มาตรฐาน API (envelope / status / list / auth) → [`docs/api-conventions.md`](docs/api-conventions.md)**
 - **แผนงานคุณภาพ / hardening (§3 ชั้น D) → [`docs/hardening-plan.md`](docs/hardening-plan.md)** · D3 → [`docs/hardening-d3-plan.md`](docs/hardening-d3-plan.md)
 - **Infra / tooling: ESLint · Logger · Testing (§3.6 / 3.3 / 3.4) → [`docs/infra-tooling.md`](docs/infra-tooling.md)**
 - **Validation layer (zod, §3.1) → [`docs/validation.md`](docs/validation.md)**

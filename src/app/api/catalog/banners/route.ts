@@ -1,5 +1,6 @@
-/** GET /api/catalog/banners — แบนเนอร์หน้าร้านที่เปิดใช้งาน (สาธารณะ) เรียงตาม sort_order */
-import { ok, route } from "@/lib/apiResponse";
+/** GET /api/catalog/banners — แบนเนอร์หน้าร้านที่เปิดใช้งาน (สาธารณะ) เรียงตาม sort_order
+ *  response: { items, meta: null } (ลิสต์เต็ม ไม่ paginate) — ดู docs/api-conventions.md */
+import { okList, route } from "@/lib/apiResponse";
 import { bannerService } from "@/services/bannerService";
 
 export const GET = route(async () => {
@@ -8,5 +9,5 @@ export const GET = route(async () => {
     sort: { sort_order: 1 },
     filter: { is_active: true },
   });
-  return ok(result.items);
+  return okList(result.items);
 });
