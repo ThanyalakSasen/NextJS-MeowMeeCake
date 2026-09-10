@@ -17,6 +17,7 @@
  *    (ส่ง promotion_code/promotion_id มา ระบบคิดเอง — ไม่เชื่อ discount_amount จาก client เมื่อมีโปรโมชัน)
  */
 import dbConnect from "../lib/dbConnect";
+import { log } from "../lib/logger";
 import { badRequest, conflict, notFound, isHttpError } from "../lib/httpError";
 import { assertObjectId, pick } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
@@ -357,7 +358,7 @@ async function persistOrder(
         });
       } catch (e) {
         if (isHttpError(e) && e.status === 422) throw e;
-        console.error("[order] บันทึกการใช้โปรโมชันไม่สำเร็จ:", e);
+        log.error("order.record_usage_failed", { order_id: String(order._id), err: e });
       }
     }
   } catch (err) {
@@ -548,14 +549,13 @@ export async function updateOrderStatus(
           const { refundPayment } = await import("./paymentService");
           await refundPayment(String(paidPayment._id), { verified_by: opts.cancelled_by });
         } catch (e) {
-          console.error("[order] คืนเงินอัตโนมัติตอนยกเลิกออเดอร์ไม่สำเร็จ:", e);
+          log.error("order.auto_refund_failed", { order_id: String(order._id), err: e });
         }
       } else {
-        console.error(
-          "[order] ยกเลิกออเดอร์ที่จ่ายแล้วแต่คืนเงินอัตโนมัติไม่ได้ " +
-            "(ไม่พบ payment ที่ paid หรือไม่มี cancelled_by):",
-          String(order._id)
-        );
+        log.warn("order.auto_refund_skipped", {
+          order_id: String(order._id),
+          reason: "ไม่พบ payment ที่ paid หรือไม่มี cancelled_by",
+        });
       }
     }
 

@@ -69,7 +69,39 @@ npm run typecheck / npm run build → ผ่าน
 
 ## 2. Logger (BACKLOG §3.3)
 
-_(เพิ่มใน commit ถัดไป)_
+### ปัญหาเดิม
+`console.error` กระจาย 5 จุด ใน 3 ไฟล์ (`apiResponse.ts`, `orderService.ts`, `userLogService.ts`) —
+format ไม่คงที่, ไม่มี level, parse ต่อยาก
+
+### สิ่งที่ทำ
+
+**`src/lib/logger.ts`** — ไม่เพิ่ม dependency:
+```ts
+import { log } from "@/lib/logger";
+log.info("order.created", { order_id, total_amount });
+log.error("order.auto_refund_failed", { order_id, err });   // err: Error → { name, message, stack } อัตโนมัติ
+```
+- output = **JSON บรรทัดเดียว** `{ t, level, event, ...ctx }` → log aggregator parse ได้
+- 4 level: `debug < info < warn < error` · ต่ำกว่า `LOG_LEVEL` ถูกข้าม
+- `LOG_LEVEL` (env) — ไม่ตั้ง = `production:"info"` / อื่น ๆ `"debug"` · เพิ่มใน `.env.example`
+- key `err` ใน ctx → serialize `Error` ให้เอง · payload ที่ stringify ไม่ได้ → fallback บรรทัดสั้น
+- ภายในใช้ `console.*` (มี `// eslint-disable-next-line no-console` จุดเดียว) — ที่อื่นห้าม `console.log` (`no-console` warn จาก §1)
+
+**แทน 5 จุด:**
+| ไฟล์ | event ใหม่ |
+|---|---|
+| `apiResponse.ts` (`toErrorResponse` fallback) | `api.unhandled_error` |
+| `orderService.ts` (`persistOrder` — recordUsage ล้ม non-422) | `order.record_usage_failed` |
+| `orderService.ts` (cancel — auto-refund ล้ม) | `order.auto_refund_failed` |
+| `orderService.ts` (cancel — refund ข้าม: ไม่พบ paid payment / ไม่มี cancelled_by) | `order.auto_refund_skipped` (warn) |
+| `userLogService.ts` (`writeLog` best-effort ล้ม) | `userlog.write_failed` |
+
+ตรวจ: `npm run lint` (0 error) · `npm run typecheck` · `npm run build` — ผ่าน
+
+### งานต่อ
+- ค่อย ๆ ใส่ `log.info` ที่ mutation สำคัญ (สร้าง/เปลี่ยนสถานะ order, verify payment) เพื่อ trace
+- ต่อ transport จริง (ship ไป Datadog/Loki ฯลฯ) แก้ที่ `logger.ts` ที่เดียว
+- §3.3b `src/lib/compensation.ts` (best-effort rollback helper) — แยกอีก task (ดู `hardening-plan.md` D3)
 
 ---
 
