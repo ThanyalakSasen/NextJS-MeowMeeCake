@@ -113,6 +113,8 @@ export async function loginWithGoogle(credential: string, ctx: { ip?: string | n
   const email = String(claims.email ?? "").toLowerCase();
   const name = String(claims.name ?? email);
   if (!email) throw badRequest("บัญชี Google นี้ไม่มีอีเมล");
+  // Google บอกว่าอีเมลนี้ยังไม่ยืนยัน → ไม่ให้ผูก/สร้างบัญชีด้วยอีเมลนี้ (กันสวมสิทธิ์)
+  if (claims.email_verified === false) throw badRequest("อีเมลของบัญชี Google นี้ยังไม่ได้ยืนยัน");
 
   let user: any = await userModel
     .findOne({ $or: [{ googleId }, { email }], deleted_at: null })
