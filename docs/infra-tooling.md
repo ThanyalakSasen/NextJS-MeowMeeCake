@@ -121,7 +121,11 @@ log.error("order.auto_refund_failed", { order_id, err });   // err: Error → { 
   (unit ชุดนี้ **ไม่ต่อ DB จริง**)
 - `coverage`: v8, include `src/lib/**` + `src/services/**`
 
-**`package.json` scripts:** `test` (`vitest run`) · `test:watch` · `test:cov`
+**`package.json` scripts:** `test` (unit เท่านั้น) · `test:integration` · `test:all` · `test:watch` · `test:cov` · `typecheck:test`
+
+> **อัปเดต 2026-09-11 (D3.3):** แยกเป็น **vitest projects** — `unit` (`tests/lib/`, ไม่ต่อ DB) กับ
+> `integration` (`tests/integration/`, `mongodb-memory-server`) · `tests/` ถูก exclude จาก `tsconfig.json`
+> หลัก (กัน `next build` compile top-level await ใน setup) → typecheck tests ด้วย `tsconfig.test.json`
 
 **ชุดแรก — unit ล้วน (`tests/lib/`), 35 tests / 4 ไฟล์:**
 | ไฟล์ | ครอบ |
@@ -131,11 +135,16 @@ log.error("order.auto_refund_failed", { order_id, err });   // err: Error → { 
 | `deliveryService.test.ts` | `calcDeliveryFee`: กทม.=40 / ต่างจังหวัด=80 / ฟรีเมื่อ ≥1500 / normalize "จังหวัด"·"จ." / null → catch-all |
 | `queryParams.test.ts` | `parsePagination` (clamp), `parseSort` (reject unknown), `parseBool`/`parseNumber`, `buildMeta`, `escapeRegExp` |
 
-ตรวจ: `npm test` → 35 passed · `typecheck` / `lint` / `build` — ผ่าน
+### ชุด integration (`tests/integration/`, D3.3 — 2026-09-11)
+- `setup.ts` — top-level await เริ่ม `MongoMemoryServer` → ตั้ง `MONGODB_URI` + `mongoose.connect` +
+  pre-populate `global._mongoose` (cache ของ `dbConnect`) · `afterEach` เคลียร์ทุก collection ·
+  binary โหลดอัตโนมัติครั้งแรก (cache ไว้)
+- `promotionUsage.test.ts` (5) — §2.9: atomic claim / ถึง limit → 422 / **ยิงพร้อมกัน 8 กับ limit=3 → สำเร็จ 3** / per-user rollback / revoke
+- `persistOrder.test.ts` (4) — happy path / re-price / **compensation: สต็อกไม่พอ → ไม่มีออเดอร์** / preorder reject
+- **ยังไม่ครอบ:** `updateOrderStatus` cancel path, `cartService`, `ingredientTransactionService`
 
-### งานต่อ (integration — task แยก, ดู `hardening-plan.md` D8)
-- `tests/setup.ts` — start `mongodb-memory-server`, connect mongoose **ก่อน import model**, `beforeEach` clear collections
-- `orderService.persistOrder` (re-price, snapshot cost, promo atomic claim, compensation rollback)
-- `promotionUsageService.recordUsage` (usage_limit race, per-user)
-- `cartService`, `ingredientTransactionService`
-- CI: เพิ่ม step `npm run typecheck && npm run lint && npm test` (ต้องมี §3.6 lint ก่อน)
+ตรวจ (ทั้งหมด): `npm run typecheck` · `typecheck:test` · `lint` · `npm test` (86) · `test:integration` (9) · `npm run build` — ผ่าน
+
+### งานต่อ
+- CI: step `typecheck && typecheck:test && lint && test && test:integration && build`
+- integration เพิ่ม: cancel order, cart, ingredient transaction, delivery quote
