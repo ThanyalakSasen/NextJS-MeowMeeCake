@@ -531,31 +531,34 @@ export async function updateOrderStatus(
   }
 
   if (next === "cancelled") {
+    // cleanup ตอนยกเลิก — best-effort ทั้งหมด (step ที่ fail จะ log ผ่าน logger ไม่ล้มการยกเลิก)
+    // ใช้ Saga เพื่อ log สม่ำเสมอ แทน .catch(() => undefined) ที่กลืน error เงียบ
+    const cleanup = new Saga();
+
     const items = await orderItemModel.find({ order_id: order._id, deleted_at: null }).lean<any[]>();
     const stockItems = items.map((it) => ({
       product_id: String(it.product_id),
       quantity: it.quantity,
     }));
     if (stockItems.length) {
-      await productService.restockForOrder(stockItems).catch(() => undefined);
+      cleanup.onRollback("restock", () => productService.restockForOrder(stockItems));
     }
-    // คืนสิทธิ์โปรโมชัน (ถ้ามี) — best-effort
-    await promotionUsageService.revokeUsage({ order_id: String(order._id) }).catch(() => undefined);
+    cleanup.onRollback("revoke-promo-usage", () =>
+      promotionUsageService.revokeUsage({ order_id: String(order._id) })
+    );
 
-    // ออเดอร์ที่จ่ายเงินแล้ว → คืนเงินอัตโนมัติ (best-effort — ไม่ให้ล้มการยกเลิก)
-    // ป้องกันสภาพ "order = cancelled แต่ payment ยัง paid" (BACKLOG 2.8)
+    // ออเดอร์ที่จ่ายเงินแล้ว → คืนเงินอัตโนมัติ · ป้องกัน "order = cancelled แต่ payment ยัง paid" (BACKLOG 2.8)
     if (order.payment_status === "paid") {
       const paidPayment = await paymentModel
         .findOne({ order_id: order._id, status: "paid", deleted_at: null })
         .lean<{ _id: unknown } | null>();
       if (paidPayment && opts.cancelled_by) {
-        try {
+        const verifiedBy = opts.cancelled_by;
+        cleanup.onRollback("auto-refund", async () => {
           // dynamic import — เลี่ยง circular import (paymentService → orderService)
           const { refundPayment } = await import("./paymentService");
-          await refundPayment(String(paidPayment._id), { verified_by: opts.cancelled_by });
-        } catch (e) {
-          log.error("order.auto_refund_failed", { order_id: String(order._id), err: e });
-        }
+          await refundPayment(String(paidPayment._id), { verified_by: verifiedBy });
+        });
       } else {
         log.warn("order.auto_refund_skipped", {
           order_id: String(order._id),
@@ -563,6 +566,8 @@ export async function updateOrderStatus(
         });
       }
     }
+
+    await cleanup.rollback();
 
     order.cancelled_at = new Date();
     if (opts.cancelled_by) {
