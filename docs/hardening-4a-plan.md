@@ -1,7 +1,7 @@
 # แผน รอบ 4a — ปิดงาน infra ให้จบ (ก่อน launch)
 
 > อัปเดตล่าสุด: 2026-09-11
-> สถานะ: 🟡 **กำลังทำ** — ✅ PR A (CI, #13 merged) · 🟡 PR B (3.6 cleanup) · ⬜ PR C–D (3.1 tail)
+> สถานะ: 🟡 **กำลังทำ** — ✅ PR A (CI #13) · ✅ PR B (3.6 cleanup #14) · 🟡 PR C (crud-factory 5 กลุ่ม) · ⬜ PR D (BOM) · ⬜ PR E (custom routes + รื้อ pick())
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ" รอบ 4a · ต่อจาก [`hardening-summary.md`](hardening-summary.md)
 
 รอบ 4a = หางงานของ D1/D3 ที่ควรปิดก่อน launch · 3 งานเรียงตาม**ลำดับพึ่งพา**:
@@ -186,11 +186,19 @@ const data = await parseBody(req, updateMeBody);
 - `Number(` = 42 จุด แต่ส่วนใหญ่เป็นเลขคณิต (`round2(Number(x))`, ราคา) → **เก็บไว้** · ลบเฉพาะที่ coerce body/query (`Number(body.qty)`) ที่ `z.coerce.number()` ทำแทน
 - ทำ**ทีละ service + `npm run typecheck` หลังทุกไฟล์** (type จะฟ้องจุดที่ยัง assume `any`)
 
-### ลำดับย่อยของข้อ 3
-1. crud-factory routes ที่เหลือ (product-options/variants, aspects, semantic-terms, reviews, attendances)
-2. custom routes (admin/orders, shop/reviews, shop/addresses, shop/me)
-3. รื้อ `pick()` ทีละ service (คู่กับ route ที่เพิ่ง adopt)
-4. `recipes` (BOM schema) — แยก
+### ลำดับย่อยของข้อ 3 (ปรับหลังสำรวจโค้ดจริง → แตกเป็น PR C / D / E)
+- **PR C** ✅ — crud-factory entity เรียบง่าย 5 กลุ่ม: `product-options` · `product-variants` · `aspects` · `semantic-terms` · `roles` (collection + `[id]`)
+  - schema: `catalog.ts` (+option/variant) · `sentiment.ts` (ใหม่) · `rbac.ts` (ใหม่)
+  - `update` ของ option/variant = `.omit({ product_id }).partial()` (ตรงกับ `updateFields` เดิมที่ห้ามย้ายสินค้า)
+  - **คง** `createFields`/`updateFields` ใน `createCrudService` ไว้เป็น defense-in-depth (zod strip unknown อยู่แล้ว) — รื้อใน PR E
+  - test: `tests/lib/schemas-crud.test.ts` (+9)
+- **PR D** ⬜ — BOM-shaped: `components` (`ingredients[]` + `created_by` inject) · `recipes` (recipe→component[]→ingredient[] ซ้อน + `superRefine` qty>0)
+- **PR E** ⬜ — custom routes: `admin/orders` (POST/PATCH) · `admin/attendances` · `shop/reviews` · `shop/addresses` · `shop/me` → `parseBody(req, schema)` · **แล้วรื้อ** `pick()` (8 ไฟล์) + `createFields`/`updateFields` ที่ซ้ำกับ zod
+
+### รื้อ `pick()` / `Number()` (→ PR E)
+- `pick(` = 8 ไฟล์ (userService ×3, addressService ×2, promotionService ×2, permissionService ×2, preorderRoundService ×2, orderService, attendanceService) — ผูกกับ custom route ที่ยังไม่ adopt → รื้อหลัง adopt route นั้น ๆ ใน PR E
+- `Number(` = 42 จุด แต่ส่วนใหญ่เป็นเลขคณิต (`round2(Number(x))`) → **เก็บไว้** · ลบเฉพาะที่ coerce input
+- ทำ**ทีละ service + `npm run typecheck` หลังทุกไฟล์**
 
 ### ⚠️ ผลกระทบ
 schema เข้มขึ้น → payload ที่เดิมหลุด (field เกิน / type ผิด / ค่าว่าง) จะโดน **400 + issues** = fix ที่ถูกต้อง แต่ต้อง**แจ้ง frontend** ต่อ endpoint (ใส่ในตาราง [`validation.md`](validation.md) §3 เหมือนตอน adopt `/shop/*`)
@@ -199,12 +207,13 @@ schema เข้มขึ้น → payload ที่เดิมหลุด (f
 
 ## แผน PR
 
-| PR | เนื้อหา | ขึ้นกับ |
+| PR | เนื้อหา | สถานะ |
 |---|---|---|
-| **A** | `.github/workflows/ci.yml` | — (merge ก่อน ให้ PR ถัดมี CI คุม) |
-| **B** | 3.6 — 2a (fix warning) + 2b (ลบ `ignoreDuringBuilds`) + 2c ทางเลือก B | A |
-| **C** | 3.1 — crud-factory routes + custom routes + รื้อ `pick()` service ที่เกี่ยว | B |
-| **D** | 3.1 — `recipes` BOM schema + ปิด ⬜ ใน [`validation.md`](validation.md) §3 | C |
+| **A** | `.github/workflows/ci.yml` | ✅ #13 merged |
+| **B** | 3.6 — 2a (fix warning) + 2b (ลบ `ignoreDuringBuilds`) + 2c ทางเลือก B | ✅ #14 merged |
+| **C** | 3.1 — crud-factory 5 กลุ่ม (option/variant/aspect/semantic-term/role) + schema + test | 🟡 กำลังทำ |
+| **D** | 3.1 — `components` + `recipes` (BOM) + ปิด ⬜ ใน [`validation.md`](validation.md) §3 | ⬜ |
+| **E** | 3.1 — custom routes (admin orders/attendances, shop reviews/addresses/me) + รื้อ `pick()`/`createFields` | ⬜ |
 
 แต่ละ PR merge เข้า `addModels` ตามเดิม
 
@@ -217,9 +226,9 @@ schema เข้มขึ้น → payload ที่เดิมหลุด (f
 ---
 
 ## เกณฑ์เสร็จรอบ 4a
-- [ ] `.github/workflows/ci.yml` เขียวบน PR + push
-- [ ] `npm run lint` = 0 error / 0 warning · `next.config.ts` ไม่มี `eslint.ignoreDuringBuilds`
-- [ ] `no-explicit-any` = `error` บน `src/lib` / `src/schemas` / `tests`
-- [ ] route ทั้ง 11 กลุ่ม adopt zod ครบ (รวม `recipes`)
-- [ ] `pick()` หายจาก `src/services/**` (เหลือ 0 ไฟล์)
-- [ ] doc 4 ไฟล์ด้านบนอัปเดต
+- [x] `.github/workflows/ci.yml` เขียวบน PR + push
+- [~] `npm run lint` = 0 error (✅) / 0 warning (⬜ เหลือ 13 → PR E) · `next.config.ts` ไม่มี `eslint.ignoreDuringBuilds` (✅)
+- [~] `no-explicit-any` = `error` บน `src/schemas` + `tests` (✅) · `src/lib` (⬜ PR E)
+- [~] route adopt zod: crud-factory เรียบง่าย (✅ PR C) · BOM `components`/`recipes` (⬜ PR D) · custom routes (⬜ PR E)
+- [ ] `pick()` / `createFields` ที่ซ้ำ zod หายจาก `src/services/**` (PR E)
+- [~] doc อัปเดต: `validation.md` §2/§3/§5 (✅ PR C) · `infra-tooling.md` (✅ PR B) · `hardening-summary.md` + `BACKLOG` §3 (⬜ ท้ายรอบ)

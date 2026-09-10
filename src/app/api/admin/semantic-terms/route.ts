@@ -4,6 +4,7 @@
  *   POST — body: { term, aspect_id, synonyms?, product_ids? }
  */
 import { collectionRoutes } from "@/lib/crudRoutes";
+import { semanticTermCreate } from "@/schemas/sentiment";
 import { semanticTermService } from "@/services/sentimentService";
 
 export const { GET, POST } = collectionRoutes(semanticTermService, {
@@ -11,4 +12,5 @@ export const { GET, POST } = collectionRoutes(semanticTermService, {
   defaultSort: "term",
   filterFromQuery: (sp) => ({ aspect_id: sp.get("aspect_id") ?? undefined }),
   auth: { menu: "reports" },
+  validate: { create: semanticTermCreate },
 });
