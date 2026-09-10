@@ -44,7 +44,23 @@ rateLimit(clientIp(req), "auth:login", { limit: 10, windowMs: 60_000 });
 
 ## 2. Google login flow (BACKLOG §3.9)
 
-_(เพิ่มใน commit ถัดไป)_
+### สถานะ
+`authService.loginWithGoogle` ใช้ **ID-token flow** อยู่แล้ว (รับ `credential` = ID token จาก
+Google Identity Services ฝั่ง frontend) — `jwtVerify(credential, GOOGLE_JWKS, { issuer, audience })`
+ของ `jose` ตรวจให้ครบ: signature (JWKS) · `iss` (accounts.google.com) · `aud` (=== `GOOGLE_CLIENT_ID`) · `exp`
+
+แต่ `.env.example` เดิมมี `GOOGLE_CLIENT_SECRET` + `GOOGLE_CALLBACK_URL` ที่ทำให้เข้าใจผิดว่าเป็น redirect/code flow
+
+### สิ่งที่ทำ
+- **`.env.example`** — ลบ `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` · เหลือ `GOOGLE_CLIENT_ID`
+  พร้อมคอมเมนต์อธิบาย ID-token flow (frontend โหลด `accounts.google.com/gsi/client` → ส่ง `credential`)
+- **`authService.loginWithGoogle`** — เพิ่มเช็ค `claims.email_verified === false` → `badRequest`
+  (กันผูก/สร้างบัญชีด้วยอีเมลที่ Google ยังไม่ยืนยัน — ป้องกันสวมสิทธิ์ผ่านการ link by email)
+- **`docs/env.md`** — อัปเดตแถว Google vars
+
+### ยังเปิดค้าง
+- ถ้าจะรองรับ redirect/code flow ในอนาคต (เช่น ต้องการ refresh token / offline access) ค่อยเพิ่ม
+  `GOOGLE_CLIENT_SECRET` + callback route กลับมา
 
 ---
 

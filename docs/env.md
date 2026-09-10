@@ -52,7 +52,7 @@ GOOGLE_CLIENT_ID=556882585770-xxxxxxxx.apps.googleusercontent.com
 
 | ตัวแปร | ไว้ทำอะไร (ในอนาคต) |
 |---|---|
-| `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` | สำหรับ OAuth **redirect/code flow** · ตอนนี้ `/api/auth/google` ใช้แบบ **ID token** (Google Identity Services) ซึ่งต้องการแค่ `GOOGLE_CLIENT_ID` |
+| `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` | ~~สำหรับ OAuth redirect/code flow~~ — **ไม่ต้องตั้ง** · `/api/auth/google` ใช้ **ID-token flow** (Google Identity Services) ต้องการแค่ `GOOGLE_CLIENT_ID` · ลบออกจาก `.env.example` แล้ว (2026-09-11, §3.9) — ถ้าจะทำ code flow ในอนาคตค่อยเพิ่มกลับ |
 | `SESSION_SECRET` | เผื่อระบบ session แบบเก่า (express-session ฯลฯ) · โค้ดปัจจุบันใช้ JWT ล้วน — **ควรตั้งเป็นค่าสุ่ม** เผื่อใช้ทีหลัง |
 | `NEXTAUTH_SECRET`, `NEXTAUTH_URL` | เผื่อย้ายไปใช้ NextAuth.js · **ควรตั้งเป็นค่าสุ่ม** |
 | `EMAIL_SERVICE`, `EMAIL_USER`, `EMAIL_PASS` | ส่งอีเมลยืนยัน / reset password (ยังไม่ทำ) |
