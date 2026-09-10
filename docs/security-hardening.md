@@ -66,4 +66,25 @@ Google Identity Services ฝั่ง frontend) — `jwtVerify(credential, GOOGL
 
 ## 3. CORS / CSRF (BACKLOG §3.10)
 
-_(เพิ่มใน commit ถัดไป)_
+### บริบท
+- session cookie เป็น `httpOnly` + **`SameSite=Lax`** + `secure` (prod) อยู่แล้ว → เบราว์เซอร์
+  ไม่ส่ง cookie บน cross-site POST/PUT/PATCH/DELETE → CSRF แบบ forge form/fetch ถูกกันระดับ cookie แล้ว
+- frontend สมมติ **same-origin** (Next app เดียวกัน) → ไม่ต้องเปิด CORS
+
+### สิ่งที่ทำ (defense-in-depth)
+
+**`src/lib/csrf.ts`** — `isCsrfSafe(method, originHeader, host)`:
+- safe method (GET/HEAD/OPTIONS) → ผ่าน
+- ไม่มี `Origin` header → ผ่าน (client ที่ไม่ใช่เบราว์เซอร์)
+- `Origin` host === host ของคำขอ → ผ่าน
+- อื่น ๆ (cross-origin / `Origin: "null"` / ค่าเพี้ยน) → **ไม่ผ่าน**
+
+**`src/middleware.ts`** — ก่อนทุกอย่าง: `!isCsrfSafe(...)` → `403 CROSS_ORIGIN`
+(ครอบทุก `/api/*` รวม `/api/auth/*`) · เพิ่ม comment ว่า API เป็น same-origin (ไม่ส่ง `Access-Control-Allow-*`)
+
+**เทส:** `tests/lib/csrf.test.ts` — safe method, ไม่มี Origin, same-origin, cross-origin, `Origin:"null"`
+
+### ยังเปิดค้าง / ถ้าต้องเปลี่ยน
+- **frontend แยก origin** → ต้องเพิ่ม allowlist ใน `middleware.ts` + ตอบ preflight `OPTIONS` +
+  ปรับ cookie เป็น `SameSite=None; Secure` (แล้ว CSRF ต้องพึ่ง token จริง ไม่ใช่แค่ Origin check)
+- proxy บางตัว strip `Origin` → การกันจะหลวม (fallback เป็น "ผ่าน") — ยอมรับได้เพราะ `SameSite=Lax` ยังกันอยู่

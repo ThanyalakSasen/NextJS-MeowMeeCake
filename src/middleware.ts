@@ -8,13 +8,18 @@
  *
  * หน้าที่:
  *  1. ลบ header x-mmc-user ที่ client อาจแนบปลอมมาทิ้งเสมอ
- *  2. ตรวจลายเซ็น JWT ใน cookie → แนบข้อมูลผู้ใช้ลง header x-mmc-user
- *  3. กั้น namespace ตามตารางข้างบน (role_type อยู่ใน JWT → เช็คได้บน Edge ไม่ต้อง query DB)
+ *  2. CSRF defense-in-depth: mutation (POST/PUT/PATCH/DELETE) ที่มี Origin ข้ามโดเมน → 403
+ *     (เสริม cookie `SameSite=Lax` ที่กัน cross-site cookie อยู่แล้ว)
+ *  3. ตรวจลายเซ็น JWT ใน cookie → แนบข้อมูลผู้ใช้ลง header x-mmc-user
+ *  4. กั้น namespace ตามตารางข้างบน (role_type อยู่ใน JWT → เช็คได้บน Edge ไม่ต้อง query DB)
  *
  * การตรวจ "สิทธิ์ละเอียด" (Permissions ต้อง query DB) ทำใน route handler ของ /api/admin/* เท่านั้น
+ * CORS: API นี้สมมติ same-origin (frontend = Next app เดียวกัน) — ไม่ส่ง Access-Control-Allow-* ให้
+ *       ถ้าอนาคตแยก origin ต้องเพิ่ม allowlist + ตอบ preflight ที่นี่
  */
 import { NextRequest, NextResponse } from "next/server";
 import { verifySession } from "@/lib/jwt";
+import { isCsrfSafe } from "@/lib/csrf";
 import { SESSION_COOKIE, USER_HEADER, type SessionUser } from "@/lib/session";
 
 const PUBLIC_PREFIXES = ["/api/auth/", "/api/health", "/api/catalog/"];
@@ -34,6 +39,11 @@ function deny(code: string, message: string, status: number, clearCookie = false
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
+  // CSRF: mutation ต้องมาจาก origin เดียวกัน (ครอบทุก /api/* รวม /api/auth/*)
+  if (!isCsrfSafe(req.method, req.headers.get("origin"), req.nextUrl.host)) {
+    return deny("CROSS_ORIGIN", "คำขอข้ามโดเมนถูกปฏิเสธ", 403);
+  }
 
   const headers = new Headers(req.headers);
   headers.delete(USER_HEADER); // กัน client ปลอม header
