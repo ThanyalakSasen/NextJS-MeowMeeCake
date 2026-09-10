@@ -71,8 +71,34 @@
 > **แผน + effort/ความเสี่ยงต่อข้อ → [`hardening-plan.md`](hardening-plan.md)** · สรุปงานที่ทำ + PR → [`hardening-summary.md`](hardening-summary.md)
 >
 > **สถานะ (2026-09-11):** ✅ D1 (3.6/3.3/3.4/3.1-infra, PR #5–#6) · ✅ D2 (3.2/3.9/3.10, PR #7) · ✅ D3 (3.3b/3.7 + integration test, PR #8–#11) · ✅ 3.5 (audit log)
-> ⬜ เหลือ: 3.1 adopt route ที่เหลือ + รื้อ `pick()` · 3.8 · 3.11 · 3.12–3.16 (D4) · CI pipeline
-> ลำดับที่ทำจริง = ตาม [`hardening-plan.md`](hardening-plan.md) §ลำดับ (D3 ย่อยตาม [`hardening-d3-plan.md`](hardening-d3-plan.md))
+> ลำดับที่ทำจริง (D1→D2→D3) = ตาม [`hardening-plan.md`](hardening-plan.md) §ลำดับ (D3 ย่อยตาม [`hardening-d3-plan.md`](hardening-d3-plan.md))
+
+### ลำดับการแก้ที่เหลือ (แนะนำ)
+
+**รอบ 4a — ปิดงาน infra ให้จบ (ทำก่อน · ก่อน launch)**
+
+1. **CI pipeline** _(หาง 3.4)_ — GitHub Actions รัน `typecheck → typecheck:test → lint → test → test:integration → build` ทุก PR · ล็อกผลงาน D1–D3 ไม่ให้ถอยหลัง · **S**
+2. **3.6 cleanup** — ลบ `next.config.ts` `eslint.ignoreDuringBuilds` · เก็บ warning `import/no-anonymous-default-export` (`productService.ts:797`) · เปิด `@typescript-eslint/no-explicit-any` เป็น `warn` แล้วไล่ใส่ type ให้ `.lean<T>()` → ลบ `/* eslint-disable */` เหมาไฟล์ → เปิด `reportUnusedDisableDirectives` กลับ · (option) type-aware `no-floating-promises` · **S–M**
+3. **3.1 adopt route ที่เหลือ** — `recipes` (BOM ซ้อน) · `product-options`/`product-variants` · `aspects`/`semantic-terms`/`reviews`/`attendances` · `admin/orders` (custom) · `shop/reviews`·`addresses`·`me` → จากนั้น **รื้อ `pick()`/`Number()` ใน service** ให้ zod เป็นด่านเดียว · **M**
+
+**รอบ 4b — feature เล็ก + เทสเพิ่ม (หลัง launch ได้)**
+
+4. **3.8 address_id → checkout** — zod `oneOf([{address_id},{delivery_address}])` + `addressService.getById` แล้ว snapshot ลง order · ต่อยอดจากข้อ 3 · **S–M**
+5. **3.12 `src/lib/notify.ts`** — no-op + log ก่อน · wire `paymentService.verifyPayment` / `orderService.updateOrderStatus` / ingredient low-stock · ต่อ LINE ทีหลังแก้ไฟล์เดียว · **S**
+6. **3.16 `purchase_cost`** — field ใน `productModel` + `getUnitCostByProduct` fallback เมื่อไม่มีสูตร · แก้ COGS/กำไรใน dashboard ให้ตรง · **S**
+7. **3.4 integration tests เพิ่ม** — `cartService` · `ingredientTransactionService` · `deliveryService.quoteForCart` · ทยอยทำ · **S–M**
+
+**รอบ 4c — ขึ้นกับการตัดสินใจ hosting**
+
+8. **3.13 object storage** — abstract `upload.ts` เป็น interface (`localDisk` + `s3`/R2/GCS) เลือกด้วย env `UPLOAD_DRIVER` · **จำเป็นถ้า deploy serverless** (Vercel `public/` read-only) · ถอน `multer` ที่ไม่ได้ใช้ · **M**
+9. **3.14 ลบรูปสินค้าที่ไม่ใช้** — เรียก `upload.delete(oldKey)` best-effort ตอน `updateProduct` เปลี่ยนรูป / `deleteProduct` · ต่อจากข้อ 8 (ต้องมี `delete` ใน interface) · **S**
+10. **3.15 delivery zone เป็น DB** — model `deliveryZone` + admin CRUD (`match_type: province|zipcode|district`) + cache TTL · fallback config เดิมถ้าตารางว่าง · **M**
+
+**รอบ 5 — งานเดี่ยวเสี่ยงสูง (branch แยก · ทำท้ายสุด)**
+
+11. **3.11 เงินเป็น integer (สตางค์)** — กระทบทุก model/service (order/orderItem/payment/promotion/expense) + `discountEngine`/`deliveryService`/`dashboardService` + migration ×100 · **ต้องมี integration test ครอบเต็มก่อน + freeze feature อื่นชั่วคราว** · **L**
+
+> เกณฑ์จัดลำดับ: (1) ป้องกันการถอยหลังก่อน (CI) → (2) ทำ lint/type ให้กั้น build จริง → (3) งานที่ปลดล็อกข้ออื่น (3.1 → 3.8) → (4) งานเดี่ยวเล็กความเสี่ยงต่ำ → (5) งานที่รอ decision ภายนอก → (6) งาน migration เสี่ยงสูงไว้ท้ายสุด
 
 | # | เรื่อง | หมายเหตุ |
 |---|---|---|

@@ -114,6 +114,9 @@ envelope · list · HTTP status ↔ `error.code` · zod `details.issues` · auth
 
 ## ที่เหลือ (ยังไม่ทำ)
 
+> **ลำดับที่แนะนำสำหรับงานที่เหลือ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"**
+> รอบ 4a (CI → 3.6 cleanup → 3.1 adopt เพิ่ม) · รอบ 4b (3.8 · 3.12 · 3.16 · integration test เพิ่ม) · รอบ 4c (3.13→3.14 · 3.15) · รอบ 5 (3.11)
+
 ### §3.1 zod — adopt เพิ่ม
 recipes / product-options / product-variants / aspects / semantic-terms / reviews / attendances ·
 shop reviews/addresses/me · admin orders (custom route) · **รื้อ `pick()` / `Number()` ใน service** (ให้ zod เป็นด่านเดียว)
