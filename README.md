@@ -29,7 +29,7 @@
 - **สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก + Migration checklist → [`docs/BACKLOG.md`](docs/BACKLOG.md)**
 - **สรุปงาน hardening §2 + §3 (พร้อม PR / ดัชนีเอกสาร) → [`docs/hardening-summary.md`](docs/hardening-summary.md)**
 - **มาตรฐาน API (envelope / status / list / auth) → [`docs/api-conventions.md`](docs/api-conventions.md)**
-- **แผนงานคุณภาพ / hardening (§3 ชั้น D) → [`docs/hardening-plan.md`](docs/hardening-plan.md)** · D3 → [`docs/hardening-d3-plan.md`](docs/hardening-d3-plan.md)
+- **แผนงานคุณภาพ / hardening (§3 ชั้น D) → [`docs/hardening-plan.md`](docs/hardening-plan.md)** · D3 → [`docs/hardening-d3-plan.md`](docs/hardening-d3-plan.md) · รอบ 4a → [`docs/hardening-4a-plan.md`](docs/hardening-4a-plan.md)
 - **Infra / tooling: ESLint · Logger · Testing (§3.6 / 3.3 / 3.4) → [`docs/infra-tooling.md`](docs/infra-tooling.md)**
 - **Validation layer (zod, §3.1) → [`docs/validation.md`](docs/validation.md)**
 - **Security hardening: rate-limit · Google flow · CORS/CSRF (§3.2 / 3.9 / 3.10) → [`docs/security-hardening.md`](docs/security-hardening.md)**

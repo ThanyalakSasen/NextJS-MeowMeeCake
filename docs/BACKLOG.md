@@ -75,6 +75,8 @@
 
 ### ลำดับการแก้ที่เหลือ (แนะนำ)
 
+> รายละเอียด + วิธีการรอบ 4a → [`hardening-4a-plan.md`](hardening-4a-plan.md)
+
 **รอบ 4a — ปิดงาน infra ให้จบ (ทำก่อน · ก่อน launch)**
 
 1. **CI pipeline** _(หาง 3.4)_ — GitHub Actions รัน `typecheck → typecheck:test → lint → test → test:integration → build` ทุก PR · ล็อกผลงาน D1–D3 ไม่ให้ถอยหลัง · **S**
