@@ -107,4 +107,35 @@ log.error("order.auto_refund_failed", { order_id, err });   // err: Error → { 
 
 ## 3. Testing (BACKLOG §3.4)
 
-_(เพิ่มใน commit ถัดไป)_
+### ปัญหาเดิม
+ไม่มี test infra เลย
+
+### สิ่งที่ทำ
+
+**deps** (devDependencies): `vitest ^5` · `@vitest/coverage-v8 ^5` · `mongodb-memory-server ^11` (เตรียมไว้สำหรับ integration test รอบหน้า — ยังไม่ใช้)
+
+**`vitest.config.mts`** (ใช้ `.mts` — เลี่ยง warning ESM-as-CJS):
+- `environment: "node"` · `include: tests/**/*.test.ts`
+- `resolve.alias` `@` → `src` (ให้ test import `@/lib/...` ได้เหมือนโค้ดจริง)
+- `test.env.MONGODB_URI` = dummy — เพราะ `src/lib/dbConnect.ts` `throw` ตั้งแต่ตอน import ถ้าไม่มีค่านี้
+  (unit ชุดนี้ **ไม่ต่อ DB จริง**)
+- `coverage`: v8, include `src/lib/**` + `src/services/**`
+
+**`package.json` scripts:** `test` (`vitest run`) · `test:watch` · `test:cov`
+
+**ชุดแรก — unit ล้วน (`tests/lib/`), 35 tests / 4 ไฟล์:**
+| ไฟล์ | ครอบ |
+|---|---|
+| `discountEngine.test.ts` | Percentage (+cap), Amount (clamp), FreeShipping (reject fee=0 → §2.6), zero-discount reject (§2.11), channel, min_order/min_qty, scoped products |
+| `productCode.test.ts` | `generateProductCode` prefix `pos-`/`pre-` + DDYY, `isProductCode` (รูปแบบ/trim/non-string), `isStockProductType` |
+| `deliveryService.test.ts` | `calcDeliveryFee`: กทม.=40 / ต่างจังหวัด=80 / ฟรีเมื่อ ≥1500 / normalize "จังหวัด"·"จ." / null → catch-all |
+| `queryParams.test.ts` | `parsePagination` (clamp), `parseSort` (reject unknown), `parseBool`/`parseNumber`, `buildMeta`, `escapeRegExp` |
+
+ตรวจ: `npm test` → 35 passed · `typecheck` / `lint` / `build` — ผ่าน
+
+### งานต่อ (integration — task แยก, ดู `hardening-plan.md` D8)
+- `tests/setup.ts` — start `mongodb-memory-server`, connect mongoose **ก่อน import model**, `beforeEach` clear collections
+- `orderService.persistOrder` (re-price, snapshot cost, promo atomic claim, compensation rollback)
+- `promotionUsageService.recordUsage` (usage_limit race, per-user)
+- `cartService`, `ingredientTransactionService`
+- CI: เพิ่ม step `npm run typecheck && npm run lint && npm test` (ต้องมี §3.6 lint ก่อน)
