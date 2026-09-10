@@ -61,13 +61,15 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 
 | route | สถานะ | schema |
 |---|---|---|
-| `POST /api/auth/register` | ✅ | `registerBody` (email trim+lowercase, password ≥8, phone `^0\d{8,9}$`) |
-| `POST /api/auth/login` | ✅ | `loginBody` |
-| `POST /api/shop/orders` (+ GET query) | ⬜ ต่อไป | `order.ts` — `discriminatedUnion("source", ...)` |
-| `POST /api/shop/cart/items` · `PATCH .../[id]` | ⬜ | `cart.ts` |
-| `POST /api/shop/payments` · `.../slip` | ⬜ | `payment.ts` |
+| `POST /api/auth/register` | ✅ | `auth.registerBody` (email trim+lowercase, password ≥8, phone `^0\d{8,9}$`) |
+| `POST /api/auth/login` | ✅ | `auth.loginBody` |
+| `POST /api/shop/orders` | ✅ | `order.createOrderBody` — `source` default `"cart"`, refine (promo อย่างใดอย่างหนึ่ง, `source=items`→ต้องมี items) |
+| `GET /api/shop/orders` | ✅ | `order.listOrderQuery` (เฉพาะ enum · page/limit/sort ยังใช้ `parsePagination`/`parseSort`) |
+| `POST /api/shop/cart/items` · `PATCH /api/shop/cart/items/[id]` | ✅ | `cart.addCartItemBody` / `cart.updateCartItemBody` (+ `parse(id, objectId)`) |
+| `POST /api/shop/payments` · `GET` · `PATCH .../[id]/slip` | ✅ | `payment.createPaymentBody` (xor order/preorder), `listPaymentQuery`, `submitSlipBody` |
 | `POST/PATCH /api/admin/orders*` | ⬜ | `order.ts` (admin variant) |
 | CRUD ทั่วไป (units, categories, banners, …) | ⬜ | เพิ่ม option `validate` ใน `crudRoutes` factory |
+| รื้อ `pick()` / `Number()` ใน service | ⬜ | หลัง adopt ครบ |
 
 ---
 
@@ -84,5 +86,9 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 
 ## 5. เทส
 
-`tests/lib/validate.test.ts` — `parseBody` (ผ่าน / body ไม่ใช่ JSON → 400 / ไม่ผ่าน schema → 400 + issues paths),
-`parseQuery` (coerce + default + enum fail), `schemas/auth` (normalize email, password สั้น, อีเมลผิด)
+- `tests/lib/validate.test.ts` — `parseBody` (ผ่าน / body ไม่ใช่ JSON → 400 / ไม่ผ่าน schema → 400 + issues paths),
+  `parseQuery` (coerce + default + enum fail), `schemas/auth` (normalize email, password สั้น, อีเมลผิด)
+- `tests/lib/schemas.test.ts` — `order` (source default, items required, promo xor, enum), `cart` (objectId, quantity),
+  `payment` (order/preorder xor, amount > 0, slip ห้ามว่าง)
+
+รวม `npm test` = 53 passed / 6 ไฟล์
