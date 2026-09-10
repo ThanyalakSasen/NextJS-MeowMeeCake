@@ -24,16 +24,12 @@ export default [
   ...compat.extends("next/core-web-vitals", "next/typescript"),
 
   {
-    linterOptions: {
-      // ไฟล์ service มี /* eslint-disable @typescript-eslint/no-explicit-any */ แบบเหมาว่าทั้งไฟล์
-      // เราปิด rule นั้นไว้ก่อน (ด้านล่าง) → directive พวกนั้นเลย "ไม่ถูกใช้" ชั่วคราว
-      // ปิดการเตือนไว้ก่อน จะกลับมามีผลเองเมื่อเปิด no-explicit-any เป็น pass แยก
-      reportUnusedDisableDirectives: "off",
-    },
     rules: {
-      // โค้ด backend ปัจจุบันใช้ any เยอะ + มี /* eslint-disable */ อยู่แล้วหลายไฟล์
-      // เปิดเป็น pass แยกภายหลัง (ค่อย ๆ ใส่ type ให้ mongoose lean<>)
-      "@typescript-eslint/no-explicit-any": "off",
+      // fase 4a (3.6): เปิด no-explicit-any กลับเป็น "warn" ทั้ง repo (จากเดิม "off")
+      // → any ทุกจุดมองเห็นได้ + directive /* eslint-disable */ เหมาไฟล์ใน service กลับมา "ถูกใช้"
+      //   (จึงเอา reportUnusedDisableDirectives: "off" ออก — กลับเป็น default)
+      // dir ที่สะอาดแล้วถูกยกเป็น "error" ด้านล่าง · services เก็บเป็น warn ไล่ทีหลัง
+      "@typescript-eslint/no-explicit-any": "warn",
 
       // unused = เตือน (ไม่บล็อก build) · ขึ้นต้น _ = ตั้งใจไม่ใช้
       "@typescript-eslint/no-unused-vars": [
@@ -47,6 +43,12 @@ export default [
       "prefer-const": "error",
       "no-var": "error",
     },
+  },
+
+  {
+    // dir ที่เป็นโค้ดใหม่/สะอาด — บังคับห้าม any เพื่อกันถอยหลัง
+    files: ["src/schemas/**/*.ts", "tests/**/*.ts"],
+    rules: { "@typescript-eslint/no-explicit-any": "error" },
   },
 
   {

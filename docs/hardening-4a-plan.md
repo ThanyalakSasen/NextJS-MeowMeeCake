@@ -1,7 +1,7 @@
 # แผน รอบ 4a — ปิดงาน infra ให้จบ (ก่อน launch)
 
 > อัปเดตล่าสุด: 2026-09-11
-> สถานะ: ⬜ **ยังไม่เริ่ม — รอยืนยันก่อนลงมือ**
+> สถานะ: 🟡 **กำลังทำ** — ✅ PR A (CI, #13 merged) · 🟡 PR B (3.6 cleanup) · ⬜ PR C–D (3.1 tail)
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ" รอบ 4a · ต่อจาก [`hardening-summary.md`](hardening-summary.md)
 
 รอบ 4a = หางงานของ D1/D3 ที่ควรปิดก่อน launch · 3 งานเรียงตาม**ลำดับพึ่งพา**:
@@ -22,7 +22,7 @@
 
 ---
 
-## 1. CI pipeline (หาง 3.4) — **S**
+## 1. CI pipeline (หาง 3.4) — **S** ✅ เสร็จ (PR [#13](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/13) merged, `verify` เขียวรอบแรก)
 
 ### เป้าหมาย
 ทุก push / PR รัน 6 ขั้นเดียวกับที่รันมือ (`typecheck → typecheck:test → lint → test → test:integration → build`) — ขั้นไหนแดง = merge ไม่ได้ · ล็อกผลงาน D1–D3 ไม่ให้ regress
@@ -136,6 +136,15 @@ rules: { "@typescript-eslint/no-floating-promises": "warn" },
 
 ### สรุปขอบเขตรอบนี้
 ทำ **2a + 2b** (เสร็จชัด) · **2c** ทางเลือก B · **2d** เลื่อน
+
+### ผลจริง PR B
+```
+npm run lint → 0 errors, 13 warnings (no-explicit-any: 12 × api route + 1 × crudRoutes.ts:84)
+typecheck · typecheck:test · test (91) · build → ผ่าน
+```
+- 2c ทำแบบ: base = `warn`, override `error` เฉพาะ `src/schemas/**` + `tests/**` (`src/lib/**` ยังไม่ยกเป็น error
+  เพราะ 5 ไฟล์มี `/* eslint-disable */` header + `crudRoutes.ts:84` มี `any` — ทำใน pass ถัดไป)
+- 13 warning ที่เหลือ = `const result: any = await service(...)` ใน route → หายเมื่อ service คืน type จริง (ข้อ 3)
 
 ---
 
