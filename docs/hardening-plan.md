@@ -149,19 +149,23 @@
 
 ## ลำดับที่แนะนำ
 
+> ทำจริงตามนี้ทุกข้อ (1–10 เสร็จแล้ว) — เฟส D3 (ข้อ 8–10) แตกย่อยเป็น D3.1–D3.6 + D3.4b
+> โดยทำ compensation (3.3b) ก่อน แล้ว integration test แล้ว 3.7 · ดู [`hardening-d3-plan.md`](hardening-d3-plan.md)
+
 ```
-1. 3.6 eslint            (S)  ── ทำเลย ได้กำไรทันที
-2. 3.3 logger            (S)  ── คู่กับ 3.6
-3. 3.4 test setup + unit (M)  ── ปลดล็อกการ refactor อย่างปลอดภัย
-4. 3.1 zod (+ crudRoutes) (M)
+1. 3.6 eslint            (S)  ✅  ── ทำเลย ได้กำไรทันที
+2. 3.3 logger            (S)  ✅  ── คู่กับ 3.6
+3. 3.4 test setup + unit (M)  ✅  ── ปลดล็อกการ refactor อย่างปลอดภัย
+4. 3.1 zod (+ crudRoutes) (M) ✅  ── infra + adopt หลัก (route ที่เหลือทยอยต่อ)
    ── ครบเฟส D1 ──
-5. 3.2 rate-limit login  (S)  ┐
-6. 3.9 Google cleanup    (S)  ├─ ก่อน production
-7. 3.10 CORS/CSRF        (S)  ┘
+5. 3.2 rate-limit login  (S)  ✅  ┐
+6. 3.9 Google cleanup    (S)  ✅  ├─ ก่อน production
+7. 3.10 CORS/CSRF        (S)  ✅  ┘
    ── ครบเฟส D2 ──
-8. 3.4 integration tests (M)  ── ต่อยอดจากข้อ 3
-9. 3.7 response envelope (S)  ── พร้อมประกาศ frontend
-10. 3.3b compensation.ts (S)
+8. 3.3b compensation.ts  (S)  ✅  ── Saga + adopt preorderService/persistOrder/cancel
+9. 3.4 integration tests (M)  ✅  ── mongodb-memory-server (promotionUsage/persistOrder/cancelOrder)
+10. 3.7 response envelope (S) ✅  ── BREAKING · + docs/api-conventions.md
+   ── ครบเฟส D3 ──
 11. 3.8 address→checkout (S)
 12. 3.12 notify.ts       (S)
 13. 3.16 purchase_cost   (S)
