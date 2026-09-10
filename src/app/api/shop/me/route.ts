@@ -6,6 +6,8 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withAuth } from "@/lib/authGuard";
+import { parseBody } from "@/lib/validate";
+import { updateProfileBody } from "@/schemas/user";
 import * as userService from "@/services/userService";
 
 export const GET = withAuth(async (session) => {
@@ -13,6 +15,6 @@ export const GET = withAuth(async (session) => {
 });
 
 export const PATCH = withAuth(async (session, req) => {
-  const body = await req.json();
-  return ok({ user: await userService.updateProfile(session.user_id, body) });
+  const data = await parseBody(req, updateProfileBody);
+  return ok({ user: await userService.updateProfile(session.user_id, data) });
 });

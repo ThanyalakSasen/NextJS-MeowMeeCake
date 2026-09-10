@@ -16,13 +16,13 @@ describe("schemas/bom — component", () => {
     componentcategory_id: OID,
     yield_qty: 10,
     yield_unit_id: OID,
-    created_by: OID,
   };
 
-  it("create: required fields + created_by", () => {
+  it("create: required fields (created_by inject จาก session — ไม่อยู่ใน schema)", () => {
     expect(componentCreate.parse(ok)).toMatchObject({ component_name: "ครีมสด", yield_qty: 10 });
-    expect(componentCreate.safeParse({ ...ok, created_by: undefined }).success).toBe(false);
+    expect(componentCreate.parse({ ...ok, created_by: OID })).not.toHaveProperty("created_by");
     expect(componentCreate.safeParse({ ...ok, componentcategory_id: "bad" }).success).toBe(false);
+    expect(componentCreate.safeParse({ component_name: "x" }).success).toBe(false);
   });
 
   it("create: ingredients[] — แต่ละรายการต้องมี id/quantity/unit_id, quantity ≥ 0", () => {
@@ -42,7 +42,7 @@ describe("schemas/bom — component", () => {
   it("update: partial + strip componentcategory_id / created_by", () => {
     const r = componentUpdate.parse({ componentcategory_id: OID, created_by: OID, note: "x" });
     expect(r).not.toHaveProperty("componentcategory_id");
-    expect(r).not.toHaveProperty("created_by");
+    expect(r).not.toHaveProperty("created_by"); // created_by ไม่อยู่ใน schema → strip
     expect(componentUpdate.safeParse({}).success).toBe(true);
   });
 });
@@ -53,7 +53,6 @@ describe("schemas/bom — recipe", () => {
     product_id: OID,
     yield_qty: 1,
     yield_unit_id: OID,
-    created_by: OID,
   };
 
   it("create: required + ingredients[] + components[] ซ้อน", () => {
@@ -68,15 +67,14 @@ describe("schemas/bom — recipe", () => {
     ).toBe(false);
   });
 
-  it("create: ขาด product_id / created_by → fail", () => {
+  it("create: ขาด product_id → fail (created_by inject จาก session)", () => {
     expect(recipeCreate.safeParse({ ...ok, product_id: undefined }).success).toBe(false);
-    expect(recipeCreate.safeParse({ ...ok, created_by: undefined }).success).toBe(false);
+    expect(recipeCreate.parse({ ...ok, created_by: OID })).not.toHaveProperty("created_by");
   });
 
-  it("update: partial + strip product_id / created_by", () => {
-    const r = recipeUpdate.parse({ product_id: OID, created_by: OID, duration_minutes: 30 });
+  it("update: partial + strip product_id", () => {
+    const r = recipeUpdate.parse({ product_id: OID, duration_minutes: 30 });
     expect(r).not.toHaveProperty("product_id");
-    expect(r).not.toHaveProperty("created_by");
     expect(r.duration_minutes).toBe(30);
   });
 });

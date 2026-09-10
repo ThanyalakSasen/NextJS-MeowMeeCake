@@ -5,6 +5,8 @@
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withAuth } from "@/lib/authGuard";
+import { parseBody } from "@/lib/validate";
+import { addressCreate } from "@/schemas/address";
 import * as addressService from "@/services/addressService";
 
 export const GET = withAuth(async (session) => {
@@ -12,6 +14,6 @@ export const GET = withAuth(async (session) => {
 });
 
 export const POST = withAuth(async (session, req) => {
-  const body = await req.json();
-  return created(await addressService.create(session.user_id, body));
+  const data = await parseBody(req, addressCreate);
+  return created(await addressService.create(session.user_id, data));
 });

@@ -1,8 +1,8 @@
 # Validation layer (zod) — BACKLOG §3.1
 
 > อัปเดตล่าสุด: 2026-09-11
-> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.1 · แผน: [`hardening-plan.md`](hardening-plan.md) เฟส D1 · PR #6
-> สถานะ: 🟡 infra + `crudRoutes` option `validate` + adopt `/auth/*` · `/shop/{orders,cart,payments}` · admin CRUD หลัก + `/admin/promotions` เสร็จ — เหลือ route รอง + รื้อ `pick()`/`Number()` ใน service (ดู §3)
+> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.1 · แผน: [`hardening-plan.md`](hardening-plan.md) D1 (PR #6) + [`hardening-4a-plan.md`](hardening-4a-plan.md) PR C–E
+> สถานะ: 🟡 infra + `validate`/`createInject` option + adopt `/auth/*` · `/shop/{orders,cart,payments,me,addresses,reviews}` · crud-factory ทั้งหมด (catalog/inventory/sentiment/rbac/bom) · `/admin/promotions` — **เหลือ (4b):** `/admin/orders` · `/admin/attendances` · รื้อ `pick()`/`createFields` ใน service (ดู §3)
 
 ---
 
@@ -40,9 +40,14 @@ parse(value, schema)     // parse ค่าที่ resolve เอง เช่
 
 ### `src/schemas/`
 - `common.ts` — ชิ้นที่ใช้ซ้ำ: `objectId`, `phone`, `deliveryAddress`, `pageQuery`, `sortQuery`, `nonEmpty(max)`
-- `<domain>.ts` — `auth.ts` · `order.ts` · `cart.ts` · `payment.ts` · `catalog.ts` (unit/หมวดหมู่/banner/product-option/product-variant) · `expense.ts` · `inventory.ts` (ingredient) · `promotion.ts` · `sentiment.ts` (aspect/semantic-term) · `rbac.ts` (role) · `bom.ts` (component/recipe — มี array ซ้อน)
+- `<domain>.ts` — `auth.ts` · `order.ts` · `cart.ts` · `payment.ts` · `catalog.ts` (unit/หมวดหมู่/banner/product-option/product-variant) · `expense.ts` · `inventory.ts` (ingredient) · `promotion.ts` · `sentiment.ts` (aspect/semantic-term) · `rbac.ts` (role) · `bom.ts` (component/recipe — array ซ้อน) · `user.ts` (แก้โปรไฟล์) · `address.ts` · `review.ts`
 - export `type X = z.infer<typeof xSchema>` ไปใช้ที่ route (ไม่ต้องเขียน interface ซ้ำ)
 - schema ที่มี cross-field `.refine()` (`order`, `payment`, `promotion`) → `.partial()` ไม่ได้ตรง ๆ → แยก `base` object ไว้ทำ `promotionUpdate = base.partial()` (PATCH ข้าม refine ข้ามฟิลด์ — service ตรวจซ้ำ)
+
+### `crudRoutes` factory — option `createInject` (รอบ 4a PR E)
+`collectionRoutes` เพิ่ม option `createInject?: (session) => Record<string, unknown>` — merge ฟิลด์จาก
+session ทับ body ตอน POST (กัน client ตั้งเอง / mass-assign) · ใช้กับ `components` + `recipes`:
+`createInject: (s) => ({ created_by: s.user_id })` → `created_by` จึงไม่อยู่ใน `bom.ts` schema
 
 ### `crudRoutes` factory — option `validate`
 ```ts
@@ -91,11 +96,13 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 | CRUD via factory — `product-options`, `product-variants` (+ `[id]`) | ✅ (รอบ 4a PR C) | `catalog.ts` — `productOptionCreate/Update`, `productVariantCreate/Update` (`update` `.omit({product_id})` = ห้ามย้ายสินค้า) |
 | CRUD via factory — `aspects`, `semantic-terms` (+ `[id]`) | ✅ (รอบ 4a PR C) | `sentiment.ts` — `aspectCreate/Update`, `semanticTermCreate/Update` |
 | CRUD via factory — `roles` (+ `[id]`) | ✅ (รอบ 4a PR C) | `rbac.ts` — `roleCreate/Update` (`role_type` enum) |
-| CRUD via factory — `components`, `recipes` (+ `[id]`) | ✅ (รอบ 4a PR D) | `bom.ts` — `componentCreate/Update`, `recipeCreate/Update` · `ingredients[]` / `components[]` = array ของ `{ id, quantity≥0, unit_id }` · `update` `.omit()` category/product + created_by |
-| `POST/PATCH /api/admin/orders*` (custom route) | ⬜ (รอบ 4a PR E) | `order.ts` (admin variant — รับ `delivery_fee`/`discount_amount` override ได้) |
-| `/api/admin/attendances`, `/api/shop/reviews`, `/api/shop/addresses`, `/api/shop/me` ฯลฯ | ⬜ (รอบ 4a PR E) | ทยอย |
-| รื้อ `pick()` / `createFields` / `Number()` ใน service | ⬜ (รอบ 4a PR E) | หลัง adopt route ครบ — ให้ zod เป็นด่านเดียว, service เหลือแค่ business rule · ตอนนี้ `createFields`/`updateFields` ใน `createCrudService` + `pickWritable()` ใน component/recipe service ยังคงไว้เป็น defense-in-depth |
-| `created_by` ของ component/recipe รับจาก body | ⚠️ (รอบ 4a PR E / security) | ปัจจุบัน client ส่ง `created_by` มาเอง (พฤติกรรมเดิม) · schema `bom.ts` validate เป็น ObjectId + service เช็ค user มีจริง แต่ **ควร inject จาก session** แล้วถอดออกจาก schema |
+| CRUD via factory — `components`, `recipes` (+ `[id]`) | ✅ (รอบ 4a PR D/E) | `bom.ts` — `componentCreate/Update`, `recipeCreate/Update` · `ingredients[]` / `components[]` = array ของ `{ id, quantity≥0, unit_id }` · `update` `.omit()` category/product · **`created_by` inject จาก session** ผ่าน `createInject` (PR E) |
+| `PATCH /api/shop/me` | ✅ (รอบ 4a PR E) | `user.ts` `updateProfileBody` — PROFILE_FIELDS ล้วน `.partial()` (phone regex, birthdate coerce, allergies = string[]) |
+| `POST /api/shop/addresses` + `[id]` PATCH | ✅ (รอบ 4a PR E) | `address.ts` `addressCreate/Update` — 5 ช่อง + `zip_code` 5 หลัก + `is_default?` |
+| `POST /api/shop/reviews` + `[id]` PATCH | ✅ (รอบ 4a PR E) | `review.ts` `reviewCreateBody/reviewUpdateBody` — `rating` int 1–5 (coerce), `image` = string[] |
+| `POST/PATCH /api/admin/orders*` (custom route) | ⬜ (4b) | `order.ts` (admin variant — รับ `delivery_fee`/`discount_amount` override ได้) — ซับซ้อน แยกทำ |
+| `/api/admin/attendances` (route / check-in / check-out / `[id]`) | ⬜ (4b) | `attendance.ts` — `recorded_by` inject จาก session |
+| รื้อ `pick()` / `createFields` / `Number()` ใน service | ⬜ (4b) | หลัง adopt route ครบ — ให้ zod เป็นด่านเดียว · ตอนนี้ `createFields`/`updateFields` (`createCrudService`) + `pickWritable()` (component/recipe) + `pick()` (address/user/promotion/permission/preorderRound/order/attendance service) ยังคงไว้เป็น defense-in-depth |
 
 ---
 
@@ -119,7 +126,8 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 - `tests/lib/catalog.test.ts` — `unit` (enum, required, update partial), `productCategory`, `banner` (required, `start_date` coerce/reject)
 - `tests/lib/schemas-admin.test.ts` — `expense` (enum, amount ≥0), `ingredient` (ObjectId ref, `current_stock` omit ใน update), `promotion` (end≥start, Percentage ≤100), ingredient/component category
 - `tests/lib/schemas-crud.test.ts` (รอบ 4a PR C) — `productOption` / `productVariant` (objectId, ราคาติดลบ, `update` strip `product_id`), `aspect` / `semanticTerm` (required, objectId array), `role` (`role_type` enum)
-- `tests/lib/schemas-bom.test.ts` (รอบ 4a PR D) — `component` / `recipe` (required + `created_by`, `ingredients[]`/`components[]` แต่ละรายการ id/quantity≥0/unit_id, coerce, `update` strip category/product + created_by)
+- `tests/lib/schemas-bom.test.ts` (รอบ 4a PR D/E) — `component` / `recipe` (`ingredients[]`/`components[]` แต่ละรายการ id/quantity≥0/unit_id, coerce, `update` strip category/product · `created_by` ไม่อยู่ใน schema)
+- `tests/lib/schemas-shop.test.ts` (รอบ 4a PR E) — `updateProfileBody` (partial, phone regex, birthdate coerce, allergies[], ทิ้ง field นอก whitelist), `address` (zip 5 หลัก, required), `review` (rating int 1–5 coerce, objectId)
 
-ไฟล์เทสฝั่ง validation = `validate`, `schemas`, `catalog`, `schemas-admin`, `schemas-crud`, `schemas-bom` (6 ไฟล์)
+ไฟล์เทสฝั่ง validation = `validate`, `schemas`, `catalog`, `schemas-admin`, `schemas-crud`, `schemas-bom`, `schemas-shop` (7 ไฟล์)
 รวมทั้ง suite ปัจจุบัน: `npm test` = **91 passed / 12 ไฟล์** · `npm run test:integration` = **13 / 3 ไฟล์** (ดู [`hardening-summary.md`](hardening-summary.md) §3.4)

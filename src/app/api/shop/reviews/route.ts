@@ -6,7 +6,9 @@
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withAuth } from "@/lib/authGuard";
+import { parseBody } from "@/lib/validate";
 import { parsePagination } from "@/lib/queryParams";
+import { reviewCreateBody } from "@/schemas/review";
 import * as reviewService from "@/services/reviewService";
 
 export const GET = withAuth(async (session, req) => {
@@ -20,14 +22,14 @@ export const GET = withAuth(async (session, req) => {
 });
 
 export const POST = withAuth(async (session, req) => {
-  const body = await req.json();
+  const data = await parseBody(req, reviewCreateBody);
   return created(
     await reviewService.createReview({
       user_id: session.user_id,
-      order_item_id: body.order_item_id,
-      rating: body.rating,
-      review_text: body.review_text ?? null,
-      image: body.image ?? [],
+      order_item_id: data.order_item_id,
+      rating: data.rating,
+      review_text: data.review_text ?? null,
+      image: data.image ?? [],
     })
   );
 });

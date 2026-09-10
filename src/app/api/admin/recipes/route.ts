@@ -10,4 +10,5 @@ export const { GET, POST } = collectionRoutes(recipeService, {
   auth: { menu: "recipes" },
   audit: { entity: "Recipe" },
   validate: { create: recipeCreate },
+  createInject: (s) => ({ created_by: s.user_id }),
 });
