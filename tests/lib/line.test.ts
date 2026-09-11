@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { pushLineMessage } from "@/lib/line";
 
 const ORIGINAL_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
