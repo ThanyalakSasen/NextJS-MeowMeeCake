@@ -1,6 +1,6 @@
 # MeowMeeCake Backend — สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก
 
-> อัปเดตล่าสุด: 2026-09-11
+> อัปเดตล่าสุด: 2026-09-12
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend
 > สรุปงานที่ทำแล้ว §2 + §3 (พร้อม PR + ดัชนีเอกสาร) → [`hardening-summary.md`](hardening-summary.md)
 
@@ -14,11 +14,13 @@
 | Auth layer (JWT + middleware + RBAC 3 ชั้น) | ✅ ใช้อยู่ |
 | `product_type` = `inStore` / `online` / `preorder` | ✅ รองรับทั้งระบบ |
 | **§2 บั๊ก / ความถูกต้องข้อมูล (2.1–2.11)** | ✅ **ปิดครบทั้ง 11 ข้อ** — PR [#3](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/3) **merged** เข้า `addModels` (merge commit `055d71b`) · issue [#4](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/issues/4) closed — เหลือแค่ขั้น deploy: `npm run sync-indexes` + ลบข้อมูลซ้ำกับ DB จริง (ดู §6) · สรุปรวม → [`data-integrity-fixes.md`](data-integrity-fixes.md) |
+| **§2b บั๊ก preorder payment/cancellation (ใหม่ 2026-09-12)** | 🔴 **ยังไม่แก้ — 4 ข้อ** พบจาก code review เต็ม `src/services/` — path เดียวกับ §2 (order) แต่ไม่เคยได้แก้ฝั่ง preorder เลย มีข้อ 1 ที่เป็นช่องโหว่ความปลอดภัย (จ่ายเงินแทนคนอื่นได้) |
+| **§2c บั๊กความทนทาน/correctness เล็กอื่น ๆ (ใหม่ 2026-09-12)** | 🟡 **ยังไม่แก้ — 4 ข้อ** (clearCart ไม่กัน error, voidTransaction ไม่มี floor guard, ความเสี่ยง double-credit สต็อก production, recordUsage swallow error — ข้อหลังเป็น tradeoff ที่ตั้งใจไว้แล้ว) จาก code review รอบเดียวกับ §2b |
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
 | อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — บันทึกลงดิสก์ (self-host เท่านั้น, ดู §3.13) |
 | Preorder (เฟส 5) | 🟡 service + API เสร็จ (ดู §8 · [preorder.md](preorder.md)) — เหลือผูก payment/production/promotion |
 | §3 คุณภาพ / hardening | 🟡 ✅ D1/D2/D3 + audit log (PR #5–#12) · ✅ รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · ยังค้าง: **รอบ 4b** (`/admin/orders`+`/admin/attendances` zod · รื้อ `pick()` · `no-explicit-any` บน `src/lib`) · 4c (3.8/3.12/3.16) · 4d (3.13–3.15) · 3.11 |
-| Notification | ❌ ตัดออก (แจ้งเตือนผ่าน LINE แยกภายหลัง — ดู §3.12) |
+| Notification | ✅ ทำแล้ว (2026-09-12) — `notificationService.ts` + LINE push (`src/lib/line.ts`) + `/api/admin/notifications` · ผูกเข้า order ใหม่/สลิปรอตรวจ/สต็อกใกล้หมด (เดิมตัดออกไว้ก่อน ดู §3.12 ประวัติ) |
 
 **คำสั่งตรวจสอบ:** `npm run typecheck` · `typecheck:test` · `npm run lint` · `npm test` (unit) · `npm run test:integration` · `npm run build` — ปัจจุบันผ่านทั้งหมด
 
@@ -63,6 +65,39 @@
 | 2.9 | ~~โปรโมชัน `usage_limit` / `max_user_per_user` ไม่ atomic~~ | — | ✅ แก้แล้ว (2026-09-07) — `promotionUsageService.recordUsage` จองสิทธิ์แบบ atomic: `findOneAndUpdate({ _id, $or:[{usage_limit:null},{ $expr:{ $lt:[{$ifNull:["$used_count",0]},"$usage_limit"] }}] }, { $inc:{ used_count:1 }})` (แนวเดียวกับ preorder quota §8) → จองไม่ได้ = `unprocessable` "ใช้ครบจำนวนแล้ว" · `max_user_per_user`: สร้าง row แล้ว count ใหม่ ถ้าเกิน → ลบ row + rollback `used_count` (optimistic — คนยิงพร้อมกันคนหลังแพ้) · `persistOrder` เรียก `recordUsage` ใน try block ตอนสร้างออเดอร์ — 422 = ล้มออเดอร์ (คืนสต็อก+ลบ), error อื่น = best-effort เดิม · `validateForOrder` ยังมี read-check ไว้ fast-fail + ใช้กับพรีวิว · รายละเอียด → [`concurrency-guards.md`](concurrency-guards.md) · **หมายเหตุ:** per-user ยังเป็น optimistic ไม่ atomic 100% (ไม่มี transaction ทั้ง codebase) |
 | 2.10 | ~~สร้าง payment ซ้ำได้หลายใบต่อ 1 ออเดอร์~~ | — | ✅ แก้แล้ว (2026-09-07) — `createPayment` ก่อนสร้างเช็ค payment ที่ยัง active (`status:"pending", deleted_at:null`) ของ order/preorder เดิม → เจอ = `conflict` "มีรายการชำระเงินที่รอตรวจสอบอยู่แล้ว" (แนบ `payment_id` เดิมใน details) · + partial unique index `paymentModel` `{ order_id } where { order_id:{$type:"objectId"}, status:"pending", deleted_at:null }` และ `{ preorder_id }` แบบเดียวกัน (กัน race ระดับ DB, `create` แปลง 11000 → conflict) · รายละเอียด → [`concurrency-guards.md`](concurrency-guards.md) · **ต้องรัน `npm run sync-indexes` กับ DB จริง** — ถ้ามี pending ซ้ำอยู่ก่อน ต้องลบซ้ำก่อน index ถึงจะสร้างผ่าน |
 | 2.11 | ~~`discount_amount = 0` ยังผูก `promotion_id` กับออเดอร์~~ | — | ✅ แก้แล้ว (2026-09-07) — เวอร์ชันทั่วไปของ 2.6 · `computeDiscount` เพิ่มเช็คหลัง `round2(Math.max(0, discount))`: ถ้า `discount <= 0` → `throw unprocessable("โปรโมชันนี้ไม่ให้ส่วนลดกับออเดอร์นี้ (ส่วนลดเป็น 0)")` (ครอบทั้ง path สร้างออเดอร์ + พรีวิว เหมือน 2.6) · `persistOrder` ตัด guard `discount_amount > 0` ที่ `recordUsage` → เหลือ `if (appliedPromotion)` เพราะ discount > 0 เสมอเมื่อมี `appliedPromotion` · รายละเอียด → [`promo-freeshipping.md`](promo-freeshipping.md) §4 |
+
+---
+
+## 2b. 🔴 บั๊ก preorder payment/cancellation — ขนานกับ §2 (order) แต่ไม่เคยแก้
+
+> พบจาก code review เต็ม `src/services/` (2026-09-12) — ไล่เทียบ `preorderService.ts`/`paymentService.ts` กับ
+> `orderService.ts` ที่ path คู่ขนานผ่านมาแล้วทุกจุด (§2.7/2.8) พบว่า preorder **ไม่เคยได้ fix ตาม** เลย
+> ทุกข้อ verify แล้วด้วยการอ่านโค้ดจริง (ไม่ใช่แค่รายงานดิบ) — reachable จริงผ่าน API ที่ใช้งานอยู่
+> (`/api/shop/payments`, `/api/shop/preorders/[id]/cancel`, `/api/admin/preorders/[id]/status`)
+> §8 เคยแอบบันทึกไว้บรรทัดเดียวว่า "ยังไม่ได้เรียก `setPaymentStatus()`" (= 2b.2) แต่ไม่เคยรู้ว่าลามไปถึง
+> security (2b.1) และเงินไม่คืน (2b.3/2b.4) — ตอนนี้ยกเป็นหมวดเดียวกับ blocker เพราะเกี่ยวกับเงินจริง
+
+| # | เรื่อง | ที่ไฟล์ | รายละเอียด / วิธีแก้ |
+|---|---|---|---|
+| 2b.1 | 🔴 **สร้าง payment ผูกกับพรีออเดอร์คนอื่นได้ (IDOR)** | `src/services/paymentService.ts:94-101` (เทียบ order branch `:86-93`) | `createPayment` branch `preorder` เช็คแค่ `preorder.payment_status !== "paid"` — **ไม่เช็ค** `preorder.user_id === input.user_id` (ownership), **ไม่เช็ค** `order_status !== "cancelled"`, **ไม่เทียบ** `amount` กับ `preorder.total_amount` (order branch มี `Math.abs(amount - order.total_amount) > AMOUNT_TOLERANCE` ที่ `:91` แต่ preorder ไม่มี) · **exploit จริง:** ลูกค้าคนไหนก็ได้ที่ login แล้ว (route `/api/shop/payments` แค่ `withAuth`) ยิง `preorder_id` ของคนอื่น + `amount` เท่าไหร่ก็ได้ → สร้าง payment `pending` ผูกกับพรีออเดอร์คนอื่นสำเร็จ ถ้าแอดมิน `verifyPayment(approved:true)` ทีหลังโดยไม่ทันสังเกต พรีออเดอร์คนอื่นจะถูกมาร์ค `paid` ทั้งที่เจ้าของไม่ได้จ่าย · **แก้:** เพิ่ม 3 เช็คให้ตรงกับ order branch |
+| 2b.2 | ~~ยังไม่ได้เรียก `preorderService.setPaymentStatus()`~~ (เคยบันทึกไว้ที่ §8) → **verify แล้ว: ผลจริงคือ preorder ไม่ auto-confirm หลังจ่ายเงิน** | `src/services/paymentService.ts:54-58` (`propagateStatus`) · `preorderService.ts:385` (`setPaymentStatus` — dead code, grep ยืนยันไม่ถูกเรียกจากที่ไหนเลยทั้ง repo) | `propagateStatus` branch `order_id` เรียก `orderService.setPaymentStatus()` จริง (`:53`) แต่ branch `preorder_id` เขียน `preorderModel.updateOne({...},{$set:{payment_status,payment_id}})` **ตรงๆ** ข้าม `preorderService.setPaymentStatus()` ไปเลย ต่างจาก order ที่ `setPaymentStatus` มี logic auto-advance `order_status` `pending→confirmed` ตอนจ่ายเงิน (`orderService.ts:651-653`) · **ผล:** พรีออเดอร์ที่แอดมิน verify payment แล้วค้างที่ `order_status:"pending"` ตลอดไป จนกว่าแอดมินจะไปกดเปลี่ยนสถานะเองอีกที (คนละหน้า คนละขั้นตอน ลืมง่าย) · **แก้:** เปลี่ยน `propagateStatus` ให้เรียก `preorderService.setPaymentStatus(preorderId, status, paymentId)` แทน (dynamic import กัน circular import เหมือนที่ `orderService`↔`paymentService` ทำอยู่แล้ว) |
+| 2b.3 | 🔴 ยกเลิกพรีออเดอร์ที่จ่ายเงินแล้ว **ไม่คืนเงิน ไม่ log** (คู่ขนาน §2.8 ที่ order แก้แล้ว) | `src/services/preorderService.ts:355-370` (`updatePreorderStatus` branch cancel) เทียบ `orderService.ts:562-580` | ตอนแอดมินยกเลิกพรีออเดอร์ (`PATCH /api/admin/preorders/[id]/status`) โค้ดคืนแค่โควตารอบ (`releaseQty`) — **ไม่เช็ค `payment_status` เลย** ไม่มี `refundPayment`, ไม่มีแม้แต่ `log.warn` (ต่างจาก order ที่ auto-refund best-effort + log ชัดเจนตาม §2.8) · **ผล:** พรีออเดอร์จบที่ `order_status:"cancelled"` + `payment_status:"paid"` ค้างถาวร ไม่มี refund record ไม่มี trace ใน log เลยสักบรรทัด · **แก้:** เพิ่ม logic เดียวกับ §2.8 — ถ้า `payment_status==="paid"` ตอนยกเลิก หา payment ที่ `status:"paid"` แล้วเรียก `refundPayment` (best-effort + `log.warn` ถ้าไม่พบ) |
+| 2b.4 | 🔴 ลูกค้ายกเลิกพรีออเดอร์ที่จ่ายเงินแล้วได้เอง ทุกสถานะ (คู่ขนาน §2.7 ที่ order แก้แล้ว) | `src/services/preorderService.ts:377-382` (`cancelPreorder`) เทียบ `orderService.ts:609-630` (`cancelOrder`) | `cancelPreorder` (ใช้โดย `POST /api/shop/preorders/[id]/cancel`) ส่งต่อ `updatePreorderStatus` ตรงๆ **ไม่มี `allowedFrom` list**, **ไม่เช็ค `payment_status==="paid"`** เลย ต่างจาก `orderService.cancelOrder` ที่มี `CUSTOMER_CANCELABLE_STATUSES = ["pending","confirmed"]` + บล็อก self-cancel เมื่อจ่ายเงินแล้ว (`throw conflict()`) · **ผล:** ลูกค้าที่จ่ายเงินพรีออเดอร์ไปแล้วยกเลิกเองได้ทุกสถานะ (แม้กำลังเตรียมของอยู่) โควตาถูกคืนแต่เงินไม่ได้คืน และไม่มีกลไกตรวจจับ (ซ้อนกับ 2b.3 — ยิ่งไม่มี log เลย) · **แก้:** เพิ่ม `allowedFrom` guard + `payment_status==="paid"` guard ให้ `cancelPreorder` แบบเดียวกับ `cancelOrder` |
+
+**ลำดับแก้แนะนำ:** 2b.1 ก่อน (security, ผลกระทบสูงสุด) → 2b.2 (data integrity, กระทบ UX แอดมินทุกวัน) → 2b.3/2b.4 คู่กัน (เงินไม่คืน — ทำพร้อมกันเพราะ root cause เดียวกันคือ "ไม่มี payment-status guard ตอน cancel")
+
+---
+
+## 2c. 🟡 บั๊กความทนทาน / correctness เล็กอื่น ๆ (code review 2026-09-12)
+
+> เจอพร้อมกับ §2b รอบเดียวกัน — verify ด้วยการอ่านโค้ดจริงทุกข้อแล้ว ไม่ใช่รายงานดิบจาก agent
+
+| # | เรื่อง | ที่ไฟล์ | รายละเอียด / วิธีแก้ |
+|---|---|---|---|
+| 2c.1 | 🟡 `createOrderFromCart` — `clearCart()` ไม่มี try/catch หลังออเดอร์ commit ไปแล้ว | `src/services/orderService.ts:440` | `persistOrder()` (`saga.commit()` แล้ว = ออเดอร์/สต็อกถูกตัดจริง) ตามด้วย `await cartService.clearCart(userId)` **ไม่มี try/catch** — จุดอื่นที่รันหลัง commit ในไฟล์เดียวกัน (เช่น `notificationService.notify(...)`) ห่อด้วย `.catch(...)` หมด มีแต่บรรทัดนี้ที่ไม่มี · **ผล:** ถ้า `clearCart` throw (เช่น DB สะดุดชั่วคราว) ทั้งที่ออเดอร์สร้างสำเร็จแล้ว จะได้ 500 กลับไปที่ลูกค้า ลูกค้าเห็น "สร้างออเดอร์ไม่สำเร็จ" ทั้งที่จริงสำเร็จ + ตะกร้ายังเต็มอยู่ → กด retry ซ้ำเสี่ยงสร้างออเดอร์ซ้ำ · **แก้:** ห่อ `clearCart` ด้วย `.catch(err => log.error(...))` แบบเดียวกับจุดอื่น |
+| 2c.2 | 🟡 `voidTransaction` ย้อนรายการ `receive` ไม่มี floor guard (ค่าติดลบได้) | `src/services/ingredientTransactionService.ts:211-215` เทียบ `createTransaction` บรรทัด `89` | `createTransaction` ฝั่ง `"use"` (ตัดสต็อก) มี guard `if (!input.allowNegative) filter.current_stock = { $gte: qty }` ก่อน `$inc` แต่ `voidTransaction` ตอนย้อนรายการ `"receive"` (`inc = -txn.qty`) **ไม่มี guard เดียวกันเลย** ยิง `$inc` ตรง ๆ · **ผล:** รับของเข้า 100 → เบิกใช้ไป 80 (เหลือ 20) → มา void รายการรับ 100 ทีหลัง → `current_stock` ลบ 100 ไม่มี error เลย ได้ `-80` ทำให้ reorder-point alert / ต้นทุนสูตรผิดเพี้ยน · **แก้:** เพิ่ม `$gte` guard แบบเดียวกับ `createTransaction` (หรือ policy อื่นที่ตั้งใจ เช่น clamp เป็น 0 + log) |
+| 2c.3 | ℹ️ `voidTransaction` ไม่มี back-reference กลับไปที่ production item — เสี่ยง double-credit | `src/services/ingredientTransactionService.ts:201` (`ingredientTransactionModel` ไม่มี field `production_item_id`) เทียบ `productionItemService.ts:211,226,263` (`consumeStock`/`reverseStock` เรียก `createTransaction` แต่ไม่ผูก back-ref) | `voidTransaction` เป็น endpoint กลาง (`DELETE /api/admin/ingredient-transactions/[id]`) ใช้ย้อนได้ทุกรายการรวมถึงที่เกิดจาก production (`consumeStock`/`reverseStock`) — เพราะ model ไม่มี field เชื่อมกลับ ถ้าแอดมิน void รายการที่มาจาก production แล้วภายหลัง production นั้นถูกยกเลิกผ่าน `reverseStock` จริง จะสร้างรายการ `"receive"` คืนสต็อกซ้ำอีกรอบ (สต็อกถูกเครดิตสองครั้ง) · **สถานะ:** เป็นความเสี่ยงเชิงสถาปัตยกรรม ยังไม่ได้ตามรอย exploit จริง — ต้องดูเพิ่มว่ามี flow ที่ทำทั้งสองอย่างได้จริงในหน้าแอดมินไหมก่อนตัดสินใจว่าต้องรีบแก้แค่ไหน · **แนวทาง:** เพิ่ม `production_item_id` (nullable) ใน `ingredientTransactionModel` + กัน `voidTransaction` void รายการที่มี back-ref นี้ (ให้ยกเลิกผ่าน production flow แทน) |
+| 2c.4 | ℹ️ (ทราบอยู่แล้ว — ไม่ใช่บั๊กที่พลาด) `recordUsage` error ที่ไม่ใช่ 422 ถูก swallow เงียบ | `src/services/orderService.ts:360-371` | โค้ดมีคอมเมนต์ระบุไว้ตรง ๆ ว่าเป็น **การตัดสินใจตั้งใจ** ("error อื่น (transient) = best-effort ไม่ล้มออเดอร์ที่สร้างสำเร็จแล้ว") — ไม่ใช่บั๊กที่หลุดไปโดยไม่รู้ตัวเหมือนข้ออื่น · **ผลข้างเคียงที่ยอมรับไว้แล้ว:** ถ้า `recordUsage` fail แบบ transient (ไม่ใช่ 422 เต็มโควตา) ออเดอร์จะมี `discount_amount`/`promotion_id` ติดอยู่ แต่ไม่มี `PromotionUsages` row / ไม่นับ `used_count` — usage reporting เพี้ยนจากส่วนลดที่ให้จริง (และ `revokeUsage` ตอนยกเลิกจะหาไม่เจอ ไม่มีอะไรให้ revoke) · **แนะนำ (ถ้าจะแก้ต่อ):** เพิ่ม retry สั้น ๆ ก่อน swallow หรือ log แบบ queryable ง่ายกว่านี้ (ตอนนี้ log.error ปกติ) — ไม่ใช่ priority สูง |
 
 ---
 
@@ -124,6 +159,8 @@
 | 3.14 | ลบรูปสินค้าที่ไม่ใช้ | ไม่มี endpoint ลบไฟล์ใน `public/uploads/products/` เมื่อแก้ `product_img` หรือลบสินค้า → ไฟล์ค้างสะสม |
 | 3.15 | ค่าส่ง = config + env ยังไม่ใช่ DB (`src/services/deliveryService.ts`) | รองรับแค่ 2 โซน (กทม./ต่างจังหวัด) แยกตามชื่อจังหวัดตรง ๆ · อัปเกรด: model `deliveryZone` + admin CRUD (โซนตามรหัสไปรษณีย์/อำเภอ, ค่าส่งตามน้ำหนัก, ส่งฟรีต่อโซน) — แก้เฉพาะ `deliveryService.ts` + เพิ่ม routes |
 | 3.16 | ไม่มี "ต้นทุนซื้อมา" สำหรับสินค้าซื้อมาขายต่อ (`productModel`) | `cost_per_unit` มาจากสูตรเท่านั้น · สินค้าที่ไม่ได้ผลิตเอง (น้ำดื่ม, ของฝาก) ไม่มีต้นทุน → COGS/กำไรใน dashboard ต่ำกว่าจริง · เพิ่ม field `purchase_cost` ใน productModel + ให้ `getUnitCostByProduct` fallback ไปใช้ค่านี้เมื่อไม่มีสูตร · ต้นทุนระดับ variant ก็ยังไม่มี |
+| 3.17 | `crudRoutes.ts` — `createInject` (กัน mass-assignment ตอน POST) ไม่มีคู่ `updateInject` ฝั่ง PATCH (2026-09-12) | `ItemRoutesOptions` (`src/lib/crudRoutes.ts:143`) ไม่มี field เทียบเท่า `createInject` ของ `CollectionRoutesOptions` (`:106`) — `PATCH` handler (`:160-167`) เรียก `service.update(id, body)` ตรง ๆ ไม่มีจุด inject ค่าจาก session เลย · ตอนนี้ยังไม่มี entity ไหนต้องการ (ยังไม่เจอบั๊กจริง) แต่ถ้ามี field ที่ต้อง derive จาก session ตอนแก้ไข (เช่น `updated_by`) จะต้อง bypass factory หรือ re-implement guard เอง · เพิ่ม `updateInject?: (session: SessionUser) => Record<string, unknown>` ให้ `ItemRoutesOptions` แบบเดียวกัน |
+| 3.18 | Checkout N+1 — `resolveLine` วน `await` ทีละบรรทัดในตะกร้า (2026-09-12) | `createOrderFromCart`/`createOrder` (`src/services/orderService.ts:420-437`) วน `for...of` เรียก `await resolveLine(...)` ทีละรายการ — แต่ละครั้งมี query แยก (product/variant/options) ไม่ batch · ตะกร้า 10 ชิ้น = query ทยอย ~30 ครั้งแทนที่จะ batch ด้วย `$in` ครั้งเดียวต่อ collection แล้ว join ใน memory → latency ตอน checkout โตเป็นเส้นตรงตามจำนวนชิ้นในตะกร้า · ยังไม่กระทบจริงตอนนี้ (ตะกร้าปกติไม่ใหญ่) แต่ควรรู้ไว้ก่อนปริมาณคำสั่งซื้อโต |
 
 ---
 
@@ -213,7 +250,8 @@ enum = `["inStore", "online", "preorder"]` (เดิม `"ready"` → `"inStore
 
 **ยังไม่ทำ (ต่อยอด):**
 - ผูก `discountEngine`/โปรโมชันกับพรีออเดอร์ (ตอนนี้รองรับเฉพาะ `discount_amount` กรอกมือของแอดมิน)
-- `paymentService` — รับ `preorder_id` ได้แล้ว แต่ยังไม่ได้เรียก `preorderService.setPaymentStatus()` (มี hook `setPaymentStatus` รออยู่)
+- `paymentService` — รับ `preorder_id` ได้แล้ว แต่ยัง **มีบั๊กจริง 4 ข้อ** ในเส้นทางนี้ (ownership/amount check หาย,
+  ไม่เรียก `setPaymentStatus()`, ยกเลิกไม่คืนเงิน) → ดูหมวด **§2b** ด้านบน (ก่อน §3)
 - `productionOrderService` — `source_type: "preorder"` ยัง reject ไว้ ยังไม่สร้างใบสั่งผลิตจาก `round_id`
 - ไม่เลื่อน `round_status` อัตโนมัติตามเวลา (แอดมินกด open/close เอง)
 - seed permission ให้ role `staff` เข้าเมนู `preorder` (owner ผ่านอยู่แล้ว)
