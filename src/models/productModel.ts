@@ -23,6 +23,15 @@ const preorderConfigSchema = new mongoose.Schema(
 
 const productSchema = new mongoose.Schema(
   {
+    // รหัสสินค้าที่มนุษย์อ่านได้ / ใช้พิมพ์บาร์โค้ดหน้าร้าน (ไม่ใช่ _id ของ Mongo)
+    //   pos-DDYYzzz = สินค้าหน้าร้าน/ออนไลน์ (inStore, online) , pre-DDYYzzz = พรีออเดอร์ (preorder)
+    //   DD = วันที่สร้าง (01-31) , YY = ปี ค.ศ. 2 หลัก , zzz = เลขสุ่ม 3 หลัก (กันซ้ำ)
+    // สร้างอัตโนมัติใน productService.createProduct() — ห้ามซ้ำ
+    product_id: {
+      type: String,
+      required: true,
+      trim: true,
+    },
     product_name_th: {
       type: String,
       required: true,
@@ -78,15 +87,16 @@ const productSchema = new mongoose.Schema(
     },
     product_type: {
       type: String,
-      enum: ["ready", "preorder"],
+      // inStore = สินค้าหน้าร้าน , online = สินค้าออนไลน์ , preorder = สินค้าพรีออเดอร์
+      enum: ["inStore", "online", "preorder"],
       required: true,
     },
     product_stock_quantity: {
-      // มีค่าเฉพาะ product_type = "ready"
+      // มีค่าเมื่อ product_type = "inStore" หรือ "online"
       // product_type = "preorder" → null
       type: Number,
       min: 0,
-      default: null,
+      default: 0,
     },
     avg_rating: {
       type: mongoose.Schema.Types.Decimal128,
@@ -100,7 +110,7 @@ const productSchema = new mongoose.Schema(
       default: 0,
     },
     preorder_config: {
-      // null ถ้า product_type = "ready"
+      // null ถ้า product_type = "inStore" หรือ "online" (ใช้เฉพาะ preorder)
       type: preorderConfigSchema,
       default: null,
     },
@@ -120,6 +130,9 @@ const productSchema = new mongoose.Schema(
 
 
 // ── Indexes ─────────────────────────────────────────────────
+// unique เฉพาะเอกสารที่มี product_id (sparse) — กันพังตอน build index บนข้อมูลเก่าที่ยังไม่มีรหัส
+// (ให้รัน scripts/backfill-product-codes.ts เติมรหัสให้ของเดิม)
+productSchema.index({ product_id: 1 }, { unique: true, sparse: true });
 productSchema.index({ category_id: 1 });
 productSchema.index({ product_type: 1 });
 productSchema.index({ product_type: 1, deleted_at: 1 });

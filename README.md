@@ -1,36 +1,45 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# NextJS-MeowMeeCake
+    1. npm i @heroicons/react
+    2. npm install @material-tailwind/react
+    3. npm install lucide-react
+    4. npm install antd
+    5. npm install recharts
+    6. npm install mongoose
+    7. npm install sweetalert2
+    8. npm install -D playwright
+    9. npm install qrcode
+    10. npm install -D @types/qrcode
+    11. npm install bcryptjs
+    12. npm install multer
 
-## Getting Started
+---
 
-First, run the development server:
+## Backend
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+- โครงสร้าง API: `/api/auth` · `/api/catalog` (สาธารณะ) · `/api/shop` (ลูกค้า) · `/api/admin` (พนักงาน + สิทธิ์เมนู)
+- **ตัวแปร environment (`.env.local`) → [`docs/env.md`](docs/env.md)**
+- **สูตรคำนวณ ราคา / ต้นทุน / กำไร-ขาดทุน → [`docs/Summary.md`](docs/Summary.md)**
+- **re-price ราคาตอน checkout (บั๊ก 2.5) → [`docs/reprice.md`](docs/reprice.md)**
+- **โปรโมชัน FreeShipping กับออเดอร์ไม่มีค่าส่ง (บั๊ก 2.6) → [`docs/promo-freeshipping.md`](docs/promo-freeshipping.md)**
+- **ขอบเขตการยกเลิกออเดอร์ของลูกค้า (บั๊ก 2.7) → [`docs/order-cancel.md`](docs/order-cancel.md)**
+- **กัน race: โปรโมชัน usage + payment ซ้ำ (บั๊ก 2.9–2.10) → [`docs/concurrency-guards.md`](docs/concurrency-guards.md)**
+- **สรุปรวมการแก้บั๊กความถูกต้องข้อมูล 2.8–2.11 → [`docs/data-integrity-fixes.md`](docs/data-integrity-fixes.md)**
+- **บันทึกกิจกรรมผู้ใช้ (audit log) → [`docs/auditLog.md`](docs/auditLog.md)**
+- **ระบบพรีออเดอร์ (รอบ / โควตา / API) → [`docs/preorder.md`](docs/preorder.md)**
+- **สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก + Migration checklist → [`docs/BACKLOG.md`](docs/BACKLOG.md)**
+- **สรุปงาน hardening §2 + §3 (พร้อม PR / ดัชนีเอกสาร) → [`docs/hardening-summary.md`](docs/hardening-summary.md)**
+- **มาตรฐาน API (envelope / status / list / auth) → [`docs/api-conventions.md`](docs/api-conventions.md)**
+- **แผนงานคุณภาพ / hardening (§3 ชั้น D) → [`docs/hardening-plan.md`](docs/hardening-plan.md)** · D3 → [`docs/hardening-d3-plan.md`](docs/hardening-d3-plan.md) · รอบ 4a → [`docs/hardening-4a-plan.md`](docs/hardening-4a-plan.md)
+- **Infra / tooling: ESLint · Logger · Testing (§3.6 / 3.3 / 3.4) → [`docs/infra-tooling.md`](docs/infra-tooling.md)**
+- **Validation layer (zod, §3.1) → [`docs/validation.md`](docs/validation.md)**
+- **Security hardening: rate-limit · Google flow · CORS/CSRF (§3.2 / 3.9 / 3.10) → [`docs/security-hardening.md`](docs/security-hardening.md)**
+
+สคริปต์:
 ```
-
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
-
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+npm run typecheck              # tsc --noEmit
+npm run build
+npm run seed                   # สร้าง role / units / หมวดหมู่ / owner user
+npm run backfill:product-codes # เติมรหัสสินค้า pos-/pre- ให้ของเดิม
+npm run sync-indexes           # ปรับ index ใน DB ให้ตรง schema (+ --fix เพื่อลบข้อมูลซ้ำ)
+npm run seed:preorder-rounds   # สร้างรอบพรีออเดอร์ตัวอย่าง (ซาวโดว์) 4 รอบ สำหรับเทสฝั่งลูกค้า
+```

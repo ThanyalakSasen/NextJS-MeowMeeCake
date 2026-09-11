@@ -56,7 +56,11 @@ const reviewSchema = new mongoose.Schema({
 
 reviewSchema.index({ product_id: 1 });
 reviewSchema.index({ user_id: 1 });
-reviewSchema.index({ order_item_id: 1 }, { sparse: true });
+// 1 order_item รีวิวได้ครั้งเดียว (partial unique — รีวิวที่ถูก soft delete แล้วไม่บล็อกการรีวิวใหม่)
+reviewSchema.index(
+  { order_item_id: 1 },
+  { unique: true, partialFilterExpression: { deleted_at: null } }
+);
 reviewSchema.index({ preorder_order_item_id: 1 }, { sparse: true });
 
 

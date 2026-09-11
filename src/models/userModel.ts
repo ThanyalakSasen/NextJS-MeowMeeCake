@@ -1,5 +1,4 @@
 import mongoose from "mongoose";
-import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema(
   {
@@ -32,34 +31,6 @@ const userSchema = new mongoose.Schema(
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }
 );
-
-userSchema.index({ email: 1 });
-userSchema.index({ role_id: 1 });
-userSchema.index({ deleted_at: 1 });
-
-// เข้ารหัส password อัตโนมัติทุกครั้งที่ set ค่าใหม่ (สร้าง user ใหม่ หรือเปลี่ยนรหัสผ่าน) — ผู้ใช้เก่าที่ยัง
-// เก็บเป็น plaintext (ก่อนมี hook นี้) จะถูกอัปเกรดเป็น hash อัตโนมัติตอน login ครั้งแรกที่ผ่าน (ดู auth/login route)
-// หมายเหตุ: Mongoose เวอร์ชันนี้ใช้ hook แบบ async/Promise ล้วน ไม่มี callback `next` แล้ว
-// (คืนค่า/resolve ปกติ = ผ่าน, throw = ยกเลิก) ต่างจาก Mongoose รุ่นเก่าที่คุ้นเคย
-// อีกอย่าง: การใส่ custom `timestamps.createdAt/updatedAt` (ด้านล่าง) ทำให้ mongoose auto-infer
-// ประเภท field ผิดเพี้ยนไป (this.password ดันถูกอนุมานเป็น Date) จึงต้อง cast ตรงๆ กันไว้
-userSchema.pre("save", async function () {
-  const pw = this.password as unknown as string | null;
-  if (!this.isModified("password") || !pw) return;
-  if (/^\$2[aby]\$/.test(pw)) return; // เป็น bcrypt hash อยู่แล้ว ไม่ต้อง hash ซ้ำ
-  this.password = (await bcrypt.hash(pw, 10)) as unknown as typeof this.password;
-});
-
-// createCrudController.update() ใช้ findByIdAndUpdate ซึ่งไม่ผ่าน pre("save") ข้างบน — ต้องมี hook
-// แยกสำหรับ query-style update ด้วย (เช่นตอนแก้ไขพนักงานแล้วตั้งรหัสผ่านใหม่จากหน้า editEmployee)
-userSchema.pre("findOneAndUpdate", async function () {
-  const update = this.getUpdate() as Record<string, unknown> | null;
-  if (!update) return;
-  const target = "$set" in update ? (update.$set as Record<string, unknown>) : update;
-  const pw = target?.password;
-  if (typeof pw !== "string" || !pw || /^\$2[aby]\$/.test(pw)) return;
-  target.password = await bcrypt.hash(pw, 10);
-});
 
 const User = mongoose.models.Users || mongoose.model("Users", userSchema);
 export default User;
