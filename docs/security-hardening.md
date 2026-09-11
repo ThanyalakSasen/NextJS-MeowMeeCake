@@ -97,9 +97,16 @@ Google Identity Services ฝั่ง frontend) — `jwtVerify(credential, GOOGL
 **เทส:** `tests/lib/csrf.test.ts` (+ allowlist case), `tests/lib/cors.test.ts` (ใหม่)
 
 ### ตั้งค่าใช้งาน (dev, 2 โปรเจกต์แยกกัน)
-- backend `.env.local`: `ALLOWED_ORIGINS=http://localhost:3000` (origin ของ frontend), รันที่ port 4000
-  (`next dev -p 4000` — ต้องคนละ port กับ frontend)
-- frontend `.env.local`: `NEXT_PUBLIC_API_BASE_URL=http://localhost:4000`, `NEXT_PUBLIC_API_MOCK=0`
+> แก้ไข 2026-09-12: สลับฝั่งที่ fix port จากดราฟต์แรก — **backend คือฝั่งที่ใช้ port default (3000)**
+> เพราะ deploy จริงมักตรึง backend ไว้ port เดิม ส่วน frontend ต้องเลื่อนหนีแทน (ตรงกับ `.env.local`
+> จริงทั้งสองฝั่งตอนนี้ — ไม่ใช่แค่แผนอีกต่อไป)
+- backend `.env.local`: `ALLOWED_ORIGINS=http://localhost:3001,http://localhost:3002` (origin ของ
+  frontend — ใส่ 2 พอร์ตกัน Next auto-เลือกพอร์ตอื่นตอน 3001 ถูกจองอยู่แล้ว), รันที่ port **3000**
+  (default ของ `next dev`/`next start` — ไม่ต้องใส่ `-p`)
+- frontend `.env.local`: `NEXT_PUBLIC_API_BASE_URL=http://localhost:3000/api` (มี `/api` ต่อท้ายเสมอ —
+  backend เสิร์ฟ route จริงใต้ `/api/*`), `NEXT_PUBLIC_API_MOCK=0`, รันที่ port **3001**
+  (`next dev -p 3001` — ตั้งไว้ใน `package.json` script `"dev"` ของ frontend แล้ว กัน dev ลืมใส่ `-p`
+  แล้วชนกับ backend ที่ใช้ 3000 เหมือนกัน)
 
 ### ยังเปิดค้าง / ถ้าต้องเปลี่ยน
 - production: ต้องตั้ง `ALLOWED_ORIGINS` เป็น origin จริงของ frontend ที่ deploy (ไม่ใช่ localhost) —
