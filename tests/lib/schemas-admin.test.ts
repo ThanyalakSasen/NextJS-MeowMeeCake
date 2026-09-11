@@ -3,6 +3,11 @@ import { expenseCreate, expenseUpdate } from "@/schemas/expense";
 import { ingredientCreate, ingredientUpdate } from "@/schemas/inventory";
 import { promotionCreate, promotionUpdate } from "@/schemas/promotion";
 import { ingredientCategoryCreate, componentCategoryCreate } from "@/schemas/catalog";
+import {
+  recordAttendanceBody,
+  updateAttendanceBody,
+  checkInOutBody,
+} from "@/schemas/attendance";
 
 const OID = "507f1f77bcf86cd799439011";
 
@@ -73,5 +78,47 @@ describe("schemas/catalog — ingredient/component category (name-only)", () => 
     expect(ingredientCategoryCreate.safeParse({ ingredient_category_name: "ผง" }).success).toBe(true);
     expect(ingredientCategoryCreate.safeParse({ ingredient_category_name: "" }).success).toBe(false);
     expect(componentCategoryCreate.safeParse({ component_category_name: "ไส้" }).success).toBe(true);
+  });
+});
+
+describe("schemas/attendance — recordAttendanceBody (BACKLOG §3.1, รอบ 4b)", () => {
+  it("ผ่านเคสปกติ — status ภาษาไทย, work_date รูปแบบถูก", () => {
+    const r = recordAttendanceBody.parse({ user_id: OID, work_date: "2026-01-10", status: "มาทำงาน" });
+    expect(r.status).toBe("มาทำงาน");
+  });
+  it("work_date ผิดรูปแบบ → fail", () => {
+    expect(
+      recordAttendanceBody.safeParse({ user_id: OID, work_date: "10-01-2026" }).success
+    ).toBe(false);
+  });
+  it("status นอก enum ภาษาไทยที่กำหนด → fail", () => {
+    expect(
+      recordAttendanceBody.safeParse({ user_id: OID, work_date: "2026-01-10", status: "present" })
+        .success
+    ).toBe(false);
+  });
+  it("check_in_at/check_out_at coerce จาก string เป็น Date ได้", () => {
+    const r = recordAttendanceBody.parse({
+      user_id: OID,
+      work_date: "2026-01-10",
+      check_in_at: "2026-01-10T09:00:00Z",
+    });
+    expect(r.check_in_at).toBeInstanceOf(Date);
+  });
+});
+
+describe("schemas/attendance — updateAttendanceBody", () => {
+  it("partial ทุก field รวม recorded_by", () => {
+    expect(updateAttendanceBody.safeParse({}).success).toBe(true);
+    expect(updateAttendanceBody.safeParse({ recorded_by: OID, status: "มาสาย" }).success).toBe(true);
+    expect(updateAttendanceBody.safeParse({ recorded_by: "not-an-id" }).success).toBe(false);
+  });
+});
+
+describe("schemas/attendance — checkInOutBody", () => {
+  it("ไม่ส่ง user_id (self check-in) → ผ่าน · ส่งมาผิดรูป ObjectId → fail", () => {
+    expect(checkInOutBody.safeParse({}).success).toBe(true);
+    expect(checkInOutBody.safeParse({ user_id: OID }).success).toBe(true);
+    expect(checkInOutBody.safeParse({ user_id: "abc" }).success).toBe(false);
   });
 });
