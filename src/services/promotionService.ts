@@ -7,7 +7,7 @@
  */
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound, unprocessable } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import {
@@ -21,45 +21,27 @@ import productModel from "../models/productModel";
 import userModel from "../models/userModel";
 import * as promotionUsageService from "./promotionUsageService";
 import * as cartService from "./cartService";
+import type { z } from "zod";
+import type { promotionCreate, promotionUpdate } from "../schemas/promotion";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export const DISCOUNT_TYPES = ["Percentage", "Amount", "FreeShipping"] as const;
 
-const WRITABLE = [
-  "promotion_code",
-  "promotion_name",
-  "promotion_desc",
-  "discount_type",
-  "discount_value",
-  "is_active",
-  "applicable_channels",
-  "min_order_amount",
-  "applicable_products",
-  "applicable_categories",
-  "min_quantity",
-  "max_discount_amount",
-  "usage_limit",
-  "max_user_per_user",
-  "start_date",
-  "end_date",
-] as const;
+type CreatePromotionInput = z.infer<typeof promotionCreate>;
+type UpdatePromotionInput = z.infer<typeof promotionUpdate>;
 
 // ── CRUD ────────────────────────────────────────────────────
-export async function createPromotion(input: Record<string, any>, createdBy: string) {
+// required field / discount_type enum / end_date≥start_date / Percentage≤100 validate ที่ route
+// ผ่าน schemas/promotion.ts แล้ว (ไม่ต้องเช็คซ้ำที่นี่)
+export async function createPromotion(input: CreatePromotionInput, createdBy: string) {
   await dbConnect();
-  for (const f of ["promotion_code", "promotion_name", "discount_type", "discount_value", "start_date", "end_date"] as const) {
-    if (input[f] == null || input[f] === "") throw badRequest(`กรุณาระบุ ${f}`);
-  }
-  if (!DISCOUNT_TYPES.includes(input.discount_type)) {
-    throw badRequest(`discount_type ต้องเป็นหนึ่งใน: ${DISCOUNT_TYPES.join(", ")}`);
-  }
   await assertRefExists(userModel, createdBy, "ผู้สร้าง", "created_by");
 
   try {
     const doc = await promotionModel.create({
-      ...pick(input, WRITABLE),
-      promotion_code: String(input.promotion_code).trim().toUpperCase(),
+      ...input,
+      promotion_code: input.promotion_code.trim().toUpperCase(),
       created_by: createdBy,
     });
     return doc.toObject();
@@ -117,15 +99,12 @@ export async function getPromotionById(id: string, opts: { includeDeleted?: bool
   return doc;
 }
 
-export async function updatePromotion(id: string, input: Record<string, any>) {
+export async function updatePromotion(id: string, input: UpdatePromotionInput) {
   await dbConnect();
   assertObjectId(id);
-  const payload = pick(input, WRITABLE) as Record<string, any>;
+  const payload: Record<string, any> = { ...input };
   if (payload.promotion_code) {
     payload.promotion_code = String(payload.promotion_code).trim().toUpperCase();
-  }
-  if (payload.discount_type && !DISCOUNT_TYPES.includes(payload.discount_type)) {
-    throw badRequest(`discount_type ต้องเป็นหนึ่งใน: ${DISCOUNT_TYPES.join(", ")}`);
   }
   try {
     const doc = await promotionModel

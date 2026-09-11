@@ -8,12 +8,16 @@
  */
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, type Pagination } from "../lib/queryParams";
 import { bangkokDateString, isWorkDateString } from "../lib/datetime";
 import attendanceModel from "../models/attendanceModel";
 import userModel from "../models/userModel";
+import type { z } from "zod";
+import type { updateAttendanceBody } from "../schemas/attendance";
+
+type UpdateAttendanceInput = z.infer<typeof updateAttendanceBody>;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -208,7 +212,7 @@ export async function recordAttendance(input: RecordAttendanceInput) {
 }
 
 // ── แอดมินแก้ไขบันทึกที่มีอยู่ ───────────────────────────────
-export async function updateAttendance(id: string, input: Record<string, any>) {
+export async function updateAttendance(id: string, input: UpdateAttendanceInput) {
   await dbConnect();
   assertObjectId(id);
   assertStatus(input.status);
@@ -216,13 +220,7 @@ export async function updateAttendance(id: string, input: Record<string, any>) {
   const existing = await attendanceModel.findOne({ _id: id, deleted_at: null });
   if (!existing) throw notFound("ไม่พบบันทึกเวลาที่ระบุ");
 
-  const payload = pick(input, [
-    "status",
-    "note",
-    "check_in_at",
-    "check_out_at",
-    "recorded_by",
-  ]);
+  const payload = { ...input } as Record<string, any>;
 
   const nextIn =
     payload.check_in_at !== undefined
