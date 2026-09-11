@@ -1,7 +1,9 @@
 # แผน รอบ 4b — จบ §3.1 (zod tail) + §3.6 (no-explicit-any บน src/lib)
 
 > อัปเดตล่าสุด: 2026-09-12
-> สถานะ: 🟡 **ข้อ A เสร็จแล้ว + ข้อ B ทำแล้ว 3/8 ไฟล์** (branch `hardening-4b-orders-attendances`) — ข้อ C ยังไม่เริ่ม
+> สถานะ: ✅ **ข้อ A + C เสร็จสมบูรณ์ · ข้อ B ทำแล้ว 3/8 ไฟล์** (branch `hardening-4b-orders-attendances`,
+> ยังไม่ merge เข้า `addModels`) — เหลือ B2 (5 ไฟล์ที่ route ต้นทางยังไม่ adopt zod) เป็นงานยกไปพร้อม
+> การ adopt zod ของ route เหล่านั้น ไม่ใช่ blocker ของรอบนี้
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ" รอบ 4b · ต่อจาก [`hardening-4a-plan.md`](hardening-4a-plan.md) §"ยกไปรอบ 4b"
 
 รอบ 4b = 3 งานที่เหลือจาก 4a เรียงตาม**ลำดับพึ่งพา** (ทำ A ก่อนเพราะ B ต้องมี schema ของ A
@@ -145,30 +147,46 @@ body/query ตรง ๆ (`Number(body.qty)`) ที่ตอนนี้ zod `z
 
 ---
 
-## C. `no-explicit-any` = error บน `src/lib` — **S–M**
+## C. `no-explicit-any` = error บน `src/lib` — **S–M** ✅ เสร็จแล้ว (2026-09-12)
 
-### ลำดับ (ไฟล์เล็ก→ใหญ่ กันเสีย momentum)
-1. `refs.ts` (3 จุด) — เป็น utility เดียว `assertRefExists` น่าจะ type ง่ายด้วย generic `<T extends { _id: unknown }>` หรือ `Model<unknown>` จาก mongoose
-2. `discountEngine.ts` (3 จุด) — มี pure function `computeDiscount` เทสครบแล้ว (`tests/lib/discountEngine.test.ts`) safety net ดี ก่อนรีแฟคเตอร์
-3. `crudService.ts` (5 จุด) — เป็น factory ที่ generic อยู่แล้ว (`createCrudService<T>`) น่าจะแค่ปรับ signature บางจุดที่หลุดเป็น `any`
-4. `bom.ts` (16 จุด — เยอะสุด ทำท้าย) — โครง BOM (component/recipe ซ้อน ingredient/component) มี type ซับซ้อนกว่าไฟล์อื่น อาจต้องนิยาม interface ใหม่ 2-3 ตัว
-5. `crudRoutes.ts:85` — `doc: any` → เปลี่ยนเป็น `doc: { _id?: unknown } | null | undefined` (ใช้แค่ `doc?._id`)
+### ผลจริง (ทำตามลำดับที่วางแผนไว้ เล็ก→ใหญ่ ไม่มีเซอร์ไพรส์ใหญ่)
+1. **`refs.ts`** (3 จุด) — `assertRefExists`/`assertRefExistsHard` เปลี่ยนเป็น generic
+   `<T>(model: Model<T>, ...)` ตามแผน — ไม่กระทบ call site ไหนเลย (โมเดลทุกตัวใน `src/models/**`
+   ถูก infer เป็น `any`/loose type อยู่แล้วจาก `mongoose.models.X || mongoose.model(...)` — generic
+   แค่ห่อ `any` เดิมให้ไม่ต้องเขียน `any` เอง ไม่ได้เพิ่มความปลอดภัยของ type จริง ๆ แต่ผ่าน lint)
+2. **`discountEngine.ts`** (3 จุด) — เพิ่ม interface `PromotionLike` (field ที่ `computeDiscount`
+   ใช้จริงทั้งหมด) แทน `promo: any` · `idIn()` เปลี่ยน `any[]` → `unknown[]` (แค่ `String(x)` เทียบ
+   ไม่ต้องรู้ type จริง) · เทส `discountEngine.test.ts` (12 เคส) ผ่านหมดไม่ต้องแก้อะไร
+3. **`crudService.ts`** (5 จุด) — `AnyModel = Model<any>` → `Model<unknown>`, `Doc = Record<string,any>`
+   → `Record<string,unknown>` **ไม่กระทบ build/typecheck ทั้งโปรเจกต์เลย** (รันแล้วเช็คก่อนแก้ 2 จุด
+   ที่เหลือ) — พอเปลี่ยน 2 type alias แล้ว 2 จุด `as any` ที่เหลือ (query chaining กับ mongoose
+   `applyPopulate`) **compile ผ่านได้เองโดยไม่ต้อง cast อะไรเลย** ดีกว่าที่แผนคาดไว้มาก (คิดว่าต้องคง
+   `as any`/disable-next-line ไว้บางจุด)
+4. **`bom.ts`** (16 จุด, เยอะสุด) — เจอว่าไฟล์นี้**มี interface `IngredientItem`/`ComponentItem`
+   ประกาศไว้อยู่แล้วตั้งแต่ต้น แต่ไม่เคยถูกใช้จริงในฟังก์ชันไหนเลย** (ทุกฟังก์ชันรับ `any[]` แทน) — แก้
+   `ingredientItemsCost`/`componentItemsCost` ให้รับ interface ที่มีอยู่แล้วตรง ๆ · เพิ่ม
+   `RawItem = Record<string,unknown>` สำหรับฟังก์ชัน validate (ยังไม่รู้ shape จนกว่าจะเช็คผ่าน — ใช้
+   `IngredientItem` ตรงนั้นจะผิดความหมาย) · type `.lean<T>()` ให้ตรง field ที่ `.select()` เลือกจริง
+5. **`crudRoutes.ts`** — 2 จุด (ไม่ใช่ 1 อย่างที่คิดตอนสำรวจ): `readBody()` return type (มี
+   `eslint-disable-next-line` เดิมอยู่แล้ว) + `logMutation()` `doc: any` (บรรทัด 85, ไม่มี disable —
+   เป็น `warning` อยู่ก่อนแล้วในทุกรอบ lint ของ session นี้) — `readBody` คืน
+   `Record<string,unknown>` (ต้อง cast `parseBody()` เพราะ `z.infer<z.ZodType>` แบบ base class
+   resolve เป็น `unknown` ไม่ใช่ object shape) · `logMutation` รับ
+   `{ _id?: unknown } | null | undefined`
+
+**ผลลัพธ์เกินคาด:** ไม่มีไฟล์ไหนต้องเหลือ `eslint-disable-next-line` เลยสักจุด — `src/lib/**`
+สะอาด 100% ไม่มี `any` explicit เหลือแม้แต่ตัวเดียว
 
 ### เกณฑ์ "เสร็จ"
 ```js
-// eslint.config.mjs — เพิ่ม src/lib/**/*.ts เข้า block error เดิม
+// eslint.config.mjs
 {
-  files: ["src/schemas/**/*.ts", "tests/**/*.ts", "src/lib/**/*.ts"],  // ← เพิ่ม src/lib
+  files: ["src/schemas/**/*.ts", "tests/**/*.ts", "src/lib/**/*.ts"],  // เพิ่ม src/lib แล้ว
   rules: { "@typescript-eslint/no-explicit-any": "error" },
 },
 ```
-`npm run lint` ต้องเหลือ 0 error (13 warning เดิมใน `src/app/api/**/route.ts` ยังคงอยู่ — เก็บไว้
-สำหรับรอบถัดไปเมื่อ service คืน type จริงแทน `any` ที่ route ประกาศรับ)
-
-### ความเสี่ยง
-กลาง — ไม่ใช่แค่ปิด warning แต่ต้อง**คิด type จริง**ให้ generic/utility function พวกนี้ อาจเจอจุดที่
-type เดิมกว้างเกินไปจนซ่อนบั๊ก (ดี — แต่ต้อง `npm run typecheck` + `test` ครบหลังทุกไฟล์ ไม่ใช่แค่ปิด
-error แล้วจบ)
+`npm run lint` → **0 error, 11 warning** (ลดจาก 13 เดิม — `crudRoutes.ts:85` หายไปพร้อมกับที่แก้)
+ที่เหลือทั้งหมดอยู่ใน `src/app/api/**/route.ts` — เก็บไว้รอบถัดไปเมื่อ service คืน type จริง
 
 ---
 
@@ -179,17 +197,17 @@ error แล้วจบ)
 | **4b-A** | ✅ zod: `admin/orders` POST + `admin/attendances` (4 ไฟล์) — branch `hardening-4b-orders-attendances` |
 | **4b-B** | ✅ รื้อ `pick()` — addressService, promotionService, attendanceService (3/8, `orderService` ข้ามเพราะ `pick()` เดียวผูกกับ route ที่ยังไม่ adopt) — branch เดียวกับ 4b-A |
 | **4b-B2** | (ค้าง) adopt zod ให้ `admin/orders/[id]/delivery` + route ที่เหลือ (permissions/preorder-rounds/preorders/users) แล้วค่อยถอด `pick()` ของ orderService (`updateDelivery`) + permissionService/preorderRoundService/preorderService/userService — **5 ไฟล์เหลือ** |
-| **4b-C** | `no-explicit-any` error บน `src/lib` (4 ไฟล์เรียงเล็ก→ใหญ่ + `crudRoutes.ts`) |
+| **4b-C** | ✅ `no-explicit-any` error บน `src/lib` (5 ไฟล์: `refs`/`discountEngine`/`crudService`/`bom`/`crudRoutes`) — branch เดียวกับ 4b-A/B |
 
 ### doc ที่ต้องอัปเดตท้ายรอบ
 - [x] [`validation.md`](validation.md) — §3 ตาราง adopt (ปิด `admin/orders`, `admin/attendances`) + §5 pick() (4b-A/B)
-- [ ] [`infra-tooling.md`](infra-tooling.md) — §1 no-explicit-any error บน src/lib (รอ 4b-C)
-- [x] [`BACKLOG.md`](BACKLOG.md) §3 — ปิดข้อ 4-5 ของ "ลำดับการแก้ที่เหลือ" (บางส่วนสำหรับข้อ 5)
+- [x] [`infra-tooling.md`](infra-tooling.md) — §1 no-explicit-any error บน src/lib (4b-C)
+- [x] [`BACKLOG.md`](BACKLOG.md) §3 — ปิดข้อ 4/6 เต็ม + ข้อ 5 บางส่วน (3/8)
 
 ## เกณฑ์เสร็จรอบ 4b
 - [x] `/admin/orders` POST validate ด้วย zod (ไม่มี PATCH endpoint จริง)
 - [x] `/admin/attendances` ทั้ง 4 route validate ด้วย zod (`recorded_by` inject จาก session เสมอตอน POST)
-- [x] `pick()` ในไฟล์ที่ route adopt zod ครบแล้วถูกถอดออก — **3/8** (address/promotion/attendance) — เหลือ 5 ไฟล์ที่ route ต้นทางยังไม่ adopt zod (ไม่ใช่บั๊ก แค่ยังไม่ถึงคิว)
-- [ ] `no-explicit-any` = error บน `src/lib/**` ทั้งหมด — `npm run lint` 0 error
-- [x] `typecheck` / `typecheck:test` / `test` / `test:integration` / `build` ผ่านหมด (4b-A + 4b-B)
-- [x] doc อัปเดตครบสำหรับ A+B (`validation.md`, `BACKLOG.md`) — `infra-tooling.md` รอ 4b-C
+- [x] `pick()` ในไฟล์ที่ route adopt zod ครบแล้วถูกถอดออก — **3/8** (address/promotion/attendance) — เหลือ 5 ไฟล์ที่ route ต้นทางยังไม่ adopt zod (ไม่ใช่บั๊ก แค่ยังไม่ถึงคิว — ดูข้อ B2)
+- [x] `no-explicit-any` = error บน `src/lib/**` ทั้งหมด — `npm run lint` 0 error (11 warning เหลือใน route layer)
+- [x] `typecheck` / `typecheck:test` / `test` (137) / `test:integration` (13) / `build` ผ่านหมดทุก PR (A+B+C)
+- [x] doc อัปเดตครบ (`validation.md`, `infra-tooling.md`, `BACKLOG.md`, `hardening-4b-plan.md`)

@@ -19,7 +19,7 @@
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
 | อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — บันทึกลงดิสก์ (self-host เท่านั้น, ดู §3.13) |
 | Preorder (เฟส 5) | 🟡 service + API เสร็จ (ดู §8 · [preorder.md](preorder.md)) — เหลือผูก payment/production/promotion |
-| §3 คุณภาพ / hardening | 🟡 ✅ D1/D2/D3 + audit log (PR #5–#12) · ✅ รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · 🟡 **รอบ 4b**: ✅ ข้อ A (`/admin/orders`+`/admin/attendances` zod) · 🟡 ข้อ B (รื้อ `pick()` 3/8 ไฟล์, 2026-09-12) — ยังค้าง: ข้อ C (`no-explicit-any` บน `src/lib`) · 4c (3.8/3.12/3.16) · 4d (3.13–3.15) · 3.11 |
+| §3 คุณภาพ / hardening | 🟡 ✅ D1/D2/D3 + audit log (PR #5–#12) · ✅ รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · ✅ **รอบ 4b ข้อ A+C เสร็จสมบูรณ์** (`/admin/orders`+`/admin/attendances` zod, `no-explicit-any` error บน `src/lib` ทั้งหมด) · 🟡 ข้อ B (รื้อ `pick()` 3/8 ไฟล์, 2026-09-12) — เหลือ B2 (5 ไฟล์ รอ route adopt) · 4c (3.8/3.12/3.16) · 4d (3.13–3.15) · 3.11 |
 | Notification | ✅ ทำแล้ว (2026-09-12) — `notificationService.ts` + LINE push (`src/lib/line.ts`) + `/api/admin/notifications` · ผูกเข้า order ใหม่/สลิปรอตรวจ/สต็อกใกล้หมด (เดิมตัดออกไว้ก่อน ดู §3.12 ประวัติ) |
 
 **คำสั่งตรวจสอบ:** `npm run typecheck` · `typecheck:test` · `npm run lint` · `npm test` (unit) · `npm run test:integration` · `npm run build` — ปัจจุบันผ่านทั้งหมด
@@ -120,7 +120,7 @@
 
 4. ✅ **`/admin/orders` (POST) + `/admin/attendances` adopt zod** (2026-09-12) — `adminCreateOrderBody` (`.extend()` จาก base ร่วมกับ `createOrderBody`) · `attendance.ts` ใหม่ (`recordAttendanceBody`/`updateAttendanceBody`/`checkInOutBody`) · ยืนยันแล้วไม่มี `PATCH /admin/orders/[id]` จริง (4a-plan เดิมเข้าใจผิด scope) · เทส `tests/lib/schemas.test.ts` + `schemas-admin.test.ts` (+9 → unit 137/17) · lint warning ลดจาก 13 → 12 (`admin/orders/route.ts` เลิกใช้ `any`)
 5. 🟡 **รื้อ `pick()` / `createFields` / `pickWritable()` ที่ซ้ำ zod** (2026-09-12) — **ถอดแล้ว 3/8**: `addressService`, `promotionService`, `attendanceService` · **เหลือ 5**: `orderService.updateDelivery` (route `/admin/orders/[id]/delivery` คนละตัวกับ `createOrder`/`createOrderFromCart` ที่ adopt แล้ว — ยังไม่ adopt), `permissionService`/`preorderRoundService`/`preorderService`/`userService` (route ต้นทางยังไม่ adopt zod เลย ยืนยันด้วย grep) · **M**
-6. ⬜ **`no-explicit-any` = `error` บน `src/lib`** — 4 ไฟล์มี `/* eslint-disable */` header (27 จุด `any`: `bom.ts`16, `crudService.ts`5, `discountEngine.ts`3, `refs.ts`3) + `crudRoutes.ts:85` `doc: any` · เก็บ 12 warning ที่เหลือใน `src/app/api/**/route.ts` · (option) `no-floating-promises` · **S–M**
+6. ✅ **`no-explicit-any` = `error` บน `src/lib`** (2026-09-12) — แก้ครบ 5 ไฟล์: `refs.ts`(3), `discountEngine.ts`(3), `crudService.ts`(5), `bom.ts`(16, มี interface `IngredientItem`/`ComponentItem` อยู่แล้วแต่ไม่เคยใช้จริง), `crudRoutes.ts`(2 จุด) — **ไม่เหลือ `any` ใน `src/lib/` เลยสักจุด** ไม่ต้องใช้ disable-next-line ที่ไหนเลย · lint warning ลด 13 → 11 (เหลือแต่ใน `src/app/api/**/route.ts`) · (option) `no-floating-promises` ยังไม่ทำ · **S–M**
 
 **รอบ 4c — feature เล็ก + เทสเพิ่ม (หลัง launch ได้)**
 
