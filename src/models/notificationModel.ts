@@ -32,6 +32,16 @@ const notificationSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // ผลการ push เข้า LINE คู่กันตอนสร้าง (notificationService.notify — src/lib/line.ts)
+    // ไม่ block การสร้าง record นี้ถ้า LINE push ล้มเหลว — เก็บไว้ดีบักเฉย ๆ
+    line_sent: {
+      type: Boolean,
+      default: false,
+    },
+    line_error: {
+      type: String,
+      default: null,
+    },
     deleted_at: {
       type: Date,
       default: null,
