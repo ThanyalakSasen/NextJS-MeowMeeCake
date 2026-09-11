@@ -1,7 +1,7 @@
 # แผน รอบ 4b — จบ §3.1 (zod tail) + §3.6 (no-explicit-any บน src/lib)
 
 > อัปเดตล่าสุด: 2026-09-12
-> สถานะ: 🟡 กำลังสำรวจ — ยังไม่เริ่มแก้โค้ด
+> สถานะ: 🟡 **ข้อ A เสร็จแล้ว** (branch `hardening-4b-orders-attendances`) — ข้อ B/C ยังไม่เริ่ม
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ" รอบ 4b · ต่อจาก [`hardening-4a-plan.md`](hardening-4a-plan.md) §"ยกไปรอบ 4b"
 
 รอบ 4b = 3 งานที่เหลือจาก 4a เรียงตาม**ลำดับพึ่งพา** (ทำ A ก่อนเพราะ B ต้องมี schema ของ A
@@ -22,7 +22,30 @@ C. no-explicit-any = error บน src/lib (4 ไฟล์ header + crudRoutes.ts
 
 ---
 
-## A. adopt zod: `/admin/orders` + `/admin/attendances` — **M**
+## A. adopt zod: `/admin/orders` + `/admin/attendances` — **M** ✅ เสร็จแล้ว (2026-09-12)
+
+### ผลจริง
+- `src/schemas/order.ts`: แยก `orderBodyBase` (ไม่ผ่าน `.refine()`) ออกมาก่อน แล้วให้ `createOrderBody`
+  (shop) กับ `adminCreateOrderBody` (admin, `.extend()` เพิ่ม `user_id`/`delivery_fee`/
+  `discount_amount`/`channel`) ต่างคนต่าง `.refine()` เอง — ตามที่คาดไว้ใน prereq: zod v4 ไม่ให้
+  `.extend()` schema ที่ผ่าน `.refine()` มาแล้ว (คืน type ที่ extend ไม่ได้) ลองใช้ generic helper
+  ฟังก์ชันห่อ `.refine()` ก่อนแต่ TS อนุมาน field ในตัว callback เป็น `unknown` เพราะไม่รู้ shape —
+  เปลี่ยนมาเขียน `.refine()` ซ้ำ 2 รอบตรง ๆ แทน (สั้นกว่าสู้กับ generic type)
+- ยืนยันจากโค้ดจริงว่า **ไม่มี** `PATCH /admin/orders/[id]` (มีแค่ GET/DELETE) — 4a-plan เดิมเข้าใจผิด
+  scope ตรงนี้ ข้อ A เลยมีแค่ POST
+- `src/schemas/attendance.ts` (ใหม่) — 3 schema: `recordAttendanceBody` (POST), `updateAttendanceBody`
+  (PATCH — มี `recorded_by` แก้ตรงได้ ต่างจาก POST ที่ inject จาก session เสมอ, พฤติกรรมเดิม),
+  `checkInOutBody` (check-in/check-out — `user_id` optional)
+- check-in/check-out เดิมใช้ `req.json().catch(() => ({}))` เพื่อให้ self check-in ไม่ต้องส่ง body
+  ก็ได้ — เปลี่ยนไปใช้ `parseBody()` ตรง ๆ ไม่ได้ (จะ throw badRequest ถ้า body ว่างจริง ทำลาย UX เดิม)
+  ใช้ `parse(await req.json().catch(() => ({})), schema)` (helper `parse()` จาก `validate.ts` ที่รับ
+  ค่าที่ resolve แล้ว) แทน — คง fallback `{}` เดิมไว้ + ได้ validate `user_id` เป็น ObjectId ด้วย
+- `admin/orders/route.ts`: ลบ `order: any` ออกได้ด้วย (TS อนุมาน union type จาก
+  `createOrder`/`createOrderFromCart` เองพอ input เป็น typed แล้ว) — lint warning ลด 13 → 12
+- เทส: `tests/lib/schemas.test.ts` (+4 สำหรับ `adminCreateOrderBody`) · `tests/lib/schemas-admin.test.ts`
+  (+9 สำหรับ 3 schema ของ attendance) → unit **137/17**
+- `typecheck` / `typecheck:test` / `lint` (0 error, 12 warning) / `test` (137/137) /
+  `test:integration` (13/13) / `build` ผ่านหมด
 
 ### A1. `POST /api/admin/orders` (สร้างออเดอร์แทนลูกค้า)
 
@@ -150,7 +173,7 @@ error แล้วจบ)
 
 | PR | เนื้อหา |
 |---|---|
-| **4b-A** | zod: `admin/orders` POST (+ PATCH ถ้ามีจริง) + `admin/attendances` (4 ไฟล์) |
+| **4b-A** | ✅ zod: `admin/orders` POST + `admin/attendances` (4 ไฟล์) — branch `hardening-4b-orders-attendances` |
 | **4b-B** | รื้อ `pick()` — เฉพาะไฟล์ที่ route adopt แล้ว (addressService, promotionService ก่อน) + orderService/attendanceService (ต่อจาก 4b-A) |
 | **4b-B2** | (ถ้าจำเป็น) adopt zod ให้ route ที่เหลือใน B แล้วค่อยถอด `pick()` ของ permissionService/preorderRoundService/preorderService/userService |
 | **4b-C** | `no-explicit-any` error บน `src/lib` (5 ไฟล์เรียงเล็ก→ใหญ่) |
@@ -161,9 +184,9 @@ error แล้วจบ)
 - [`BACKLOG.md`](BACKLOG.md) §3 — ปิดข้อ 4-6 ของ "ลำดับการแก้ที่เหลือ"
 
 ## เกณฑ์เสร็จรอบ 4b
-- [ ] `/admin/orders` POST (+ PATCH ถ้ามี) validate ด้วย zod
-- [ ] `/admin/attendances` ทั้ง 4 route validate ด้วย zod (`recorded_by` inject จาก session เสมอ)
+- [x] `/admin/orders` POST validate ด้วย zod (ไม่มี PATCH endpoint จริง)
+- [x] `/admin/attendances` ทั้ง 4 route validate ด้วย zod (`recorded_by` inject จาก session เสมอตอน POST)
 - [ ] `pick()` ในไฟล์ที่ route adopt zod ครบแล้วถูกถอดออก (อย่างน้อย address/promotion/order/attendance — 4/8)
 - [ ] `no-explicit-any` = error บน `src/lib/**` ทั้งหมด — `npm run lint` 0 error
-- [ ] `typecheck` / `typecheck:test` / `test` / `test:integration` / `build` ผ่านหมดทุก PR
+- [x] `typecheck` / `typecheck:test` / `test` / `test:integration` / `build` ผ่านหมด (4b-A)
 - [ ] doc อัปเดตครบ (`validation.md`, `infra-tooling.md`, `BACKLOG.md`)
