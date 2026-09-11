@@ -18,7 +18,8 @@
     "seed": "tsx scripts/seed.ts",
     "backfill:product-codes": "tsx scripts/backfill-product-codes.ts",
     "sync-indexes": "tsx scripts/sync-indexes.ts",
-    "seed:preorder-rounds": "tsx scripts/seed-preorder-rounds.ts"
+    "seed:preorder-rounds": "tsx scripts/seed-preorder-rounds.ts",
+    "reset-owner-password": "tsx scripts/reset-owner-password.ts"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
