@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [addModels, main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # dbConnect.ts throw ตั้งแต่ import ถ้าไม่มีค่านี้ (ดู vitest.config.mts / docs/hardening-4a-plan.md)
+      # ค่าเหล่านี้เป็น dummy สำหรับ typecheck / build / unit test เท่านั้น — integration test
+      # จะเขียนทับ MONGODB_URI ด้วย mongodb-memory-server ใน tests/integration/setup.ts
+      MONGODB_URI: mongodb://127.0.0.1:27017/ci-dummy
+      JWT_SECRET: ci-dummy-secret-000000000000000000000000
+      SESSION_SECRET: ci-dummy-secret-000000000000000000000000
+      NODE_ENV: test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22 # ตรงกับ nvm local (v22.14.0)
+          cache: npm
+
+      # cache binary ของ mongodb-memory-server (~120MB) — ไม่งั้นโหลดใหม่ทุกครั้ง
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}
+
+      - run: npm ci
+
+      - run: npm run typecheck
+      - run: npm run typecheck:test
+      - run: npm run lint
+      - run: npm test # unit (project: unit)
+      - run: npm run test:integration # project: integration (mongodb-memory-server)
+      - run: npm run build

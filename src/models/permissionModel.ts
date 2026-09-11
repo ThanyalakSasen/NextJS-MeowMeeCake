@@ -55,19 +55,25 @@ const permissionSchema = new mongoose.Schema({
     ref: "Users",
     required: true,
   },
+  // soft delete — null = ยังใช้งานอยู่, มีค่า = ถูกลบเมื่อวันเวลานั้น
+  deleted_at: {
+    type: Date,
+    default: null,
+  },
 }
 ,
   {
-    timestamps: { deletedAt: "deleted_at", createdAt: "created_at", updatedAt: "updated_at" },
+    timestamps: { createdAt: "created_at", updatedAt: "updated_at" },
   }
 );
 
-// Compound Index: role_id + menu_key ต้องไม่ซ้ำกัน (แทน unique บน role_id เพียงฟิลด์เดียว)
-// หมายเหตุ: DB เคยมี index เก่าชื่อ user_id_1_menu_key_1 หลงเหลือจากตอนที่ schema นี้ยังผูกกับ
-// user_id แทน role_id — index นั้นทำให้สร้าง permission ซ้ำ menu_key ข้ามกัน role ไม่ได้เลย (ลบไปแล้ว)
+// Compound Index: role_id + menu_key ต้องไม่ซ้ำกัน — แต่บังคับ unique เฉพาะรายการที่ยังไม่ถูกลบ
+// (partial index) เพื่อให้ soft delete แล้วสร้างสิทธิ์คู่เดิมใหม่ได้
+// หมายเหตุ: DB เคยมี index เก่าชื่อ user_id_1_menu_key_1 และ role_id_1_menu_key_1 (แบบ sparse)
+// ถ้าเคยรันสคีมาเวอร์ชันก่อนหน้า ต้อง drop index เก่าออกก่อน index ใหม่นี้จึงจะถูกสร้าง
 permissionSchema.index(
   { role_id: 1, menu_key: 1 },
-  { unique: true, sparse: true },
+  { unique: true, partialFilterExpression: { deleted_at: null } },
 );
 
 // pre-save hook: ตรวจสอบ role_id และอัปเดต updated_at

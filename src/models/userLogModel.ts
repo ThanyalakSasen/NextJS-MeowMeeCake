@@ -13,7 +13,7 @@ const userLogSchema = new mongoose.Schema({
   action_type: {
     type: String,
     required: true,
-    enum: ["CREATE", "READ", "UPDATE", "DELETE", "OTHER"], //ตัวอย่างประเภทของการกระทำที่บันทึก
+    enum: ["CREATE", "READ", "UPDATE", "DELETE", "LOGIN","LOGOUT", "OTHER"], //ตัวอย่างประเภทของการกระทำที่บันทึก
   },
   entity: {
     //ระบุประเภทของข้อมูลที่ถูกกระทำ เช่น "User", "Order", "Product" เป็นต้น
