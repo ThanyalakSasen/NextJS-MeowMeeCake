@@ -67,24 +67,42 @@ Google Identity Services ฝั่ง frontend) — `jwtVerify(credential, GOOGL
 ## 3. CORS / CSRF (BACKLOG §3.10)
 
 ### บริบท
-- session cookie เป็น `httpOnly` + **`SameSite=Lax`** + `secure` (prod) อยู่แล้ว → เบราว์เซอร์
-  ไม่ส่ง cookie บน cross-site POST/PUT/PATCH/DELETE → CSRF แบบ forge form/fetch ถูกกันระดับ cookie แล้ว
-- frontend สมมติ **same-origin** (Next app เดียวกัน) → ไม่ต้องเปิด CORS
+- session cookie เป็น `httpOnly` + **`SameSite=Lax`** (same-origin) หรือ **`SameSite=None; Secure`**
+  (เมื่อเปิดโหมด cross-origin ด้วย `ALLOWED_ORIGINS`) + `secure` (prod หรือ cross-origin) อยู่แล้ว
+- **2026-09-11: เปิดรองรับ frontend แยก origin จริงแล้ว** (NextJS-MeowMeeCake-Frontend, โปรเจกต์แยก) —
+  ดูหัวข้อ "frontend แยก origin" ด้านล่าง แทนที่สมมติฐาน same-origin เดิม
 
 ### สิ่งที่ทำ (defense-in-depth)
+
+**`src/lib/cors.ts`** (ใหม่) — `isAllowedOrigin(origin)` / `corsHeaders(origin)`:
+- อ่าน allowlist จาก env `ALLOWED_ORIGINS` (comma-separated) — ไม่ตั้ง = ไม่มี origin ไหนผ่าน (ปิดโหมดนี้)
+- `corsHeaders` คืน `Access-Control-Allow-Origin/-Credentials` + `Vary: Origin` เฉพาะ origin ที่อยู่ใน allowlist
 
 **`src/lib/csrf.ts`** — `isCsrfSafe(method, originHeader, host)`:
 - safe method (GET/HEAD/OPTIONS) → ผ่าน
 - ไม่มี `Origin` header → ผ่าน (client ที่ไม่ใช่เบราว์เซอร์)
 - `Origin` host === host ของคำขอ → ผ่าน
-- อื่น ๆ (cross-origin / `Origin: "null"` / ค่าเพี้ยน) → **ไม่ผ่าน**
+- `Origin` อยู่ใน `ALLOWED_ORIGINS` allowlist → ผ่าน
+- อื่น ๆ (cross-origin นอก allowlist / `Origin: "null"` / ค่าเพี้ยน) → **ไม่ผ่าน**
 
-**`src/middleware.ts`** — ก่อนทุกอย่าง: `!isCsrfSafe(...)` → `403 CROSS_ORIGIN`
-(ครอบทุก `/api/*` รวม `/api/auth/*`) · เพิ่ม comment ว่า API เป็น same-origin (ไม่ส่ง `Access-Control-Allow-*`)
+**`src/middleware.ts`**:
+- ตอบ preflight `OPTIONS` เองที่ Edge (204 + `Access-Control-Allow-*` เมื่อ origin อยู่ใน allowlist)
+- `!isCsrfSafe(...)` → `403 CROSS_ORIGIN` เหมือนเดิม (ครอบทุก `/api/*` รวม `/api/auth/*`)
+- แนบ `Access-Control-Allow-*` ลงทุก response (สำเร็จ/ปฏิเสธ) ผ่าน helper `respond()` เมื่อ origin อยู่ใน allowlist
 
-**เทส:** `tests/lib/csrf.test.ts` — safe method, ไม่มี Origin, same-origin, cross-origin, `Origin:"null"`
+**`src/lib/session.ts`** — `attachSession`/`clearSession`: เมื่อ `ALLOWED_ORIGINS` ไม่ว่าง → cookie เป็น
+`sameSite: "none"` + `secure: true` เสมอ (สเปกบังคับคู่กัน — `localhost` เป็น secure context ในเบราว์เซอร์
+สมัยใหม่ จึงทดสอบผ่าน `http://localhost` ได้โดยไม่ต้อง HTTPS)
+
+**เทส:** `tests/lib/csrf.test.ts` (+ allowlist case), `tests/lib/cors.test.ts` (ใหม่)
+
+### ตั้งค่าใช้งาน (dev, 2 โปรเจกต์แยกกัน)
+- backend `.env.local`: `ALLOWED_ORIGINS=http://localhost:3000` (origin ของ frontend), รันที่ port 4000
+  (`next dev -p 4000` — ต้องคนละ port กับ frontend)
+- frontend `.env.local`: `NEXT_PUBLIC_API_BASE_URL=http://localhost:4000`, `NEXT_PUBLIC_API_MOCK=0`
 
 ### ยังเปิดค้าง / ถ้าต้องเปลี่ยน
-- **frontend แยก origin** → ต้องเพิ่ม allowlist ใน `middleware.ts` + ตอบ preflight `OPTIONS` +
-  ปรับ cookie เป็น `SameSite=None; Secure` (แล้ว CSRF ต้องพึ่ง token จริง ไม่ใช่แค่ Origin check)
-- proxy บางตัว strip `Origin` → การกันจะหลวม (fallback เป็น "ผ่าน") — ยอมรับได้เพราะ `SameSite=Lax` ยังกันอยู่
+- production: ต้องตั้ง `ALLOWED_ORIGINS` เป็น origin จริงของ frontend ที่ deploy (ไม่ใช่ localhost) —
+  `secure: true` บังคับ HTTPS จริงตอนนั้น (ไม่มี localhost exception)
+- proxy บางตัว strip `Origin` → การกันจะหลวม (fallback เป็น "ผ่าน") — ยอมรับได้เพราะ same-origin/allowlist
+  เช็คที่ cookie (`SameSite`) ยังกันอยู่อีกชั้น
