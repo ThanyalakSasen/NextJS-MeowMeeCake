@@ -97,7 +97,14 @@ export async function createPayment(input: CreatePaymentInput) {
       .findOne({ _id: input.preorder_id, deleted_at: null })
       .lean<any>();
     if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
+    if (String(preorder.user_id) !== String(input.user_id)) {
+      throw badRequest("พรีออเดอร์นี้ไม่ได้เป็นของผู้ใช้ที่ระบุ");
+    }
     if (preorder.payment_status === "paid") throw conflict("พรีออเดอร์นี้ชำระเงินแล้ว");
+    if (preorder.order_status === "cancelled") throw conflict("พรีออเดอร์นี้ถูกยกเลิกแล้ว");
+    if (Math.abs(amount - preorder.total_amount) > AMOUNT_TOLERANCE) {
+      throw badRequest(`ยอดชำระต้องเท่ากับยอดพรีออเดอร์ (${preorder.total_amount} บาท)`);
+    }
   }
 
   // กันสร้าง payment ซ้ำ: 1 order/preorder มีใบที่ยัง active (pending) ได้ใบเดียว

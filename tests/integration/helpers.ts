@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import userModel from "@/models/userModel";
 import productModel from "@/models/productModel";
+import preorderModel from "@/models/preorderModel";
 
 export const oid = () => new mongoose.Types.ObjectId();
 
@@ -28,6 +29,20 @@ export async function makeProduct(over: Record<string, unknown> = {}) {
     product_price: 100,
     product_type: "inStore",
     product_stock_quantity: 50,
+    ...over,
+  });
+}
+
+/** สร้าง preorder ตรง ๆ ผ่าน model (ไม่ผ่าน preorderService — ไม่ต้องมีรอบ/โควตาจริงสำหรับเทส payment) */
+export async function makePreorder(userId: string, over: Record<string, unknown> = {}) {
+  seq++;
+  return preorderModel.create({
+    preorder_no: `PRE-TEST-${seq}-${Date.now()}`,
+    user_id: userId,
+    round_id: oid(),
+    order_type: "takeaway",
+    subtotal: 100,
+    total_amount: 100,
     ...over,
   });
 }
