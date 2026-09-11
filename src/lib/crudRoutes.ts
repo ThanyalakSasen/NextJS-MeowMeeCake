@@ -46,11 +46,14 @@ export interface CrudValidate {
 }
 
 /** อ่าน body: มี schema → parseBody (throw 400 ถ้าไม่ผ่าน) · ไม่มี → req.json() แบบ tolerant เดิม
- *  (คืน any เพื่อคง behavior เดิม — service.create/update รับ Doc generic) */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function readBody(req: NextRequest, schema: z.ZodType | undefined): Promise<any> {
-  if (schema) return parseBody(req, schema);
-  return req.json().catch(() => ({}));
+ *  (คืน Record<string, unknown> — ตรงกับ Doc ของ CrudService.create/update) */
+async function readBody(
+  req: NextRequest,
+  schema: z.ZodType | undefined
+): Promise<Record<string, unknown>> {
+  // z.infer<z.ZodType> (base class, ไม่ใช่ schema เฉพาะ) resolve เป็น unknown — cast ให้ตรง signature
+  if (schema) return (await parseBody(req, schema)) as Record<string, unknown>;
+  return req.json().catch(() => ({})) as Promise<Record<string, unknown>>;
 }
 
 /** บันทึก audit log สำหรับ mutation ของ crud factory (ถ้าตั้ง opts.audit) */
@@ -82,7 +85,7 @@ function logMutation(
   req: NextRequest,
   cfg: CrudAudit | undefined,
   op: "create" | "update" | "delete" | "restore",
-  doc: any
+  doc: { _id?: unknown } | null | undefined
 ): void {
   if (!cfg) return;
   audit(req, {
