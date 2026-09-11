@@ -16,6 +16,10 @@ import userModel from "../src/models/userModel";
 const OWNER_EMAIL = "thanyalak.sas@kkumail.com";
 const OWNER_PASSWORD = "MeowMee@1234";
 
+// บัญชี "ลูกค้าทั่วไป" คงที่ — ผูกกับออเดอร์หน้าร้าน (POS) ที่ไม่ระบุตัวลูกค้าจริง
+// ไม่มี password (login ไม่ได้ตั้งใจ) — frontend หา id ผ่าน GET /admin/users?search=<email> นี้
+export const GUEST_CUSTOMER_EMAIL = "guest@meowmeecake.local";
+
 type Doc = Record<string, unknown>;
 
 /** สร้างเฉพาะเอกสารที่ยังไม่มี (idempotent — รันซ้ำได้) */
@@ -107,6 +111,25 @@ async function main() {
     });
     console.log(`  owner user             สร้างใหม่ ${OWNER_EMAIL}`);
     console.log(`                         รหัสผ่านชั่วคราว: ${OWNER_PASSWORD}  ← เปลี่ยนทันที`);
+  }
+
+  // ลูกค้าทั่วไป (POS guest)
+  const customerRole: any = await roleModel.findOne({ role_name: "customer" }).lean();
+  if (!customerRole) throw new Error("ไม่พบ role customer หลัง seed roles");
+
+  const existingGuest = await userModel.exists({ email: GUEST_CUSTOMER_EMAIL.toLowerCase() });
+  if (existingGuest) {
+    console.log(`  guest customer         มีอยู่แล้ว (${GUEST_CUSTOMER_EMAIL})`);
+  } else {
+    await userModel.create({
+      user_fullname: "ลูกค้าทั่วไป",
+      email: GUEST_CUSTOMER_EMAIL,
+      auth_provider: "local", // password ไม่ตั้ง (null) — login ไม่ได้ตั้งใจ
+      role_id: customerRole._id,
+      is_active: true,
+      is_email_verified: true,
+    });
+    console.log(`  guest customer         สร้างใหม่ ${GUEST_CUSTOMER_EMAIL}`);
   }
 
   console.log("\nseed เสร็จสมบูรณ์");
