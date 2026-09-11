@@ -21,6 +21,7 @@ import userModel from "../models/userModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
 import * as orderService from "./orderService";
+import * as preorderService from "./preorderService";
 import type { PaymentStatus } from "./orderService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -48,14 +49,14 @@ export interface ListPaymentQuery {
 }
 
 // ── helper: ผลักสถานะไปที่ order หรือ preorder ที่ผูกไว้ ─────
+// BACKLOG 2b.2: preorder ต้องผ่าน preorderService.setPaymentStatus() เหมือน order ผ่าน
+// orderService.setPaymentStatus() — ไม่งั้น auto-advance order_status pending→confirmed
+// ตอนจ่ายเงินจะไม่ทำงาน (เดิมเขียน payment_status ตรงผ่าน preorderModel.updateOne เฉย ๆ)
 async function propagateStatus(payment: any, status: PaymentStatus) {
   if (payment.order_id) {
     await orderService.setPaymentStatus(String(payment.order_id), status, String(payment._id));
   } else if (payment.preorder_id) {
-    await preorderModel.updateOne(
-      { _id: payment.preorder_id, deleted_at: null },
-      { $set: { payment_status: status, payment_id: payment._id } }
-    );
+    await preorderService.setPaymentStatus(String(payment.preorder_id), status, String(payment._id));
   }
 }
 
