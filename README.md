@@ -23,6 +23,7 @@
 - **โปรโมชัน FreeShipping กับออเดอร์ไม่มีค่าส่ง (บั๊ก 2.6) → [`docs/promo-freeshipping.md`](docs/promo-freeshipping.md)**
 - **ขอบเขตการยกเลิกออเดอร์ของลูกค้า (บั๊ก 2.7) → [`docs/order-cancel.md`](docs/order-cancel.md)**
 - **กัน race: โปรโมชัน usage + payment ซ้ำ (บั๊ก 2.9–2.10) → [`docs/concurrency-guards.md`](docs/concurrency-guards.md)**
+- **preorder payment/cancellation hardening (บั๊ก 2b.1–2b.4) → [`docs/preorder-payment-hardening.md`](docs/preorder-payment-hardening.md)**
 - **สรุปรวมการแก้บั๊กความถูกต้องข้อมูล 2.8–2.11 → [`docs/data-integrity-fixes.md`](docs/data-integrity-fixes.md)**
 - **บันทึกกิจกรรมผู้ใช้ (audit log) → [`docs/auditLog.md`](docs/auditLog.md)**
 - **ระบบพรีออเดอร์ (รอบ / โควตา / API) → [`docs/preorder.md`](docs/preorder.md)**

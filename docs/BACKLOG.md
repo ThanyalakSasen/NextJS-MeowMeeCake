@@ -77,6 +77,7 @@
 > **แก้ครบทั้ง 4 ข้อแล้ว** บน branch `fix-preorder-payment-ownership` (commit `51f4a75`, `4bc09b1`) —
 > ยังไม่ merge เข้า `addModels` · เทสใหม่ `tests/integration/{createPaymentPreorder,cancelPreorder}.test.ts`
 > (9 เคส) · `typecheck`/`lint`/`test`/`test:integration`/`build` ผ่านหมดหลังแก้
+> **รายละเอียดปัญหา/วิธีแก้/เหตุผลที่แก้แบบนี้ (ทีละข้อ) → [`preorder-payment-hardening.md`](preorder-payment-hardening.md)**
 
 | # | เรื่อง | ที่ไฟล์ | รายละเอียด / วิธีแก้ |
 |---|---|---|---|
