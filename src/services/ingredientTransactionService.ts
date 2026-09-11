@@ -17,6 +17,8 @@ import ingredientTransactionModel from "../models/ingredientTransactionModel";
 import ingredientModel from "../models/ingredientModel";
 import unitModel from "../models/unitModel";
 import userModel from "../models/userModel";
+import { notificationService } from "./notificationService";
+import { log } from "../lib/logger";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -112,6 +114,21 @@ export async function createTransaction(input: CreateTransactionInput) {
       expiry_date: input.expiry_date ? new Date(input.expiry_date) : null,
       performed_by: input.performed_by,
     });
+
+    // แจ้งเตือนตอนสต็อกเพิ่งข้ามจุดสั่งซื้อลงมา (before > reorder_point, after <= reorder_point)
+    // เช็คแค่ตอน "เพิ่งข้าม" กัน spam แจ้งเตือนซ้ำทุกครั้งที่เบิกตอนสต็อกต่ำอยู่แล้ว
+    const reorderPoint = ingredient.reorder_point ?? 0;
+    if (before > reorderPoint && after <= reorderPoint) {
+      notificationService
+        .notify({
+          title: `วัตถุดิบใกล้หมด: ${ingredient.ingredient_name}`,
+          message: `คงเหลือ ${after} (จุดสั่งซื้อ ${reorderPoint})`,
+          module: "ingredient",
+          type: "warning",
+          link: "/owner/ingredients",
+        })
+        .catch((err) => log.error("ingredient.notify_failed", { ingredient_id: String(ingredient._id), err }));
+    }
 
     return {
       transaction: txn.toObject(),

@@ -36,6 +36,7 @@ import * as promotionUsageService from "./promotionUsageService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import * as productService from "./productService";
+import { notificationService } from "./notificationService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -375,6 +376,17 @@ async function persistOrder(
     await saga.rollback();
     throw err;
   }
+
+  // แจ้งเตือนออเดอร์ใหม่ (DB + LINE) — best-effort ไม่ทำให้สร้างออเดอร์ล้มเหลวถ้าแจ้งเตือนพัง
+  notificationService
+    .notify({
+      title: `ออเดอร์ใหม่ ${order.order_no}`,
+      message: `ยอดรวม ${total_amount.toLocaleString("th-TH")} บาท`,
+      module: "order",
+      type: "info",
+      link: `/owner/orders/manageOrders?id=${order._id}`,
+    })
+    .catch((err) => log.error("order.notify_failed", { order_id: String(order._id), err }));
 
   return getOrderById(String(order._id));
 }

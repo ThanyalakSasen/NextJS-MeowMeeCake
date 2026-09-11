@@ -14,6 +14,11 @@ import productModel from "../models/productModel";
 import productCategoryModel from "../models/productCategoryModel";
 import productVariantModel from "../models/productVariantModel";
 import unitModel from "../models/unitModel";
+import { notificationService } from "./notificationService";
+import { log } from "../lib/logger";
+
+/** เกณฑ์ "สต็อกเหลือน้อย" ของสินค้า (ตรงกับดีฟอลต์ของ getLowStockProducts) */
+const LOW_STOCK_THRESHOLD = 5;
 
 /**
  * productService — CRUD + จัดการสต็อกของสินค้า (Products)
@@ -716,6 +721,22 @@ export async function deductStockForOrder(items: StockItemInput[]) {
         );
       }
       applied.push({ product_id, quantity });
+
+      // แจ้งเตือนตอนสต็อกเพิ่งข้าม LOW_STOCK_THRESHOLD ลงมา (กัน spam ทุกครั้งที่ต่ำอยู่แล้ว)
+      const before = product.product_stock_quantity ?? 0;
+      const after = updated.product_stock_quantity ?? 0;
+      if (before > LOW_STOCK_THRESHOLD && after <= LOW_STOCK_THRESHOLD) {
+        // หมายเหตุ: enum module ไม่มีหมวด "product" แยก — ใช้ "ingredient" ร่วมกัน (หมวดสต็อกสินค้าคงคลัง)
+        notificationService
+          .notify({
+            title: `สินค้าใกล้หมด: ${product.product_name_th}`,
+            message: `คงเหลือ ${after} ชิ้น`,
+            module: "ingredient",
+            type: "warning",
+            link: "/owner/products",
+          })
+          .catch((err) => log.error("product.notify_failed", { product_id, err }));
+      }
     }
   } catch (err) {
     // ชดเชย: คืนสต็อกทุกตัวที่ตัดไปแล้ว

@@ -18,6 +18,8 @@ import paymentModel from "../models/paymentModel";
 import orderModel from "../models/orderModel";
 import preorderModel from "../models/preorderModel";
 import userModel from "../models/userModel";
+import { notificationService } from "./notificationService";
+import { log } from "../lib/logger";
 import * as orderService from "./orderService";
 import type { PaymentStatus } from "./orderService";
 
@@ -207,6 +209,18 @@ export async function submitSlip(
   if (input.promptpay_ref !== undefined) payment.promptpay_ref = input.promptpay_ref;
   payment.status = "pending"; // ส่งใหม่หลังเคยถูกปฏิเสธ → กลับมารอตรวจ
   await payment.save();
+
+  // แจ้งเตือนสลิปเข้าใหม่ (DB + LINE) — best-effort ไม่ทำให้แนบสลิปล้มเหลวถ้าแจ้งเตือนพัง
+  notificationService
+    .notify({
+      title: "มีสลิปโอนเงินรอตรวจสอบ",
+      message: `ยอด ${payment.amount.toLocaleString("th-TH")} บาท`,
+      module: "finance",
+      type: "info",
+      link: payment.order_id ? `/owner/orders/manageOrders?id=${payment.order_id}` : null,
+    })
+    .catch((err) => log.error("payment.notify_failed", { payment_id: String(payment._id), err }));
+
   return payment.toObject();
 }
 
