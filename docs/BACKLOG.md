@@ -14,7 +14,7 @@
 | Auth layer (JWT + middleware + RBAC 3 ชั้น) | ✅ ใช้อยู่ |
 | `product_type` = `inStore` / `online` / `preorder` | ✅ รองรับทั้งระบบ |
 | **§2 บั๊ก / ความถูกต้องข้อมูล (2.1–2.11)** | ✅ **ปิดครบทั้ง 11 ข้อ** — PR [#3](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/3) **merged** เข้า `addModels` (merge commit `055d71b`) · issue [#4](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/issues/4) closed — เหลือแค่ขั้น deploy: `npm run sync-indexes` + ลบข้อมูลซ้ำกับ DB จริง (ดู §6) · สรุปรวม → [`data-integrity-fixes.md`](data-integrity-fixes.md) |
-| **§2b บั๊ก preorder payment/cancellation (ใหม่ 2026-09-12)** | 🔴 **ยังไม่แก้ — 4 ข้อ** พบจาก code review เต็ม `src/services/` — path เดียวกับ §2 (order) แต่ไม่เคยได้แก้ฝั่ง preorder เลย มีข้อ 1 ที่เป็นช่องโหว่ความปลอดภัย (จ่ายเงินแทนคนอื่นได้) |
+| **§2b บั๊ก preorder payment/cancellation (2026-09-12)** | ✅ **แก้ครบ 4/4** บน branch `fix-preorder-payment-ownership` (ยังไม่ merge เข้า `addModels`) — พบจาก code review เต็ม `src/services/`, มีข้อ 1 ที่เคยเป็นช่องโหว่ความปลอดภัย (จ่ายเงินแทนคนอื่นได้) |
 | **§2c บั๊กความทนทาน/correctness เล็กอื่น ๆ (ใหม่ 2026-09-12)** | 🟡 **ยังไม่แก้ — 4 ข้อ** (clearCart ไม่กัน error, voidTransaction ไม่มี floor guard, ความเสี่ยง double-credit สต็อก production, recordUsage swallow error — ข้อหลังเป็น tradeoff ที่ตั้งใจไว้แล้ว) จาก code review รอบเดียวกับ §2b |
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
 | อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — บันทึกลงดิสก์ (self-host เท่านั้น, ดู §3.13) |
@@ -68,23 +68,24 @@
 
 ---
 
-## 2b. 🔴 บั๊ก preorder payment/cancellation — ขนานกับ §2 (order) แต่ไม่เคยแก้
+## 2b. ✅ บั๊ก preorder payment/cancellation — ปิดครบ 4/4 (2026-09-12)
 
 > พบจาก code review เต็ม `src/services/` (2026-09-12) — ไล่เทียบ `preorderService.ts`/`paymentService.ts` กับ
 > `orderService.ts` ที่ path คู่ขนานผ่านมาแล้วทุกจุด (§2.7/2.8) พบว่า preorder **ไม่เคยได้ fix ตาม** เลย
 > ทุกข้อ verify แล้วด้วยการอ่านโค้ดจริง (ไม่ใช่แค่รายงานดิบ) — reachable จริงผ่าน API ที่ใช้งานอยู่
 > (`/api/shop/payments`, `/api/shop/preorders/[id]/cancel`, `/api/admin/preorders/[id]/status`)
-> §8 เคยแอบบันทึกไว้บรรทัดเดียวว่า "ยังไม่ได้เรียก `setPaymentStatus()`" (= 2b.2) แต่ไม่เคยรู้ว่าลามไปถึง
-> security (2b.1) และเงินไม่คืน (2b.3/2b.4) — ตอนนี้ยกเป็นหมวดเดียวกับ blocker เพราะเกี่ยวกับเงินจริง
+> **แก้ครบทั้ง 4 ข้อแล้ว** บน branch `fix-preorder-payment-ownership` (commit `51f4a75`, `4bc09b1`) —
+> ยังไม่ merge เข้า `addModels` · เทสใหม่ `tests/integration/{createPaymentPreorder,cancelPreorder}.test.ts`
+> (9 เคส) · `typecheck`/`lint`/`test`/`test:integration`/`build` ผ่านหมดหลังแก้
 
 | # | เรื่อง | ที่ไฟล์ | รายละเอียด / วิธีแก้ |
 |---|---|---|---|
-| 2b.1 | 🔴 **สร้าง payment ผูกกับพรีออเดอร์คนอื่นได้ (IDOR)** | `src/services/paymentService.ts:94-101` (เทียบ order branch `:86-93`) | `createPayment` branch `preorder` เช็คแค่ `preorder.payment_status !== "paid"` — **ไม่เช็ค** `preorder.user_id === input.user_id` (ownership), **ไม่เช็ค** `order_status !== "cancelled"`, **ไม่เทียบ** `amount` กับ `preorder.total_amount` (order branch มี `Math.abs(amount - order.total_amount) > AMOUNT_TOLERANCE` ที่ `:91` แต่ preorder ไม่มี) · **exploit จริง:** ลูกค้าคนไหนก็ได้ที่ login แล้ว (route `/api/shop/payments` แค่ `withAuth`) ยิง `preorder_id` ของคนอื่น + `amount` เท่าไหร่ก็ได้ → สร้าง payment `pending` ผูกกับพรีออเดอร์คนอื่นสำเร็จ ถ้าแอดมิน `verifyPayment(approved:true)` ทีหลังโดยไม่ทันสังเกต พรีออเดอร์คนอื่นจะถูกมาร์ค `paid` ทั้งที่เจ้าของไม่ได้จ่าย · **แก้:** เพิ่ม 3 เช็คให้ตรงกับ order branch |
-| 2b.2 | ~~ยังไม่ได้เรียก `preorderService.setPaymentStatus()`~~ (เคยบันทึกไว้ที่ §8) → **verify แล้ว: ผลจริงคือ preorder ไม่ auto-confirm หลังจ่ายเงิน** | `src/services/paymentService.ts:54-58` (`propagateStatus`) · `preorderService.ts:385` (`setPaymentStatus` — dead code, grep ยืนยันไม่ถูกเรียกจากที่ไหนเลยทั้ง repo) | `propagateStatus` branch `order_id` เรียก `orderService.setPaymentStatus()` จริง (`:53`) แต่ branch `preorder_id` เขียน `preorderModel.updateOne({...},{$set:{payment_status,payment_id}})` **ตรงๆ** ข้าม `preorderService.setPaymentStatus()` ไปเลย ต่างจาก order ที่ `setPaymentStatus` มี logic auto-advance `order_status` `pending→confirmed` ตอนจ่ายเงิน (`orderService.ts:651-653`) · **ผล:** พรีออเดอร์ที่แอดมิน verify payment แล้วค้างที่ `order_status:"pending"` ตลอดไป จนกว่าแอดมินจะไปกดเปลี่ยนสถานะเองอีกที (คนละหน้า คนละขั้นตอน ลืมง่าย) · **แก้:** เปลี่ยน `propagateStatus` ให้เรียก `preorderService.setPaymentStatus(preorderId, status, paymentId)` แทน (dynamic import กัน circular import เหมือนที่ `orderService`↔`paymentService` ทำอยู่แล้ว) |
-| 2b.3 | 🔴 ยกเลิกพรีออเดอร์ที่จ่ายเงินแล้ว **ไม่คืนเงิน ไม่ log** (คู่ขนาน §2.8 ที่ order แก้แล้ว) | `src/services/preorderService.ts:355-370` (`updatePreorderStatus` branch cancel) เทียบ `orderService.ts:562-580` | ตอนแอดมินยกเลิกพรีออเดอร์ (`PATCH /api/admin/preorders/[id]/status`) โค้ดคืนแค่โควตารอบ (`releaseQty`) — **ไม่เช็ค `payment_status` เลย** ไม่มี `refundPayment`, ไม่มีแม้แต่ `log.warn` (ต่างจาก order ที่ auto-refund best-effort + log ชัดเจนตาม §2.8) · **ผล:** พรีออเดอร์จบที่ `order_status:"cancelled"` + `payment_status:"paid"` ค้างถาวร ไม่มี refund record ไม่มี trace ใน log เลยสักบรรทัด · **แก้:** เพิ่ม logic เดียวกับ §2.8 — ถ้า `payment_status==="paid"` ตอนยกเลิก หา payment ที่ `status:"paid"` แล้วเรียก `refundPayment` (best-effort + `log.warn` ถ้าไม่พบ) |
-| 2b.4 | 🔴 ลูกค้ายกเลิกพรีออเดอร์ที่จ่ายเงินแล้วได้เอง ทุกสถานะ (คู่ขนาน §2.7 ที่ order แก้แล้ว) | `src/services/preorderService.ts:377-382` (`cancelPreorder`) เทียบ `orderService.ts:609-630` (`cancelOrder`) | `cancelPreorder` (ใช้โดย `POST /api/shop/preorders/[id]/cancel`) ส่งต่อ `updatePreorderStatus` ตรงๆ **ไม่มี `allowedFrom` list**, **ไม่เช็ค `payment_status==="paid"`** เลย ต่างจาก `orderService.cancelOrder` ที่มี `CUSTOMER_CANCELABLE_STATUSES = ["pending","confirmed"]` + บล็อก self-cancel เมื่อจ่ายเงินแล้ว (`throw conflict()`) · **ผล:** ลูกค้าที่จ่ายเงินพรีออเดอร์ไปแล้วยกเลิกเองได้ทุกสถานะ (แม้กำลังเตรียมของอยู่) โควตาถูกคืนแต่เงินไม่ได้คืน และไม่มีกลไกตรวจจับ (ซ้อนกับ 2b.3 — ยิ่งไม่มี log เลย) · **แก้:** เพิ่ม `allowedFrom` guard + `payment_status==="paid"` guard ให้ `cancelPreorder` แบบเดียวกับ `cancelOrder` |
+| 2b.1 | ~~**สร้าง payment ผูกกับพรีออเดอร์คนอื่นได้ (IDOR)**~~ | `src/services/paymentService.ts:94-101` (เทียบ order branch `:86-93`) | ✅ แก้แล้ว (2026-09-12, commit `51f4a75`) — เพิ่ม 3 เช็คให้ branch `preorder` ตรงกับ branch `order` ทุกจุด: ownership (`preorder.user_id === input.user_id` — `input.user_id` มาจาก session เสมอ ไม่ใช่ client-controlled), cancelled-status (`order_status !== "cancelled"`), amount-tolerance (`Math.abs(amount - preorder.total_amount) > AMOUNT_TOLERANCE`) · เทส: `createPaymentPreorder.test.ts` (4 เคส) |
+| 2b.2 | ~~ยังไม่ได้เรียก `preorderService.setPaymentStatus()`~~ (เคยบันทึกไว้ที่ §8) | `src/services/paymentService.ts:54-58` (`propagateStatus`) · `preorderService.ts:385` (`setPaymentStatus`) | ✅ แก้แล้ว (2026-09-12, commit `4bc09b1`) — `propagateStatus` branch `preorder_id` เปลี่ยนจากเขียน `preorderModel.updateOne()` ตรง ๆ มาเรียก `preorderService.setPaymentStatus()` แทน (logic auto-advance `order_status` `pending→confirmed` มีอยู่แล้วในฟังก์ชันนี้ตั้งแต่ต้น แค่ไม่เคยถูกเรียก) · เทส: `cancelPreorder.test.ts` เคส "verify payment → auto-confirm" |
+| 2b.3 | ~~ยกเลิกพรีออเดอร์ที่จ่ายเงินแล้ว ไม่คืนเงิน ไม่ log~~ (คู่ขนาน §2.8) | `src/services/preorderService.ts` (`updatePreorderStatus` branch cancel) เทียบ `orderService.ts:562-580` | ✅ แก้แล้ว (2026-09-12, commit `4bc09b1`) — เปลี่ยนมาใช้ `Saga` (เหมือน orderService) + เพิ่ม auto-refund เมื่อ `payment_status==="paid"` (หา payment ที่ `paid` แล้วเรียก `paymentService.refundPayment` ผ่าน dynamic import กัน circular import) + `log.warn` ถ้าไม่พบ payment/`cancelled_by` แทนที่จะเงียบสนิท · เทส: `cancelPreorder.test.ts` เคส "แอดมินยกเลิก → auto-refund" |
+| 2b.4 | ~~ลูกค้ายกเลิกพรีออเดอร์ที่จ่ายเงินแล้วได้เอง ทุกสถานะ~~ (คู่ขนาน §2.7) | `src/services/preorderService.ts` (`cancelPreorder`) เทียบ `orderService.ts:609-630` (`cancelOrder`) | ✅ แก้แล้ว (2026-09-12, commit `4bc09b1`) — เพิ่ม `CUSTOMER_CANCELABLE_STATUSES = ["pending","confirmed"]` + option `allowedFrom` ใน `cancelPreorder()` (เช็คสถานะปัจจุบัน + block เมื่อ `payment_status==="paid"` → `conflict` 409 "ติดต่อร้าน") · route `/api/shop/preorders/[id]/cancel` ส่ง `allowedFrom` เข้าไปแล้ว (เดิมไม่ส่งเลย) · เทส: `cancelPreorder.test.ts` 3 เคส (จ่ายแล้ว/เกิน allowedFrom/ปกติ) |
 
-**ลำดับแก้แนะนำ:** 2b.1 ก่อน (security, ผลกระทบสูงสุด) → 2b.2 (data integrity, กระทบ UX แอดมินทุกวัน) → 2b.3/2b.4 คู่กัน (เงินไม่คืน — ทำพร้อมกันเพราะ root cause เดียวกันคือ "ไม่มี payment-status guard ตอน cancel")
+**ยังไม่ทำ:** push branch + เปิด PR เข้า `addModels`
 
 ---
 
@@ -250,8 +251,8 @@ enum = `["inStore", "online", "preorder"]` (เดิม `"ready"` → `"inStore
 
 **ยังไม่ทำ (ต่อยอด):**
 - ผูก `discountEngine`/โปรโมชันกับพรีออเดอร์ (ตอนนี้รองรับเฉพาะ `discount_amount` กรอกมือของแอดมิน)
-- `paymentService` — รับ `preorder_id` ได้แล้ว แต่ยัง **มีบั๊กจริง 4 ข้อ** ในเส้นทางนี้ (ownership/amount check หาย,
-  ไม่เรียก `setPaymentStatus()`, ยกเลิกไม่คืนเงิน) → ดูหมวด **§2b** ด้านบน (ก่อน §3)
+- ~~`paymentService` — รับ `preorder_id` ได้แล้ว แต่ยังไม่ได้เรียก `preorderService.setPaymentStatus()`~~ →
+  **แก้แล้ว** พร้อมอีก 3 บั๊กที่เกี่ยวข้อง (ownership/amount check, ยกเลิกไม่คืนเงิน) → ดูหมวด **§2b** ด้านบน (ก่อน §3)
 - `productionOrderService` — `source_type: "preorder"` ยัง reject ไว้ ยังไม่สร้างใบสั่งผลิตจาก `round_id`
 - ไม่เลื่อน `round_status` อัตโนมัติตามเวลา (แอดมินกด open/close เอง)
 - seed permission ให้ role `staff` เข้าเมนู `preorder` (owner ผ่านอยู่แล้ว)
