@@ -1,8 +1,8 @@
 # Validation layer (zod) — BACKLOG §3.1
 
-> อัปเดตล่าสุด: 2026-09-11
-> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.1 · แผน: [`hardening-plan.md`](hardening-plan.md) D1 (PR #6) + [`hardening-4a-plan.md`](hardening-4a-plan.md) PR C–E
-> สถานะ: 🟡 infra + `validate`/`createInject` option + adopt `/auth/*` · `/shop/{orders,cart,payments,me,addresses,reviews}` · crud-factory ทั้งหมด (catalog/inventory/sentiment/rbac/bom) · `/admin/promotions` — **เหลือ (4b):** `/admin/orders` · `/admin/attendances` · รื้อ `pick()`/`createFields` ใน service (ดู §3)
+> อัปเดตล่าสุด: 2026-09-12
+> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.1 · แผน: [`hardening-plan.md`](hardening-plan.md) D1 (PR #6) + [`hardening-4a-plan.md`](hardening-4a-plan.md) PR C–E + [`hardening-4b-plan.md`](hardening-4b-plan.md) ข้อ A
+> สถานะ: 🟡 infra + `validate`/`createInject` option + adopt `/auth/*` · `/shop/{orders,cart,payments,me,addresses,reviews}` · crud-factory ทั้งหมด (catalog/inventory/sentiment/rbac/bom) · `/admin/promotions` · **`/admin/orders` (POST) + `/admin/attendances` ทั้ง 4 route (2026-09-12)** — **เหลือ (4b ต่อ):** รื้อ `pick()`/`createFields` ใน service (ดู §3)
 
 ---
 
@@ -100,9 +100,9 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 | `PATCH /api/shop/me` | ✅ (รอบ 4a PR E) | `user.ts` `updateProfileBody` — PROFILE_FIELDS ล้วน `.partial()` (phone regex, birthdate coerce, allergies = string[]) |
 | `POST /api/shop/addresses` + `[id]` PATCH | ✅ (รอบ 4a PR E) | `address.ts` `addressCreate/Update` — 5 ช่อง + `zip_code` 5 หลัก + `is_default?` |
 | `POST /api/shop/reviews` + `[id]` PATCH | ✅ (รอบ 4a PR E) | `review.ts` `reviewCreateBody/reviewUpdateBody` — `rating` int 1–5 (coerce), `image` = string[] |
-| `POST/PATCH /api/admin/orders*` (custom route) | ⬜ (4b) | `order.ts` (admin variant — รับ `delivery_fee`/`discount_amount` override ได้) — ซับซ้อน แยกทำ |
-| `/api/admin/attendances` (route / check-in / check-out / `[id]`) | ⬜ (4b) | `attendance.ts` — `recorded_by` inject จาก session |
-| รื้อ `pick()` / `createFields` / `Number()` ใน service | ⬜ (4b) | หลัง adopt route ครบ — ให้ zod เป็นด่านเดียว · ตอนนี้ `createFields`/`updateFields` (`createCrudService`) + `pickWritable()` (component/recipe) + `pick()` (address/user/promotion/permission/preorderRound/order/attendance service) ยังคงไว้เป็น defense-in-depth |
+| `POST /api/admin/orders` (custom route) | ✅ (2026-09-12) | `order.ts` → `adminCreateOrderBody` (`.extend()` จาก `orderBodyBase` ที่ `createOrderBody`/`adminCreateOrderBody` ใช้ร่วมกัน — เพิ่ม `user_id`/`delivery_fee`/`discount_amount`/`channel`) — ไม่มี `PATCH /admin/orders/[id]` จริง (มีแค่ GET/DELETE, เปลี่ยนสถานะแยกไปที่ `/admin/orders/[id]/status`) |
+| `/api/admin/attendances` (route / check-in / check-out / `[id]`) | ✅ (2026-09-12) | `attendance.ts` — `recordAttendanceBody`/`updateAttendanceBody`/`checkInOutBody` · `recorded_by` inject จาก session เสมอ (ไม่อยู่ใน schema POST) แต่แก้ตรงได้ผ่าน PATCH (พฤติกรรมเดิม) |
+| รื้อ `pick()` / `createFields` / `Number()` ใน service | 🟡 **3/8 ถอดแล้ว** (2026-09-12) | `addressService`/`promotionService`/`attendanceService` ถอด `pick()` ออกแล้ว (route ต้นทาง adopt zod ครบ) · **เหลือ:** `orderService.updateDelivery` (route `.../delivery` ยังไม่ adopt — คนละ route กับ `createOrder` ที่ adopt แล้ว) · `userService`/`permissionService`/`preorderRoundService`/`preorderService` (route ต้นทางยังไม่ adopt zod เลยทั้งกลุ่ม) · `createFields`/`updateFields` (`createCrudService`) + `pickWritable()` (component/recipe) ยังคงไว้เป็น defense-in-depth (คนละ layer จาก `pick()` ใน service) |
 
 ---
 

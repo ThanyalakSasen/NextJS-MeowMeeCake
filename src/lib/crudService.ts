@@ -14,9 +14,8 @@ import { notFound } from "./httpError";
 import { assertObjectId, pick } from "./objectId";
 import { buildMeta, escapeRegExp, type Pagination } from "./queryParams";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-type AnyModel = Model<any>;
-type Doc = Record<string, any>;
+type AnyModel = Model<unknown>;
+type Doc = Record<string, unknown>;
 
 export interface PopulateSpec {
   path: string;
@@ -91,7 +90,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
         .find(filter)
         .sort(sort as Record<string, 1 | -1>)
         .skip(args.pagination.skip)
-        .limit(args.pagination.limit) as any
+        .limit(args.pagination.limit)
     );
 
     const [items, total] = await Promise.all([
@@ -109,7 +108,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
     const filter: Record<string, unknown> = { _id: id };
     if (softDelete && !includeDeleted) filter.deleted_at = null;
 
-    const doc = await applyPopulate(model.findOne(filter) as any).lean();
+    const doc = await applyPopulate(model.findOne(filter)).lean();
     if (!doc) throw notFound(`ไม่พบ${opts.label}ที่ระบุ`);
     return doc as Doc;
   }
