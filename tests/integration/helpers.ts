@@ -1,6 +1,8 @@
 import mongoose from "mongoose";
 import userModel from "@/models/userModel";
 import productModel from "@/models/productModel";
+import ingredientModel from "@/models/ingredientModel";
+import unitModel from "@/models/unitModel";
 import preorderModel from "@/models/preorderModel";
 
 export const oid = () => new mongoose.Types.ObjectId();
@@ -29,6 +31,31 @@ export async function makeProduct(over: Record<string, unknown> = {}) {
     product_price: 100,
     product_type: "inStore",
     product_stock_quantity: 50,
+    ...over,
+  });
+}
+
+export async function makeUnit(over: Record<string, unknown> = {}) {
+  seq++;
+  return unitModel.create({
+    unit_name: `หน่วย ${seq}-${Date.now()}`,
+    unit_abbr: `u${seq}`,
+    unit_type: "Custom",
+    usage_context: ["Ingredient"],
+    ...over,
+  });
+}
+
+export async function makeIngredient(over: Record<string, unknown> = {}) {
+  seq++;
+  const unit = await makeUnit();
+  return ingredientModel.create({
+    ingredient_name: `วัตถุดิบ ${seq}-${Date.now()}`,
+    ingredient_category_id: oid(),
+    unit_id: unit._id,
+    current_stock: 0,
+    cost_per_unit: 10,
+    reorder_point: 5,
     ...over,
   });
 }

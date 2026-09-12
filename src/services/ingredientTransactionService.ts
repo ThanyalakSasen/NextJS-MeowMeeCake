@@ -209,10 +209,20 @@ export async function voidTransaction(id: string) {
   }
 
   const inc = txn.type === "receive" ? -txn.qty : txn.qty; // receive→ลบออก, use→คืนกลับ
-  await ingredientModel.updateOne(
-    { _id: txn.ingredient_id },
-    { $inc: { current_stock: inc } }
-  );
+
+  // BACKLOG 2c.2: ย้อนรายการ "receive" คือการลบสต็อกออก (inc < 0) — ต้องกันติดลบแบบเดียวกับ
+  // createTransaction ฝั่ง "use" (:89) ไม่งั้น void รายการรับที่ของถูกเบิกใช้ไปแล้วบางส่วนจะทำให้
+  // current_stock ติดลบเงียบ ๆ ไม่มี error (การย้อน "use" คืนกลับเข้าสต็อกไม่มีทางติดลบ ไม่ต้องกัน)
+  const filter: Record<string, any> = { _id: txn.ingredient_id, deleted_at: null };
+  if (inc < 0) filter.current_stock = { $gte: -inc };
+  const res = await ingredientModel.updateOne(filter, { $inc: { current_stock: inc } });
+  if (res.modifiedCount === 0) {
+    const current = await ingredientModel.findById(txn.ingredient_id).lean<any>();
+    throw conflict(
+      `สต็อกไม่พอให้ย้อนรายการนี้ (คงเหลือ ${current?.current_stock ?? 0}, ต้องย้อนออก ${-inc}) — ` +
+        `อาจมีการเบิกใช้ไปแล้วหลังรายการนี้ ให้ทำ adjust ปรับยอดแทน`
+    );
+  }
 
   txn.deleted_at = new Date();
   txn.note = `${txn.note ?? ""} [ยกเลิกรายการ]`.trim();

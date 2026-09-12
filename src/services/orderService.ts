@@ -441,7 +441,12 @@ export async function createOrderFromCart(
   }
 
   const order = await persistOrder(userId, lines, input);
-  await cartService.clearCart(userId);
+  // เคลียร์ตะกร้า — best-effort เหมือน notify ด้านบน: ออเดอร์ commit สำเร็จไปแล้ว (persistOrder
+  // saga.commit() แล้ว) ถ้า clearCart พังไม่ควรทำให้ client เห็น 500 ทั้งที่ออเดอร์สร้างสำเร็จจริง
+  // (BACKLOG 2c.1 — เดิมไม่มี .catch() จุดเดียวในไฟล์นี้ที่รันหลัง commit แล้วไม่กันพัง)
+  await cartService
+    .clearCart(userId)
+    .catch((err) => log.error("order.clear_cart_failed", { user_id: userId, order_id: String(order._id), err }));
   return order;
 }
 
