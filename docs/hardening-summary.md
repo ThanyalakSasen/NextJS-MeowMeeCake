@@ -184,10 +184,11 @@ test: unit 155→**163** / integration 56→**79** · ก่อนลงมื�
 
 ---
 
-## รอบ 5 — เงินเป็น integer (สตางค์) — 🟡 เฟส 4/5 (2026-09-12) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)
+## รอบ 5 — เงินเป็น integer (สตางค์) — 🟡 เฟส 5a/6 (2026-09-12) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)
 
-สำรวจก่อนลงมือพบเงินกระจายใน 17 model — แบ่งเป็น 5 เฟสตามโดเมนที่ผูกกันจริงทางโค้ด (ทำทีเดียวเสี่ยงเกิน
-รีวิวไหว) ถามผู้ใช้เรื่อง API contract ก่อน: **DB เก็บสตางค์ แต่ API ยังบาททศนิยมเหมือนเดิม** (ไม่ breaking)
+สำรวจก่อนลงมือพบเงินกระจายใน 17 model (ภายหลังพบเพิ่มอีก 1 ตัวระหว่างสำรวจเฟส 5 — รวมเป็น 18 ดูแถว
+เฟส 5b) — แบ่งเป็นเฟสตามโดเมนที่ผูกกันจริงทางโค้ด (ทำทีเดียวเสี่ยงเกินรีวิวไหว) ถามผู้ใช้เรื่อง API
+contract ก่อน: **DB เก็บสตางค์ แต่ API ยังบาททศนิยมเหมือนเดิม** (ไม่ breaking)
 
 | เฟส | ขอบเขต | สถานะ |
 |---|---|---|
@@ -195,7 +196,8 @@ test: unit 155→**163** / integration 56→**79** · ก่อนลงมื�
 | 2 | Expense (`expenseModel.amount`) | ✅ เสร็จ |
 | 3 | Delivery zone (`deliveryZoneModel.fee`) | ✅ เสร็จ |
 | 4 | Recipe/Component/Ingredient cost + `cost_per_unit`/`purchase_cost` | ✅ เสร็จ |
-| 5 | Promotion definition + Product pricing ที่เหลือ (`product_price`/`variant_price`/`extra_price`/`cartItemModel`) | ⬜ |
+| 5a | Promotion definition (`promotionModel`) | ✅ เสร็จ |
+| 5b | Product pricing ที่เหลือ (`product_price`/`variant_price`/`extra_price`/`cartItemModel`) + `preorderRoundItemModel.price_override` | ⬜ |
 
 เฟส 1 ต้องรวม order+preorder เข้าด้วยกันเพราะ `paymentModel` เป็น collection กลางที่ใช้ร่วมกัน (แยกแปลง
 ไม่ได้ — จะกำกวมว่า doc ไหนหน่วยอะไร) · migration script `npm run migrate:money-to-satang` · เจอ+แก้บั๊ก
@@ -220,14 +222,29 @@ field ที่เป็น `null` (ยืนยันด้วยการท�
 ก่อนเสมอ ไม่งั้น migration พังกลางทาง · เจอบั๊กมาร์กเกอร์ซ้ำแบบเดียวกับเฟส 2 อีกครั้ง (เพิ่ม field เข้า
 collection ที่มี section เดิมอยู่แล้ว ต้องแยก section id ใหม่) — ดู `hardening-5-money-phase1.md` §4
 
-test unit 163→171→171→171→**171** (คงที่ตั้งแต่เฟส 2) / integration 82→89→93→**104**
+**หมายเหตุระหว่างเตรียม merge เฟส 4:** เจอว่า CI (`typecheck:test` — คนละคำสั่งกับ `typecheck` ที่ไม่
+ครอบคลุม `tests/`) ของ PR เฟส 4/2/3 จริง ๆ FAILURE มาตลอด แต่ merge ผ่านเพราะ `verify` ไม่ใช่ required
+check — ต้นเหตุ `db.collection("migrations")` ไม่ได้ type ไว้ แก้แล้วและเพิ่มขั้นตอนนี้เข้า checklist
+
+เฟส 5a (Promotion) ซับซ้อนสุดตามคาดเพราะ `discount_value` เป็นเงินเฉพาะตอน `discount_type ===
+"Amount"` (`min_order_amount`/`max_discount_amount` เป็นเงินเสมอ) ต้อง handle conditional ทั้งตอน
+service และตอน migrate — `discountEngine.ts` ไม่ต้องแก้เลยเพราะ `presentPromotion()` ทำหน้าที่แปลง
+ข้ามโดเมนให้ก่อนส่งเข้า (ใช้ฟังก์ชันเดียวกับที่เป็น API presenter) **เจอว่า `$mul` ธรรมดาทำ
+conditional ไม่ได้** ต้องเปลี่ยนไปใช้ pipeline-style update แทน (`updateMany(filter, [stage],
+{ updatePipeline: true })`) — บวกกับค้นพบว่า aggregation `$multiply` คืน `null` เฉย ๆ เมื่อเจอ `null`
+(ไม่ throw เหมือน `$mul` ในเฟส 4) จึงไม่ต้อง filter `$type:"number"` เลยสำหรับ field nullable ในเฟสนี้
+— ปลอดภัยกว่าและสั้นกว่า `$mul` + filter · ยังพบ `preorderRoundItemModel.price_override` เป็น money
+field ที่พลาดจากการสำรวจ 17 model รอบแรก (ผูก fallback chain เดียวกับ `product.sale_price`/
+`product_price`) ต้องยกไปแปลงพร้อมเฟส 5b
+
+test unit 163→171→171→171→171→**171** (คงที่ตั้งแต่เฟส 2) / integration 82→89→93→104→**115**
 
 ---
 
 ## ที่เหลือ (ยังไม่ทำ)
 
 > **ลำดับ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"** — รอบ 4b/4c/4d ปิดครบแล้ว, รอบ 5
-> (3.11) เหลือ 1 เฟสจาก 5 (ดูตารางด้านบน)
+> (3.11) เหลือเฟส 5b เฟสเดียว (ดูตารางด้านบน)
 
 ### §1 Blockers — ขั้น deploy (ไม่ใช่โค้ด)
 `npm run seed` · `npm run backfill:product-codes` · MongoDB `product_type` เดิม → `inStore` ·
@@ -252,7 +269,7 @@ test unit 163→171→171→171→**171** (คงที่ตั้งแต่�
 | [`hardening-4b-plan.md`](hardening-4b-plan.md) | รอบ 4b — zod tail ครบ (`/admin/orders`+อีก 5 กลุ่ม) · รื้อ `pick()` 8/8 · `no-explicit-any` บน `src/lib` (PR #20–#21) |
 | [`hardening-4c-plan.md`](hardening-4c-plan.md) | รอบ 4c — address_id→checkout · purchase_cost · integration test เพิ่ม (+ §0 บทเรียนเรื่อง §2b/§2c ที่เคยรายงานผิดว่า merge แล้ว) (PR #23–#25) |
 | [`hardening-4d-plan.md`](hardening-4d-plan.md) | รอบ 4d — object storage abstraction · ลบรูปที่ไม่ใช้ · delivery zone เป็น DB (PR #28) |
-| [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | รอบ 5 §3.11 เฟส 1-4 — เงินเป็นสตางค์: Order+Preorder+Payment+Expense+DeliveryZone+Recipe/Component/Ingredient+purchase_cost · แผนเฟสที่เหลือ |
+| [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | รอบ 5 §3.11 เฟส 1-5a — เงินเป็นสตางค์: Order+Preorder+Payment+Expense+DeliveryZone+Recipe/Component/Ingredient+purchase_cost+Promotion · แผนเฟส 5b ที่เหลือ |
 | [`infra-tooling.md`](infra-tooling.md) | §3.6 eslint · §3.3 logger · §3.4 testing |
 | [`validation.md`](validation.md) | §3.1 zod — สถานะ adopt ราย route |
 | [`security-hardening.md`](security-hardening.md) | §3.2 rate-limit · §3.9 Google · §3.10 CSRF |

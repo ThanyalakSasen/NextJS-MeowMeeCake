@@ -11,6 +11,7 @@ import ingredientModel from "@/models/ingredientModel";
 import componentModel from "@/models/componentModel";
 import recipeModel from "@/models/recipeModel";
 import productModel from "@/models/productModel";
+import promotionModel from "@/models/promotionModel";
 import mongoose from "mongoose";
 import { runMigration } from "../../scripts/migrate-money-to-satang";
 import { makeUser, makeProduct, makePreorder } from "./helpers";
@@ -143,6 +144,38 @@ describe("scripts/migrate-money-to-satang", () => {
     const productNullPurchaseCost = product; // makeProduct() ไม่ได้ตั้ง purchase_cost มา (default null)
     const productWithPurchaseCost = await makeProduct({ purchase_cost: 70 });
 
+    // BACKLOG §3.11 เฟส 5a — promotion 3 ชนิด ยืนยันว่า discount_value แปลงเฉพาะ Amount
+    const promoAmount = await promotionModel.create({
+      promotion_code: `PROMO-AMT-${Date.now()}`,
+      promotion_name: "ลดเงินสด",
+      discount_type: "Amount",
+      discount_value: 25,
+      min_order_amount: 100,
+      max_discount_amount: null,
+      start_date: new Date(),
+      end_date: new Date(Date.now() + 86_400_000),
+      created_by: new mongoose.Types.ObjectId(),
+    });
+    const promoPercentage = await promotionModel.create({
+      promotion_code: `PROMO-PCT-${Date.now()}`,
+      promotion_name: "ลด %",
+      discount_type: "Percentage",
+      discount_value: 15, // % ดิบ — ต้อง "ไม่ถูกแตะ"
+      max_discount_amount: 60,
+      start_date: new Date(),
+      end_date: new Date(Date.now() + 86_400_000),
+      created_by: new mongoose.Types.ObjectId(),
+    });
+    const promoFreeShipping = await promotionModel.create({
+      promotion_code: `PROMO-SHIP-${Date.now()}`,
+      promotion_name: "ส่งฟรี",
+      discount_type: "FreeShipping",
+      discount_value: 0, // ไม่ถูกใช้เลย แต่ต้อง "ไม่ถูกแตะ" เช่นกัน
+      start_date: new Date(),
+      end_date: new Date(Date.now() + 86_400_000),
+      created_by: new mongoose.Types.ObjectId(),
+    });
+
     const summary = await runMigration();
     expect(summary).toMatchObject({
       orders: 1,
@@ -159,6 +192,7 @@ describe("scripts/migrate-money-to-satang", () => {
       components: 1,
       recipes: 1,
       products_purchase_cost: 1, // เจอแค่ตัวที่มี purchase_cost เป็นตัวเลขจริง (filter $type:number)
+      promotions: 3, // pipeline update แก้ทั้ง 3 เอกสาร (conditional อยู่ข้างในแต่ละเอกสารเอง)
     });
 
     const rOrder = await orderModel
@@ -237,6 +271,28 @@ describe("scripts/migrate-money-to-satang", () => {
       .findById(productWithPurchaseCost._id)
       .lean<{ purchase_cost: number | null }>();
     expect(rProductWithCost!.purchase_cost).toBe(7000);
+
+    // ── เฟส 5a ─────────────────────────────────────────────────
+    const rPromoAmount = await promotionModel.findById(promoAmount._id).lean<{
+      discount_value: number;
+      min_order_amount: number | null;
+      max_discount_amount: number | null;
+    }>();
+    expect(rPromoAmount!.discount_value).toBe(2500); // Amount → คูณ 100
+    expect(rPromoAmount!.min_order_amount).toBe(10000); // เงินเสมอ → คูณ 100
+    expect(rPromoAmount!.max_discount_amount).toBeNull(); // null → $multiply คืน null ไม่พัง ไม่เป็น 0
+
+    const rPromoPct = await promotionModel.findById(promoPercentage._id).lean<{
+      discount_value: number;
+      max_discount_amount: number | null;
+    }>();
+    expect(rPromoPct!.discount_value).toBe(15); // Percentage → "ไม่ถูกแตะ" ยังเป็น % ดิบ
+    expect(rPromoPct!.max_discount_amount).toBe(6000); // แต่ max_discount_amount แปลงเสมอ
+
+    const rPromoShip = await promotionModel
+      .findById(promoFreeShipping._id)
+      .lean<{ discount_value: number }>();
+    expect(rPromoShip!.discount_value).toBe(0); // FreeShipping → ไม่ถูกแตะเช่นกัน
   });
 
   it("กันรันซ้ำต่อ collection — รันครั้งที่สองต้องไม่คูณ ×100 ซ้ำอีกรอบ (section ที่รันแล้ว = null)", async () => {
