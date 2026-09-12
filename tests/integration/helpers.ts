@@ -5,6 +5,7 @@ import ingredientModel from "@/models/ingredientModel";
 import unitModel from "@/models/unitModel";
 import preorderModel from "@/models/preorderModel";
 import recipeModel from "@/models/recipeModel";
+import addressModel from "@/models/addressModel";
 
 export const oid = () => new mongoose.Types.ObjectId();
 
@@ -70,6 +71,19 @@ export async function makeRecipe(productId: string, over: Record<string, unknown
     yield_unit_id: oid(),
     estimated_cost_per_batch: 100,
     created_by: oid(),
+    ...over,
+  });
+}
+
+export async function makeAddress(userId: string, over: Record<string, unknown> = {}) {
+  seq++;
+  return addressModel.create({
+    user_id: userId,
+    house_no: `${seq}/${seq}`,
+    sub_district: `ตำบลทดสอบ ${seq}`,
+    district: `อำเภอทดสอบ ${seq}`,
+    province: "กรุงเทพมหานคร",
+    zip_code: "10100",
     ...over,
   });
 }
