@@ -16,6 +16,18 @@ import { runMigration } from "../../scripts/migrate-money-to-satang";
 import { makeUser, makeProduct, makePreorder } from "./helpers";
 
 /**
+ * ต้อง type ตรงนี้เอง — ไม่งั้น `db.collection("migrations")` (ไม่ผ่าน mongoose model) จะ infer เป็น
+ * `Document` ของ native driver ที่ `_id` เป็น `ObjectId` โดย default ทำให้ insert `{ _id: "string" }`
+ * ตรง ๆ ชนกับ type ไม่ผ่าน tsc (เจอจริงจาก `npm run typecheck:test` ที่ CI รันแยกจาก `typecheck`
+ * ปกติ — เป็นบั๊กที่ตกค้างมาตั้งแต่เฟส 2 เพราะไม่เคยรันคำสั่งนี้เองตอน verify ก่อน merge)
+ */
+interface MigrationMarkerDoc {
+  _id: string;
+  applied_at: Date;
+  modified_count: number;
+}
+
+/**
  * BACKLOG §3.11 — scripts/migrate-money-to-satang.ts คูณข้อมูลเงินเดิม (บาท) ×100 ครั้งเดียวตอน
  * deploy จริง เทสนี้จำลองเอกสาร "แบบเก่า" (สร้างตรงผ่าน model ข้าม service ที่แปลงให้แล้ว) แล้วยืนยัน
  * ว่า migration แปลงถูกทุก field รวม nested array (selected_options[].extra_price) + กันรันซ้ำ
@@ -255,7 +267,7 @@ describe("scripts/migrate-money-to-satang", () => {
     // จำลองสถานการณ์: DB นี้เคยรัน migrate ตอนมีแค่ orders/payments (เฟส 1 เก่า) ไปแล้ว — ใส่ marker
     // ของ 2 section นั้นตรง ๆ (ข้าม runMigration()) แต่ "ลืม" ใส่ marker ของ expenses (เพิ่งเพิ่มทีหลัง)
     const db = mongoose.connection.db!;
-    await db.collection("migrations").insertMany([
+    await db.collection<MigrationMarkerDoc>("migrations").insertMany([
       { _id: "money_to_satang_3_11_orders", applied_at: new Date(), modified_count: 0 },
       { _id: "money_to_satang_3_11_payments", applied_at: new Date(), modified_count: 0 },
     ]);
@@ -290,7 +302,7 @@ describe("scripts/migrate-money-to-satang", () => {
     // จำลอง DB ที่เคยรันเฟส 1 ไปแล้วจริง (marker "order_items" มีอยู่แล้ว) แต่ cost_per_unit ของ
     // orderItem เดิมยังเป็นบาทดิบค้างอยู่ (เพราะเฟส 1 ตั้งใจไม่แตะ cost_per_unit)
     const db = mongoose.connection.db!;
-    await db.collection("migrations").insertOne({
+    await db.collection<MigrationMarkerDoc>("migrations").insertOne({
       _id: "money_to_satang_3_11_order_items",
       applied_at: new Date(),
       modified_count: 1,
