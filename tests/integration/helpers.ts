@@ -4,6 +4,8 @@ import productModel from "@/models/productModel";
 import ingredientModel from "@/models/ingredientModel";
 import unitModel from "@/models/unitModel";
 import preorderModel from "@/models/preorderModel";
+import productVariantModel from "@/models/productVariantModel";
+import productOptionModel from "@/models/productOptionModel";
 import recipeModel from "@/models/recipeModel";
 import addressModel from "@/models/addressModel";
 
@@ -58,6 +60,26 @@ export async function makeIngredient(over: Record<string, unknown> = {}) {
     current_stock: 0,
     cost_per_unit: 10,
     reorder_point: 5,
+    ...over,
+  });
+}
+
+export async function makeVariant(productId: string, over: Record<string, unknown> = {}) {
+  seq++;
+  return productVariantModel.create({
+    product_id: productId,
+    variant_name: `ตัวเลือก ${seq}`,
+    variant_price: 0,
+    ...over,
+  });
+}
+
+export async function makeOption(productId: string, over: Record<string, unknown> = {}) {
+  seq++;
+  return productOptionModel.create({
+    product_id: productId,
+    option_name: `เพิ่มเติม ${seq}`,
+    extra_price: 0,
     ...over,
   });
 }
