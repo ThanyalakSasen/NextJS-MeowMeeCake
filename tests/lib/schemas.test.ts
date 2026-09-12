@@ -81,6 +81,49 @@ describe("schemas/order — adminCreateOrderBody (BACKLOG §3.1, รอบ 4b)",
   });
 });
 
+describe("schemas/order — address_id / delivery_address oneOf (BACKLOG §3.8, รอบ 4c)", () => {
+  it("delivery + ไม่ระบุที่อยู่เลย → fail", () => {
+    expect(createOrderBody.safeParse({ order_type: "delivery" }).success).toBe(false);
+  });
+  it("delivery + ระบุทั้ง address_id และ delivery_address พร้อมกัน → fail", () => {
+    expect(
+      createOrderBody.safeParse({
+        order_type: "delivery",
+        address_id: OID,
+        recipient_name: "ก",
+        recipient_phone: "0812345678",
+        delivery_address: { recipient_name: "ก", house_no: "1" },
+      }).success
+    ).toBe(false);
+  });
+  it("delivery + address_id อย่างเดียวไม่มี recipient_name/phone → fail", () => {
+    expect(
+      createOrderBody.safeParse({ order_type: "delivery", address_id: OID }).success
+    ).toBe(false);
+  });
+  it("delivery + address_id + recipient_name/phone ครบ → ผ่าน", () => {
+    expect(
+      createOrderBody.safeParse({
+        order_type: "delivery",
+        address_id: OID,
+        recipient_name: "สมชาย",
+        recipient_phone: "0812345678",
+      }).success
+    ).toBe(true);
+  });
+  it("delivery + delivery_address อย่างเดียว (แบบเดิม) → ผ่าน", () => {
+    expect(
+      createOrderBody.safeParse({
+        order_type: "delivery",
+        delivery_address: { recipient_name: "ก", house_no: "1" },
+      }).success
+    ).toBe(true);
+  });
+  it("takeaway ไม่ต้องมีที่อยู่เลยก็ผ่าน", () => {
+    expect(createOrderBody.safeParse({ order_type: "takeaway" }).success).toBe(true);
+  });
+});
+
 describe("schemas/order — updateDeliveryBody (BACKLOG §3, รอบ 4b ข้อ B2)", () => {
   it("รับทุกฟิลด์เป็น optional, enum delivery_status ถูกต้อง", () => {
     expect(updateDeliveryBody.safeParse({}).success).toBe(true);
