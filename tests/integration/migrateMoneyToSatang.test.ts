@@ -5,6 +5,7 @@ import preorderModel from "@/models/preorderModel";
 import preorderItemModel from "@/models/preorderItemModel";
 import paymentModel from "@/models/paymentModel";
 import promotionUsagesModel from "@/models/promotionUsagesModel";
+import expenseModel from "@/models/expenseModel";
 import mongoose from "mongoose";
 import { runMigration } from "../../scripts/migrate-money-to-satang";
 import { makeUser, makeProduct, makePreorder } from "./helpers";
@@ -71,6 +72,14 @@ describe("scripts/migrate-money-to-satang", () => {
       discount_applied: 10,
     });
 
+    const expense = await expenseModel.create({
+      date: new Date(),
+      description: "ทดสอบ",
+      category: "อื่นๆ",
+      amount: 300,
+      payment_method: "เงินสด",
+    });
+
     const summary = await runMigration();
     expect(summary).toMatchObject({
       orders: 1,
@@ -79,6 +88,7 @@ describe("scripts/migrate-money-to-satang", () => {
       preorder_items: 1,
       payments: 1,
       promotion_usages: 1,
+      expenses: 1,
     });
 
     const rOrder = await orderModel
@@ -120,9 +130,12 @@ describe("scripts/migrate-money-to-satang", () => {
       .findById(usage._id)
       .lean<{ discount_applied: number }>();
     expect(rUsage!.discount_applied).toBe(1000);
+
+    const rExpense = await expenseModel.findById(expense._id).lean<{ amount: number }>();
+    expect(rExpense!.amount).toBe(30000);
   });
 
-  it("กันรันซ้ำ — รันครั้งที่สองต้องไม่คูณ ×100 ซ้ำอีกรอบ", async () => {
+  it("กันรันซ้ำต่อ collection — รันครั้งที่สองต้องไม่คูณ ×100 ซ้ำอีกรอบ (section ที่รันแล้ว = null)", async () => {
     const user = await makeUser();
     const order = await orderModel.create({
       order_no: `OP-TEST-${Date.now()}`,
@@ -138,11 +151,46 @@ describe("scripts/migrate-money-to-satang", () => {
     }
 
     const first = await runMigration();
-    expect(first).not.toBeNull();
+    expect(first.orders).toBe(1); // section รันจริงครั้งแรก
     expect(await currentSubtotal()).toBe(10000);
 
     const second = await runMigration();
-    expect(second).toBeNull(); // ข้ามเพราะมี marker แล้ว
+    expect(second.orders).toBeNull(); // ข้ามเพราะ section นี้มี marker แล้ว
     expect(await currentSubtotal()).toBe(10000); // ไม่ถูกคูณซ้ำ
+  });
+
+  it("เพิ่ม field ใหม่เข้าไฟล์ทีหลัง (เหมือนเฟส 2 เพิ่ม expenseModel) — section เก่าที่มี marker แล้วไม่โดนคูณซ้ำ แต่ section ใหม่ที่ยังไม่มี marker ต้องรันจริง", async () => {
+    // จำลองสถานการณ์: DB นี้เคยรัน migrate ตอนมีแค่ orders/payments (เฟส 1 เก่า) ไปแล้ว — ใส่ marker
+    // ของ 2 section นั้นตรง ๆ (ข้าม runMigration()) แต่ "ลืม" ใส่ marker ของ expenses (เพิ่งเพิ่มทีหลัง)
+    const db = mongoose.connection.db!;
+    await db.collection("migrations").insertMany([
+      { _id: "money_to_satang_3_11_orders", applied_at: new Date(), modified_count: 0 },
+      { _id: "money_to_satang_3_11_payments", applied_at: new Date(), modified_count: 0 },
+    ]);
+
+    const order = await orderModel.create({
+      order_no: `OP-TEST-${Date.now()}`,
+      user_id: (await makeUser())._id,
+      order_type: "takeaway",
+      subtotal: 100, // ตั้งใจปล่อยเป็น "บาทดิบ" เหมือนไม่เคย migrate จริง (marker หลอกไว้เฉย ๆ)
+      total_amount: 100,
+    });
+    const expense = await expenseModel.create({
+      date: new Date(),
+      description: "ทดสอบ",
+      category: "อื่นๆ",
+      amount: 50,
+      payment_method: "เงินสด",
+    });
+
+    const result = await runMigration();
+    expect(result.orders).toBeNull(); // ข้าม เพราะมี marker หลอกไว้ (จำลอง "เคยรันไปแล้วจริง")
+    expect(result.expenses).toBe(1); // รันจริง เพราะไม่มี marker ของ section นี้เลย
+
+    const rOrder = await orderModel.findById(order._id).lean<{ subtotal: number }>();
+    expect(rOrder!.subtotal).toBe(100); // ไม่ถูกแตะ (section ถูกข้ามตาม marker)
+
+    const rExpense = await expenseModel.findById(expense._id).lean<{ amount: number }>();
+    expect(rExpense!.amount).toBe(5000); // ถูกแปลงจริง
   });
 });
