@@ -16,6 +16,7 @@ import productVariantModel from "../models/productVariantModel";
 import unitModel from "../models/unitModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
+import { deleteImages } from "../lib/upload";
 
 /** เกณฑ์ "สต็อกเหลือน้อย" ของสินค้า (ตรงกับดีฟอลต์ของ getLowStockProducts) */
 const LOW_STOCK_THRESHOLD = 5;
@@ -421,6 +422,9 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     });
   }
 
+  // BACKLOG §3.14 — จำรูปเดิมไว้ก่อนเขียนทับ เผื่อต้องลบไฟล์ที่ไม่ใช้แล้วหลัง save สำเร็จ
+  const oldImages: string[] = input.product_img !== undefined ? [...(existing.product_img ?? [])] : [];
+
   const updatable: (keyof UpdateProductInput)[] = [
     "product_name_th",
     "product_name_eng",
@@ -458,7 +462,17 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   }
 
   await existing.save();
-  return existing.toObject();
+  const result = existing.toObject();
+
+  // BACKLOG §3.14 — ลบไฟล์รูปเดิมที่ไม่อยู่ในชุดใหม่แล้ว (best-effort, ไม่ทำให้ update พังถ้าลบไม่สำเร็จ —
+  // deleteImages() ดักจับ error ของตัวเองทุกไฟล์ ไม่ throw ต่อ)
+  if (oldImages.length > 0) {
+    const kept = new Set<string>(result.product_img ?? []);
+    const removed = oldImages.filter((url) => !kept.has(url));
+    if (removed.length > 0) await deleteImages(removed);
+  }
+
+  return result;
 }
 
 // ── DELETE (soft) ─────────────────────────────────────────────
@@ -500,10 +514,16 @@ export async function hardDeleteProduct(id: string) {
   await dbConnect();
   assertObjectId(id);
 
-  const product = await productModel.findByIdAndDelete(id).lean();
+  const product = await productModel
+    .findByIdAndDelete(id)
+    .lean<{ product_img?: string[] } | null>();
   if (!product) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
+
+  // BACKLOG §3.14 — ลบถาวรแล้ว ไม่มีทาง restore กลับมาแสดงรูปเดิมได้อีก เก็บไฟล์ไว้ไม่มีประโยชน์
+  if (product.product_img?.length) await deleteImages(product.product_img);
+
   return product;
 }
 

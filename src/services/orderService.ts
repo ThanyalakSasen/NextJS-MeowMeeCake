@@ -269,10 +269,12 @@ async function persistOrder(
     if (opts.delivery_fee_override && opts.delivery_fee != null) {
       delivery_fee = Math.max(0, Number(opts.delivery_fee) || 0);
     } else {
-      delivery_fee = deliveryService.calcDeliveryFee({
-        province: opts.delivery_address?.province ?? null,
-        subtotal,
-      }).fee;
+      delivery_fee = (
+        await deliveryService.calcDeliveryFee({
+          province: opts.delivery_address?.province ?? null,
+          subtotal,
+        })
+      ).fee;
     }
   }
 
