@@ -10,13 +10,19 @@
 import bcrypt from "bcryptjs";
 import dbConnect from "../lib/dbConnect";
 import { badRequest, forbidden, notFound, unauthorized, HttpError } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
+import type { z } from "zod";
+import type { updateProfileBody, createUserBody, updateUserBody } from "../schemas/user";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+type UpdateProfileInput = z.infer<typeof updateProfileBody>;
+type CreateUserBody = z.infer<typeof createUserBody>;
+type UpdateUserBody = z.infer<typeof updateUserBody>;
 
 // ── ค่าคงที่นโยบายรหัสผ่าน / การล็อกบัญชี ─────────────────────
 export const BCRYPT_ROUNDS = 10;
@@ -35,42 +41,12 @@ const SECRET_FIELDS = [
 
 const SELECT_PUBLIC = SECRET_FIELDS.map((f) => `-${f}`).join(" ");
 
-const PROFILE_FIELDS = [
-  "user_fullname",
-  "user_birthdate",
-  "user_phone",
-  "user_img",
-  "user_allergies",
-] as const;
-
-const EMPLOYMENT_FIELDS = [
-  "start_working_date",
-  "last_working_date",
-  "employment_type",
-  "emp_salary",
-  "part_time_hours",
-  "emp_status",
-] as const;
+// PROFILE_FIELDS/EMPLOYMENT_FIELDS (whitelist สำหรับ pick()) ถูกลบไปแล้ว — field ที่เขียนได้
+// ตอนนี้กำหนดที่ schemas/user.ts (updateProfileBody/createUserBody/updateUserBody) แทน
 
 // ── Types ────────────────────────────────────────────────────
-export interface CreateUserInput {
-  user_fullname: string;
-  email: string;
-  auth_provider: "local" | "google";
-  role_id: string;
-  password?: string;
-  googleId?: string;
-  user_birthdate?: string | Date | null;
-  user_phone?: string | null;
-  user_img?: string | null;
-  user_allergies?: string[];
-  is_active?: boolean;
-  start_working_date?: string | Date | null;
-  employment_type?: "full_time" | "part_time" | null;
-  emp_salary?: number | null;
-  part_time_hours?: number | null;
-  emp_status?: boolean | null;
-}
+// input type ของ createUser/updateUser มาจาก schemas/user.ts (CreateUserBody/UpdateUserBody
+// ด้านล่าง) โดยตรงแล้ว — ไม่มี interface แยกซ้ำเหมือนก่อน adopt zod
 
 export interface ListUserQuery {
   pagination: Pagination;
@@ -100,23 +76,13 @@ function hashPassword(pw: string): Promise<string> {
 }
 
 // ── CREATE ───────────────────────────────────────────────────
-export async function createUser(input: CreateUserInput) {
+// required field / auth_provider enum validate ที่ route ผ่าน schemas/user.ts createUserBody แล้ว
+export async function createUser(input: CreateUserBody) {
   await dbConnect();
-
-  for (const field of ["user_fullname", "email", "auth_provider", "role_id"] as const) {
-    if (!input[field]) throw badRequest(`กรุณาระบุ ${field}`);
-  }
-  if (!["local", "google"].includes(input.auth_provider)) {
-    throw badRequest('auth_provider ต้องเป็น "local" หรือ "google"');
-  }
   await assertRefExists(roleModel, input.role_id, "บทบาท", "role_id");
 
   const payload: Record<string, any> = {
-    user_fullname: input.user_fullname,
-    email: input.email,
-    auth_provider: input.auth_provider,
-    role_id: input.role_id,
-    ...pick(input as Record<string, any>, [...PROFILE_FIELDS, ...EMPLOYMENT_FIELDS]),
+    ...input,
     is_active: input.is_active ?? true,
   };
 
@@ -190,7 +156,7 @@ export async function getUserById(id: string, opts: { includeDeleted?: boolean }
 }
 
 // ── UPDATE (โปรไฟล์ + ข้อมูลการจ้างงาน ไม่รวมรหัสผ่าน) ────────
-export async function updateUser(id: string, input: Record<string, any>) {
+export async function updateUser(id: string, input: UpdateUserBody) {
   await dbConnect();
   assertObjectId(id);
 
@@ -198,13 +164,7 @@ export async function updateUser(id: string, input: Record<string, any>) {
     await assertRefExists(roleModel, input.role_id, "บทบาท", "role_id");
   }
 
-  const payload = pick(input, [
-    ...PROFILE_FIELDS,
-    ...EMPLOYMENT_FIELDS,
-    "email",
-    "role_id",
-    "is_active",
-  ]);
+  const payload = { ...input };
 
   try {
     const user = await userModel
@@ -223,11 +183,13 @@ export async function updateUser(id: string, input: Record<string, any>) {
 }
 
 // ── แก้โปรไฟล์ตัวเอง (ลูกค้า/พนักงาน) — เขียนได้เฉพาะฟิลด์โปรไฟล์ ────
-export async function updateProfile(id: string, input: Record<string, unknown>) {
+// PATCH /api/shop/me เป็น caller เดียว — validate ด้วย schemas/user.ts updateProfileBody แล้ว
+// (ไม่ต้อง whitelist ซ้ำด้วย pick())
+export async function updateProfile(id: string, input: UpdateProfileInput) {
   await dbConnect();
   assertObjectId(id);
 
-  const payload = pick(input, [...PROFILE_FIELDS]);
+  const payload = { ...input };
   const user = await userModel
     .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: payload }, {
       new: true,

@@ -14,7 +14,7 @@
  */
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import preorderRoundModel from "../models/preorderRoundModel";
@@ -22,8 +22,13 @@ import preorderRoundItemModel from "../models/preorderRoundItemModel";
 import preorderModel from "../models/preorderModel";
 import productModel from "../models/productModel";
 import userModel from "../models/userModel";
+import type { z } from "zod";
+import type { updateRoundBody, updateRoundItemBody } from "../schemas/preorderRound";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+type UpdateRoundInput = z.infer<typeof updateRoundBody>;
+type UpdateRoundItemInput = z.infer<typeof updateRoundItemBody>;
 
 export const ROUND_STATUSES = ["scheduled", "open", "closed", "cancelled"] as const;
 export type RoundStatus = (typeof ROUND_STATUSES)[number];
@@ -239,7 +244,8 @@ export async function getRoundDetail(
 }
 
 // ── UPDATE (แก้ได้เฉพาะชื่อ + ช่วงเวลา) ──────────────────────
-export async function updateRound(id: string, input: Record<string, any>) {
+// "ต้องมีอย่างน้อย 1 ฟิลด์" / round_name ไม่ว่าง validate ที่ route ผ่าน schemas/preorderRound.ts แล้ว
+export async function updateRound(id: string, input: UpdateRoundInput) {
   await dbConnect();
   assertObjectId(id);
 
@@ -249,14 +255,7 @@ export async function updateRound(id: string, input: Record<string, any>) {
     throw conflict(`รอบสถานะ "${round.round_status}" แก้ไขรายละเอียดไม่ได้`);
   }
 
-  const payload = pick(input, ["round_name", "open_date", "close_date", "pickup_date"]);
-  if (Object.keys(payload).length === 0) {
-    throw badRequest("ไม่มีฟิลด์ที่อนุญาตให้แก้ไข (round_name/open_date/close_date/pickup_date)");
-  }
-  if (payload.round_name !== undefined) {
-    payload.round_name = String(payload.round_name).trim();
-    if (!payload.round_name) throw badRequest("round_name ห้ามว่าง");
-  }
+  const payload: Record<string, any> = { ...input };
 
   const open_date = payload.open_date !== undefined ? toDate(payload.open_date, "open_date") : round.open_date;
   const close_date = payload.close_date !== undefined ? toDate(payload.close_date, "close_date") : round.close_date;
@@ -388,17 +387,15 @@ export async function addRoundItem(roundId: string, input: RoundItemInput) {
   }
 }
 
-export async function updateRoundItem(itemId: string, input: Record<string, any>) {
+// "ต้องมีอย่างน้อย 1 ฟิลด์" validate ที่ route ผ่าน schemas/preorderRound.ts updateRoundItemBody แล้ว
+export async function updateRoundItem(itemId: string, input: UpdateRoundItemInput) {
   await dbConnect();
   assertObjectId(itemId, "id");
 
   const item = await preorderRoundItemModel.findOne({ _id: itemId, deleted_at: null });
   if (!item) throw notFound("ไม่พบรายการสินค้าในรอบที่ระบุ");
 
-  const payload = pick(input, ["price_override", "min_order_qty", "max_qty_total", "is_active"]);
-  if (Object.keys(payload).length === 0) {
-    throw badRequest("ไม่มีฟิลด์ที่อนุญาตให้แก้ไข (price_override/min_order_qty/max_qty_total/is_active)");
-  }
+  const payload: Record<string, any> = { ...input };
   if (payload.price_override !== undefined && payload.price_override !== null) {
     payload.price_override = Math.max(0, Number(payload.price_override) || 0);
   }

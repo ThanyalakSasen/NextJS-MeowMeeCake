@@ -8,14 +8,18 @@
  */
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, type Pagination } from "../lib/queryParams";
 import permissionModel from "../models/permissionModel";
 import roleModel from "../models/roleModel";
 import userModel from "../models/userModel";
+import type { z } from "zod";
+import type { permissionUpdate } from "../schemas/rbac";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+type UpdatePermissionInput = z.infer<typeof permissionUpdate>;
 
 export const MENU_KEYS = [
   "orders",
@@ -88,7 +92,11 @@ export async function createPermission(input: CreatePermissionInput) {
       granted_by: input.granted_by,
       expires_at: input.expires_at ?? null,
       deleted_at: null,
-      ...pick(input as Record<string, any>, FLAG_FIELDS),
+      can_view: input.can_view,
+      can_create: input.can_create,
+      can_update: input.can_update,
+      can_delete: input.can_delete,
+      can_approve: input.can_approve,
     });
     return doc.toObject();
   } catch (err: any) {
@@ -146,15 +154,12 @@ export async function getPermissionById(
 }
 
 // ── UPDATE (แก้ได้เฉพาะ flag การอนุญาต + วันหมดอายุ) ─────────
-export async function updatePermission(id: string, input: Record<string, any>) {
+// "ต้องมีอย่างน้อย 1 ฟิลด์" validate ที่ route ผ่าน schemas/rbac.ts permissionUpdate แล้ว (.refine)
+export async function updatePermission(id: string, input: UpdatePermissionInput) {
   await dbConnect();
   assertObjectId(id);
 
-  const payload = pick(input, [...FLAG_FIELDS, "expires_at"]);
-  if (Object.keys(payload).length === 0) {
-    throw badRequest("ไม่มีฟิลด์ที่อนุญาตให้แก้ไข (can_view/can_create/.../expires_at)");
-  }
-
+  const payload = { ...input };
   const doc = await permissionModel
     .findOneAndUpdate(
       { _id: id, deleted_at: null },

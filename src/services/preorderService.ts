@@ -13,7 +13,7 @@
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
 import { Saga } from "../lib/compensation";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import preorderModel from "../models/preorderModel";
@@ -126,7 +126,10 @@ export async function createPreorder(
     for (const f of ADDRESS_FIELDS) {
       if (!addr[f]) throw badRequest(`delivery_address.${f} จำเป็นต้องระบุ`);
     }
-    delivery_address = pick(addr, ADDRESS_FIELDS) as Record<string, string>;
+    // ตัดฟิลด์เกินทิ้ง (เก็บเฉพาะ ADDRESS_FIELDS) — ไม่ใช้ pick() ตรงนี้ตั้งใจ: ผ่านการเช็ค
+    // required field ครบข้างบนแล้ว การ narrow shape แค่ Object.fromEntries ธรรมดาก็พอ
+    // (ไม่ได้ทำหน้าที่กัน mass-assignment ที่ต้องรอ route adopt zod เหมือน service อื่น)
+    delivery_address = Object.fromEntries(ADDRESS_FIELDS.map((f) => [f, addr[f]]));
   }
 
   // ── resolve รายการ + คิดราคา ──
