@@ -25,6 +25,7 @@ const expenseSchema = new mongoose.Schema(
       ],
       required: true,
     },
+    // BACKLOG §3.11 เฟส 2 — สตางค์ (integer) ตั้งแต่ 2026-09-12 (API ยังรับ-ส่งบาทเหมือนเดิม, ดู src/lib/money.ts)
     amount: {
       type: Number,
       required: true,

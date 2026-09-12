@@ -1,7 +1,7 @@
-# รอบ 5 — เงินเป็น integer (สตางค์), เฟส 1: Order + Preorder + Payment
+# รอบ 5 — เงินเป็น integer (สตางค์), เฟส 1-2: Order+Preorder+Payment, Expense
 
 > อัปเดตล่าสุด: 2026-09-12
-> สถานะ: ✅ **เฟส 1 เสร็จสมบูรณ์** (จากทั้งหมดที่ต้องทำ — ดู §5 "เฟสที่เหลือ")
+> สถานะ: ✅ **เฟส 1-2 เสร็จสมบูรณ์** (จากทั้งหมด 5 เฟส — ดู §7 "เฟสที่เหลือ")
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.11 — งานเดี่ยวเสี่ยงสูงที่สุดในทั้งหมด (tag **L**)
 > ก่อนเริ่ม: สำรวจขอบเขตจริงก่อน (17 model + 9 schema แตะเงิน) แล้วถามผู้ใช้เรื่อง API contract
 
@@ -19,11 +19,11 @@
   subtotal ของทั้ง order/preorder ที่ตอนนี้เป็นสตางค์แล้ว)
 - `dashboardService` อ่านรวมจากทั้ง orderModel/orderItemModel เข้าด้วยกัน ต้องแก้พร้อมกันไปในตัว
 
-**สิ่งที่ยังไม่แตะในเฟสนี้** (ตั้งใจ ไม่ใช่ลืม): `productModel`/`productVariantModel`/
-`productOptionModel` (ราคาสินค้า/variant/option), `promotionModel` (นิยามโปรโมชัน —
-`discount_value`/`min_order_amount`/`max_discount_amount`), `deliveryZoneModel.fee`,
-`recipeModel`/`componentModel`/`ingredientModel` (ต้นทุนวัตถุดิบ/สูตร), `expenseModel.amount`,
-`cartItemModel.price_snapshot`, `orderItem`/`preorderItem`.`cost_per_unit` — ยังเป็นบาททั้งหมด ดู §5
+**สิ่งที่ยังไม่แตะ** (ตั้งใจ ไม่ใช่ลืม — `expenseModel.amount` แปลงไปแล้วในเฟส 2):
+`productModel`/`productVariantModel`/`productOptionModel` (ราคาสินค้า/variant/option),
+`promotionModel` (นิยามโปรโมชัน — `discount_value`/`min_order_amount`/`max_discount_amount`),
+`deliveryZoneModel.fee`, `recipeModel`/`componentModel`/`ingredientModel` (ต้นทุนวัตถุดิบ/สูตร),
+`cartItemModel.price_snapshot`, `orderItem`/`preorderItem`.`cost_per_unit` — ยังเป็นบาททั้งหมด ดู §7
 
 ---
 
@@ -78,16 +78,17 @@ discount_amount = toSatang(result.discount_amount);
 
 ---
 
-## 2. Field ที่แปลงแล้ว (สตางค์) ในเฟสนี้
+## 2. Field ที่แปลงแล้ว (สตางค์)
 
-| Model | Field |
-|---|---|
-| `orderModel` | `subtotal`, `discount_amount`, `delivery_fee`, `total_amount` |
-| `orderItemModel` | `unit_price`, `total_price`, `selected_options[].extra_price` (ไม่รวม `cost_per_unit`) |
-| `preorderModel` | `subtotal`, `discount_amount`, `delivery_fee`, `total_amount` |
-| `preorderItemModel` | `unit_price`, `total_price` (ไม่รวม `cost_per_unit`) |
-| `paymentModel` | `amount` (ใช้ร่วมทั้งฝั่ง order/preorder) |
-| `promotionUsagesModel` | `discount_applied` |
+| Model | Field | เฟส |
+|---|---|---|
+| `orderModel` | `subtotal`, `discount_amount`, `delivery_fee`, `total_amount` | 1 |
+| `orderItemModel` | `unit_price`, `total_price`, `selected_options[].extra_price` (ไม่รวม `cost_per_unit`) | 1 |
+| `preorderModel` | `subtotal`, `discount_amount`, `delivery_fee`, `total_amount` | 1 |
+| `preorderItemModel` | `unit_price`, `total_price` (ไม่รวม `cost_per_unit`) | 1 |
+| `paymentModel` | `amount` (ใช้ร่วมทั้งฝั่ง order/preorder) | 1 |
+| `promotionUsagesModel` | `discount_applied` | 1 |
+| `expenseModel` | `amount` | 2 |
 
 ## 3. Service ที่แก้ + ตรรกะ presenter (สตางค์ → บาท ตอนคืนค่า)
 
@@ -104,9 +105,15 @@ discount_amount = toSatang(result.discount_amount);
   **ก่อน** เอาไปรวมกับ `cogs`/`expenseTotal` (ยังเป็นบาท) ในสูตร `profit_estimate` — ผสมหน่วยตรงนี้คือจุด
   เสี่ยงที่สุดถ้าพลาด (กำไรจะเพี้ยนx100 เงียบ ๆ ไม่มี error ให้เห็น) · `salesByDay()`/`topProducts()`
   แปลง `revenue` เช่นกัน
+- **`expenseService.ts`** (เฟส 2) — เดิม export `createCrudService(...)` ตรง ๆ ไม่มีการแปลงอะไรเลย
+  เปลี่ยนเป็นห่อ `base` (แบบเดียวกับ `deliveryZoneService` ในรอบ 4d) แล้ว override
+  `create`/`update`/`list`/`getById`/`remove`/`restore` ให้แปลง `amount` เข้า/ออก · `summary()`
+  (aggregate ตามหมวด) และ `totalInRange()` (ใช้จาก `dashboardService`) แปลงผลรวมเป็นบาทก่อนคืน —
+  **`dashboardService.ts` ไม่ต้องแก้อะไรเลยสักบรรทัดในเฟสนี้** เพราะ `totalInRange()` คืนบาทให้เหมือนเดิม
+  ทุกประการ (ยืนยันด้วย `git diff` ว่าไฟล์นี้ไม่มีการเปลี่ยนแปลงในเฟส 2)
 
-**ไม่ต้องแก้ schema (`src/schemas/order.ts`, `payment.ts`) หรือ route ไหนเลยสักไฟล์** — client ยังส่ง/
-รับบาททศนิยมเหมือนเดิมทุกประการ การแปลงทั้งหมดอยู่ในชั้น service ล้วน ๆ
+**ไม่ต้องแก้ schema (`src/schemas/order.ts`, `payment.ts`, `expense.ts`) หรือ route ไหนเลยสักไฟล์** —
+client ยังส่ง/รับบาททศนิยมเหมือนเดิมทุกประการ การแปลงทั้งหมดอยู่ในชั้น service ล้วน ๆ
 
 ---
 
@@ -116,14 +123,27 @@ discount_amount = toSatang(result.discount_amount);
 ด้วย MongoDB `$mul` (atomic ต่อ collection ไม่ต้อง fetch+loop ใน JS) รวม nested
 `selected_options[].extra_price` ด้วย positional-all operator
 
-**กันรันซ้ำ**: บันทึก marker doc ไว้ใน collection `migrations` (`_id: "money_to_satang_3_11"`) หลังรัน
-สำเร็จ — รันซ้ำจะเช็คแล้วข้ามให้อัตโนมัติ (สำคัญมาก: รันซ้ำโดยไม่มี guard นี้จะคูณ ×100 ซ้ำสองรอบ ทำให้
-ยอดเงินทั้งระบบพังหมด) โค้ด logic แยกเป็น `runMigration()` ที่ export ออกมาต่างหากจาก CLI runner
-เพื่อให้ integration test เรียกตรง ๆ ได้โดยไม่โดน `mongoose.disconnect()` ที่ CLI runner ทำตอนจบ
+**กันรันซ้ำแบบต่อ collection (marker แยก ไม่ใช่ marker เดียวทั้งไฟล์)** — บันทึก marker doc แยกกันต่อ
+section ไว้ใน collection `migrations` (เช่น `_id: "money_to_satang_3_11_orders"`,
+`"money_to_satang_3_11_expenses"` ฯลฯ) แต่ละ section เช็ค marker ของตัวเองก่อนรันเสมอ
+
+**ทำไมต้องเป็น marker แยก ไม่ใช้ marker เดียวทั้งไฟล์ (บั๊กที่เจอตอนเขียนเฟส 2):** ตอนแรกออกแบบเป็น
+marker เดียวทั้งไฟล์ (`"money_to_satang_3_11"`) เช็คครั้งเดียวตอนต้นฟังก์ชัน — ใช้ได้ดีตอนมีแค่เฟส 1
+แต่พอมาเขียนเฟส 2 (เพิ่ม `expenseModel` เข้าไปในไฟล์เดิม) พบว่า **ถ้า DB เคยรัน migrate ตอนเป็นเฟส 1
+ไปแล้ว (มี marker เดียวนั้นอยู่) รันสคริปต์ใหม่ (ที่มี expenseModel เพิ่มมาแล้ว) จะเจอ marker เดิม แล้ว
+ข้ามทั้งไฟล์ทันที — `expenseModel` จะไม่ถูกแตะเลยแม้แต่ครั้งเดียว** เงียบ ๆ ไม่มี error ให้เห็นด้วย —
+เปลี่ยนเป็น marker แยกต่อ collection ก่อน merge เฟส 2 แก้ปัญหานี้ถาวร: DB ที่เคยรันเฟส 1 ไปแล้ว รัน
+สคริปต์เวอร์ชันเฟส 2 จะข้าม section เดิมที่มี marker (orders/payments/ฯลฯ) แต่ยังรัน `expenses` จริง
+เพราะไม่มี marker ของมัน — มีเทสจำลองสถานการณ์นี้ตรง ๆ ใน `migrateMoneyToSatang.test.ts`
+
+`runMigration()` คืน `Record<string, number | null>` — ตัวเลข = จำนวนเอกสารที่แก้จริง, `null` = section
+นั้นถูกข้าม (เคยรันแล้ว) แยก logic ออกมาจาก CLI runner (ที่ทำ `mongoose.disconnect()` ตอนจบ) เพื่อให้
+integration test import `runMigration()` ไปเรียกตรง ๆ ได้โดยไม่ตัด connection ที่เทสอื่นในไฟล์ใช้ร่วมกัน
 
 **ต้องรันก่อน deploy จริงครั้งแรกหลัง PR นี้ merge** (หรือรันกับ DB dev/staging ที่มีข้อมูลทดสอบอยู่แล้ว
 ถ้าอยากให้ตัวเลขเดิมยังถูกต้อง — ถ้าไม่รัน ข้อมูลเก่าจะโดนตีความเป็นสตางค์ทั้งที่จริงเป็นบาท เช่น
-`total_amount: 150` เดิม (150 บาท) จะกลายเป็นแค่ 1.50 บาทถ้าไม่ migrate)
+`total_amount: 150` เดิม (150 บาท) จะกลายเป็นแค่ 1.50 บาทถ้าไม่ migrate) — **ถ้าเคยรันตอนจบเฟส 1 ไปแล้ว
+รันซ้ำอีกครั้งตอนนี้ได้เลยปลอดภัย** จะแค่เติม `expenses` section ที่ยังไม่เคยรันให้เท่านั้น
 
 ---
 
@@ -146,12 +166,18 @@ discount_amount = toSatang(result.discount_amount);
 - `tests/integration/persistOrder.test.ts` (+1 เคส) — `29.9*3 = 89.69999999999999` ใน JS ดิบ (ก่อนแก้
   `orderItem.total_price` แต่ละบรรทัด**ไม่เคย** `round2()` เลย มีแต่ subtotal/total_amount รวมที่โดน —
   ยืนยันว่าหลังแก้ทั้ง order และ orderItem เก็บเป็น integer สตางค์เป๊ะ ไม่มีทางเพี้ยนแบบนี้อีก)
-- `tests/integration/migrateMoneyToSatang.test.ts` (2 เคส) — แปลงถูกทุก field ทุก collection รวม
-  nested array + `cost_per_unit` ไม่ถูกแตะ, กันรันซ้ำใช้ได้จริง
+- `tests/integration/migrateMoneyToSatang.test.ts` (4 เคส) — แปลงถูกทุก field ทุก collection รวม
+  nested array + `cost_per_unit` ไม่ถูกแตะ, กันรันซ้ำต่อ collection ใช้ได้จริง, **จำลองสถานการณ์
+  "เพิ่ม field ใหม่เข้าไฟล์ทีหลัง" ตรง ๆ** (ตั้ง marker หลอกของ section เก่าไว้ก่อน แล้วยืนยันว่า section
+  ใหม่ที่ยังไม่มี marker ยังรันจริง — คุมบั๊กที่เจอตอนเขียนเฟส 2 ไม่ให้เกิดซ้ำ)
+- `tests/integration/expenseService.test.ts` (5 เคส, เฟส 2) — create/update แปลง amount ถูกทาง,
+  list/getById คืนบาท, `summary()` รวมยอดตามหมวดถูกต้อง, `totalInRange()` คืนบาทตรง ๆ
+- `tests/integration/dashboardService.test.ts` (1 เคส, เฟส 2) — สร้างออเดอร์ paid (satang) +
+  ค่าใช้จ่าย (satang หลังเฟส 2) พร้อมกัน ยืนยันว่า `profit_estimate` ไม่ผสมหน่วยผิด (จุดเสี่ยงสุดตาม §3)
 - แก้ assertion เดิมที่ query DB ตรง ๆ (bypass presenter) ใน `persistOrder.test.ts`,
   `createPaymentPreorder.test.ts`, `cancelPreorder.test.ts` ให้ตรงกับหน่วยสตางค์จริง + comment กำกับ
   ชัดว่าทำไมต่างจาก `order.*`/`preorder.*` ที่มาจาก service (บาทเหมือนเดิม)
-- unit 163 → **171** · integration 79 → **82**
+- unit 163 → 171 · integration 79 → 82 (เฟส 1) → **89** (เฟส 2)
 
 ---
 
@@ -159,10 +185,10 @@ discount_amount = toSatang(result.discount_amount);
 
 เรียงตามความเสี่ยง/ผลกระทบจากน้อยไปมาก:
 
-1. **Expense** (`expenseModel.amount`) — โดดเดี่ยว ไม่ผูกกับอะไร ทำได้เร็วที่สุด
+1. ~~**Expense** (`expenseModel.amount`)~~ — ✅ เสร็จแล้ว (เฟส 2, 2026-09-12)
 2. **Delivery zone** (`deliveryZoneModel.fee`) — โดดเดี่ยวเช่นกัน (env fallback ก็ต้องแปลงด้วยถ้าจะทำ)
 3. **Recipe/Component/Ingredient cost** (`estimated_cost_per_batch`, `cost_per_unit`) — ผูกกับ
-   `orderItem.cost_per_unit`/`preorderItem.cost_per_unit` ที่ปล่อยไว้เป็นบาทในเฟสนี้ — ทำเฟสนี้เมื่อไหร่
+   `orderItem.cost_per_unit`/`preorderItem.cost_per_unit` ที่ปล่อยไว้เป็นบาทในเฟส 1 — ทำเฟสนี้เมื่อไหร่
    ต้องกลับมาแปลง 2 field นั้นให้เป็นสตางค์ด้วยพร้อมกัน (ตอนนี้คงเป็นบาทไว้ตั้งใจ)
 4. **Promotion definition** (`promotionModel.discount_value`/`min_order_amount`/`max_discount_amount`)
    — ซับซ้อนกว่าที่อื่นเพราะ `discount_value` เป็นเงิน**เฉพาะ**ตอน `discount_type === "Amount"`
@@ -171,8 +197,9 @@ discount_amount = toSatang(result.discount_amount);
 5. **Product pricing** (`productModel.product_price`/`sale_price`/`purchase_cost`,
    `productVariantModel.variant_price`, `productOptionModel.extra_price`) — เสี่ยงสุดเพราะกระทบ
    `cartItemModel.price_snapshot` ด้วย (ต้อง migrate พร้อมกัน) และเป็นจุดเริ่มของทุกการคำนวณเงินในระบบ
-   (`resolveLine()` ที่เพิ่งแปลงในเฟสนี้จะไม่ต้องมี "จุดข้ามโดเมน" อีกต่อไปถ้าทำเฟสนี้เสร็จ — โค้ดจะง่ายขึ้น)
+   (`resolveLine()` ที่เพิ่งแปลงในเฟส 1 จะไม่ต้องมี "จุดข้ามโดเมน" อีกต่อไปถ้าทำเฟสนี้เสร็จ — โค้ดจะง่ายขึ้น)
 
-แต่ละเฟสควรทำแยก PR เหมือนเฟส 1 — เขียน migration ส่วนเพิ่มเข้าไปใน
-`scripts/migrate-money-to-satang.ts` เดิม (เพิ่ม field ใหม่ในแต่ละ `updateMany`) ไม่ต้องสร้างไฟล์ใหม่
-เว้นแต่จะซับซ้อนจนแยกอ่านง่ายกว่า (เช่น promotion ที่ต้อง conditional)
+แต่ละเฟสควรทำแยก PR — เขียน migration ส่วนเพิ่มเข้าไปใน `scripts/migrate-money-to-satang.ts` เดิม
+(เพิ่ม `runSection()` ใหม่ต่อ collection — **ห้ามใช้ marker เดิมซ้ำ ต้องตั้ง sectionId ใหม่ไม่ซ้ำใคร
+เสมอ** ดู §4 ว่าทำไม) ไม่ต้องสร้างไฟล์ใหม่ เว้นแต่จะซับซ้อนจนแยกอ่านง่ายกว่า (เช่น promotion ที่ต้อง
+conditional)

@@ -6,6 +6,7 @@ import dbConnect from "../lib/dbConnect";
 import { badRequest } from "../lib/httpError";
 import { createCrudService } from "../lib/crudService";
 import expenseModel from "../models/expenseModel";
+import { toSatang, toBaht, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -20,7 +21,7 @@ export const EXPENSE_CATEGORIES = [
   "อื่นๆ",
 ] as const;
 
-export const expenseService = createCrudService(expenseModel as any, {
+const base = createCrudService(expenseModel as any, {
   label: "ค่าใช้จ่าย",
   searchFields: ["description", "vendor", "note"],
   createFields: [
@@ -36,6 +37,44 @@ export const expenseService = createCrudService(expenseModel as any, {
   ],
 });
 
+// BACKLOG §3.11 เฟส 2 — amount เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentExpense<T extends Record<string, unknown>>(doc: T): T {
+  return toBahtFields(doc, ["amount"] as const);
+}
+
+export const expenseService = {
+  ...base,
+
+  async list(args: Parameters<typeof base.list>[0]) {
+    const result = await base.list(args);
+    return { ...result, items: result.items.map(presentExpense) };
+  },
+
+  async getById(id: string, includeDeleted?: boolean) {
+    return presentExpense(await base.getById(id, includeDeleted));
+  },
+
+  async create(input: Record<string, unknown>) {
+    const payload =
+      input.amount != null ? { ...input, amount: toSatang(Number(input.amount)) } : input;
+    return presentExpense(await base.create(payload));
+  },
+
+  async update(id: string, input: Record<string, unknown>) {
+    const payload =
+      input.amount != null ? { ...input, amount: toSatang(Number(input.amount)) } : input;
+    return presentExpense(await base.update(id, payload));
+  },
+
+  async remove(id: string) {
+    return presentExpense(await base.remove(id));
+  },
+
+  async restore(id: string) {
+    return presentExpense(await base.restore(id));
+  },
+};
+
 /** สรุปยอดค่าใช้จ่ายตามหมวด ในช่วงวันที่ */
 export async function summary(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();
@@ -46,21 +85,26 @@ export async function summary(opts: { date_from?: string; date_to?: string } = {
     if (opts.date_to) match.date.$lte = new Date(opts.date_to);
   }
 
+  // $sum ได้ผลรวมเป็นสตางค์ (amount เก็บเป็นสตางค์แล้ว) — แปลงเป็นบาทก่อนคืน (API ยังบาทเหมือนเดิม)
   const rows = await expenseModel.aggregate([
     { $match: match },
     { $group: { _id: "$category", total: { $sum: "$amount" }, count: { $sum: 1 } } },
     { $sort: { total: -1 } },
   ]);
 
-  const total = rows.reduce((s, r) => s + r.total, 0);
+  const totalBaht = rows.reduce((s, r) => s + toBaht(r.total), 0);
   return {
-    total: Math.round(total * 100) / 100,
+    total: Math.round(totalBaht * 100) / 100,
     count: rows.reduce((s, r) => s + r.count, 0),
-    by_category: rows.map((r) => ({ category: r._id, total: r.total, count: r.count })),
+    by_category: rows.map((r) => ({
+      category: r._id,
+      total: Math.round(toBaht(r.total) * 100) / 100,
+      count: r.count,
+    })),
   };
 }
 
-/** ยอดรวมค่าใช้จ่ายในช่วง (ใช้จาก dashboard) */
+/** ยอดรวมค่าใช้จ่ายในช่วง เป็น**บาท** (ใช้จาก dashboardService — คืนบาทตรงนี้เลยกันต้องแปลงซ้ำที่ผู้เรียก) */
 export async function totalInRange(dateFrom?: Date, dateTo?: Date): Promise<number> {
   await dbConnect();
   const match: Record<string, any> = { deleted_at: null };
@@ -73,7 +117,7 @@ export async function totalInRange(dateFrom?: Date, dateTo?: Date): Promise<numb
     { $match: match },
     { $group: { _id: null, total: { $sum: "$amount" } } },
   ]);
-  return rows[0]?.total ?? 0;
+  return toBaht(rows[0]?.total ?? 0);
 }
 
 export function assertCategory(cat: unknown): void {

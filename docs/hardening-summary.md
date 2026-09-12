@@ -21,7 +21,7 @@
 | **§2c บั๊กความทนทาน** (clearCart error handling · voidTransaction floor guard) | ✅ → [`order-cart-inventory-robustness.md`](order-cart-inventory-robustness.md) | #22 |
 | **§3 รอบ 4c** (3.8 address_id→checkout · ~~3.12~~ ล้าสมัย · 3.16 purchase_cost · 3.4 integration test เพิ่ม) | ✅ → [`hardening-4c-plan.md`](hardening-4c-plan.md) | #23–#25 |
 | **§3 รอบ 4d — feature/ops** (3.13 object storage abstraction · 3.14 ลบรูปที่ไม่ใช้ · 3.15 delivery zone เป็น DB) | ✅ → [`hardening-4d-plan.md`](hardening-4d-plan.md) | #28 |
-| **§3 3.11 เงินเป็น integer** | 🟡 เฟส 1/5 (Order+Preorder+Payment) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | — |
+| **§3 3.11 เงินเป็น integer** | 🟡 เฟส 2/5 (Order+Preorder+Payment+Expense) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | — |
 
 ทุก PR merge เข้า branch `addModels` · ทุก commit ผ่าน `typecheck` · `typecheck:test` · `lint` · `test` (unit) · `test:integration` · `build` · **CI (`.github/workflows/ci.yml`) รันครบทุกขั้นทุก PR ตั้งแต่ #13**
 
@@ -184,7 +184,7 @@ test: unit 155→**163** / integration 56→**79** · ก่อนลงมื�
 
 ---
 
-## รอบ 5 — เงินเป็น integer (สตางค์) — 🟡 เฟส 1/5 (2026-09-12) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)
+## รอบ 5 — เงินเป็น integer (สตางค์) — 🟡 เฟส 2/5 (2026-09-12) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)
 
 สำรวจก่อนลงมือพบเงินกระจายใน 17 model — แบ่งเป็น 5 เฟสตามโดเมนที่ผูกกันจริงทางโค้ด (ทำทีเดียวเสี่ยงเกิน
 รีวิวไหว) ถามผู้ใช้เรื่อง API contract ก่อน: **DB เก็บสตางค์ แต่ API ยังบาททศนิยมเหมือนเดิม** (ไม่ breaking)
@@ -192,22 +192,27 @@ test: unit 155→**163** / integration 56→**79** · ก่อนลงมื�
 | เฟส | ขอบเขต | สถานะ |
 |---|---|---|
 | 1 | Order+OrderItem+Preorder+PreorderItem+Payment+PromotionUsages+dashboardService | ✅ เสร็จ |
-| 2 | Expense (`expenseModel.amount`) | ⬜ |
+| 2 | Expense (`expenseModel.amount`) | ✅ เสร็จ |
 | 3 | Delivery zone (`deliveryZoneModel.fee`) | ⬜ |
 | 4 | Recipe/Component/Ingredient cost (+ `cost_per_unit` ที่ปล่อยเป็นบาทไว้ในเฟส 1) | ⬜ |
 | 5 | Promotion definition + Product pricing (`product_price`/`variant_price`/`extra_price`/`cartItemModel`) | ⬜ |
 
 เฟส 1 ต้องรวม order+preorder เข้าด้วยกันเพราะ `paymentModel` เป็น collection กลางที่ใช้ร่วมกัน (แยกแปลง
-ไม่ได้ — จะกำกวมว่า doc ไหนหน่วยอะไร) · migration script `npm run migrate:money-to-satang` (กันรันซ้ำ
-ด้วย marker collection) · เจอ+แก้บั๊กใน `tests/integration/setup.ts` ไปด้วย (afterEach เดิมไม่เคลียร์
-raw collection ที่ไม่ผ่าน mongoose model) · test unit 163→**171** / integration 79→**82**
+ไม่ได้ — จะกำกวมว่า doc ไหนหน่วยอะไร) · migration script `npm run migrate:money-to-satang` · เจอ+แก้บั๊ก
+ใน `tests/integration/setup.ts` ไปด้วย (afterEach เดิมไม่เคลียร์ raw collection ที่ไม่ผ่าน mongoose model)
+
+เฟส 2 (Expense) โดดเดี่ยวตามคาด — `dashboardService` ไม่ต้องแก้เลยสักบรรทัด แต่**เจอบั๊กสำคัญ**ใน
+migration script เอง: marker เดิมเป็นก้อนเดียวทั้งไฟล์ ถ้า DB เคยรันเฟส 1 ไปแล้วจะข้ามทั้งไฟล์รวมถึง
+`expenseModel` ที่เพิ่งเพิ่มมาด้วย (เงียบ ไม่มี error) — แก้เป็น marker แยกต่อ collection ก่อน merge
+
+test unit 163→171→**171** (ไม่เปลี่ยนจาก money.test.ts) / integration 82→**89**
 
 ---
 
 ## ที่เหลือ (ยังไม่ทำ)
 
 > **ลำดับ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"** — รอบ 4b/4c/4d ปิดครบแล้ว, รอบ 5
-> (3.11) เหลือ 4 เฟสจาก 5 (ดูตารางด้านบน)
+> (3.11) เหลือ 3 เฟสจาก 5 (ดูตารางด้านบน)
 
 ### §1 Blockers — ขั้น deploy (ไม่ใช่โค้ด)
 `npm run seed` · `npm run backfill:product-codes` · MongoDB `product_type` เดิม → `inStore` ·
@@ -232,7 +237,7 @@ raw collection ที่ไม่ผ่าน mongoose model) · test unit 163�
 | [`hardening-4b-plan.md`](hardening-4b-plan.md) | รอบ 4b — zod tail ครบ (`/admin/orders`+อีก 5 กลุ่ม) · รื้อ `pick()` 8/8 · `no-explicit-any` บน `src/lib` (PR #20–#21) |
 | [`hardening-4c-plan.md`](hardening-4c-plan.md) | รอบ 4c — address_id→checkout · purchase_cost · integration test เพิ่ม (+ §0 บทเรียนเรื่อง §2b/§2c ที่เคยรายงานผิดว่า merge แล้ว) (PR #23–#25) |
 | [`hardening-4d-plan.md`](hardening-4d-plan.md) | รอบ 4d — object storage abstraction · ลบรูปที่ไม่ใช้ · delivery zone เป็น DB (PR #28) |
-| [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | รอบ 5 §3.11 เฟส 1 — เงินเป็นสตางค์: Order+Preorder+Payment · แผนเฟสที่เหลือ |
+| [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | รอบ 5 §3.11 เฟส 1-2 — เงินเป็นสตางค์: Order+Preorder+Payment+Expense · แผนเฟสที่เหลือ |
 | [`infra-tooling.md`](infra-tooling.md) | §3.6 eslint · §3.3 logger · §3.4 testing |
 | [`validation.md`](validation.md) | §3.1 zod — สถานะ adopt ราย route |
 | [`security-hardening.md`](security-hardening.md) | §3.2 rate-limit · §3.9 Google · §3.10 CSRF |
