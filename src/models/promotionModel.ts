@@ -28,10 +28,15 @@ const promotionSchema = new mongoose.Schema({
         enum: ["online", "instore"],
         default: ["online", "instore"],
     },
+    // BACKLOG §3.11 เฟส 5a — เป็นเงิน (สตางค์) เฉพาะตอน discount_type === "Amount" เท่านั้น! ตอน
+    // "Percentage" เป็นตัวเลข % ดิบ (0-100) ไม่ใช่เงิน ไม่แปลง · ตอน "FreeShipping" ไม่ถูกใช้เลย (แต่
+    // required ที่ schema เพราะประวัติศาสตร์ ปล่อยเป็น 0 ไปเฉย ๆ ไม่แปลงเช่นกัน) — ดู promotionService.ts
     discount_value: { //ค่าของส่วนลด
         type: Number,
         required: true,
     },
+    // BACKLOG §3.11 เฟส 5a — เป็นเงิน (สตางค์) เสมอไม่ว่า discount_type จะเป็นอะไร (ยอดขั้นต่ำเทียบกับ
+    // subtotal ที่เป็นบาทเสมอ)
     min_order_amount: { //จำนวนเงินขั้นต่ำในการใช้โปรโมชั่นนี้ — ถ้ากำหนด applicable_products ไว้ด้วย
         // จะเช็คเฉพาะยอดรวมของ "สินค้าที่ร่วมรายการ" เท่านั้น ไม่ใช่ยอดทั้งบิล (เช่น "คละสินค้า A/B ครบ 200 ลด 50")
         type: Number,
@@ -52,6 +57,7 @@ const promotionSchema = new mongoose.Schema({
         type: Number,
         required: false,
     },
+    // BACKLOG §3.11 เฟส 5a — เป็นเงิน (สตางค์) เสมอเมื่อมีค่า (แม้จะมีความหมายเฉพาะตอน Percentage)
     max_discount_amount: { //จำนวนเงินสูงสุดที่สามารถใช้ส่วนลดนี้ได้ (ถ้า discount_type เป็น Percentage)
         type: Number,
         required: false,

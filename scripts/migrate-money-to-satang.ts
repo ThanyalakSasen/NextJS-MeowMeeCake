@@ -15,6 +15,7 @@ import ingredientModel from "../src/models/ingredientModel";
 import componentModel from "../src/models/componentModel";
 import recipeModel from "../src/models/recipeModel";
 import productModel from "../src/models/productModel";
+import promotionModel from "../src/models/promotionModel";
 
 /**
  * BACKLOG §3.11 — ย้ายข้อมูลเงินเดิมที่เก็บเป็น "บาท" (float) ให้เป็น "สตางค์" (integer) ครั้งเดียว
@@ -29,8 +30,12 @@ import productModel from "../src/models/productModel";
  * recipeModel.estimated_cost_per_batch, productModel.purchase_cost (**ไม่รวม** product_price/
  * sale_price — ยังไม่แปลง), orderItemModel.cost_per_unit, preorderItemModel.cost_per_unit
  * (ค้างจากเฟส 1 — ต้องรอ recipeModel/ingredientModel/componentModel แปลงก่อนถึงจะแปลงตามได้)
+ * ครอบคลุม (เฟส 5a): promotionModel.min_order_amount/max_discount_amount (เสมอ) และ
+ * discount_value **เฉพาะตอน discount_type === "Amount"** (ตอน Percentage เป็นตัวเลข % ไม่แปลง) —
+ * ใช้ pipeline-style update (`updateMany(filter, [stage, ...])`) แทน `$mul` ธรรมดา เพราะต้อง
+ * conditional ตาม field อื่นในเอกสารเดียวกัน (ดูรายละเอียดที่ runSection ด้านล่าง)
  * **ไม่รวม** field เงินใน productModel (product_price/sale_price)/productVariantModel/
- * productOptionModel/promotionModel/cartItemModel เพราะยังไม่ถูกแปลง (ดู
+ * productOptionModel/cartItemModel/preorderRoundItemModel.price_override เพราะยังไม่ถูกแปลง (ดู
  * docs/hardening-5-money-phase1.md §7 แผนเฟสที่เหลือ)
  *
  * **กันรันซ้ำแบบต่อ collection** (ไม่ใช่ marker เดียวทั้งไฟล์!) — แต่ละ section ด้านล่างมี id ของตัวเอง
@@ -206,6 +211,39 @@ export async function runMigration(): Promise<Record<string, number | null>> {
       return res.modifiedCount;
     }
   );
+
+  // ── เฟส 5a ─────────────────────────────────────────────────
+  // ใช้ pipeline-style update (`updateMany(filter, [stage])` — array แทน object เป็น arg ที่ 2) แทน
+  // `$mul` ธรรมดา เพราะ discount_value ต้องคูณ ×100 "เฉพาะ" เอกสารที่ discount_type === "Amount"
+  // เท่านั้น ($cond ทำแบบนี้ไม่ได้กับ $mul) — bonus ที่ไม่ได้ตั้งใจตอนแรก: $multiply ใน aggregation
+  // pipeline คืน null เฉย ๆ เมื่อเจอ operand เป็น null (ไม่ throw เหมือน $mul update operator ธรรมดา
+  // ในเฟส 4) ยืนยันด้วยการทดสอบจริง จึงไม่ต้อง filter `$type:"number"` ก่อนเหมือนเฟส 4 เลยสำหรับ
+  // min_order_amount/max_discount_amount ที่เป็น nullable เช่นกัน — ปลอดภัยกว่าและโค้ดสั้นกว่า
+  summary.promotions = await runSection(db, "money_to_satang_3_11_promotions", async () => {
+    // mongoose ปฏิเสธ array (pipeline update) เว้นแต่บอกชัดเจนด้วย { updatePipeline: true } — ต่างจาก
+    // native MongoDB driver ที่รับ array ตรง ๆ (ยืนยันตอนทดสอบ syntax นี้ครั้งแรกกับ native driver
+    // ก่อนพอร์ตมาใช้ mongoose ที่นี่ ถึงเจอว่าต้องมี option เพิ่ม)
+    const res = await promotionModel.updateMany(
+      {},
+      [
+        {
+          $set: {
+            discount_value: {
+              $cond: [
+                { $eq: ["$discount_type", "Amount"] },
+                { $multiply: ["$discount_value", 100] },
+                "$discount_value",
+              ],
+            },
+            min_order_amount: { $multiply: ["$min_order_amount", 100] },
+            max_discount_amount: { $multiply: ["$max_discount_amount", 100] },
+          },
+        },
+      ],
+      { updatePipeline: true }
+    );
+    return res.modifiedCount;
+  });
 
   console.log("migrate-money-to-satang จบแล้ว:");
   for (const [k, v] of Object.entries(summary)) {

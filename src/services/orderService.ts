@@ -289,7 +289,9 @@ async function persistOrder(
   }
 
   // ── ส่วนลด: ใช้โปรโมชัน (ระบบคิดเอง) หรือส่วนลดกรอกมือ ──
-  // promotionService/discountEngine ยังทำงานเป็น "บาท" เช่นกัน (promotionModel ไม่ได้แปลงในเฟสนี้) —
+  // promotionService.validateForOrder()/discountEngine.ts ยังรับ-คืนเป็น "บาท" เหมือนเดิมทุกประการ
+  // แม้ promotionModel เองจะถูกแปลงเป็นสตางค์แล้วตั้งแต่เฟส 5a ก็ตาม (promotionService แปลงกลับเป็น
+  // บาทให้เองก่อนส่งเข้า discountEngine — ดู presentPromotion() ที่นั่น) — จุดนี้จึงไม่ต้องแก้อะไรเลย
   // แปลงอินพุตเป็นบาทตอนเรียก แล้วแปลงผลลัพธ์ (บาท) กลับเป็นสตางค์ทันที
   let discount_amount = 0;
   let appliedPromotion: { promotion_id: string; discount_amount: number } | null = null;

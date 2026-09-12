@@ -1,9 +1,13 @@
-# รอบ 5 — เงินเป็น integer (สตางค์), เฟส 1-4: Order+Preorder+Payment, Expense, Delivery zone, Recipe/Component/Ingredient
+# รอบ 5 — เงินเป็น integer (สตางค์), เฟส 1-5a: Order+Preorder+Payment, Expense, Delivery zone, Recipe/Component/Ingredient, Promotion
 
 > อัปเดตล่าสุด: 2026-09-12
-> สถานะ: ✅ **เฟส 1-4 เสร็จสมบูรณ์** (จากทั้งหมด 5 เฟส — ดู §7 "เฟสที่เหลือ")
+> สถานะ: ✅ **เฟส 1-5a เสร็จสมบูรณ์** (จากแผนเดิม 5 เฟส — แผนเดิมเฟส 5 แตกเป็น **5a (Promotion)** และ
+> **5b (Product pricing + Cart + preorderRoundItemModel.price_override)** ระหว่างสำรวจขอบเขตจริงก่อน
+> ลงมือ พบว่าทั้งสองเรื่องเป็นคนละ domain ที่ไม่ผูกกันทางโค้ดเลย (เหตุผลเดียวกับที่แบ่งเฟส 1-4 มาตั้งแต่แรก
+> — ดู §0) — ดู §7 "เฟสที่เหลือ")
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.11 — งานเดี่ยวเสี่ยงสูงที่สุดในทั้งหมด (tag **L**)
-> ก่อนเริ่ม: สำรวจขอบเขตจริงก่อน (17 model + 9 schema แตะเงิน) แล้วถามผู้ใช้เรื่อง API contract
+> ก่อนเริ่ม: สำรวจขอบเขตจริงก่อน (17 model + 9 schema แตะเงิน — ตัวเลขนี้พลาดไป 1 model จริง ๆ ดู §0)
+> แล้วถามผู้ใช้เรื่อง API contract
 
 ## 0. ทำไมต้องแบ่งเฟส (และทำไมเฟส 1 ใหญ่กว่าที่คิดตอนแรก)
 
@@ -21,9 +25,18 @@
 
 **สิ่งที่ยังไม่แตะ** (ตั้งใจ ไม่ใช่ลืม — `expenseModel.amount` แปลงในเฟส 2, `deliveryZoneModel.fee`
 แปลงในเฟส 3, `recipeModel`/`componentModel`/`ingredientModel` + `cost_per_unit`/`purchase_cost`
-แปลงในเฟส 4): `productModel.product_price`/`sale_price`/`productVariantModel`/`productOptionModel`
-(ราคาขาย/variant/option), `promotionModel` (นิยามโปรโมชัน — `discount_value`/`min_order_amount`/
-`max_discount_amount`), `cartItemModel.price_snapshot` — ยังเป็นบาททั้งหมด ดู §7
+แปลงในเฟส 4, `promotionModel` แปลงในเฟส 5a): `productModel.product_price`/`sale_price`/
+`productVariantModel`/`productOptionModel` (ราคาขาย/variant/option), `cartItemModel.price_snapshot` —
+ยังเป็นบาททั้งหมด ดู §7
+
+**ตัวเลข "17 models" ด้านบนพลาดไป 1 ตัวจริง ๆ** — ตอนสำรวจตอนเริ่มรอบ 5 ไม่เจอ
+`preorderRoundItemModel.price_override` (ราคาตั้งขายเฉพาะรอบ override ราคาสินค้าปกติ) เพราะมันไม่ได้
+"ดูเหมือน" money field ชัดเจนแบบฟิลด์อื่น (ชื่อไม่มีคำว่า price/amount/cost ตรง ๆ กว่าจะรู้ว่าเป็นเงินต้อง
+ตามอ่าน `preorderRoundService.getOrderableRoundItem()`) เจอตอนสำรวจขอบเขตเฟส 5 (ก่อนตัดสินใจแยก 5a/
+5b) — field นี้ผูก `??` fallback chain เดียวกับ `product.sale_price`/`product_price` โดยตรง
+(`item.price_override ?? product.sale_price ?? product.product_price`) เหมือนกับที่ `productModel.
+purchase_cost` ผูกกับสูตรผ่าน `getUnitCostByProduct()` ในเฟส 4 — ต้องแปลงพร้อมกับ Product pricing ใน
+เฟส 5b เสมอ ไม่งั้นได้ปัญหาหน่วยปนกันแบบเดียวกันอีก (ดู §7 ข้อ 5)
 
 ---
 
@@ -100,6 +113,7 @@ discount_amount = toSatang(result.discount_amount);
 | `productModel` | `purchase_cost` (**ไม่รวม** `product_price`/`sale_price` — รอเฟส 5) | 4 |
 | `orderItemModel` | `cost_per_unit` (ค้างจากเฟส 1 — ต้องรอเฟสนี้ก่อน) | 4 |
 | `preorderItemModel` | `cost_per_unit` (ค้างจากเฟส 1 — ต้องรอเฟสนี้ก่อน) | 4 |
+| `promotionModel` | `min_order_amount`, `max_discount_amount` (เสมอ) + `discount_value` (**เฉพาะ** `discount_type === "Amount"`) | 5a |
 
 ## 3. Service ที่แก้ + ตรรกะ presenter (สตางค์ → บาท ตอนคืนค่า)
 
@@ -160,6 +174,16 @@ discount_amount = toSatang(result.discount_amount);
   `orderItem.cost_per_unit * quantity`) ตอนนี้ได้ผลรวมเป็นสตางค์แล้ว (เดิมเป็นบาท) ต้องเพิ่ม `toBaht()`
   ครอบ `cogs` ก่อนเอาไปรวมในสูตร `profit_estimate` — เป็นจุดเสี่ยงเดิมที่เคยเตือนไว้ตั้งแต่เฟส 1 ว่า "รอ
   เฟส 4 มาแก้" (ดู comment เดิมในโค้ด) ตอนนี้แก้ครบแล้วทุกองค์ประกอบของสูตร
+- **`promotionService.ts`** (เฟส 5a) — เพิ่ม `presentPromotion()` ที่แปลง `min_order_amount`/
+  `max_discount_amount` เสมอ + แปลง `discount_value` **เฉพาะ**เมื่อ `discount_type === "Amount"` ใช้ใน
+  `createPromotion`/`listPromotions`/`getPromotionById`/`updatePromotion`/`deletePromotion`/
+  `restorePromotion` ทุกจุดที่คืน promotion doc · `createPromotion`/`updatePromotion` แปลง input บาท
+  เป็นสตางค์ก่อนเขียนด้วย logic เดียวกัน (`updatePromotion` ต้องอ่าน `discount_type` ปัจจุบันจาก DB มา
+  ดูก่อนถ้า payload ไม่ได้ส่ง `discount_type` มาด้วย — ดูตัวอย่างโค้ดด้านล่าง) · **`validateForOrder()`
+  นำ `presentPromotion()` มาใช้ซ้ำเป็นตัวแปลงข้ามโดเมนก่อนส่งเข้า `discountEngine.computeDiscount()`**
+  (ฟังก์ชันเดียวกันที่ทำหน้าที่เป็น API presenter ก็ทำหน้าที่แปลงข้ามโดเมนได้พอดี เพราะทั้งคู่ต้องการผลลัพธ์
+  แบบเดียวกันคือ "field เงินเป็นบาท") — `orderService.ts` **ไม่ต้องแก้อะไรเลยสักบรรทัด** เพราะ
+  `validateForOrder()` ยังรับ-คืนเป็นบาทเหมือนเดิมทุกประการ (คอมเมนต์อธิบายเพิ่มไว้ที่จุดเรียกเท่านั้น)
 
 ### ตัวอย่างโค้ดจริงที่แก้ในเฟส 4 (ก่อน/หลัง)
 
@@ -292,6 +316,79 @@ collection ที่เคยมี section ของตัวเองอยู
 collection ใหม่ทั้งหมด (เฟส 2) หรือ field ใหม่ใน collection ที่เคยมี section อยู่แล้ว (เฟส 4) —
 **ต้องเป็น section id ใหม่เสมอ ห้ามผสมกับ section เดิมเด็ดขาด**
 
+### ตัวอย่างโค้ดจริงที่แก้ในเฟส 5a
+
+**1) `promotionService.updatePromotion()` — ต้องรู้ discount_type "ที่จะเป็นหลังอัปเดต" ก่อนตัดสินใจแปลง:**
+
+```ts
+// discount_value เป็นเงินเฉพาะตอน discount_type === "Amount" — ถ้า payload ไม่ได้ส่ง discount_type
+// มาด้วย ต้องอ่านค่าปัจจุบันจาก DB มาดูก่อนว่าประเภทที่ "จะเป็นหลังอัปเดต" คืออะไร (ไม่ใช่เดาจาก payload
+// อย่างเดียว หรือแย่กว่านั้นคือไม่ตรวจเลยแล้วปล่อยผ่าน)
+if (payload.discount_value !== undefined) {
+  let effectiveType = payload.discount_type;
+  if (effectiveType === undefined) {
+    const existing = await promotionModel.findOne({ _id: id, deleted_at: null })
+      .select("discount_type").lean();
+    effectiveType = existing.discount_type;
+  }
+  if (effectiveType === "Amount") {
+    payload.discount_value = toSatang(Number(payload.discount_value));
+  }
+}
+// ตั้งใจ "ไม่" แตะ discount_value เลยถ้า payload ไม่ได้ส่งมาด้วย แม้จะเปลี่ยน discount_type ในคำขอ
+// เดียวกัน — ค่าเก่าที่ยังไม่เคยถูกแปลงหน่วย (นัยเป็น % หรือบาทดิบตามที่กรอกไว้ตอนสร้าง) จะยังคงเดิม
+// จนกว่าแอดมินจะกรอก discount_value ใหม่มาเองจริง ๆ — พฤติกรรมนี้เหมือนกับก่อนแก้ทุกประการ (ระบบ
+// ไม่เคยพยายาม "ตีความ" ค่าเก่าใหม่ตามชนิดที่เปลี่ยนไป เพราะทำแบบนั้นเสี่ยงเดาผิดยิ่งกว่า)
+```
+
+**2) `presentPromotion()` ใช้ซ้ำได้ทั้งเป็น API presenter และตัวแปลงข้ามโดเมนให้ `discountEngine.ts`:**
+
+```ts
+function presentPromotion<T extends Record<string, unknown>>(promo: T): T {
+  const out = toBahtFields(promo, ["min_order_amount", "max_discount_amount"] as const);
+  if (out.discount_type === "Amount" && typeof out.discount_value === "number") {
+    out.discount_value = toBaht(out.discount_value);
+  }
+  return out;
+}
+
+// validateForOrder() — เรียกฟังก์ชันเดียวกันนี้ก่อนส่งเข้า discountEngine.computeDiscount() ที่ยัง
+// ทำงานเป็นบาทล้วน (ไม่เคยถูกแก้เลยในเฟสนี้) — ไม่ต้องเขียนตัวแปลงแยกอีกชุดสำหรับ "ใช้ภายใน" เพราะ
+// รูปร่างผลลัพธ์ที่ต้องการ (field เงินเป็นบาท) เหมือนกับที่ API ต้องการเป๊ะ
+return computeDiscount(presentPromotion(promo), { lines, subtotal, delivery_fee, channel });
+```
+
+### บั๊ก/ข้อค้นพบที่เจอในเฟส 5a
+
+**MongoDB `$mul` ธรรมดาทำ conditional ไม่ได้ — ต้องใช้ pipeline-style update แทน:** `discount_value`
+ต้องคูณ ×100 เฉพาะเอกสารที่ `discount_type === "Amount"` เท่านั้น ซึ่ง `$mul` (object update ธรรมดาแบบ
+เฟส 1-4) ไม่รองรับเงื่อนไขแบบนี้เลย ต้องเปลี่ยนไปใช้ **pipeline-style update** (`updateMany(filter,
+[stage, ...])` — array แทน object เป็น argument ที่ 2) ที่รองรับ `$cond`/`$multiply` แบบ aggregation:
+
+```ts
+await promotionModel.updateMany({}, [
+  { $set: {
+      discount_value: { $cond: [
+        { $eq: ["$discount_type", "Amount"] },
+        { $multiply: ["$discount_value", 100] },
+        "$discount_value",
+      ]},
+      min_order_amount: { $multiply: ["$min_order_amount", 100] },
+      max_discount_amount: { $multiply: ["$max_discount_amount", 100] },
+  }},
+], { updatePipeline: true }); // mongoose ต้องมี option นี้ชัดเจน ไม่งั้น throw "Cannot pass an
+                               // array to query updates unless the `updatePipeline` option is set"
+                               // (native MongoDB driver รับ array ตรง ๆ ได้เลยไม่ต้องมี option แบบนี้
+                               // — เจอตอนพอร์ต syntax ที่ทดสอบผ่าน native driver มาใช้ผ่าน mongoose)
+```
+
+**bonus ที่ไม่ได้ตั้งใจตอนแรก:** ทดสอบจริงพบว่า aggregation `$multiply` คืน `null` เฉย ๆ เมื่อเจอ
+operand เป็น `null` (ต่างจาก `$mul` update operator ธรรมดาในเฟส 4 ที่ throw ทันที) จึงไม่ต้อง filter
+`{ field: { $type: "number" } }` ก่อนเหมือนเฟส 4 เลยสำหรับ `min_order_amount`/`max_discount_amount`
+ที่เป็น nullable เช่นกัน — pipeline update ปลอดภัยกว่าและโค้ดสั้นกว่า `$mul` ธรรมดาในทุกกรณีที่มี field
+เงิน nullable ปนอยู่ (ควรพิจารณาใช้ pipeline-style เป็นค่าเริ่มต้นสำหรับ migration ในอนาคต แทนที่จะ
+เลือก `$mul` + filter เป็นค่าเริ่มต้นแบบเฟส 4)
+
 **ไม่ต้องแก้ schema (`src/schemas/order.ts`, `payment.ts`, `expense.ts`, `delivery.ts`) หรือ route ไหน
 เลยสักไฟล์** —
 client ยังส่ง/รับบาททศนิยมเหมือนเดิมทุกประการ การแปลงทั้งหมดอยู่ในชั้น service ล้วน ๆ
@@ -328,12 +425,16 @@ integration test import `runMigration()` ไปเรียกตรง ๆ ไ�
 เจอในไฟล์นี้ — MongoDB `$mul` error ทันทีถ้าเจอ `null` ตรง ๆ ต้อง filter `{ field: { $type: "number" } }`
 ก่อนเสมอ (field required ทั่วไปไม่ต้องกังวลเรื่องนี้เพราะไม่มีทางเป็น `null`)
 
+**เฟส 5a เพิ่ม section `promotions` เข้ามา** — ต่างจากทุก section ก่อนหน้าตรงที่เป็น **pipeline-style
+update** (ดู §3 "บั๊ก/ข้อค้นพบที่เจอในเฟส 5a") ไม่ใช่ `$mul` object ธรรมดา แต่ยังใช้ `runSection()`
+เดิมได้เหมือนกันทุกประการ (`runSection()` รับแค่ callback ที่คืน `modifiedCount` ไม่สนว่าข้างในเรียก
+`updateMany` แบบไหน) — marker เป็น section ของตัวเอง (`money_to_satang_3_11_promotions`) ตามกฎเดิม
+
 **ต้องรันก่อน deploy จริงครั้งแรกหลัง PR นี้ merge** (หรือรันกับ DB dev/staging ที่มีข้อมูลทดสอบอยู่แล้ว
 ถ้าอยากให้ตัวเลขเดิมยังถูกต้อง — ถ้าไม่รัน ข้อมูลเก่าจะโดนตีความเป็นสตางค์ทั้งที่จริงเป็นบาท เช่น
 `total_amount: 150` เดิม (150 บาท) จะกลายเป็นแค่ 1.50 บาทถ้าไม่ migrate) — **ถ้าเคยรันตอนจบเฟสก่อนหน้า
 ไปแล้ว รันซ้ำอีกครั้งตอนนี้ได้เลยปลอดภัยเสมอ** (marker แยกต่อ section) จะแค่เติม section ใหม่ที่ยังไม่
-เคยรันให้เท่านั้น (ตอนนี้คือ `ingredients`/`components`/`recipes`/`products_purchase_cost`/
-`order_items_cost_per_unit`/`preorder_items_cost_per_unit`)
+เคยรันให้เท่านั้น (ตอนนี้คือ `promotions`)
 
 ---
 
@@ -383,11 +484,19 @@ integration test import `runMigration()` ไปเรียกตรง ๆ ไ�
   หลังเฟส 4 มีแค่ "ความหมาย" ของหน่วย (บาท → สตางค์) ไม่ใช่ค่าตัวเลข
 - `tests/integration/dashboardService.test.ts` (1 เคส เดิม, ปรับให้ `cost_per_unit` เป็นสตางค์) —
   ยืนยัน `cogs`/`profit_estimate` ยังถูกต้องหลังเพิ่ม `toBaht()` ครอบ `cogsRows` (เฟส 4)
+- `tests/integration/promotionMoney.test.ts` (11 เคส, เฟส 5a, ไฟล์ใหม่) — create/update ครบทุก
+  discount_type (Amount แปลง, Percentage/FreeShipping ไม่แปลง), `min_order_amount`/
+  `max_discount_amount` แปลงเสมอไม่ว่า type ใด, update สามกรณี (แก้ค่าปกติ, เปลี่ยน type พร้อมค่าใหม่
+  ในคำขอเดียวกัน, เปลี่ยน type โดยไม่ส่งค่าใหม่มาด้วย — ค่าเก่าต้องไม่ถูกแตะ), list/getById คืนบาทถูก
+  ตามชนิด, **end-to-end ผ่าน `validateForOrder()`**: Amount + min_order_amount เทียบเกณฑ์ถูกหน่วย
+  (ทั้งผ่านและ reject), Percentage + max_discount_amount cap แปลงบาทถูกต้อง (ไม่ cap เพี้ยน ×100)
 - แก้ assertion เดิมที่ query DB ตรง ๆ (bypass presenter) ใน `persistOrder.test.ts`,
-  `createPaymentPreorder.test.ts`, `cancelPreorder.test.ts` ให้ตรงกับหน่วยสตางค์จริง + comment กำกับ
-  ชัดว่าทำไมต่างจาก `order.*`/`preorder.*` ที่มาจาก service (บาทเหมือนเดิม)
-- unit 163 → 171 (คงที่ตั้งแต่เฟส 2) · integration 79 → 82 (เฟส 1) → 89 (เฟส 2) → 93 (เฟส 3) →
-  **104** (เฟส 4)
+  `createPaymentPreorder.test.ts`, `cancelPreorder.test.ts`, `cancelOrder.test.ts` ให้ตรงกับหน่วย
+  สตางค์จริง + comment กำกับชัดว่าทำไมต่างจาก `order.*`/`preorder.*` ที่มาจาก service (บาทเหมือนเดิม)
+  — `cancelOrder.test.ts`'s `makePromo()` สร้าง promotion ตรงผ่าน model (bypass promotionService)
+  ด้วย `discount_value: 20` มาตั้งแต่ก่อนเฟส 5a ต้องเปลี่ยนเป็น `2000` (สตางค์)
+- unit 163 → 171 (คงที่ตั้งแต่เฟส 2) · integration 79 → 82 (เฟส 1) → 89 (เฟส 2) → 93 (เฟส 3) → 104
+  (เฟส 4) → **115** (เฟส 5a)
 
 ---
 
@@ -412,15 +521,22 @@ integration test import `runMigration()` ไปเรียกตรง ๆ ไ�
    เหตุผลที่แผนเฟสต้องยึด "domain ที่ผูกกันจริงทางโค้ด" ไม่ใช่ตามหมวดหมู่ที่ดูเป็นเรื่องเดียวกัน (เหมือนที่
    เจอกับ order/preorder ตอนเฟส 1) เจอบั๊กใหม่ 2 จุดระหว่างทำ (ปัดเศษ + `$mul` กับ `null`) และบั๊ก
    มาร์กเกอร์ซ้ำแบบเดียวกับเฟส 2 อีกครั้ง — รายละเอียดเต็ม → §3/§4
-4. **Promotion definition** (`promotionModel.discount_value`/`min_order_amount`/`max_discount_amount`)
-   — ซับซ้อนกว่าที่อื่นเพราะ `discount_value` เป็นเงิน**เฉพาะ**ตอน `discount_type === "Amount"`
-   (ตอน `"Percentage"` เป็นตัวเลข % ไม่ใช่เงิน) ต้อง handle แบบ conditional ทั้งตอน migrate และตอน
-   validate schema
-5. **Product pricing ที่เหลือ** (`productModel.product_price`/`sale_price` — `purchase_cost` แปลงไป
-   แล้วในเฟส 4, `productVariantModel.variant_price`, `productOptionModel.extra_price`) — เสี่ยงสุดเพราะ
-   กระทบ `cartItemModel.price_snapshot` ด้วย (ต้อง migrate พร้อมกัน) และเป็นจุดเริ่มของทุกการคำนวณเงิน
-   ในระบบ (`resolveLine()` ที่เพิ่งแปลงในเฟส 1 จะไม่ต้องมี "จุดข้ามโดเมน" ไปหา productModel อีกต่อไปถ้า
-   ทำเฟสนี้เสร็จ — โค้ดจะง่ายขึ้น)
+4. ~~**Promotion definition** (`promotionModel.discount_value`/`min_order_amount`/
+   `max_discount_amount`)~~ — ✅ เสร็จแล้ว (เฟส 5a, 2026-09-12) — ซับซ้อนกว่าที่อื่นตามคาดเพราะ
+   `discount_value` เป็นเงิน**เฉพาะ**ตอน `discount_type === "Amount"` ต้อง handle แบบ conditional ทั้ง
+   ตอน service (`createPromotion`/`updatePromotion`/presenter) และตอน migrate (ใช้ pipeline-style
+   update แทน `$mul` ธรรมดา — ค้นพบใหม่ระหว่างทำ ดู §3/§4) `promotionUpdate` schema ไม่ต้องแก้เลยเพราะ
+   API ยังรับ-ส่งบาทเหมือนเดิมทุกประการ (ตามที่คาดไว้ในแผนเดิม)
+5. **Product pricing ที่เหลือ + preorderRoundItemModel.price_override** (`productModel.
+   product_price`/`sale_price` — `purchase_cost` แปลงไปแล้วในเฟส 4, `productVariantModel.
+   variant_price`, `productOptionModel.extra_price`, `cartItemModel.price_snapshot` +
+   `selected_options[].extra_price`) — เสี่ยงสุดเพราะเป็นจุดเริ่มของทุกการคำนวณเงินในระบบ
+   (`resolveLine()` ที่เพิ่งแปลงในเฟส 1 จะไม่ต้องมี "จุดข้ามโดเมน" ไปหา productModel อีกต่อไปถ้าทำเฟส
+   นี้เสร็จ — โค้ดจะง่ายขึ้น) **ต้องดึง `preorderRoundItemModel.price_override` เข้ามาแปลงพร้อมกันด้วย**
+   (ค้นพบตอนสำรวจขอบเขตก่อนเริ่มเฟส 5a — ดู §0) เพราะ `preorderRoundService.getOrderableRoundItem()`/
+   `getRoundDetail()` ผูก `item.price_override ?? product.sale_price ?? product.product_price` เข้า
+   ด้วยกันเป็น fallback chain เดียวกันเป๊ะกับที่ `purchase_cost` ผูกกับสูตรในเฟส 4 — ถ้าปล่อย
+   `price_override` ไว้ก่อนจะได้ `unit_price` หน่วยปนกันขึ้นอยู่กับว่า round item นั้นมี override หรือไม่
 
 แต่ละเฟสควรทำแยก PR — เขียน migration ส่วนเพิ่มเข้าไปใน `scripts/migrate-money-to-satang.ts` เดิม
 (เพิ่ม `runSection()` ใหม่ต่อ collection — **ห้ามใช้ marker เดิมซ้ำ ต้องตั้ง sectionId ใหม่ไม่ซ้ำใคร
