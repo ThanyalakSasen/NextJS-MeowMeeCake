@@ -187,10 +187,12 @@ export async function createPreorder(
   // ── ค่าส่ง (server คิดเอง) ──
   let delivery_fee = 0;
   if (input.order_type === "delivery") {
-    delivery_fee = deliveryService.calcDeliveryFee({
-      province: delivery_address?.province ?? null,
-      subtotal,
-    }).fee;
+    delivery_fee = (
+      await deliveryService.calcDeliveryFee({
+        province: delivery_address?.province ?? null,
+        subtotal,
+      })
+    ).fee;
   }
 
   // ── ส่วนลด (เฉพาะแอดมินกรอกมือ) ──

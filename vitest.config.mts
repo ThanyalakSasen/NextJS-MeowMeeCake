@@ -23,7 +23,9 @@ export default defineConfig({
           name: "integration",
           environment: "node",
           include: ["tests/integration/**/*.test.ts"],
-          env: { NODE_ENV: "test" },
+          // DELIVERY_ZONE_CACHE_TTL_MS=0 ปิด cache ของ deliveryZoneService — กัน test ที่ afterEach
+          // ล้าง DB ตรง ๆ (bypass service) แล้วเทสถัดไปยังเห็นโซนเก่าที่ cache ค้างไว้
+          env: { NODE_ENV: "test", DELIVERY_ZONE_CACHE_TTL_MS: "0" },
           setupFiles: ["tests/integration/setup.ts"], // เริ่ม mongodb-memory-server + ตั้ง MONGODB_URI
           testTimeout: 30_000,
           hookTimeout: 60_000, // ครั้งแรก mongodb-memory-server ต้องโหลด binary

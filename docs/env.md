@@ -22,9 +22,16 @@ Next.js โหลด `.env.local` ให้อัตโนมัติตอน 
 | `JWT_COOKIE_EXPIRE` | ไม่ | `7` | `src/lib/session.ts` | อายุ cookie `session` เป็น**จำนวนวัน** (ตัวเลขล้วน) |
 | `NODE_ENV` | อัตโนมัติ | `development` | `src/lib/session.ts` | Next.js ตั้งให้เอง (`production` ตอน `next build`/`start`) · ใช้เปิด flag `Secure` ของ cookie เมื่อเป็น production |
 | `GOOGLE_CLIENT_ID` | เฉพาะ Google login | — | `src/services/authService.ts` | Client ID จาก Google Cloud Console · ใช้เป็น `audience` ตอน verify Google ID token ที่ `POST /api/auth/google` · ถ้าไม่ตั้ง endpoint นั้นจะตอบ error |
-| `DELIVERY_FREE_MIN` | ไม่ | `1500` | `src/services/deliveryService.ts` | ยอดสั่งซื้อ (บาท) ที่ถึงแล้วส่งฟรี |
-| `DELIVERY_FEE_METRO` | ไม่ | `40` | `src/services/deliveryService.ts` | ค่าส่ง กรุงเทพฯ + ปริมณฑล (นนทบุรี/ปทุมธานี/สมุทรปราการ/สมุทรสาคร/นครปฐม) |
-| `DELIVERY_FEE_UPCOUNTRY` | ไม่ | `80` | `src/services/deliveryService.ts` | ค่าส่งต่างจังหวัด (จังหวัดอื่นทั้งหมด) |
+| `DELIVERY_FREE_MIN` | ไม่ | `1500` | `src/services/deliveryService.ts` | ยอดสั่งซื้อ (บาท) ที่ถึงแล้วส่งฟรี (ใช้เสมอ ไม่ว่าโซนจะมาจาก DB หรือ fallback) |
+| `DELIVERY_FEE_METRO` | ไม่ | `40` | `src/services/deliveryService.ts` | **fallback เท่านั้น** (BACKLOG §3.15) — ใช้ต่อเมื่อยังไม่มีโซนไหนตั้งไว้ใน `/api/admin/delivery-zones` เลย ปกติแอดมินแก้ค่าส่งผ่านหน้านั้นแทน ไม่ต้องแก้ env+redeploy แล้ว · ค่าส่ง กรุงเทพฯ + ปริมณฑล (นนทบุรี/ปทุมธานี/สมุทรปราการ/สมุทรสาคร/นครปฐม) |
+| `DELIVERY_FEE_UPCOUNTRY` | ไม่ | `80` | `src/services/deliveryService.ts` | **fallback เท่านั้น** เช่นเดียวกับข้างบน — ค่าส่งต่างจังหวัด (จังหวัดอื่นทั้งหมด) |
+| `DELIVERY_ZONE_CACHE_TTL_MS` | ไม่ | `60000` | `src/services/deliveryZoneService.ts` | อายุ cache ของโซนค่าจัดส่งจาก DB (มิลลิวินาที) — ตั้งเป็น `0` ปิด cache ได้ (ใช้ตอนเทส) |
+| `UPLOAD_DRIVER` | ไม่ | `localDisk` | `src/lib/upload.ts` | `localDisk` (เขียนลง `public/uploads/` — self-host เท่านั้น) หรือ `s3` (S3-compatible: AWS S3 / Cloudflare R2 / GCS interop — จำเป็นถ้า deploy serverless) |
+| `S3_BUCKET` | เฉพาะ `UPLOAD_DRIVER=s3` | — | `src/lib/upload.ts` | ชื่อ bucket ปลายทาง |
+| `S3_REGION` | ไม่ | `auto` | `src/lib/upload.ts` | region ของ bucket (R2 ใช้ `auto` ได้) |
+| `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | เฉพาะ `UPLOAD_DRIVER=s3` | — | `src/lib/upload.ts` | credential เข้าถึง bucket |
+| `S3_ENDPOINT` | เฉพาะ R2/GCS | — | `src/lib/upload.ts` | ใส่เมื่อไม่ได้ใช้ AWS S3 ตรงๆ (เช่น `https://<account>.r2.cloudflarestorage.com`) |
+| `S3_PUBLIC_URL_BASE` | เฉพาะ `UPLOAD_DRIVER=s3` | — | `src/lib/upload.ts` | โดเมนอ่านไฟล์กลับ (CDN หรือ bucket public url) — ใช้ประกอบ url ที่คืนให้ client และแกะกลับเป็น key ตอนลบไฟล์ |
 
 ### ตัวอย่างค่า (`.env.local`)
 

@@ -22,10 +22,10 @@
     "reset-owner-password": "tsx scripts/reset-owner-password.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1131.0",
     "bcryptjs": "^3.0.3",
     "jose": "^5.10.0",
     "mongoose": "^9.9.4",
-    "multer": "^2.3.0",
     "next": "^15.1.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

@@ -16,6 +16,7 @@ import {
   addRoundItemBody,
   updateRoundItemBody,
 } from "@/schemas/preorderRound";
+import { deliveryZoneCreate, deliveryZoneUpdate } from "@/schemas/delivery";
 
 const OID = "507f1f77bcf86cd799439011";
 
@@ -204,5 +205,24 @@ describe("schemas/user — createUserBody/updateUserBody (BACKLOG §3, รอบ
     expect(updateUserBody.safeParse({}).success).toBe(true);
     expect(updateUserBody.safeParse({ last_working_date: "2026-01-01" }).success).toBe(true);
     expect(updateUserBody.safeParse({ role_id: "abc" }).success).toBe(false);
+  });
+});
+
+describe("schemas/delivery — deliveryZoneCreate/Update (BACKLOG §3.15)", () => {
+  it("create: ผ่านเคสปกติ, default provinces=[]/is_catch_all=false/is_active=true/sort_order=0", () => {
+    const r = deliveryZoneCreate.parse({ zone_name: "ทดสอบ", fee: 50 });
+    expect(r).toMatchObject({ provinces: [], is_catch_all: false, is_active: true, sort_order: 0 });
+  });
+  it("create: fee ติดลบ → fail, coerce จาก string ได้", () => {
+    expect(deliveryZoneCreate.safeParse({ zone_name: "x", fee: -1 }).success).toBe(false);
+    expect(deliveryZoneCreate.parse({ zone_name: "x", fee: "50" }).fee).toBe(50);
+  });
+  it("create: zone_name ว่าง → fail", () => {
+    expect(deliveryZoneCreate.safeParse({ zone_name: "", fee: 50 }).success).toBe(false);
+  });
+  it("update: ต้องมีอย่างน้อย 1 ฟิลด์ (refine)", () => {
+    expect(deliveryZoneUpdate.safeParse({}).success).toBe(false);
+    expect(deliveryZoneUpdate.safeParse({ fee: 100 }).success).toBe(true);
+    expect(deliveryZoneUpdate.safeParse({ is_active: false }).success).toBe(true);
   });
 });

@@ -111,6 +111,7 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 | `/api/admin/preorder-rounds*` (route/`[id]`/items) + `/api/admin/preorder-round-items/[id]` | ✅ (2026-09-12, รอบ 4b B2) | `preorderRound.ts` (ใหม่) — `createRoundBody`/`updateRoundBody`/`addRoundItemBody`/`updateRoundItemBody` |
 | `/api/admin/users` + `[id]` PATCH | ✅ (2026-09-12, รอบ 4b B2) | `user.ts` `createUserBody`/`updateUserBody` — password/googleId บังคับตาม `auth_provider` ยังเช็คที่ service (conditional ข้าม field) |
 | รื้อ `pick()` / `createFields` / `Number()` ใน service | ✅ **ปิดครบ 8/8** (2026-09-12) | ทุกไฟล์: `addressService`, `promotionService`, `attendanceService`, `orderService.updateDelivery`, `permissionService`, `preorderRoundService`, `preorderService` (narrow refactor — ไม่ต้องรอ adopt เพราะไม่ใช่ whitelist ที่ทับซ้อน validation ชั้นไหน), `userService` · `createFields`/`updateFields` (`createCrudService`) + `pickWritable()` (component/recipe) ยังคงไว้เป็น defense-in-depth (คนละ layer จาก `pick()` ใน service) |
+| CRUD via factory — `delivery-zones` (+ `[id]`, `[id]/restore`) | ✅ (2026-09-12, รอบ 4d §3.15) | `delivery.ts` (ใหม่) — `deliveryZoneCreate`/`deliveryZoneUpdate` (`update` เขียนแยกจาก `.partial()` เพราะ `create` มี `.default()` หลายฟิลด์ — ดู `hardening-4d-plan.md`) |
 
 ---
 
