@@ -1,8 +1,12 @@
 # Validation layer (zod) — BACKLOG §3.1
 
 > อัปเดตล่าสุด: 2026-09-12
-> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.1 · แผน: [`hardening-plan.md`](hardening-plan.md) D1 (PR #6) + [`hardening-4a-plan.md`](hardening-4a-plan.md) PR C–E + [`hardening-4b-plan.md`](hardening-4b-plan.md) ข้อ A
-> สถานะ: 🟡 infra + `validate`/`createInject` option + adopt `/auth/*` · `/shop/{orders,cart,payments,me,addresses,reviews}` · crud-factory ทั้งหมด (catalog/inventory/sentiment/rbac/bom) · `/admin/promotions` · **`/admin/orders` (POST) + `/admin/attendances` ทั้ง 4 route (2026-09-12)** — **เหลือ (4b ต่อ):** รื้อ `pick()`/`createFields` ใน service (ดู §3)
+> ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.1 · แผน: [`hardening-plan.md`](hardening-plan.md) D1 (PR #6) + [`hardening-4a-plan.md`](hardening-4a-plan.md) PR C–E + [`hardening-4b-plan.md`](hardening-4b-plan.md)
+> สถานะ: ✅ **adopt ครบทุก route ที่วางแผนไว้แล้ว** (2026-09-12) — infra + `validate`/`createInject` option
+> + `/auth/*` · `/shop/{orders,cart,payments,me,addresses,reviews}` · crud-factory ทั้งหมด ·
+> `/admin/promotions` · `/admin/orders` (POST + `.../delivery`) · `/admin/attendances` ·
+> `/admin/permissions` · `/admin/preorder-rounds*` + `/admin/preorder-round-items` · `/admin/users` ·
+> รื้อ `pick()`/`createFields` ที่ซ้ำ zod เสร็จครบ **8/8 ไฟล์** (ดู §5)
 
 ---
 
@@ -97,12 +101,16 @@ const { email, password } = await parseBody(req, loginBody);   // มี type + 
 | CRUD via factory — `aspects`, `semantic-terms` (+ `[id]`) | ✅ (รอบ 4a PR C) | `sentiment.ts` — `aspectCreate/Update`, `semanticTermCreate/Update` |
 | CRUD via factory — `roles` (+ `[id]`) | ✅ (รอบ 4a PR C) | `rbac.ts` — `roleCreate/Update` (`role_type` enum) |
 | CRUD via factory — `components`, `recipes` (+ `[id]`) | ✅ (รอบ 4a PR D/E) | `bom.ts` — `componentCreate/Update`, `recipeCreate/Update` · `ingredients[]` / `components[]` = array ของ `{ id, quantity≥0, unit_id }` · `update` `.omit()` category/product · **`created_by` inject จาก session** ผ่าน `createInject` (PR E) |
-| `PATCH /api/shop/me` | ✅ (รอบ 4a PR E) | `user.ts` `updateProfileBody` — PROFILE_FIELDS ล้วน `.partial()` (phone regex, birthdate coerce, allergies = string[]) |
+| `PATCH /api/shop/me` | ✅ (รอบ 4a PR E) | `user.ts` `updateProfileBody` — field โปรไฟล์ล้วน `.partial()` (phone regex, birthdate coerce, allergies = string[]) |
 | `POST /api/shop/addresses` + `[id]` PATCH | ✅ (รอบ 4a PR E) | `address.ts` `addressCreate/Update` — 5 ช่อง + `zip_code` 5 หลัก + `is_default?` |
 | `POST /api/shop/reviews` + `[id]` PATCH | ✅ (รอบ 4a PR E) | `review.ts` `reviewCreateBody/reviewUpdateBody` — `rating` int 1–5 (coerce), `image` = string[] |
 | `POST /api/admin/orders` (custom route) | ✅ (2026-09-12) | `order.ts` → `adminCreateOrderBody` (`.extend()` จาก `orderBodyBase` ที่ `createOrderBody`/`adminCreateOrderBody` ใช้ร่วมกัน — เพิ่ม `user_id`/`delivery_fee`/`discount_amount`/`channel`) — ไม่มี `PATCH /admin/orders/[id]` จริง (มีแค่ GET/DELETE, เปลี่ยนสถานะแยกไปที่ `/admin/orders/[id]/status`) |
 | `/api/admin/attendances` (route / check-in / check-out / `[id]`) | ✅ (2026-09-12) | `attendance.ts` — `recordAttendanceBody`/`updateAttendanceBody`/`checkInOutBody` · `recorded_by` inject จาก session เสมอ (ไม่อยู่ใน schema POST) แต่แก้ตรงได้ผ่าน PATCH (พฤติกรรมเดิม) |
-| รื้อ `pick()` / `createFields` / `Number()` ใน service | 🟡 **3/8 ถอดแล้ว** (2026-09-12) | `addressService`/`promotionService`/`attendanceService` ถอด `pick()` ออกแล้ว (route ต้นทาง adopt zod ครบ) · **เหลือ:** `orderService.updateDelivery` (route `.../delivery` ยังไม่ adopt — คนละ route กับ `createOrder` ที่ adopt แล้ว) · `userService`/`permissionService`/`preorderRoundService`/`preorderService` (route ต้นทางยังไม่ adopt zod เลยทั้งกลุ่ม) · `createFields`/`updateFields` (`createCrudService`) + `pickWritable()` (component/recipe) ยังคงไว้เป็น defense-in-depth (คนละ layer จาก `pick()` ใน service) |
+| `PATCH /api/admin/orders/[id]/delivery` | ✅ (2026-09-12, รอบ 4b B2) | `order.ts` `updateDeliveryBody` |
+| `/api/admin/permissions` + `[id]` PATCH (custom route) | ✅ (2026-09-12, รอบ 4b B2) | `rbac.ts` `permissionCreate`/`permissionUpdate` (`.refine()` บังคับมีอย่างน้อย 1 ฟิลด์ตอน update) — `granted_by` inject จาก session |
+| `/api/admin/preorder-rounds*` (route/`[id]`/items) + `/api/admin/preorder-round-items/[id]` | ✅ (2026-09-12, รอบ 4b B2) | `preorderRound.ts` (ใหม่) — `createRoundBody`/`updateRoundBody`/`addRoundItemBody`/`updateRoundItemBody` |
+| `/api/admin/users` + `[id]` PATCH | ✅ (2026-09-12, รอบ 4b B2) | `user.ts` `createUserBody`/`updateUserBody` — password/googleId บังคับตาม `auth_provider` ยังเช็คที่ service (conditional ข้าม field) |
+| รื้อ `pick()` / `createFields` / `Number()` ใน service | ✅ **ปิดครบ 8/8** (2026-09-12) | ทุกไฟล์: `addressService`, `promotionService`, `attendanceService`, `orderService.updateDelivery`, `permissionService`, `preorderRoundService`, `preorderService` (narrow refactor — ไม่ต้องรอ adopt เพราะไม่ใช่ whitelist ที่ทับซ้อน validation ชั้นไหน), `userService` · `createFields`/`updateFields` (`createCrudService`) + `pickWritable()` (component/recipe) ยังคงไว้เป็น defense-in-depth (คนละ layer จาก `pick()` ใน service) |
 
 ---
 
