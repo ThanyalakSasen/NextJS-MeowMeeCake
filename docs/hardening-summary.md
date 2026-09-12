@@ -184,7 +184,7 @@ test: unit 155→**163** / integration 56→**79** · ก่อนลงมื�
 
 ---
 
-## รอบ 5 — เงินเป็น integer (สตางค์) — 🟡 เฟส 5a/6 (2026-09-12) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)
+## รอบ 5 — เงินเป็น integer (สตางค์) — ✅ เสร็จสมบูรณ์ทั้งหมด (2026-09-12) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)
 
 สำรวจก่อนลงมือพบเงินกระจายใน 17 model (ภายหลังพบเพิ่มอีก 1 ตัวระหว่างสำรวจเฟส 5 — รวมเป็น 18 ดูแถว
 เฟส 5b) — แบ่งเป็นเฟสตามโดเมนที่ผูกกันจริงทางโค้ด (ทำทีเดียวเสี่ยงเกินรีวิวไหว) ถามผู้ใช้เรื่อง API
@@ -197,7 +197,7 @@ contract ก่อน: **DB เก็บสตางค์ แต่ API ยั�
 | 3 | Delivery zone (`deliveryZoneModel.fee`) | ✅ เสร็จ |
 | 4 | Recipe/Component/Ingredient cost + `cost_per_unit`/`purchase_cost` | ✅ เสร็จ |
 | 5a | Promotion definition (`promotionModel`) | ✅ เสร็จ |
-| 5b | Product pricing ที่เหลือ (`product_price`/`variant_price`/`extra_price`/`cartItemModel`) + `preorderRoundItemModel.price_override` | ⬜ |
+| 5b | Product pricing ที่เหลือ (`product_price`/`variant_price`/`extra_price`/`cartItemModel`) + `preorderRoundItemModel.price_override` | ✅ เสร็จ |
 
 เฟส 1 ต้องรวม order+preorder เข้าด้วยกันเพราะ `paymentModel` เป็น collection กลางที่ใช้ร่วมกัน (แยกแปลง
 ไม่ได้ — จะกำกวมว่า doc ไหนหน่วยอะไร) · migration script `npm run migrate:money-to-satang` · เจอ+แก้บั๊ก
@@ -237,14 +237,27 @@ conditional ไม่ได้** ต้องเปลี่ยนไปใช�
 field ที่พลาดจากการสำรวจ 17 model รอบแรก (ผูก fallback chain เดียวกับ `product.sale_price`/
 `product_price`) ต้องยกไปแปลงพร้อมเฟส 5b
 
-test unit 163→171→171→171→171→**171** (คงที่ตั้งแต่เฟส 2) / integration 82→89→93→104→**115**
+เฟส 5b (Product pricing + `preorderRoundItemModel.price_override`) — เฟสสุดท้ายของ §3.11 ปิดโครงการนี้
+ทั้งหมด แปลงครบทั้ง `productModel.product_price`/`sale_price`, `productVariantModel.variant_price`,
+`productOptionModel.extra_price`, `cartItemModel.price_snapshot`+`selected_options[].extra_price`,
+`preorderRoundItemModel.price_override` — ผลลัพธ์ที่น่าพอใจที่สุด: `orderService.resolveLine()`/
+`preorderService`'s round-item pricing ไม่มี "จุดข้ามโดเมน" ให้ต้อง `toSatang()` ปลายทางอีกแล้ว เพราะ
+ฝั่งสินค้ากับฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด **บั๊กที่ไม่ได้เจอ (แต่เกือบเจอ)**: test helper
+`makeProduct()`/`makeVariant()`/`makeOption()` มีจุดเรียกอยู่ก่อนแล้ว 51 จุดใน 12 ไฟล์ — แก้โดยให้
+helper แปลงบาท→สตางค์ให้อัตโนมัติในตัวเอง (ต่างจาก `makeIngredient`/`makeRecipe` ในเฟส 4 ที่ปรับแค่
+default) ทำให้จุดเรียกเดิมผ่านหมดโดยไม่ต้องแก้แม้แต่จุดเดียว (ยกเว้น 1 จุด)
+
+test unit 163→171→171→171→171→**171** (คงที่ตั้งแต่เฟส 2) / integration 82→89→93→104→115→**125**
+
+**สรุปทั้งรอบ 5:** 6 เฟสย่อย, 18 model, unit 163→171, integration 79→125 (+46 เคส) — รายละเอียด/
+บทเรียนทั้งหมด → `hardening-5-money-phase1.md` §8
 
 ---
 
 ## ที่เหลือ (ยังไม่ทำ)
 
-> **ลำดับ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"** — รอบ 4b/4c/4d ปิดครบแล้ว, รอบ 5
-> (3.11) เหลือเฟส 5b เฟสเดียว (ดูตารางด้านบน)
+> **ลำดับ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"** — รอบ 4b/4c/4d/5 ปิดครบทั้งหมดแล้ว
+> ไม่มีงานค้างจาก §3 อีก
 
 ### §1 Blockers — ขั้น deploy (ไม่ใช่โค้ด)
 `npm run seed` · `npm run backfill:product-codes` · MongoDB `product_type` เดิม → `inStore` ·
@@ -269,7 +282,7 @@ test unit 163→171→171→171→171→**171** (คงที่ตั้งแ�
 | [`hardening-4b-plan.md`](hardening-4b-plan.md) | รอบ 4b — zod tail ครบ (`/admin/orders`+อีก 5 กลุ่ม) · รื้อ `pick()` 8/8 · `no-explicit-any` บน `src/lib` (PR #20–#21) |
 | [`hardening-4c-plan.md`](hardening-4c-plan.md) | รอบ 4c — address_id→checkout · purchase_cost · integration test เพิ่ม (+ §0 บทเรียนเรื่อง §2b/§2c ที่เคยรายงานผิดว่า merge แล้ว) (PR #23–#25) |
 | [`hardening-4d-plan.md`](hardening-4d-plan.md) | รอบ 4d — object storage abstraction · ลบรูปที่ไม่ใช้ · delivery zone เป็น DB (PR #28) |
-| [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | รอบ 5 §3.11 เฟส 1-5a — เงินเป็นสตางค์: Order+Preorder+Payment+Expense+DeliveryZone+Recipe/Component/Ingredient+purchase_cost+Promotion · แผนเฟส 5b ที่เหลือ |
+| [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | รอบ 5 §3.11 — เสร็จสมบูรณ์ทั้งหมด (เฟส 1-5b, 18 model): Order+Preorder+Payment+Expense+DeliveryZone+Recipe/Component/Ingredient+Promotion+Product pricing เป็นสตางค์ |
 | [`infra-tooling.md`](infra-tooling.md) | §3.6 eslint · §3.3 logger · §3.4 testing |
 | [`validation.md`](validation.md) | §3.1 zod — สถานะ adopt ราย route |
 | [`security-hardening.md`](security-hardening.md) | §3.2 rate-limit · §3.9 Google · §3.10 CSRF |

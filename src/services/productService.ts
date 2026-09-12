@@ -22,11 +22,11 @@ import { toSatang, toBahtFields } from "../lib/money";
 /** เกณฑ์ "สต็อกเหลือน้อย" ของสินค้า (ตรงกับดีฟอลต์ของ getLowStockProducts) */
 const LOW_STOCK_THRESHOLD = 5;
 
-// BACKLOG §3.11 เฟส 4 — purchase_cost เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
-// (เฉพาะ purchase_cost เท่านั้น — product_price/sale_price ยังไม่แปลง รอเฟส 5 พร้อม product pricing
-// อื่นทั้งหมด ดู recipeService.getUnitCostByProduct comment สำหรับเหตุผลที่ purchase_cost ต้องแปลงก่อน)
+// BACKLOG §3.11 — purchase_cost เก็บเป็นสตางค์ตั้งแต่เฟส 4 (ดู recipeService.getUnitCostByProduct
+// comment สำหรับเหตุผลที่ต้องแปลงก่อน product_price/sale_price อื่น) ส่วน product_price/sale_price
+// เก็บเป็นสตางค์ตั้งแต่เฟส 5b — API ยังรับ-ส่งบาททศนิยมเหมือนเดิมทั้งหมด
 function presentProduct<T extends Record<string, unknown>>(product: T): T {
-  return toBahtFields(product, ["purchase_cost"] as const);
+  return toBahtFields(product, ["purchase_cost", "product_price", "sale_price"] as const);
 }
 
 /**
@@ -213,8 +213,9 @@ export async function createProduct(input: CreateProductInput) {
     product_name_th: input.product_name_th,
     product_name_eng: input.product_name_eng,
     category_id: input.category_id,
-    product_price: input.product_price,
-    sale_price: input.sale_price ?? null,
+    // BACKLOG §3.11 เฟส 5b — input.product_price/sale_price เป็นบาทจาก request เสมอ (API contract)
+    product_price: toSatang(Number(input.product_price)),
+    sale_price: input.sale_price != null ? toSatang(Number(input.sale_price)) : null,
     is_visible: input.is_visible ?? true,
     product_img: input.product_img ?? [],
     product_description: input.product_description ?? null,
@@ -406,10 +407,16 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   if (input.purchase_cost != null && input.purchase_cost < 0) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
-  // BACKLOG §3.11 เฟส 4 — input.purchase_cost เป็นบาทจาก request เสมอ (API contract) แปลงเป็นสตางค์
-  // ก่อนให้ loop `updatable` ด้านล่างเขียนลง existing.purchase_cost (ซึ่งเป็นสตางค์ใน DB แล้ว)
+  // BACKLOG §3.11 — input.purchase_cost/product_price/sale_price เป็นบาทจาก request เสมอ (API
+  // contract) แปลงเป็นสตางค์ก่อนให้ loop `updatable` ด้านล่างเขียนลง existing.* (ซึ่งเป็นสตางค์ใน DB แล้ว)
   if (input.purchase_cost != null) {
     input.purchase_cost = toSatang(Number(input.purchase_cost));
+  }
+  if (input.product_price != null) {
+    input.product_price = toSatang(Number(input.product_price));
+  }
+  if (input.sale_price != null) {
+    input.sale_price = toSatang(Number(input.sale_price));
   }
   if (input.category_id) {
     await assertCategoryExists(input.category_id);

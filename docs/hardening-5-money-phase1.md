@@ -1,10 +1,11 @@
-# รอบ 5 — เงินเป็น integer (สตางค์), เฟส 1-5a: Order+Preorder+Payment, Expense, Delivery zone, Recipe/Component/Ingredient, Promotion
+# รอบ 5 — เงินเป็น integer (สตางค์): Order+Preorder+Payment, Expense, Delivery zone, Recipe/Component/Ingredient, Promotion, Product pricing
 
 > อัปเดตล่าสุด: 2026-09-12
-> สถานะ: ✅ **เฟส 1-5a เสร็จสมบูรณ์** (จากแผนเดิม 5 เฟส — แผนเดิมเฟส 5 แตกเป็น **5a (Promotion)** และ
-> **5b (Product pricing + Cart + preorderRoundItemModel.price_override)** ระหว่างสำรวจขอบเขตจริงก่อน
-> ลงมือ พบว่าทั้งสองเรื่องเป็นคนละ domain ที่ไม่ผูกกันทางโค้ดเลย (เหตุผลเดียวกับที่แบ่งเฟส 1-4 มาตั้งแต่แรก
-> — ดู §0) — ดู §7 "เฟสที่เหลือ")
+> สถานะ: ✅ **เสร็จสมบูรณ์ทั้งหมด** — ครบทุกเฟส (1, 2, 3, 4, 5a, 5b) จาก 18 model ที่แตะเงิน (แผนเดิม
+> วางไว้ 5 เฟส/17 model — เฟส 5 แตกเป็น **5a (Promotion)** กับ **5b (Product pricing + Cart +
+> preorderRoundItemModel.price_override)** ระหว่างสำรวจขอบเขตจริงก่อนลงมือ เพราะเป็นคนละ domain ที่ไม่
+> ผูกกันทางโค้ดเลย — เหตุผลเดียวกับที่แบ่งเฟส 1-4 มาตั้งแต่แรก ดู §0 — และเจอ `preorderRoundItemModel.
+> price_override` เพิ่มระหว่างทางที่พลาดจากการสำรวจรอบแรก รวมเป็น 18 model) — ดู §8 "สรุปทั้งโปรเจกต์"
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.11 — งานเดี่ยวเสี่ยงสูงที่สุดในทั้งหมด (tag **L**)
 > ก่อนเริ่ม: สำรวจขอบเขตจริงก่อน (17 model + 9 schema แตะเงิน — ตัวเลขนี้พลาดไป 1 model จริง ๆ ดู §0)
 > แล้วถามผู้ใช้เรื่อง API contract
@@ -23,11 +24,11 @@
   subtotal ของทั้ง order/preorder ที่ตอนนี้เป็นสตางค์แล้ว)
 - `dashboardService` อ่านรวมจากทั้ง orderModel/orderItemModel เข้าด้วยกัน ต้องแก้พร้อมกันไปในตัว
 
-**สิ่งที่ยังไม่แตะ** (ตั้งใจ ไม่ใช่ลืม — `expenseModel.amount` แปลงในเฟส 2, `deliveryZoneModel.fee`
-แปลงในเฟส 3, `recipeModel`/`componentModel`/`ingredientModel` + `cost_per_unit`/`purchase_cost`
-แปลงในเฟส 4, `promotionModel` แปลงในเฟส 5a): `productModel.product_price`/`sale_price`/
-`productVariantModel`/`productOptionModel` (ราคาขาย/variant/option), `cartItemModel.price_snapshot` —
-ยังเป็นบาททั้งหมด ดู §7
+**ครบทุก field เงินที่เคยสำรวจไว้แล้ว ณ จุดนี้** — `expenseModel.amount` (เฟส 2), `deliveryZoneModel.
+fee` (เฟส 3), `recipeModel`/`componentModel`/`ingredientModel` + `cost_per_unit`/`purchase_cost`
+(เฟส 4), `promotionModel` (เฟส 5a), `productModel.product_price`/`sale_price`/`productVariantModel.
+variant_price`/`productOptionModel.extra_price`/`cartItemModel.price_snapshot`/
+`preorderRoundItemModel.price_override` (เฟส 5b) — ดู §8 สำหรับสรุปทั้งโปรเจกต์
 
 **ตัวเลข "17 models" ด้านบนพลาดไป 1 ตัวจริง ๆ** — ตอนสำรวจตอนเริ่มรอบ 5 ไม่เจอ
 `preorderRoundItemModel.price_override` (ราคาตั้งขายเฉพาะรอบ override ราคาสินค้าปกติ) เพราะมันไม่ได้
@@ -36,7 +37,7 @@
 5b) — field นี้ผูก `??` fallback chain เดียวกับ `product.sale_price`/`product_price` โดยตรง
 (`item.price_override ?? product.sale_price ?? product.product_price`) เหมือนกับที่ `productModel.
 purchase_cost` ผูกกับสูตรผ่าน `getUnitCostByProduct()` ในเฟส 4 — ต้องแปลงพร้อมกับ Product pricing ใน
-เฟส 5b เสมอ ไม่งั้นได้ปัญหาหน่วยปนกันแบบเดียวกันอีก (ดู §7 ข้อ 5)
+เฟส 5b เสมอ ไม่งั้นได้ปัญหาหน่วยปนกันแบบเดียวกันอีก — แปลงจริงแล้วในเฟส 5b (ดู §7)
 
 ---
 
@@ -91,7 +92,7 @@ discount_amount = toSatang(result.discount_amount);
 และใช้แค่คำนวณ COGS ใน dashboard — **ไม่เคยถูกบวก/ลบรวมกับ subtotal/total_amount ของออเดอร์ที่ไหนเลย**
 (ยืนยันจากโค้ดจริง) ตอนเฟส 1 จึงปลอดภัยที่จะให้ต่างหน่วยกับฟิลด์อื่นในเอกสารเดียวกันไปก่อน จนกว่าโดเมน
 สูตร/วัตถุดิบ (ที่มาของค่านี้) จะถูกแปลงในเฟสถัดไป — **แปลงจริงแล้วในเฟส 4 พร้อมกับ
-`recipeModel`/`componentModel`/`ingredientModel`** (ดู §3/§7)
+`recipeModel`/`componentModel`/`ingredientModel`** (ดู §3)
 
 ---
 
@@ -110,10 +111,15 @@ discount_amount = toSatang(result.discount_amount);
 | `ingredientModel` | `cost_per_unit` | 4 |
 | `componentModel` | `estimated_cost_per_batch` | 4 |
 | `recipeModel` | `estimated_cost_per_batch` | 4 |
-| `productModel` | `purchase_cost` (**ไม่รวม** `product_price`/`sale_price` — รอเฟส 5) | 4 |
+| `productModel` | `purchase_cost` (**ไม่รวม** `product_price`/`sale_price` — รอเฟส 5b) | 4 |
 | `orderItemModel` | `cost_per_unit` (ค้างจากเฟส 1 — ต้องรอเฟสนี้ก่อน) | 4 |
 | `preorderItemModel` | `cost_per_unit` (ค้างจากเฟส 1 — ต้องรอเฟสนี้ก่อน) | 4 |
 | `promotionModel` | `min_order_amount`, `max_discount_amount` (เสมอ) + `discount_value` (**เฉพาะ** `discount_type === "Amount"`) | 5a |
+| `productModel` | `product_price`, `sale_price` (section แยกจาก `purchase_cost` เดิม) | 5b |
+| `productVariantModel` | `variant_price` | 5b |
+| `productOptionModel` | `extra_price` | 5b |
+| `cartItemModel` | `price_snapshot`, `selected_options[].extra_price` | 5b |
+| `preorderRoundItemModel` | `price_override` (model ที่ 18 — พลาดจากการสำรวจ 17 model รอบแรก) | 5b |
 
 ## 3. Service ที่แก้ + ตรรกะ presenter (สตางค์ → บาท ตอนคืนค่า)
 
@@ -184,6 +190,32 @@ discount_amount = toSatang(result.discount_amount);
   (ฟังก์ชันเดียวกันที่ทำหน้าที่เป็น API presenter ก็ทำหน้าที่แปลงข้ามโดเมนได้พอดี เพราะทั้งคู่ต้องการผลลัพธ์
   แบบเดียวกันคือ "field เงินเป็นบาท") — `orderService.ts` **ไม่ต้องแก้อะไรเลยสักบรรทัด** เพราะ
   `validateForOrder()` ยังรับ-คืนเป็นบาทเหมือนเดิมทุกประการ (คอมเมนต์อธิบายเพิ่มไว้ที่จุดเรียกเท่านั้น)
+- **`productService.ts`** (เฟส 5b) — ขยาย `presentProduct()` (เดิมมีแค่ `purchase_cost` จากเฟส 4) ให้
+  รวม `product_price`/`sale_price` ด้วย · `createProduct`/`updateProduct` แปลงทั้งสองฟิลด์เข้าเป็น
+  สตางค์ (เหมือน `purchase_cost` เป๊ะ) · `resolveScan()` **ไม่ต้องแก้เลย** เพราะอ่านจาก
+  `getProductByCode()`/`getProductById()` ที่ผ่าน presenter แล้ว
+- **`productVariantService.ts`/`productOptionService.ts`** (เฟส 5b) — เดิม `...base` เฉย ๆ ไม่มี
+  override เลยสักฟังก์ชัน (คล้าย `expenseService.ts` ก่อนเฟส 2) เพิ่ม `presentVariant()`/
+  `presentOption()` + override ครบ `list`/`getById`/`create`/`update`/`remove`/`restore`
+- **`cartService.ts`** (เฟส 5b) — เพิ่ม `presentCartItem()` ใช้ใน `getCartDetail()`/`addItem()`/
+  `updateItemQuantity()` · **`addItem()` ไม่ต้องแก้ตรรกะคำนวณ `price_snapshot` เลยสักบรรทัด** เพราะ
+  query ตรงจาก `productModel`/`productVariantModel`/`productOptionModel` (ข้าม service ที่มี
+  presenter) ซึ่งเป็นสตางค์ทั้งหมดแล้ว ผลลัพธ์จึงเป็นสตางค์เองโดยอัตโนมัติ (เหมือน `bom.ts` ในเฟส 4) ·
+  `getCartDetail()` ต้องคำนวณ `line_total`/`subtotal` เป็นสตางค์ก่อนเสมอแล้วค่อยแปลงเป็นบาทตอนจบ (กัน
+  ปัดเศษสะสม) และแปลง**ซ้อน**เข้าไปใน `.populate("variant_id", "... variant_price")` ด้วย (เหมือน
+  `componentService.getExpanded()` ในเฟส 4)
+- **`orderService.ts`'s `resolveLine()`** (เฟส 5b) — **จุดที่น่าพอใจที่สุดของทั้งโปรเจกต์**: เอา
+  `toSatang()` ที่ห่อ `unit_price`/`selected_options[].extra_price` ตอนจบออกได้เลย เพราะ
+  `productModel`/`productVariantModel`/`productOptionModel` เป็นสตางค์แล้วทั้งหมด "จุดข้ามโดเมน" ที่
+  เคยต้องมีตั้งแต่เฟส 1 (ดู §1) **ไม่มีอยู่แล้ว** — โค้ดง่ายขึ้นจริงตามที่เคยคาดการณ์ไว้ตอนวางแผนเฟสนี้
+- **`preorderRoundService.ts`** (เฟส 5b) — เพิ่ม `presentRoundItem()` แปลง `price_override`/
+  `current_price` เสมอ + แปลง**ซ้อน**เข้าไปใน `.populate("product_id", PRODUCT_SELECT)` (มี
+  `product_price`/`sale_price` ติดมาด้วย) ใช้ใน `addRoundItem`/`updateRoundItem`/`getRoundDetail`/
+  `listRoundItems` · **`getOrderableRoundItem()` ไม่ผ่าน presenter โดยตั้งใจ** — internal only (ใช้
+  แค่ใน `preorderService.createPreorder()`) คืนสตางค์ตรง ๆ เหมือน `getUnitCostByProduct()` ในเฟส 4
+- **`preorderService.ts`** (เฟส 5b) — ลบ `toSatang(unit_price)` ที่เคยห่อผลลัพธ์จาก
+  `getOrderableRoundItem()` ออก (เหตุผลเดียวกับ `resolveLine()` ด้านบน — ไม่มีจุดข้ามโดเมนให้ต้องแปลง
+  อีกแล้ว)
 
 ### ตัวอย่างโค้ดจริงที่แก้ในเฟส 4 (ก่อน/หลัง)
 
@@ -393,6 +425,75 @@ operand เป็น `null` (ต่างจาก `$mul` update operator ธร
 เลยสักไฟล์** —
 client ยังส่ง/รับบาททศนิยมเหมือนเดิมทุกประการ การแปลงทั้งหมดอยู่ในชั้น service ล้วน ๆ
 
+### ตัวอย่างโค้ดจริงที่แก้ในเฟส 5b
+
+**1) `orderService.resolveLine()` — "จุดข้ามโดเมน" ที่มีมาตั้งแต่เฟส 1 หายไปเลย:**
+
+```ts
+// เฟส 1-5a: productModel/productVariantModel/productOptionModel ยังเป็นบาท ต้องคำนวณเป็นบาทให้
+// เสร็จก่อน แล้วแปลงเป็นสตางค์ครั้งเดียวตอนจบ
+const basePrice = product.sale_price ?? product.product_price;
+const unit_price = basePrice + (variant?.variant_price ?? 0) + options.reduce((s, o) => s + o.extra_price, 0);
+return {
+  ...,
+  selected_options: options.map((o) => ({ ...o, extra_price: toSatang(o.extra_price) })),
+  unit_price: toSatang(unit_price),
+};
+
+// เฟส 5b: ทั้ง 3 แหล่งเป็นสตางค์แล้ว — unit_price ที่คำนวณตรงนี้เป็นสตางค์อยู่แล้วโดยอัตโนมัติ
+const basePrice = product.sale_price ?? product.product_price;
+const unit_price = basePrice + (variant?.variant_price ?? 0) + options.reduce((s, o) => s + o.extra_price, 0);
+return {
+  ...,
+  selected_options: options.map((o) => ({ ...o })), // extra_price เป็นสตางค์อยู่แล้ว ไม่ต้องแปลง
+  unit_price, // ไม่ต้อง toSatang() อีกแล้ว
+};
+```
+
+**2) `cartService.getCartDetail()` — คำนวณเป็นสตางค์ก่อนเสมอ แล้วแปลง populate ซ้อนด้วย:**
+
+```ts
+const line = items.map((it) => {
+  const lineTotalSatang = (it.price_snapshot ?? 0) * (it.quantity ?? 0); // สตางค์ดิบจาก DB
+  const presented = presentCartItem(it); // แปลง price_snapshot/selected_options[].extra_price
+  return {
+    ...presented,
+    // .populate("variant_id", "... variant_price") ติดสตางค์ดิบมาด้วย ต้องแปลงซ้อนเองอีกชั้น
+    variant_id: presented.variant_id && typeof presented.variant_id === "object"
+      ? toBahtFields(presented.variant_id, ["variant_price"])
+      : presented.variant_id,
+    line_total: toBaht(lineTotalSatang), // แปลงเป็นบาทตอนจบทีเดียว กันปัดเศษสะสม
+  };
+});
+```
+
+### ข้อค้นพบสำคัญที่เจอตอนสำรวจก่อนเริ่มเฟส 5b: `preorderRoundItemModel.price_override`
+
+สำรวจโค้ดก่อนลงมือ (ตามธรรมเนียมทุกเฟสของรอบนี้) พบว่า `preorderRoundItemModel.price_override` เป็น
+money field ที่**พลาดจากการสำรวจ 17 model ตอนเริ่มรอบ 5** เพราะชื่อ field ไม่มีคำว่า price/amount/cost
+ที่ชัดเจนพอจะเจอด้วยการ grep ผิวเผิน (`price_override` มีคำว่า price จริง แต่ต้องตามอ่าน
+`preorderRoundService.getOrderableRoundItem()`/`getRoundDetail()` ถึงจะเห็นว่ามันผูก `??` fallback
+chain เดียวกับ `product.sale_price`/`product.product_price` โดยตรง — เหมือนกับที่ `productModel.
+purchase_cost` ผูกกับสูตรผ่าน `getUnitCostByProduct()` ในเฟส 4 เป๊ะ) ถ้าปล่อย `price_override` ไว้ไม่
+แปลงพร้อมกับ product pricing จะได้ `unit_price` ที่หน่วยปนกันขึ้นอยู่กับว่า round item นั้นมี override
+หรือไม่ (มี override → บาทดิบ, ไม่มี → fallback ไปอ่านสตางค์จาก product) — จับได้ก่อนเขียนโค้ดจริง ไม่ใช่
+จากเทสพัง เพราะทำตามขั้นตอน "สำรวจก่อนแตะ" ที่ตั้งเป็นธรรมเนียมมาตั้งแต่เฟส 1
+
+### บั๊กที่ไม่ได้เจอ (แต่เกือบเจอ) ในเฟส 5b: `makeProduct()`/`makeVariant()`/`makeOption()` ในเทส
+
+`tests/integration/helpers.ts`'s `makeProduct()` สร้าง productModel doc ตรง ๆ (ข้าม productService)
+มีจุดเรียกใช้กระจายอยู่ **51 จุดใน 12 ไฟล์เทส** ทั่วทั้ง test suite (เขียนไว้ตั้งแต่ก่อนรอบ 5 เริ่มด้วยซ้ำ)
+หลายจุดส่ง `product_price`/`sale_price` เป็นตัวเลขที่ตั้งใจหมายถึง "บาท" (เช่น `makeProduct({
+product_price: 120 })`) — ถ้าทำตามแนวทางเฟส 4 (ปรับแค่ค่า default ของ helper ตรง ๆ อย่างที่ทำกับ
+`makeIngredient`/`makeRecipe`) จะต้องไล่แก้ทุก 1 ใน 51 จุดเรียกให้กลายเป็นค่าสตางค์ ×100 เอง — เสี่ยงพลาด
+สูงและงานหนักเกินจำเป็น แก้โดยให้ **helper เองเป็นคนแปลงบาท→สตางค์ก่อนเขียนจริง** (`merged.product_price
+= toSatang(Number(merged.product_price))`) ทำให้ทุกจุดเรียกที่มีอยู่แล้วยังคงความหมาย "บาท" เหมือนเดิม
+ทุกประการโดยไม่ต้องแก้อะไรเลยสักจุด (ยกเว้น 1 จุดที่อัปเดตราคาตรงผ่าน model โดยไม่ผ่าน helper ใน
+`persistOrder.test.ts` ซึ่งต้องแก้ให้เป็นค่าสตางค์ตรง ๆ เหมือนเดิม) — **purchase_cost ไม่ได้แปลงด้วย
+วิธีนี้** เพราะเทสที่มีอยู่ก่อนแล้วจากเฟส 4 (`getUnitCostByProduct.test.ts`) ส่งค่าดิบเป็นสตางค์ตรง ๆ
+อยู่แล้ว ถ้าแปลงซ้อนจะพังเทสเก่าทันที — บทเรียน: **จำนวนจุดเรียกใช้ของ test helper ที่มีอยู่ก่อนควรเป็น
+ตัวตัดสินว่าจะแก้ที่ default ตรง ๆ หรือแก้ที่ตัว helper ให้แปลงหน่วยให้เอง**
+
 ---
 
 ## 4. Migration script
@@ -430,11 +531,20 @@ update** (ดู §3 "บั๊ก/ข้อค้นพบที่เจอใ
 เดิมได้เหมือนกันทุกประการ (`runSection()` รับแค่ callback ที่คืน `modifiedCount` ไม่สนว่าข้างในเรียก
 `updateMany` แบบไหน) — marker เป็น section ของตัวเอง (`money_to_satang_3_11_promotions`) ตามกฎเดิม
 
+**เฟส 5b เพิ่ม 5 section ใหม่**: `products_pricing` (`product_price`/`sale_price` — section แยกจาก
+`products_purchase_cost` เดิมของเฟส 4 ตามกฎ "field ใหม่เข้า collection ที่มี section อยู่แล้วต้องแยก
+id เสมอ" ใช้ pipeline-style เพราะ `sale_price` เป็น nullable), `product_variants`/`product_options`
+(`$mul` ธรรมดา — field required ทั้งคู่), `cart_items` (`$mul` + positional-all เหมือน
+`orderItemModel.selected_options` ในเฟส 1), `preorder_round_items` (`price_override` — pipeline-style
+เพราะเป็น nullable เหมือน `sale_price`)
+
 **ต้องรันก่อน deploy จริงครั้งแรกหลัง PR นี้ merge** (หรือรันกับ DB dev/staging ที่มีข้อมูลทดสอบอยู่แล้ว
 ถ้าอยากให้ตัวเลขเดิมยังถูกต้อง — ถ้าไม่รัน ข้อมูลเก่าจะโดนตีความเป็นสตางค์ทั้งที่จริงเป็นบาท เช่น
 `total_amount: 150` เดิม (150 บาท) จะกลายเป็นแค่ 1.50 บาทถ้าไม่ migrate) — **ถ้าเคยรันตอนจบเฟสก่อนหน้า
 ไปแล้ว รันซ้ำอีกครั้งตอนนี้ได้เลยปลอดภัยเสมอ** (marker แยกต่อ section) จะแค่เติม section ใหม่ที่ยังไม่
-เคยรันให้เท่านั้น (ตอนนี้คือ `promotions`)
+เคยรันให้เท่านั้น (ตอนนี้คือ `products_pricing`/`product_variants`/`product_options`/`cart_items`/
+`preorder_round_items`) — **นี่คือการรัน migration ครั้งสุดท้ายของ §3.11 ทั้งโปรเจกต์** หลัง PR เฟส 5b
+merge แล้ว ไม่มี field เงินไหนเหลือให้ต้องรันเพิ่มอีก
 
 ---
 
@@ -495,50 +605,97 @@ update** (ดู §3 "บั๊ก/ข้อค้นพบที่เจอใ
   สตางค์จริง + comment กำกับชัดว่าทำไมต่างจาก `order.*`/`preorder.*` ที่มาจาก service (บาทเหมือนเดิม)
   — `cancelOrder.test.ts`'s `makePromo()` สร้าง promotion ตรงผ่าน model (bypass promotionService)
   ด้วย `discount_value: 20` มาตั้งแต่ก่อนเฟส 5a ต้องเปลี่ยนเป็น `2000` (สตางค์)
+- `tests/integration/productPricingMoney.test.ts` (10 เคส, เฟส 5b, ไฟล์ใหม่) — ครอบทุก service ที่แก้:
+  `productService` create/update/list/getById แปลง `product_price`/`sale_price` ทั้งคู่ (รวมกรณี
+  `sale_price: null` เคลียร์ค่า) · `productVariantService`/`productOptionService` create/update/
+  list/getById แปลง `variant_price`/`extra_price` · `cartService` end-to-end: `addItem()` คำนวณ
+  `price_snapshot` จาก product+variant+option ที่เป็นสตางค์ทั้งหมด (ใช้ 29.9+10.5+5.25 บาท ยืนยันไม่มี
+  float drift), `getCartDetail()`/`updateItemQuantity()` คืนบาทถูกทาง · **`orderService.resolveLine()`
+  end-to-end**: สร้างออเดอร์จริงจากสินค้า+option ที่เป็นทศนิยม (33.3+6.7 บาท) ยืนยัน `subtotal` เป๊ะ
+  ไม่มี rounding drift หลังเอา `toSatang()` ที่เคยห่อออก · `preorderRoundService`: `addRoundItem`/
+  `updateRoundItem` แปลง `price_override`, `getRoundDetail`/`listRoundItems` แปลง `current_price` +
+  ซ้อนเข้าไปใน populate ของ product ด้วย, **end-to-end เต็มเส้นทางผ่าน `preorderService.
+  createPreorder()`**: round item ที่มี `price_override` → `preorderItem.unit_price` เก็บสตางค์ตรง
+  DB, API คืนบาทถูกต้อง
+- `tests/integration/migrateMoneyToSatang.test.ts` (+1 เคส สะสมในเทสใหญ่ตัวเดิม, เฟส 5b) — เพิ่ม
+  เอกสารดิบ (สร้างตรงผ่าน model ไม่ผ่าน `makeProduct()`/`makeVariant()`/`makeOption()` ที่แปลงให้
+  อัตโนมัติแล้ว — กันปนกับเอกสารที่ "เป็นสตางค์อยู่แล้ว" จาก helper) ครบทั้ง 5 collection ใหม่ รวมเคส
+  `price_override: null` ยืนยันว่า pipeline update ไม่พัง
+- **`tests/integration/helpers.ts`**: `makeProduct()`/`makeVariant()`/`makeOption()` เปลี่ยนจาก "ปรับ
+  แค่ default" (แบบที่ทำกับ `makeIngredient`/`makeRecipe` ในเฟส 4) เป็น **แปลงบาท→สตางค์ให้อัตโนมัติ
+  ในตัว helper เอง** เพราะมีจุดเรียกใช้อยู่ก่อนแล้วถึง 51 จุดใน 12 ไฟล์ทั่ว test suite (ดู §3 "บั๊กที่
+  ไม่ได้เจอ") — ผลคือรันเทสทั้งหมด (รวมเทสเก่าก่อนรอบ 5 เริ่ม) ผ่านหมดโดยไม่ต้องแก้จุดเรียกเดิมแม้แต่
+  จุดเดียว ยกเว้น `persistOrder.test.ts` ที่อัปเดตราคาตรงผ่าน model (ไม่ผ่าน helper) 1 จุด
 - unit 163 → 171 (คงที่ตั้งแต่เฟส 2) · integration 79 → 82 (เฟส 1) → 89 (เฟส 2) → 93 (เฟส 3) → 104
-  (เฟส 4) → **115** (เฟส 5a)
+  (เฟส 4) → 115 (เฟส 5a) → **125** (เฟส 5b)
 
 ---
 
-## 7. เฟสที่เหลือของ §3.11 (ยังไม่ทำ — ทำทีหลังตามความจำเป็น ไม่ต้องรีบ)
+## 7. สรุปฟิลด์ที่เคยพลาดจากการสำรวจตอนแรก
 
-เรียงตามความเสี่ยง/ผลกระทบจากน้อยไปมาก:
+การสำรวจ "17 model ที่แตะเงิน" ตอนเริ่มรอบ 5 (ก่อนเริ่มเฟส 1) พลาดไป 1 model จริง — รวมเป็น **18
+model** ในที่สุด:
 
-1. ~~**Expense** (`expenseModel.amount`)~~ — ✅ เสร็จแล้ว (เฟส 2, 2026-09-12)
-2. ~~**Delivery zone** (`deliveryZoneModel.fee`)~~ — ✅ เสร็จแล้ว (เฟส 3, 2026-09-12) — โดดเดี่ยวตามคาด
-   แต่ `getActiveZonesCached()` (cache ภายในที่ `deliveryService.ts` ใช้) ต้องปล่อยเป็นสตางค์ดิบไว้
-   ไม่ผ่าน presenter (presenter มีไว้เฉพาะ `/api/admin/delivery-zones` เท่านั้น) — env fallback
-   (`DELIVERY_FEE_METRO`/`DELIVERY_FEE_UPCOUNTRY`) **ไม่ได้แปลง** เพราะยังเป็น "บาท" ทั้งระบบเหมือนเดิม
-   (ค่านั้นไม่เคยถูกเก็บลง DB เป็นสตางค์เลย ใช้ตรงในฟังก์ชันเป็นบาทตลอด ไม่มีอะไรต้องแก้)
-3. ~~**Recipe/Component/Ingredient cost** (`estimated_cost_per_batch`, `cost_per_unit`)~~ — ✅ เสร็จแล้ว
-   (เฟส 4, 2026-09-12) — แปลง `ingredientModel.cost_per_unit`/`componentModel`+`recipeModel.
-   estimated_cost_per_batch` พร้อม `orderItem`/`preorderItem.cost_per_unit` ที่ค้างจากเฟส 1 ครบทุกตัว
-   ตามแผน · **ดึง `productModel.purchase_cost` เข้ามาแปลงพร้อมกันด้วย** ทั้งที่อยู่ในกลุ่ม "Product
-   pricing" ของแผนเดิม (ข้อ 5 ด้านล่าง) เพราะสำรวจโค้ดจริงก่อนลงมือพบว่า `recipeService.
-   getUnitCostByProduct()` ผสมค่าจากทั้งสูตรกับ `purchase_cost` fallback เข้าด้วยกันเป็น Map เดียว —
-   ถ้าปล่อย `purchase_cost` ไว้ก่อนตามแผนเดิมจะได้ Map ที่หน่วยปนกัน (บาง productId มาจากสูตรเป็น
-   สตางค์ บาง productId มาจาก fallback เป็นบาท) โดยไม่มีทางรู้จากภายนอกว่าค่าไหนมาจากไหน — บทเรียนนี้คือ
-   เหตุผลที่แผนเฟสต้องยึด "domain ที่ผูกกันจริงทางโค้ด" ไม่ใช่ตามหมวดหมู่ที่ดูเป็นเรื่องเดียวกัน (เหมือนที่
-   เจอกับ order/preorder ตอนเฟส 1) เจอบั๊กใหม่ 2 จุดระหว่างทำ (ปัดเศษ + `$mul` กับ `null`) และบั๊ก
-   มาร์กเกอร์ซ้ำแบบเดียวกับเฟส 2 อีกครั้ง — รายละเอียดเต็ม → §3/§4
-4. ~~**Promotion definition** (`promotionModel.discount_value`/`min_order_amount`/
-   `max_discount_amount`)~~ — ✅ เสร็จแล้ว (เฟส 5a, 2026-09-12) — ซับซ้อนกว่าที่อื่นตามคาดเพราะ
-   `discount_value` เป็นเงิน**เฉพาะ**ตอน `discount_type === "Amount"` ต้อง handle แบบ conditional ทั้ง
-   ตอน service (`createPromotion`/`updatePromotion`/presenter) และตอน migrate (ใช้ pipeline-style
-   update แทน `$mul` ธรรมดา — ค้นพบใหม่ระหว่างทำ ดู §3/§4) `promotionUpdate` schema ไม่ต้องแก้เลยเพราะ
-   API ยังรับ-ส่งบาทเหมือนเดิมทุกประการ (ตามที่คาดไว้ในแผนเดิม)
-5. **Product pricing ที่เหลือ + preorderRoundItemModel.price_override** (`productModel.
-   product_price`/`sale_price` — `purchase_cost` แปลงไปแล้วในเฟส 4, `productVariantModel.
-   variant_price`, `productOptionModel.extra_price`, `cartItemModel.price_snapshot` +
-   `selected_options[].extra_price`) — เสี่ยงสุดเพราะเป็นจุดเริ่มของทุกการคำนวณเงินในระบบ
-   (`resolveLine()` ที่เพิ่งแปลงในเฟส 1 จะไม่ต้องมี "จุดข้ามโดเมน" ไปหา productModel อีกต่อไปถ้าทำเฟส
-   นี้เสร็จ — โค้ดจะง่ายขึ้น) **ต้องดึง `preorderRoundItemModel.price_override` เข้ามาแปลงพร้อมกันด้วย**
-   (ค้นพบตอนสำรวจขอบเขตก่อนเริ่มเฟส 5a — ดู §0) เพราะ `preorderRoundService.getOrderableRoundItem()`/
-   `getRoundDetail()` ผูก `item.price_override ?? product.sale_price ?? product.product_price` เข้า
-   ด้วยกันเป็น fallback chain เดียวกันเป๊ะกับที่ `purchase_cost` ผูกกับสูตรในเฟส 4 — ถ้าปล่อย
-   `price_override` ไว้ก่อนจะได้ `unit_price` หน่วยปนกันขึ้นอยู่กับว่า round item นั้นมี override หรือไม่
+- `preorderRoundItemModel.price_override` — ชื่อ field มีคำว่า "price" แต่ไม่ปรากฏชัดจนกว่าจะตามอ่าน
+  `preorderRoundService.getOrderableRoundItem()`/`getRoundDetail()` ว่าผูก fallback chain กับ
+  `product.sale_price`/`product.product_price` โดยตรง — จับได้ระหว่างสำรวจขอบเขตก่อนเริ่มเฟส 5
+  (ก่อนเขียนโค้ดจริง ไม่ใช่จากเทสพัง) แก้พร้อมกับ Product pricing ในเฟส 5b
 
-แต่ละเฟสควรทำแยก PR — เขียน migration ส่วนเพิ่มเข้าไปใน `scripts/migrate-money-to-satang.ts` เดิม
-(เพิ่ม `runSection()` ใหม่ต่อ collection — **ห้ามใช้ marker เดิมซ้ำ ต้องตั้ง sectionId ใหม่ไม่ซ้ำใคร
-เสมอ** ดู §4 ว่าทำไม) ไม่ต้องสร้างไฟล์ใหม่ เว้นแต่จะซับซ้อนจนแยกอ่านง่ายกว่า (เช่น promotion ที่ต้อง
-conditional)
+บทเรียนสำหรับใครมาแตะเงินในโปรเจกต์นี้อีกในอนาคต: **grep หาคำว่า "price"/"amount"/"cost" อย่างเดียวไม่พอ
+— ต้องตามอ่าน fallback chain (`??`) และฟังก์ชันที่ผสมค่าจากหลายแหล่งเข้าด้วยกันด้วย** เพราะ field ที่ผูก
+กับแหล่งเงินอื่นแบบนี้มักไม่มีคำที่ grep เจอง่าย ๆ ในชื่อของมันเอง (`purchase_cost` ในเฟส 4 ก็ผ่าน
+`??` chain เดียวกันนี้ แต่ชื่อชัดกว่า `price_override` มากจนสำรวจรอบแรกจับได้)
+
+---
+
+## 8. สรุปทั้งโปรเจกต์ — §3.11 เสร็จสมบูรณ์แล้วทั้งหมด
+
+ทุกเฟสของแผนเดิม (ที่แตกเป็น 6 เฟสย่อยระหว่างทาง: 1, 2, 3, 4, 5a, 5b) เสร็จครบแล้ว ไม่มี field เงินไหน
+เหลือค้างในระบบอีก — ครบทั้ง 18 model:
+
+1. ✅ **เฟส 1 (2026-09-12):** Order + OrderItem + Preorder + PreorderItem + Payment +
+   PromotionUsages + `dashboardService` — เฟสใหญ่ที่สุดเพราะ `paymentModel` เป็น collection กลางที่
+   ผูก order/preorder เข้าด้วยกัน แยกแปลงไม่ได้ · เจอ+แก้บั๊ก `tests/integration/setup.ts` (ไม่เคลียร์
+   raw collection ที่ไม่ผ่าน mongoose model) ไปด้วย
+2. ✅ **เฟส 2 (2026-09-12):** Expense (`expenseModel.amount`) — โดดเดี่ยวตามคาด แต่เจอบั๊กมาร์กเกอร์
+   เดียวทั้งไฟล์ (แก้เป็น marker แยกต่อ collection ถาวร)
+3. ✅ **เฟส 3 (2026-09-12):** Delivery zone (`deliveryZoneModel.fee`) — โดดเดี่ยวตามคาด, ยืนยัน
+   pattern "แปลงข้ามโดเมนตรงจุดที่ข้าม" ใช้ได้กับ cache ภายในด้วย
+4. ✅ **เฟส 4 (2026-09-12):** Recipe/Component/Ingredient cost + `cost_per_unit` (ค้างจากเฟส 1) +
+   `productModel.purchase_cost` (ดึงเข้ามาก่อนกำหนดเพราะผูกกับสูตรผ่าน `getUnitCostByProduct()`) —
+   เจอบั๊กมาร์กเกอร์ซ้ำอีกครั้ง + บั๊กปัดเศษ + `$mul` พังกับ `null`
+5. ✅ **เฟส 5a (2026-09-12):** Promotion definition — ซับซ้อนสุดในบรรดาเฟสที่ทำสำเร็จ (field เดียว
+   ความหมายเปลี่ยนตามเงื่อนไข) ค้นพบ pipeline-style update แก้ปัญหา conditional + nullable ได้ดีกว่า
+   `$mul` + filter
+6. ✅ **เฟส 5b (2026-09-12):** Product pricing (`productModel.product_price`/`sale_price`,
+   `productVariantModel.variant_price`, `productOptionModel.extra_price`, `cartItemModel.
+   price_snapshot`) + `preorderRoundItemModel.price_override` (model ที่ 18 ที่พลาดจากการสำรวจรอบ
+   แรก — ดู §7) — เฟสสุดท้าย ปิดท้ายด้วยการลบ "จุดข้ามโดเมน" (`toSatang()` wrapping ปลายทาง) ออกจาก
+   `orderService.resolveLine()` และ `preorderService`'s round-item pricing ได้สำเร็จตามที่วางแผนไว้
+
+**บทเรียนที่ยืนยันซ้ำตลอดทั้งโปรเจกต์** (คุ้มค่าที่จะจำไว้ใช้กับงาน migration ลักษณะเดียวกันในอนาคต):
+
+- **แบ่งเฟสตาม domain ที่ผูกกันจริงทางโค้ด ไม่ใช่ตามหมวดหมู่ที่ดูเป็นเรื่องเดียวกัน** — ค้นพบซ้ำ 3 ครั้ง
+  (order/preorder ผ่าน `paymentModel` ในเฟส 1, `purchase_cost` ผ่าน `getUnitCostByProduct()` ในเฟส 4,
+  `price_override` ผ่าน fallback chain เดียวกับ product pricing ในเฟส 5b)
+- **field เงินใหม่ที่เพิ่มเข้า collection ที่มี migration section อยู่แล้วต้องได้ section id ใหม่เสมอ**
+  ไม่งั้น DB ที่เคย migrate ไปแล้วจะข้ามทั้ง section โดยไม่แตะ field ใหม่เลย (เจอซ้ำในเฟส 2 และเฟส 4)
+- **MongoDB `$mul` (object update ธรรมดา) error ทันทีถ้าเจอ field เป็น `null`** ต้อง filter
+  `$type:"number"` ก่อนเสมอสำหรับ field nullable (เฟส 4) — **หรือใช้ pipeline-style update แทนไปเลย**
+  (`updateMany(filter, [stage], { updatePipeline: true })`) ซึ่งรองรับทั้ง conditional logic และ
+  `null` ได้โดยไม่ต้อง filter อะไรเพิ่ม (ค้นพบในเฟส 5a — แนะนำให้ใช้เป็นค่าเริ่มต้นสำหรับ migration ใน
+  อนาคต แทน `$mul` + filter)
+- **grep หาคำว่า price/amount/cost ไม่พอสำหรับสำรวจ money field** — ต้องตามอ่าน fallback chain (`??`)
+  และฟังก์ชันผสมค่าจากหลายแหล่งด้วย (`price_override` หลุดจากการสำรวจรอบแรกเพราะเหตุนี้)
+- **สูตรปัดเศษที่ออกแบบไว้สำหรับบาท (`Math.round(x*100)/100`) ใช้ไม่ได้กับสตางค์** — ต้องเปลี่ยนเป็น
+  `Math.round(x)` ตรง ๆ ทุกจุดที่เคยปัดทศนิยม 2 ตำแหน่ง (เฟส 4)
+- **presenter ที่แปลง DB→API เดียวกัน มักใช้ซ้ำเป็นตัวแปลงข้ามโดเมนให้ฟังก์ชันภายในที่ยังไม่แปลงได้พอดี**
+  (`presentPromotion()` ในเฟส 5a ใช้ทั้งสองบทบาท) เพราะทั้งคู่ต้องการรูปร่างผลลัพธ์แบบเดียวกัน
+- **จำนวนจุดเรียกใช้ของ test helper ที่มีอยู่ก่อนควรตัดสินว่าจะแก้ที่ default ตรง ๆ (จุดเรียกน้อย) หรือ
+  ให้ helper แปลงหน่วยให้เองอัตโนมัติ (จุดเรียกเยอะ)** — ผิดกันระหว่าง `makeIngredient`/`makeRecipe`
+  (เฟส 4, ปรับ default) กับ `makeProduct`/`makeVariant`/`makeOption` (เฟส 5b, 51 จุดเรียก ต้องให้
+  helper แปลงเอง)
+
+**ตัวเลขรวมทั้งโปรเจกต์:** unit test 163 → 171 (คงที่ตั้งแต่เฟส 2) · integration test 79 → 82 → 89 →
+93 → 104 → 115 → **125** (เพิ่มขึ้น 46 เคสตลอด 6 เฟสย่อย) · migration script มีทั้งหมด 20 section
+อิสระต่อกัน (ดู `scripts/migrate-money-to-satang.ts`)

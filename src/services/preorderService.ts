@@ -167,10 +167,10 @@ export async function createPreorder(
       );
     }
 
-    // unit_price มาจาก preorderRoundService (price_override/sale_price/product_price — ยังเป็นบาท
-    // ไม่ได้แปลงในเฟสนี้) แปลงเป็นสตางค์ตรงนี้ที่เดียว จุดที่ข้ามจากโดเมนสินค้า/รอบเข้าสู่พรีออเดอร์
-    // (BACKLOG §3.11 — เหมือน orderService.resolveLine)
-    const unitPriceSatang = toSatang(unit_price);
+    // BACKLOG §3.11 เฟส 5b — unit_price จาก preorderRoundService.getOrderableRoundItem() เป็นสตางค์
+    // อยู่แล้ว (price_override/sale_price/product_price เป็นสตางค์ทั้งหมดตั้งแต่เฟส 5b) ไม่ต้องแปลง
+    // อะไรเพิ่ม — ก่อนหน้านี้ (เฟส 1-5a) ยังต้อง toSatang() ตรงนี้เพราะฝั่งสินค้ายังเป็นบาทอยู่
+    const unitPriceSatang = unit_price;
     lines.push({
       round_item_id: item._id,
       product_id: product._id,
