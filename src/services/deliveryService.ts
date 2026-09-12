@@ -14,6 +14,7 @@
 import dbConnect from "../lib/dbConnect";
 import * as cartService from "./cartService";
 import { getActiveZonesCached } from "./deliveryZoneService";
+import { toBaht } from "../lib/money";
 
 function envNum(v: string | undefined, fallback: number): number {
   const n = Number(v);
@@ -84,8 +85,10 @@ export async function calcDeliveryFee(input: {
     const specific = dbZones.find((z) => !z.is_catch_all && z.provinces.includes(province));
     const matched = specific ?? dbZones.find((z) => z.is_catch_all);
     if (matched) {
+      // matched.fee เป็นสตางค์ดิบจาก DB (BACKLOG §3.11 เฟส 3) — แปลงเป็นบาทตรงนี้ก่อนคืน (ผลลัพธ์
+      // ของฟังก์ชันนี้เป็นบาทเสมอ ผู้เรียก เช่น orderService จะแปลงกลับเป็นสตางค์เองอีกที)
       return {
-        fee: free ? 0 : matched.fee,
+        fee: free ? 0 : toBaht(matched.fee),
         free,
         zone: matched.zone_name,
         free_shipping_min: FREE_SHIPPING_MIN,
@@ -113,7 +116,7 @@ export async function listZones() {
       source: "db" as const,
       zones: dbZones.map((z) => ({
         name: z.zone_name,
-        fee: z.fee,
+        fee: toBaht(z.fee), // z.fee เป็นสตางค์ดิบจาก DB (BACKLOG §3.11 เฟส 3)
         is_catch_all: z.is_catch_all,
         provinces: z.provinces,
       })),

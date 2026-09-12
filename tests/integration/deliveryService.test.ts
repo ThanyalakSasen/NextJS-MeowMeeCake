@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { calcDeliveryFee, listZones } from "@/services/deliveryService";
 import { deliveryZoneService } from "@/services/deliveryZoneService";
+import deliveryZoneModel from "@/models/deliveryZoneModel";
 
 /**
  * BACKLOG §3.15 — delivery zone เป็น DB (ย้ายมาจาก tests/lib/deliveryService.test.ts เดิม เพราะ
@@ -149,5 +150,68 @@ describe("calcDeliveryFee — ใช้โซนจาก DB เมื่อแ�
     await deliveryZoneService.create({ zone_name: "โซน A", fee: 10, sort_order: 0 });
     const z = await listZones();
     expect(z.source).toBe("db");
+  });
+});
+
+/**
+ * BACKLOG §3.11 เฟส 3 — deliveryZoneModel.fee เก็บเป็นสตางค์ แต่ API (ทั้ง calcDeliveryFee/listZones
+ * และ /api/admin/delivery-zones ที่ deliveryZoneService คุมอยู่) ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+ */
+describe("deliveryZoneService / deliveryService — fee เก็บสตางค์ คืนบาท (BACKLOG §3.11 เฟส 3)", () => {
+  it("create: รับ fee เป็นบาท เก็บลง DB เป็นสตางค์ คืนกลับเป็นบาท", async () => {
+    const zone = await deliveryZoneService.create({
+      zone_name: "โซนทดสอบ",
+      fee: 45.5,
+      sort_order: 0,
+    });
+    expect(zone.fee).toBe(45.5);
+
+    const raw = await deliveryZoneModel
+      .findById((zone as { _id: unknown })._id)
+      .lean<{ fee: number }>();
+    expect(raw!.fee).toBe(4550);
+  });
+
+  it("update: fee ใหม่แปลงเป็นสตางค์ถูกต้อง", async () => {
+    const zone = await deliveryZoneService.create({ zone_name: "โซนทดสอบ", fee: 50, sort_order: 0 });
+    const updated = await deliveryZoneService.update((zone as { _id: unknown })._id as string, {
+      fee: 65,
+    });
+    expect(updated.fee).toBe(65);
+
+    const raw = await deliveryZoneModel
+      .findById((zone as { _id: unknown })._id)
+      .lean<{ fee: number }>();
+    expect(raw!.fee).toBe(6500);
+  });
+
+  it("list/getById (หน้าแอดมิน) คืนค่าเป็นบาทเสมอ", async () => {
+    const created = await deliveryZoneService.create({
+      zone_name: "โซนทดสอบ",
+      fee: 99.75,
+      sort_order: 0,
+    });
+
+    const byId = await deliveryZoneService.getById((created as { _id: unknown })._id as string);
+    expect(byId.fee).toBe(99.75);
+
+    const list = await deliveryZoneService.list({ pagination: { page: 1, limit: 10, skip: 0 } });
+    const found = list.items.find(
+      (it) => String((it as { _id: unknown })._id) === String((created as { _id: unknown })._id)
+    );
+    expect((found as { fee: number } | undefined)?.fee).toBe(99.75);
+  });
+
+  it("calcDeliveryFee: ราคาที่ float คูณแล้วมี rounding error ค้าง (29.9 บาท) ยังคำนวณถูกเป๊ะ", async () => {
+    // 29.9 เก็บ *100 = 2990 สตางค์เป๊ะ (ไม่ใช่ float เพี้ยนแบบ 29.9*100 อาจให้ผลไม่ตรงในบางค่า)
+    await deliveryZoneService.create({
+      zone_name: "โซนทศนิยม",
+      provinces: ["ตราด"],
+      fee: 29.9,
+      sort_order: 0,
+    });
+
+    const q = await calcDeliveryFee({ province: "ตราด", subtotal: 100 });
+    expect(q.fee).toBe(29.9);
   });
 });
