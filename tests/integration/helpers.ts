@@ -6,6 +6,7 @@ import unitModel from "@/models/unitModel";
 import preorderModel from "@/models/preorderModel";
 import productVariantModel from "@/models/productVariantModel";
 import productOptionModel from "@/models/productOptionModel";
+import recipeModel from "@/models/recipeModel";
 import addressModel from "@/models/addressModel";
 
 export const oid = () => new mongoose.Types.ObjectId();
@@ -79,6 +80,19 @@ export async function makeOption(productId: string, over: Record<string, unknown
     product_id: productId,
     option_name: `เพิ่มเติม ${seq}`,
     extra_price: 0,
+    ...over,
+  });
+}
+
+export async function makeRecipe(productId: string, over: Record<string, unknown> = {}) {
+  seq++;
+  return recipeModel.create({
+    recipe_name: `สูตรทดสอบ ${seq}`,
+    product_id: productId,
+    yield_qty: 10,
+    yield_unit_id: oid(),
+    estimated_cost_per_batch: 100,
+    created_by: oid(),
     ...over,
   });
 }

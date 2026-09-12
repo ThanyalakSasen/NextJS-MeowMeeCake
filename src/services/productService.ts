@@ -48,6 +48,8 @@ export interface CreateProductInput {
   product_description?: string | null;
   preparation_heating?: string | null;
   yield_per_batch?: number | null;
+  /** ต้นทุนต่อหน่วยกรอกมือ (BACKLOG §3.16) — ใช้เฉพาะสินค้าที่ไม่มีสูตรการผลิต ดู recipeService.getUnitCostByProduct */
+  purchase_cost?: number | null;
   product_stock_quantity?: number | null;
   preorder_config?: PreorderConfigInput | null;
 }
@@ -184,6 +186,9 @@ export async function createProduct(input: CreateProductInput) {
   if (input.sale_price != null && input.sale_price < 0) {
     throw new ProductError("sale_price ต้องไม่ติดลบ", 400);
   }
+  if (input.purchase_cost != null && input.purchase_cost < 0) {
+    throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
+  }
   if (!PRODUCT_TYPES.includes(input.product_type)) {
     throw new ProductError(
       `product_type ต้องเป็นหนึ่งใน: ${PRODUCT_TYPES.join(", ")}`,
@@ -206,6 +211,7 @@ export async function createProduct(input: CreateProductInput) {
     product_description: input.product_description ?? null,
     preparation_heating: input.preparation_heating ?? null,
     yield_per_batch: input.yield_per_batch ?? null,
+    purchase_cost: input.purchase_cost ?? null,
     unit_id: input.unit_id,
     product_type: input.product_type,
     product_stock_quantity: isStockProductType(input.product_type)
@@ -388,6 +394,9 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   if (input.sale_price != null && input.sale_price < 0) {
     throw new ProductError("sale_price ต้องไม่ติดลบ", 400);
   }
+  if (input.purchase_cost != null && input.purchase_cost < 0) {
+    throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
+  }
   if (input.category_id) {
     await assertCategoryExists(input.category_id);
   }
@@ -423,6 +432,7 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     "product_description",
     "preparation_heating",
     "yield_per_batch",
+    "purchase_cost",
     "unit_id",
     "product_type",
   ];
