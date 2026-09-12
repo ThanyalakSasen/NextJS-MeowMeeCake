@@ -96,6 +96,34 @@ export async function setDefault(userId: string, id: string) {
   return doc;
 }
 
+/** สแนปช็อตที่อยู่ลง order (BACKLOG §3.8) — รับ address_id (จากสมุดที่อยู่) หรือ delivery_address
+ *  (กรอกใหม่ทั้งก้อน) อย่างใดอย่างหนึ่ง (route validate oneOf ไว้แล้วผ่าน zod) แล้วคืนเป็น flat record
+ *  รูปแบบเดียวกับที่ orderService.persistOrder คาดหวัง (ADDRESS_FIELDS: recipient_name/recipient_phone/
+ *  house_no/sub_district/district/province/zip_code) — สมุดที่อยู่เก็บแค่ตำแหน่ง ไม่เก็บชื่อ/เบอร์ผู้รับ
+ *  (สั่งให้คนอื่นได้) เลยต้องรับ recipient_name/recipient_phone แยกมาต่างหากเมื่อใช้ address_id */
+export async function resolveDeliverySnapshot(
+  userId: string,
+  input: {
+    address_id?: string | null;
+    recipient_name?: string | null;
+    recipient_phone?: string | null;
+    delivery_address?: Record<string, string> | null;
+  }
+): Promise<Record<string, string> | null> {
+  if (!input.address_id) return input.delivery_address ?? null;
+
+  const addr = await getById(userId, input.address_id);
+  return {
+    recipient_name: input.recipient_name ?? "",
+    recipient_phone: input.recipient_phone ?? "",
+    house_no: addr.house_no,
+    sub_district: addr.sub_district,
+    district: addr.district,
+    province: addr.province,
+    zip_code: addr.zip_code,
+  };
+}
+
 export async function remove(userId: string, id: string) {
   await dbConnect();
   assertObjectId(id);
