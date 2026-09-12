@@ -131,7 +131,7 @@
 **รอบ 4c — feature เล็ก + เทสเพิ่ม (หลัง launch ได้)**
 
 7. **3.8 address_id → checkout** — zod `oneOf([{address_id},{delivery_address}])` + `addressService.getById` snapshot ลง order · **S–M**
-8. **3.12 `src/lib/notify.ts`** — no-op + log ก่อน · wire `paymentService.verifyPayment` / `orderService.updateOrderStatus` / ingredient low-stock · **S**
+8. ~~3.12 `src/lib/notify.ts`~~ — ✅ **ล้าสมัยแล้ว ไม่ต้องทำ** — ระบบแจ้งเตือนตัวจริงถูกสร้างเสร็จแล้วก่อนหน้านี้ในเซสชันนี้ (`src/services/notificationService.ts` + `src/lib/line.ts` push เข้า LINE คู่กัน + `/api/admin/notifications` routes) และ wire เข้า `orderService`/`paymentService`/`ingredientTransactionService`/`productService` จริงแล้ว (ยืนยันด้วย grep 2026-09-12) — ไฟล์ `src/lib/notify.ts` ที่ plan เดิมพูดถึงไม่มีอยู่จริง (ไม่เคยสร้างเป็น no-op stub เพราะสร้างของจริงไปเลย)
 9. **3.16 `purchase_cost`** — field ใน `productModel` + `getUnitCostByProduct` fallback เมื่อไม่มีสูตร · แก้ COGS/กำไรใน dashboard · **S**
 10. **3.4 integration tests เพิ่ม** — `cartService` · `ingredientTransactionService` · `deliveryService.quoteForCart` · **S–M**
 
