@@ -1,9 +1,10 @@
-# Robustness fixes: clearCart error handling + voidTransaction floor guard
+# Robustness fixes: §2c.1–2c.4 (clearCart, voidTransaction, production double-credit, recordUsage)
 
 > อัปเดตล่าสุด: 2026-09-12
-> ขอบเขต: แก้ BACKLOG §2c.1–2c.2 — สองบั๊กความทนทานที่เจอพร้อมกับ §2b (code review เต็ม `src/services/`)
+> ขอบเขต: แก้ BACKLOG §2c.1–2c.2 (branch `fix-robustness-2c`, PR #22) + §2c.3 (branch
+> `fix-production-double-credit-2c3`) — บั๊กความทนทานที่เจอพร้อมกับ §2b (code review เต็ม
+> `src/services/`) · §2c.4 ตรวจสอบซ้ำแล้วยืนยันว่าเป็น tradeoff ที่ตั้งใจไว้แล้วจริง ไม่ใช่บั๊ก (§4)
 > เกี่ยวข้อง: [`BACKLOG.md`](BACKLOG.md) §2c
-> branch: `fix-robustness-2c`
 
 ---
 
@@ -120,7 +121,118 @@ if (res.modifiedCount === 0) {
 
 ---
 
-## 3. เทส
+## 3. `voidTransaction` void รายการที่มาจากการผลิตได้ตรง ๆ — เสี่ยงเครดิตสต็อกซ้ำ (2c.3)
+
+### ปัญหาเดิม (ยืนยันแล้วว่า exploit จริง ไม่ใช่แค่ความเสี่ยงเชิงทฤษฎี)
+
+`productionItemService.ts` มี 2 ฟังก์ชันที่แก้ `current_stock` ผ่าน `ingredientTransactionService.createTransaction()`:
+
+- **`consumeStock(id)`** — หักสต็อกตามสูตร (type `"use"`) แล้วบันทึก `item.stock_impact` + `item.stock_updated_at` ไว้ที่ตัวรายการผลิต (`productionItemModel`) เพื่อให้ **`reverseStock` ย้อนกลับได้ทีหลัง**
+- **`reverseStock(id)`** — เช็คว่า `item.stock_updated_at` ยังตั้งอยู่ → สร้างรายการ `"receive"` คืนสต็อกตาม `item.stock_impact` ที่บันทึกไว้ → เคลียร์ `stock_impact`/`stock_updated_at`
+
+ธุรกรรม `ingredientTransaction` (type `"use"`) ที่ `consumeStock` สร้างไว้ **ไม่มีอะไรผูกกลับไปที่
+`productionItem` เลย** — เป็นแค่รายการทั่วไปในตาราง `ingredientTransactions` เหมือนรายการที่บันทึกมือ
+ทุกประการ ขณะที่ `DELETE /api/admin/ingredient-transactions/[id]` (`voidTransaction`) เป็น endpoint
+**กลาง** ที่ void รายการไหนก็ได้ (permission `ingredients.delete`) — ไม่รู้จัก/ไม่เช็คว่ารายการนั้นมาจาก
+การผลิตหรือเปล่า
+
+**ลำดับ exploit จริงที่ตามรอยเจอ** (ใช้ endpoint ที่มีอยู่จริง 2 ตัว, permission คนละชุดกัน แต่ role
+`owner` ผ่านทั้งคู่):
+
+1. แอดมินกด **"หักสต็อกวัตถุดิบ"** ที่หน้ารายการผลิต (`POST /admin/production-items/[id]/consume-stock`)
+   → หักสต็อก 5 หน่วย + สร้างธุรกรรม `"use"` qty 5 + `productionItem.stock_updated_at` ถูกตั้ง
+2. แอดมิน (คนละคน หรือคนเดิมที่ลืม) ไปแก้ที่หน้า **"รายการเคลื่อนไหวสต็อกวัตถุดิบ"** (หน้าทั่วไป ไม่ใช่หน้า
+   การผลิต) เห็นธุรกรรม `"use"` นั้นแล้วกด **ยกเลิก** (`DELETE /admin/ingredient-transactions/[id]`) —
+   ทำได้ปกติเพราะ `voidTransaction` ไม่รู้ว่ารายการนี้มาจากการผลิต → สต็อกถูกเครดิตกลับ **+5** ทันที (ครั้งที่ 1)
+   แต่ `productionItem.stock_updated_at` **ยังไม่ถูกเคลียร์** เพราะ `voidTransaction` ไม่รู้จัก `productionItemModel` เลย
+3. ภายหลัง แอดมินไปที่หน้ารายการผลิตเดิม กด **"คืนสต็อกวัตถุดิบ"** (`POST /admin/production-items/[id]/reverse-stock`)
+   — `reverseStock` เช็คแค่ `item.stock_updated_at` (ยังตั้งอยู่จากข้อ 1) ก็ทึกทักว่า "ยังไม่เคยถูกย้อน"
+   แล้วสร้างธุรกรรม `"receive"` คืนสต็อกตาม `stock_impact` เดิม **ซ้ำอีกรอบ** → เครดิตกลับ **+5** อีกครั้ง
+   (ครั้งที่ 2)
+
+**ผล:** เบิกสต็อกจริงแค่ 5 หน่วยครั้งเดียว แต่ระบบเครดิตคืนให้ **2 ครั้ง** (+10 รวม) จากการกดปุ่มที่ถูกต้อง
+2 ปุ่มบนหน้าจอคนละหน้ากัน — ไม่ต้องอาศัยบั๊กหรือช่องโหว่พิเศษใด ๆ แค่ทำตามลำดับที่สมเหตุสมผลในหน้าที่มีอยู่จริง
+
+### วิธีแก้
+
+เพิ่ม back-reference ตามที่ BACKLOG แนะนำไว้แต่แรก:
+
+```ts
+// src/models/ingredientTransactionModel.ts
+production_item_id: {
+  type: mongoose.Schema.Types.ObjectId,
+  ref: "ProductionItems",
+  default: null,   // null = ธุรกรรมบันทึกมือปกติ ไม่เกี่ยวกับการผลิต
+},
+```
+
+`ingredientTransactionService.createTransaction()` รับ `production_item_id` เป็น input เสริม (validate
+ด้วย `assertRefExists` แบบเดียวกับ ref อื่นในฟังก์ชันนี้ — กันกรอกมั่ว/ค่าไม่มีอยู่จริง) แล้วบันทึกลงเอกสาร
+
+`productionItemService.ts` ส่ง `production_item_id: String(item._id)` แนบไปกับ**ทุกครั้ง**ที่เรียก
+`createTransaction()` (ทั้ง `consumeStock` ตอนหักจริง, `consumeStock` ตอน rollback ถ้าหักบางส่วนแล้วพัง,
+และ `reverseStock` ตอนคืน) — ทุกธุรกรรมที่มาจาก production มี back-ref ครบ ไม่มีจุดไหนหลุด
+
+`voidTransaction()` เพิ่มเช็คก่อนย้อนสต็อก:
+
+```ts
+if (txn.production_item_id) {
+  throw conflict(
+    "รายการนี้เกิดจากการผลิต — ยกเลิกผ่านทางนี้ไม่ได้ ... ให้ไปที่รายการผลิตนี้แล้วกด " +
+    "\"คืนสต็อกวัตถุดิบ\" (reverse-stock) แทน"
+  );
+}
+```
+
+### ทำไมแก้แบบนี้
+
+- **แก้ที่ root cause (ไม่มีทางเชื่อมกลับ) ไม่ใช่แก้ปลายเหตุ** — ทางเลือกอื่นที่คิดไว้ เช่น ทำให้
+  `reverseStock` เช็คว่าธุรกรรมเดิมยัง "active" อยู่จริงก่อนเชื่อ `stock_impact` (query
+  `ingredientTransactionModel` หาธุรกรรมที่ตรงกับ note+qty+ingredient ของแต่ละ line) — เปราะกว่ามาก
+  (match ด้วย note เป็น string ไม่ reliable) และไม่แก้ปัญหาฝั่ง `voidTransaction` ที่ควร "รู้ตัว" ว่า
+  กำลังจะ void อะไรอยู่ตั้งแต่แรกอยู่ดี
+- **บล็อกที่ `voidTransaction` ไม่ใช่บล็อกที่ `reverseStock`** — เพราะ `voidTransaction` เป็น endpoint
+  ทั่วไปที่ไม่รู้บริบทการผลิตเลย ในขณะที่ `reverseStock` **คือ** ทางที่ถูกต้องสำหรับย้อนธุรกรรมกลุ่มนี้
+  อยู่แล้ว (มันอ่าน `stock_impact` ที่บันทึกไว้ตรง ๆ ไม่ต้องเดา) — ปิดทางที่ผิดแทนที่จะเปิดทางที่ถูกเพิ่ม
+- **validate `production_item_id` ด้วย `assertRefExists`** — แม้ route `POST /admin/ingredient-transactions`
+  จะ spread `...body` เข้า `createTransaction()` ตรง ๆ โดยไม่มี zod (ช่องโหว่ mass-assignment เดิมที่มีอยู่
+  ก่อนแล้ว ไม่ใช่ scope ของ fix นี้) การบังคับให้ `production_item_id` ต้องอ้างถึงรายการผลิตที่มีอยู่จริง
+  ทำให้ต่อให้ client ส่งค่านี้มาเอง อย่างมากก็แค่ทำให้ธุรกรรมของตัวเอง void ไม่ได้ (ต้องรู้ id รายการผลิตจริง
+  ที่มีอยู่ด้วย) ไม่ใช่ช่องโหว่ด้านความปลอดภัยใหม่
+- **แท็กทุกธุรกรรมที่มาจาก production รวมถึงตอน rollback ระหว่าง `consumeStock`** — แม้ตอนนั้น
+  `item.stock_updated_at` ยังไม่เคยถูกตั้ง (ไม่มีความเสี่ยง double-credit จากจุดนี้โดยตรง) แต่แท็กไว้เพื่อ
+  ความสม่ำเสมอของ ledger (ตามรอยได้ว่าธุรกรรมไหนเกี่ยวกับการผลิตชิ้นไหนบ้างจากหน้ารายการเคลื่อนไหวได้เลย)
+
+---
+
+## 4. `recordUsage` swallow error ที่ไม่ใช่ 422 — ตรวจสอบซ้ำแล้ว: เป็น tradeoff ตั้งใจจริง ไม่ใช่บั๊ก (2c.4)
+
+`orderService.ts` (บรรทัดที่เรียก `promotionUsageService.recordUsage`):
+
+```ts
+try {
+  await promotionUsageService.recordUsage({ ... });
+} catch (e) {
+  if (isHttpError(e) && e.status === 422) throw e; // เต็มโควตาจริง → reject ทั้งออเดอร์
+  log.error("order.record_usage_failed", { order_id: String(order._id), err: e }); // อื่น = best-effort
+}
+```
+
+**ตรวจสอบซ้ำ (2026-09-12):** อ่านโค้ด + คอมเมนต์ในไฟล์จริงอีกครั้งโดยตรง — คอมเมนต์ในไฟล์ระบุเหตุผลไว้ตรง ๆ
+ตั้งแต่แรกว่า `"error อื่น (transient) = best-effort ไม่ล้มออเดอร์ที่สร้างสำเร็จแล้ว"` และ error ที่เป็น
+reject จริง (422 = โควตาเต็ม) ก็ยัง throw ต่อให้ saga rollback ล้มทั้งออเดอร์ตามปกติ — พฤติกรรมตรงกับที่
+ตั้งใจเขียนไว้ทุกจุด ไม่ใช่บั๊กที่หลุดไปโดยไม่รู้ตัวแบบ 2c.1–2c.3
+
+**ผลข้างเคียงที่ยอมรับไว้แล้ว (ยังอยู่ ไม่ได้แก้ในเซสชันนี้):** ถ้า `recordUsage` fail แบบ transient
+(ไม่ใช่ 422) ออเดอร์จะมี `discount_amount`/`promotion_id` ติดอยู่ แต่ไม่มี `PromotionUsages` row / ไม่นับ
+`used_count` — usage reporting เพี้ยนจากส่วนลดที่ให้จริง และ `revokeUsage` ตอนยกเลิกออเดอร์จะหาไม่เจอ
+(ไม่มีอะไรให้ revoke) — ผลกระทบเป็นแค่ "รายงานยอดใช้โปรโมชันคลาดเคลื่อน" ไม่ใช่เงินหายหรือสต็อกผิด **ตัดสินใจ
+ไม่แก้เพิ่มในรอบนี้** เพราะ effort/ผลกระทบไม่คุ้ม (transient error หายาก + ผลกระทบแค่ reporting) — ถ้าจะแก้
+ต่อในอนาคต แนวทางที่แนะนำไว้คือเพิ่ม retry สั้น ๆ ก่อน swallow แทนการ log แล้วปล่อยผ่านทันที
+
+---
+
+## 5. เทส
 
 - `tests/integration/createOrderFromCart.test.ts` (2 เคส) — mock `cartService.clearCart` ด้วย
   `vi.spyOn(...).mockRejectedValueOnce(...)` แล้วยืนยันว่า `createOrderFromCart` ยัง resolve สำเร็จ
@@ -130,11 +242,8 @@ if (res.modifiedCount === 0) {
 - `tests/integration/voidTransaction.test.ts` (3 เคส) — รับ 100 + ใช้ 80 แล้ว void รายการรับ → conflict
   + สต็อกไม่เปลี่ยน, void รายการ receive ที่ยังไม่ถูกใช้ → สำเร็จปกติ, void รายการ use → คืนสต็อกได้เสมอ
   (sanity ว่าไม่ได้ไปกระทบทิศทางที่ไม่ต้องกัน)
-- เพิ่ม helper `makeIngredient`/`makeUnit` ใน `tests/integration/helpers.ts`
-
-## 4. ยังเปิดค้าง (ไม่ใช่ scope ของรอบนี้)
-
-- §2c.3 (ความเสี่ยง double-credit สต็อกจาก production — ไม่มี back-reference) และ §2c.4 (`recordUsage`
-  swallow error — เป็น tradeoff ที่ตั้งใจไว้แล้ว ไม่ใช่บั๊ก) ยังไม่ได้แก้ ดู [`BACKLOG.md`](BACKLOG.md) §2c
-- `voidTransaction` ยังเป็น endpoint กลางที่ void รายการจาก production ได้โดยไม่มีการกันไว้ (คือ §2c.3
-  พอดี) — ยังไม่แก้ในรอบนี้เพราะต้องสืบ `productionItemService.ts` เพิ่มก่อนตัดสินใจออกแบบ
+- `tests/integration/productionStockDoubleCredit.test.ts` (5 เคส, 2c.3) — `consumeStock` แท็ก
+  `production_item_id` ให้ธุรกรรมที่สร้างจริง, void ธุรกรรมที่มี back-ref → conflict (สต็อกไม่เปลี่ยน),
+  `reverseStock` ทางที่ถูกยังทำงานปกติ (เครดิตกลับครั้งเดียว) + ธุรกรรม `"receive"` ที่มันสร้างก็ถูกแท็กด้วย,
+  `production_item_id` ที่ไม่มีอยู่จริง → `notFound`, ธุรกรรมมือปกติ (ไม่มี back-ref) ยัง void ได้ตามเดิม
+- เพิ่ม helper `makeIngredient`/`makeUnit`/`makeRecipe` ใน `tests/integration/helpers.ts`

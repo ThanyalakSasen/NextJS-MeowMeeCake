@@ -17,6 +17,7 @@ import ingredientTransactionModel from "../models/ingredientTransactionModel";
 import ingredientModel from "../models/ingredientModel";
 import unitModel from "../models/unitModel";
 import userModel from "../models/userModel";
+import productionItemModel from "../models/productionItemModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
 
@@ -36,6 +37,9 @@ export interface CreateTransactionInput {
   transaction_date?: string | Date | null;
   expiry_date?: string | Date | null;
   allowNegative?: boolean;
+  /** BACKLOG §2c.3 — internal only: productionItemService ใส่ให้เพื่อผูกธุรกรรมกับรายการผลิต
+   *  ที่สร้างมัน กัน voidTransaction() ย้อนรายการนี้แบบไม่รู้ตัว (ต้องยกเลิกผ่าน reverse-stock แทน) */
+  production_item_id?: string | null;
 }
 
 export interface ListTransactionQuery {
@@ -73,6 +77,10 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   const unitId = input.unit_id || String(ingredient.unit_id);
   await assertRefExists(unitModel, unitId, "หน่วยนับ", "unit_id");
+
+  if (input.production_item_id) {
+    await assertRefExists(productionItemModel, input.production_item_id, "รายการผลิต", "production_item_id");
+  }
 
   const before = ingredient.current_stock ?? 0;
   let after: number;
@@ -113,6 +121,7 @@ export async function createTransaction(input: CreateTransactionInput) {
       transaction_date: input.transaction_date ? new Date(input.transaction_date) : new Date(),
       expiry_date: input.expiry_date ? new Date(input.expiry_date) : null,
       performed_by: input.performed_by,
+      production_item_id: input.production_item_id ?? null,
     });
 
     // แจ้งเตือนตอนสต็อกเพิ่งข้ามจุดสั่งซื้อลงมา (before > reorder_point, after <= reorder_point)
@@ -206,6 +215,16 @@ export async function voidTransaction(id: string) {
   if (!txn) throw notFound("ไม่พบรายการเคลื่อนไหวที่ระบุ หรือถูกยกเลิกไปแล้ว");
   if (txn.type === "adjust") {
     throw badRequest("รายการชนิด adjust ยกเลิกไม่ได้ (ไม่มียอดก่อนหน้าให้ย้อน) — ให้ทำ adjust ใหม่แทน");
+  }
+  // BACKLOG §2c.3 — รายการที่เกิดจากการผลิต (consumeStock/reverseStock) ห้าม void ผ่านทางนี้:
+  // ธุรกรรมกลุ่มนี้ผูกกับ productionItem.stock_impact/stock_updated_at ของรายการผลิตต้นทาง — ถ้า void
+  // ตรงนี้แล้วภายหลังมีคนกด reverse-stock ที่หน้ารายการผลิตอีกที (เพราะ stock_updated_at ยังไม่ถูกเคลียร์
+  // ไม่รู้ว่ามีคนย้อนไปแล้ว) จะสร้างรายการ "receive" ชดเชยซ้ำอีกรอบ = เครดิตสต็อกสองครั้งจากการเบิกครั้งเดียว
+  if (txn.production_item_id) {
+    throw conflict(
+      "รายการนี้เกิดจากการผลิต — ยกเลิกผ่านทางนี้ไม่ได้ (จะทำให้เครดิตสต็อกซ้ำถ้ามีคนกดคืนสต็อกที่หน้า" +
+        "รายการผลิตอีกที) ให้ไปที่รายการผลิตนี้แล้วกด \"คืนสต็อกวัตถุดิบ\" (reverse-stock) แทน"
+    );
   }
 
   const inc = txn.type === "receive" ? -txn.qty : txn.qty; // receive→ลบออก, use→คืนกลับ
