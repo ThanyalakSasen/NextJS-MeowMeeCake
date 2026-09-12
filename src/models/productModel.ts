@@ -80,6 +80,14 @@ const productSchema = new mongoose.Schema(
       default: null,
       min: 0,
     },
+    // ต้นทุนต่อหน่วยที่กรอกมือ (BACKLOG §3.16) — fallback ให้ recipeService.getUnitCostByProduct()
+    // ใช้เฉพาะสินค้าที่ "ซื้อมาขายต่อ" ไม่มีสูตรการผลิต (recipeModel) ให้คำนวณต้นทุนเองได้
+    // ถ้าสินค้ามีสูตรอยู่แล้ว ต้นทุนจากสูตรจะมาก่อนเสมอ (ดูลำดับความสำคัญใน recipeService)
+    purchase_cost: {
+      type: Number,
+      default: null,
+      min: 0,
+    },
     unit_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Units",

@@ -142,7 +142,9 @@ function pickWritable(input: Record<string, any>): Record<string, any> {
 /**
  * ต้นทุนต่อหน่วยของสินค้า = estimated_cost_per_batch / yield_qty ของ "สูตรล่าสุด" ของสินค้านั้น
  * ใช้ตอนสร้างออเดอร์เพื่อ snapshot cost_per_unit ลง orderItem (คำนวณกำไรใน dashboard)
- * คืน Map<productId, number | null> — null = ไม่มีสูตร / yield_qty เป็น 0
+ * ลำดับความสำคัญ: 1) สูตรล่าสุดที่มี yield_qty > 0  2) product.purchase_cost ที่แอดมินกรอกมือ
+ * (BACKLOG §3.16 — เผื่อสินค้าที่ไม่มีสูตร เช่น ซื้อมาขายต่อ)  3) null (ไม่มีข้อมูลต้นทุนเลย)
+ * คืน Map<productId, number | null> — null = ไม่มีทั้งสูตรและ purchase_cost
  */
 export async function getUnitCostByProduct(
   productIds: string[]
@@ -172,6 +174,18 @@ export async function getUnitCostByProduct(
         ? Math.round((r.estimated_cost_per_batch / r.yield_qty) * 100) / 100
         : null;
     out.set(key, unit);
+  }
+
+  // fallback: สินค้าที่ยังไม่มีต้นทุนจากสูตร (ไม่มีสูตรเลย หรือมีแต่ yield_qty = 0) ใช้ purchase_cost ที่กรอกมือแทน
+  const missing = validIds.filter((id) => out.get(id) == null);
+  if (missing.length > 0) {
+    const products = await productModel
+      .find({ _id: { $in: missing } })
+      .select("purchase_cost")
+      .lean<Array<{ _id: any; purchase_cost?: number | null }>>();
+    for (const p of products) {
+      if (p.purchase_cost != null) out.set(String(p._id), p.purchase_cost);
+    }
   }
   return out;
 }
