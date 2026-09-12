@@ -19,7 +19,8 @@
     "backfill:product-codes": "tsx scripts/backfill-product-codes.ts",
     "sync-indexes": "tsx scripts/sync-indexes.ts",
     "seed:preorder-rounds": "tsx scripts/seed-preorder-rounds.ts",
-    "reset-owner-password": "tsx scripts/reset-owner-password.ts"
+    "reset-owner-password": "tsx scripts/reset-owner-password.ts",
+    "migrate:money-to-satang": "tsx scripts/migrate-money-to-satang.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1131.0",

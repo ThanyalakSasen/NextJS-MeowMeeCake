@@ -24,6 +24,7 @@ import userModel from "../models/userModel";
 import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
+import { toSatang, toBaht, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -59,8 +60,6 @@ const ADDRESS_FIELDS = [
   "province",
   "zip_code",
 ] as const;
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 // ── Types ────────────────────────────────────────────────────
 export interface PreorderLineInput {
@@ -168,6 +167,10 @@ export async function createPreorder(
       );
     }
 
+    // unit_price มาจาก preorderRoundService (price_override/sale_price/product_price — ยังเป็นบาท
+    // ไม่ได้แปลงในเฟสนี้) แปลงเป็นสตางค์ตรงนี้ที่เดียว จุดที่ข้ามจากโดเมนสินค้า/รอบเข้าสู่พรีออเดอร์
+    // (BACKLOG §3.11 — เหมือน orderService.resolveLine)
+    const unitPriceSatang = toSatang(unit_price);
     lines.push({
       round_item_id: item._id,
       product_id: product._id,
@@ -176,33 +179,35 @@ export async function createPreorder(
         product_name_eng: product.product_name_eng,
       },
       quantity,
-      unit_price,
-      total_price: round2(unit_price * quantity),
+      unit_price: unitPriceSatang,
+      total_price: unitPriceSatang * quantity,
       special_request: raw.special_request?.trim() || null,
     });
   }
 
-  const subtotal = round2(lines.reduce((s, l) => s + l.total_price, 0));
+  const subtotal = lines.reduce((s, l) => s + l.total_price, 0);
 
-  // ── ค่าส่ง (server คิดเอง) ──
+  // ── ค่าส่ง (server คิดเอง) ── deliveryService ยังทำงานเป็นบาท — แปลงข้ามโดเมนแค่จุดนี้
   let delivery_fee = 0;
   if (input.order_type === "delivery") {
-    delivery_fee = (
-      await deliveryService.calcDeliveryFee({
-        province: delivery_address?.province ?? null,
-        subtotal,
-      })
-    ).fee;
+    delivery_fee = toSatang(
+      (
+        await deliveryService.calcDeliveryFee({
+          province: delivery_address?.province ?? null,
+          subtotal: toBaht(subtotal),
+        })
+      ).fee
+    );
   }
 
-  // ── ส่วนลด (เฉพาะแอดมินกรอกมือ) ──
+  // ── ส่วนลด (เฉพาะแอดมินกรอกมือ — input.discount_amount เป็นบาทจาก request) ──
   const discount_amount = opts.allowManualDiscount
-    ? Math.max(0, Number(input.discount_amount) || 0)
+    ? toSatang(Math.max(0, Number(input.discount_amount) || 0))
     : 0;
   if (discount_amount > subtotal + delivery_fee) {
     throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
   }
-  const total_amount = round2(subtotal - discount_amount + delivery_fee);
+  const total_amount = subtotal - discount_amount + delivery_fee;
 
   // ── ต้นทุนต่อหน่วย (สแนปช็อตจากสูตรล่าสุด) ──
   const costByProduct = await recipeService.getUnitCostByProduct(
@@ -270,6 +275,18 @@ export async function createPreorder(
 }
 
 // ── READ ─────────────────────────────────────────────────────
+// BACKLOG §3.11 — DB เก็บเงินเป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม (เหมือน orderService)
+const PREORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount"] as const;
+const PREORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price"] as const; // ไม่รวม cost_per_unit (ยังเป็นบาท)
+
+function presentPreorder<T extends Record<string, unknown>>(preorder: T): T {
+  return toBahtFields(preorder, PREORDER_MONEY_FIELDS);
+}
+
+function presentPreorderItem(item: any): any {
+  return toBahtFields(item, PREORDER_ITEM_MONEY_FIELDS);
+}
+
 export async function listPreorders(query: ListPreorderQuery) {
   await dbConnect();
 
@@ -305,7 +322,7 @@ export async function listPreorders(query: ListPreorderQuery) {
     preorderModel.countDocuments(filter),
   ]);
 
-  return { items, meta: buildMeta(total, query.pagination) };
+  return { items: items.map(presentPreorder), meta: buildMeta(total, query.pagination) };
 }
 
 export async function getPreorderById(id: string, opts: { includeDeleted?: boolean } = {}) {
@@ -323,7 +340,7 @@ export async function getPreorderById(id: string, opts: { includeDeleted?: boole
   if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
 
   const items = await preorderItemModel.find({ preorder_id: preorder._id, deleted_at: null }).lean();
-  return { ...preorder, items };
+  return { ...presentPreorder(preorder), items: items.map(presentPreorderItem) };
 }
 
 export async function getPreorderByNo(preorderNo: string) {
@@ -335,7 +352,7 @@ export async function getPreorderByNo(preorderNo: string) {
     .lean<any>();
   if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
   const items = await preorderItemModel.find({ preorder_id: preorder._id, deleted_at: null }).lean();
-  return { ...preorder, items };
+  return { ...presentPreorder(preorder), items: items.map(presentPreorderItem) };
 }
 
 // ── UPDATE STATUS (state machine) ───────────────────────────
@@ -470,7 +487,7 @@ export async function setPaymentStatus(
   if (status === "paid" && preorder.order_status === "pending") {
     await preorderModel.updateOne({ _id: preorderId }, { $set: { order_status: "confirmed" } });
   }
-  return preorder;
+  return presentPreorder(preorder);
 }
 
 // ── DELETE (soft) ───────────────────────────────────────────

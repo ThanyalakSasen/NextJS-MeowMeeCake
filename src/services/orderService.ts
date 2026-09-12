@@ -37,6 +37,7 @@ import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import * as productService from "./productService";
 import { notificationService } from "./notificationService";
+import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import type { z } from "zod";
 import type { updateDeliveryBody } from "../schemas/order";
 
@@ -156,8 +157,6 @@ function randomOrderNo(now = new Date()): string {
   return `OP-${ymd}-${rand}`;
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
 // ── helper: resolve รายการสั่งซื้อจาก input ดิบ (ใช้ตอนสั่งเองไม่ผ่านตะกร้า) ──
 async function resolveLine(input: OrderLineInput): Promise<PricedLine> {
   const quantity = Number(input.quantity);
@@ -216,6 +215,10 @@ async function resolveLine(input: OrderLineInput): Promise<PricedLine> {
     });
   }
 
+  // basePrice/variant_price/extra_price ทั้งหมดมาจาก productModel/productVariantModel/
+  // productOptionModel ซึ่งยังเป็น "บาท" (ยังไม่แปลงในเฟสนี้ — BACKLOG §3.11) — คำนวณ unit_price
+  // เป็นบาทให้เสร็จก่อนทั้งหมด แล้วแปลงเป็นสตางค์ครั้งเดียวตอนจบ (จุดที่ข้ามจากโดเมนสินค้า/บาท
+  // เข้าสู่โดเมนออเดอร์/สตางค์) กันปัญหาการปัดเศษคูณซ้อนถ้าแปลงทีละส่วนแล้วบวกกัน
   const basePrice = product.sale_price ?? product.product_price;
   const unit_price =
     basePrice + (variant?.variant_price ?? 0) + options.reduce((s, o) => s + o.extra_price, 0);
@@ -228,10 +231,11 @@ async function resolveLine(input: OrderLineInput): Promise<PricedLine> {
       product_name_eng: product.product_name_eng,
       variant_name: variant?.variant_name ?? null,
     },
-    selected_options: options,
+    // extra_price เก็บลง orderItem.selected_options เป็นสตางค์เช่นกัน (สแนปช็อตไว้แสดงผลย้อนหลัง)
+    selected_options: options.map((o) => ({ ...o, extra_price: toSatang(o.extra_price) })),
     special_request: input.special_request?.trim() || null,
     quantity,
-    unit_price,
+    unit_price: toSatang(unit_price),
     cost_per_unit: null,
   };
 }
@@ -256,29 +260,37 @@ async function persistOrder(
     lines.map((l) => String(l.product_id))
   );
 
+  // unit_price/total_price เป็นสตางค์แล้วตั้งแต่ resolveLine() — บวก/คูณ integer ตรงนี้ไม่มี
+  // rounding error เลย ต่างจากตอนเป็นบาท (float) ที่ต้อง round2() ปิดท้ายทุกจุด (BACKLOG §3.11)
   const itemsPayload = lines.map((l) => ({
     ...l,
     total_price: l.unit_price * l.quantity,
     cost_per_unit: costByProduct.get(String(l.product_id)) ?? l.cost_per_unit ?? null,
   }));
-  const subtotal = round2(itemsPayload.reduce((s, it) => s + it.total_price, 0));
+  const subtotal = itemsPayload.reduce((s, it) => s + it.total_price, 0);
 
   // ── ค่าส่ง: คิดฝั่ง server เสมอ (เว้นแต่แอดมินสั่ง override) ──
+  // deliveryService ยังทำงานเป็น "บาท" (ยังไม่แปลงในเฟสนี้) — แปลง subtotal เป็นบาทตอนส่งออก แล้ว
+  // แปลงผลลัพธ์ (บาท) กลับเป็นสตางค์ทันทีที่ได้รับ (ข้ามโดเมนแค่จุดเดียว ไม่ผสมหน่วยไปไกลกว่านี้)
   let delivery_fee = 0;
   if (opts.order_type === "delivery") {
     if (opts.delivery_fee_override && opts.delivery_fee != null) {
-      delivery_fee = Math.max(0, Number(opts.delivery_fee) || 0);
+      delivery_fee = toSatang(Math.max(0, Number(opts.delivery_fee) || 0));
     } else {
-      delivery_fee = (
-        await deliveryService.calcDeliveryFee({
-          province: opts.delivery_address?.province ?? null,
-          subtotal,
-        })
-      ).fee;
+      delivery_fee = toSatang(
+        (
+          await deliveryService.calcDeliveryFee({
+            province: opts.delivery_address?.province ?? null,
+            subtotal: toBaht(subtotal),
+          })
+        ).fee
+      );
     }
   }
 
   // ── ส่วนลด: ใช้โปรโมชัน (ระบบคิดเอง) หรือส่วนลดกรอกมือ ──
+  // promotionService/discountEngine ยังทำงานเป็น "บาท" เช่นกัน (promotionModel ไม่ได้แปลงในเฟสนี้) —
+  // แปลงอินพุตเป็นบาทตอนเรียก แล้วแปลงผลลัพธ์ (บาท) กลับเป็นสตางค์ทันที
   let discount_amount = 0;
   let appliedPromotion: { promotion_id: string; discount_amount: number } | null = null;
 
@@ -295,7 +307,7 @@ async function persistOrder(
       product_id: String(l.product_id),
       category_id: catByProduct.get(String(l.product_id)) ?? null,
       quantity: l.quantity,
-      line_total: round2(l.unit_price * l.quantity),
+      line_total: toBaht(l.unit_price * l.quantity),
     }));
 
     const result = await promotionService.validateForOrder({
@@ -303,20 +315,20 @@ async function persistOrder(
       promotion_id: opts.promotion_id ?? undefined,
       user_id: userId,
       lines: discountLines,
-      subtotal,
-      delivery_fee,
+      subtotal: toBaht(subtotal),
+      delivery_fee: toBaht(delivery_fee),
       channel: opts.channel ?? "online",
     });
-    discount_amount = result.discount_amount;
+    discount_amount = toSatang(result.discount_amount);
     appliedPromotion = { promotion_id: result.promotion_id, discount_amount };
   } else {
-    discount_amount = Math.max(0, Number(opts.discount_amount) || 0);
+    discount_amount = toSatang(Math.max(0, Number(opts.discount_amount) || 0));
   }
 
   if (discount_amount > subtotal + delivery_fee) {
     throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
   }
-  const total_amount = round2(subtotal - discount_amount + delivery_fee);
+  const total_amount = subtotal - discount_amount + delivery_fee;
 
   const stockItems = lines.map((l) => ({
     product_id: String(l.product_id),
@@ -387,7 +399,7 @@ async function persistOrder(
   notificationService
     .notify({
       title: `ออเดอร์ใหม่ ${order.order_no}`,
-      message: `ยอดรวม ${total_amount.toLocaleString("th-TH")} บาท`,
+      message: `ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
       module: "order",
       type: "info",
       link: `/owner/orders/manageOrders?id=${order._id}`,
@@ -467,6 +479,26 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
 }
 
 // ── READ ────────────────────────────────────────────────────
+// BACKLOG §3.11 — DB เก็บเงินเป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม (ตัดสินใจร่วมกับผู้ใช้
+// 2026-09-12 ไม่ให้เป็น breaking change) — แปลงกลับตรงนี้ที่เดียวก่อนส่งออกทุกจุดที่ query ตรง ๆ
+// (ฟังก์ชันที่ return ผ่าน getOrderById/getOrderByNo อยู่แล้วไม่ต้องแปลงซ้ำ)
+const ORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount"] as const;
+const ORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price"] as const; // ไม่รวม cost_per_unit (ยังเป็นบาท)
+
+function presentOrder<T extends Record<string, unknown>>(order: T): T {
+  return toBahtFields(order, ORDER_MONEY_FIELDS);
+}
+
+function presentOrderItem(item: any): any {
+  return {
+    ...toBahtFields(item, ORDER_ITEM_MONEY_FIELDS),
+    selected_options: (item.selected_options ?? []).map((o: any) => ({
+      ...o,
+      extra_price: toBaht(o.extra_price),
+    })),
+  };
+}
+
 export async function listOrders(query: ListOrderQuery) {
   await dbConnect();
 
@@ -499,7 +531,7 @@ export async function listOrders(query: ListOrderQuery) {
     orderModel.countDocuments(filter),
   ]);
 
-  return { items, meta: buildMeta(total, query.pagination) };
+  return { items: items.map(presentOrder), meta: buildMeta(total, query.pagination) };
 }
 
 export async function getOrderById(id: string, opts: { includeDeleted?: boolean } = {}) {
@@ -518,7 +550,7 @@ export async function getOrderById(id: string, opts: { includeDeleted?: boolean 
   const items = await orderItemModel
     .find({ order_id: order._id, deleted_at: null })
     .lean();
-  return { ...order, items };
+  return { ...presentOrder(order), items: items.map(presentOrderItem) };
 }
 
 export async function getOrderByNo(orderNo: string) {
@@ -529,7 +561,7 @@ export async function getOrderByNo(orderNo: string) {
     .lean<any>();
   if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
   const items = await orderItemModel.find({ order_id: order._id, deleted_at: null }).lean();
-  return { ...order, items };
+  return { ...presentOrder(order), items: items.map(presentOrderItem) };
 }
 
 // ── เปลี่ยนสถานะออเดอร์ (state machine) ─────────────────────
@@ -662,7 +694,7 @@ export async function setPaymentStatus(orderId: string, status: PaymentStatus, p
   if (status === "paid" && order.order_status === "pending") {
     await orderModel.updateOne({ _id: orderId }, { $set: { order_status: "confirmed" } });
   }
-  return order;
+  return presentOrder(order);
 }
 
 // ── อัปเดตข้อมูลการจัดส่ง ───────────────────────────────────
@@ -687,8 +719,8 @@ export async function updateDelivery(id: string, input: UpdateDeliveryInput) {
 
   const updated = await orderModel
     .findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true })
-    .lean();
-  return updated;
+    .lean<any>();
+  return updated ? presentOrder(updated) : updated;
 }
 
 // ── DELETE (soft) ───────────────────────────────────────────

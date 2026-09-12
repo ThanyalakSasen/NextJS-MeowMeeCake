@@ -16,7 +16,8 @@ describe("preorderService — payment/cancellation hardening (BACKLOG 2b)", () =
   it("2b.2: verify payment ของพรีออเดอร์ → payment_status=paid + order_status pending→confirmed อัตโนมัติ", async () => {
     const customer = await makeUser();
     const admin = await makeUser();
-    const preorder = await makePreorder(String(customer._id), { total_amount: 200 });
+    // total_amount เป็นสตางค์ (BACKLOG §3.11) — 20000 = 200 บาท
+    const preorder = await makePreorder(String(customer._id), { total_amount: 20000 });
 
     const payment = await paymentService.createPayment({
       user_id: String(customer._id),
@@ -38,7 +39,7 @@ describe("preorderService — payment/cancellation hardening (BACKLOG 2b)", () =
   it("2b.3: แอดมินยกเลิกพรีออเดอร์ที่จ่ายแล้ว → auto-refund (payment + preorder.payment_status = refunded)", async () => {
     const customer = await makeUser();
     const admin = await makeUser();
-    const preorder = await makePreorder(String(customer._id), { total_amount: 300 });
+    const preorder = await makePreorder(String(customer._id), { total_amount: 30000 });
 
     const payment = await paymentService.createPayment({
       user_id: String(customer._id),
@@ -67,7 +68,7 @@ describe("preorderService — payment/cancellation hardening (BACKLOG 2b)", () =
   it("2b.4: ลูกค้ายกเลิกพรีออเดอร์ที่จ่ายแล้วเอง → 409 (ต้องติดต่อร้าน) ไม่ยกเลิกจริง", async () => {
     const customer = await makeUser();
     const admin = await makeUser();
-    const preorder = await makePreorder(String(customer._id), { total_amount: 120 });
+    const preorder = await makePreorder(String(customer._id), { total_amount: 12000 });
 
     const payment = await paymentService.createPayment({
       user_id: String(customer._id),
