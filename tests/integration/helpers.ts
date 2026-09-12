@@ -6,6 +6,7 @@ import unitModel from "@/models/unitModel";
 import preorderModel from "@/models/preorderModel";
 import productVariantModel from "@/models/productVariantModel";
 import productOptionModel from "@/models/productOptionModel";
+import addressModel from "@/models/addressModel";
 
 export const oid = () => new mongoose.Types.ObjectId();
 
@@ -78,6 +79,19 @@ export async function makeOption(productId: string, over: Record<string, unknown
     product_id: productId,
     option_name: `เพิ่มเติม ${seq}`,
     extra_price: 0,
+    ...over,
+  });
+}
+
+export async function makeAddress(userId: string, over: Record<string, unknown> = {}) {
+  seq++;
+  return addressModel.create({
+    user_id: userId,
+    house_no: `${seq}/${seq}`,
+    sub_district: `ตำบลทดสอบ ${seq}`,
+    district: `อำเภอทดสอบ ${seq}`,
+    province: "กรุงเทพมหานคร",
+    zip_code: "10100",
     ...over,
   });
 }
