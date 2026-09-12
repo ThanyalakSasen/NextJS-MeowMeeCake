@@ -50,6 +50,7 @@ export async function makeUnit(over: Record<string, unknown> = {}) {
   });
 }
 
+/** cost_per_unit เป็นสตางค์ (integer) — ค่าเริ่มต้น 1000 = 10.00 บาท (BACKLOG §3.11 เฟส 4) */
 export async function makeIngredient(over: Record<string, unknown> = {}) {
   seq++;
   const unit = await makeUnit();
@@ -58,7 +59,7 @@ export async function makeIngredient(over: Record<string, unknown> = {}) {
     ingredient_category_id: oid(),
     unit_id: unit._id,
     current_stock: 0,
-    cost_per_unit: 10,
+    cost_per_unit: 1000,
     reorder_point: 5,
     ...over,
   });
@@ -84,6 +85,7 @@ export async function makeOption(productId: string, over: Record<string, unknown
   });
 }
 
+/** estimated_cost_per_batch เป็นสตางค์ (integer) — ค่าเริ่มต้น 10000 = 100.00 บาท (BACKLOG §3.11 เฟส 4) */
 export async function makeRecipe(productId: string, over: Record<string, unknown> = {}) {
   seq++;
   return recipeModel.create({
@@ -91,7 +93,7 @@ export async function makeRecipe(productId: string, over: Record<string, unknown
     product_id: productId,
     yield_qty: 10,
     yield_unit_id: oid(),
-    estimated_cost_per_batch: 100,
+    estimated_cost_per_batch: 10000,
     created_by: oid(),
     ...over,
   });

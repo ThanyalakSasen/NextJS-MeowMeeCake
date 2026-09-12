@@ -5,6 +5,12 @@ import { makeProduct, makeRecipe } from "./helpers";
 /**
  * BACKLOG §3.16 — purchase_cost fallback
  * getUnitCostByProduct() ลำดับความสำคัญ: สูตร (ล่าสุด, yield_qty > 0) → product.purchase_cost → null
+ *
+ * BACKLOG §3.11 เฟส 4 — ตั้งแต่เฟสนี้ทั้ง recipeModel.estimated_cost_per_batch และ
+ * productModel.purchase_cost เก็บเป็นสตางค์ทั้งคู่ แต่เทสนี้สร้างข้อมูลตรงผ่าน model (ข้าม
+ * service ที่แปลงให้) จึงยังใช้ตัวเลขเดิมได้ตรง ๆ — ฟังก์ชันนี้แค่หาร/เทียบค่าที่ query มา ไม่เคย
+ * แปลงหน่วยเอง (ดู comment ที่ recipeService.getUnitCostByProduct) ผลลัพธ์จึงยังตรงกับก่อนแก้เฟส 4
+ * ทุกตัวเลข — สิ่งที่เปลี่ยนคือแค่ "ความหมาย" ของหน่วย (เดิมนัยเป็นบาท ตอนนี้นัยเป็นสตางค์)
  */
 describe("recipeService.getUnitCostByProduct — purchase_cost fallback (BACKLOG §3.16)", () => {
   it("มีสูตรที่ yield_qty > 0 → ใช้ต้นทุนจากสูตร ไม่สนใจ purchase_cost", async () => {

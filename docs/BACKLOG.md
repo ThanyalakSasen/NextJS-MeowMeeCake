@@ -19,7 +19,7 @@
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
 | อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — `upload.ts` เป็น interface แล้ว เลือก driver (`localDisk`/`s3`) ผ่าน env `UPLOAD_DRIVER` (ดู §3.13) |
 | Preorder (เฟส 5) | 🟡 service + API เสร็จ (ดู §8 · [preorder.md](preorder.md)) — เหลือผูก payment/production/promotion |
-| §3 คุณภาพ / hardening | 🟡 ✅ D1/D2/D3 + audit log (PR #5–#12) · ✅ รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · ✅ **รอบ 4b เสร็จสมบูรณ์ทั้ง 3 ข้อ** (zod tail ครบ `/admin/orders`+`/admin/attendances`+`/admin/permissions`+`/admin/preorder-rounds*`+`/admin/users`, รื้อ `pick()` 8/8 ไฟล์, `no-explicit-any` error บน `src/lib` ทั้งหมด — lint warning 13→5) · ✅ **รอบ 4c เสร็จสมบูรณ์** (3.8 address_id, ~~3.12~~ ล้าสมัย, 3.16 purchase_cost, 3.4 integration tests) · ✅ **รอบ 4d เสร็จสมบูรณ์** (3.13 object storage abstraction, 3.14 ลบรูปที่ไม่ใช้, 3.15 delivery zone เป็น DB) · 🟡 **รอบ 5 (3.11) เฟส 3/5 เสร็จ** (Order+Preorder+Payment+Expense+DeliveryZone เป็นสตางค์แล้ว — ดู [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)) |
+| §3 คุณภาพ / hardening | 🟡 ✅ D1/D2/D3 + audit log (PR #5–#12) · ✅ รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · ✅ **รอบ 4b เสร็จสมบูรณ์ทั้ง 3 ข้อ** (zod tail ครบ `/admin/orders`+`/admin/attendances`+`/admin/permissions`+`/admin/preorder-rounds*`+`/admin/users`, รื้อ `pick()` 8/8 ไฟล์, `no-explicit-any` error บน `src/lib` ทั้งหมด — lint warning 13→5) · ✅ **รอบ 4c เสร็จสมบูรณ์** (3.8 address_id, ~~3.12~~ ล้าสมัย, 3.16 purchase_cost, 3.4 integration tests) · ✅ **รอบ 4d เสร็จสมบูรณ์** (3.13 object storage abstraction, 3.14 ลบรูปที่ไม่ใช้, 3.15 delivery zone เป็น DB) · 🟡 **รอบ 5 (3.11) เฟส 4/5 เสร็จ** (Order+Preorder+Payment+Expense+DeliveryZone+Recipe/Component/Ingredient+purchase_cost เป็นสตางค์แล้ว — ดู [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)) |
 | Notification | ✅ ทำแล้ว (2026-09-12) — `notificationService.ts` + LINE push (`src/lib/line.ts`) + `/api/admin/notifications` · ผูกเข้า order ใหม่/สลิปรอตรวจ/สต็อกใกล้หมด (เดิมตัดออกไว้ก่อน ดู §3.12 ประวัติ) |
 
 **คำสั่งตรวจสอบ:** `npm run typecheck` · `typecheck:test` · `npm run lint` · `npm test` (unit) · `npm run test:integration` · `npm run build` — ปัจจุบันผ่านทั้งหมด
@@ -167,11 +167,26 @@
       (cache ภายในที่ `deliveryService.ts` ใช้เท่านั้น ไม่เคย expose ตรงให้ client) ตั้งใจปล่อยเป็น
       สตางค์ดิบไว้ ให้ `deliveryService.ts` แปลงเองตรงจุดใช้จริง (`calcDeliveryFee`/`listZones`) ·
       เทส unit 171/integration 93
-    - ⬜ เฟส 4: Recipe/Component/Ingredient cost (ต้องกลับมาแปลง `cost_per_unit` ที่ปล่อยไว้เป็นบาท
-      ในเฟส 1 ด้วยพร้อมกัน)
+    - ✅ **เฟส 4: Recipe/Component/Ingredient cost + `cost_per_unit`/`purchase_cost`** (2026-09-12) —
+      `ingredientModel.cost_per_unit`/`componentModel`+`recipeModel.estimated_cost_per_batch` เป็น
+      สตางค์แล้ว พร้อม `orderItem`/`preorderItem.cost_per_unit` ที่ปล่อยไว้เป็นบาทตั้งแต่เฟส 1 (ต้องรอ
+      เฟสนี้ก่อนเพราะที่มาคือ `recipeService.getUnitCostByProduct()`) · **ดึง `productModel.
+      purchase_cost` เข้ามาแปลงพร้อมกันด้วย** ทั้งที่อยู่ในกลุ่ม Product pricing ของแผนเดิม — เพราะ
+      `getUnitCostByProduct()` ผสมค่าจากทั้งสูตรกับ `purchase_cost` fallback เข้าด้วยกัน ถ้าปล่อย
+      `purchase_cost` ไว้ก่อนจะได้ Map ที่หน่วยปนกันโดยไม่มีทางรู้จากภายนอก · **เจอบั๊กใหม่ 2 จุด:**
+      (1) สูตรปัดเศษเดิม `Math.round(cost*100)/100` ออกแบบไว้ปัดทศนิยมบาท 2 ตำแหน่ง ถ้าไม่แก้จะปัด
+      สตางค์ละเอียดถึง 1/100 สตางค์ซึ่งไม่มีความหมาย ต้องเปลี่ยนเป็น `Math.round(cost)` ตรง ๆ ทั้ง
+      `componentService`/`recipeService`/`getUnitCostByProduct()` (2) MongoDB `$mul` **error ทันที**
+      ถ้าเจอ field ที่เป็น `null` (ยืนยันด้วยการทดสอบจริงกับ mongodb-memory-server) —
+      `cost_per_unit`/`purchase_cost` เป็น nullable ต้อง filter `{ field: { $type: "number" } }` ก่อน
+      $mul เสมอ, ไม่งั้น migration พังกลางทางทั้ง collection · **บั๊กมาร์กเกอร์ซ้ำ (แบบเดียวกับเฟส 2)
+      เจออีกครั้ง:** เพิ่ม `cost_per_unit` เข้า field ของ collection ที่มี section เดิมอยู่ก่อนแล้ว
+      (`order_items`/`preorder_items`) ต้องแยก section id ใหม่เสมอ (`order_items_cost_per_unit`/
+      `preorder_items_cost_per_unit`) ไม่งั้น DB ที่เคยรันเฟส 1 จะข้ามทั้ง section ไม่แตะ cost_per_unit
+      เลย · เทส unit 171/integration 104
     - ⬜ เฟส 5: Promotion definition (ซับซ้อนสุด — `discount_value` เป็นเงินเฉพาะตอน `discount_type
-      = "Amount"`) + Product pricing (`product_price`/`sale_price`/`variant_price`/`extra_price`/
-      `cartItemModel.price_snapshot`) — เสี่ยงสุดเพราะเป็นจุดเริ่มของทุกการคำนวณเงินในระบบ
+      = "Amount"`) + Product pricing ที่เหลือ (`product_price`/`sale_price`/`variant_price`/
+      `extra_price`/`cartItemModel.price_snapshot`) — เสี่ยงสุดเพราะเป็นจุดเริ่มของทุกการคำนวณเงินในระบบ
 
 > เกณฑ์จัดลำดับ: (1) ป้องกันการถอยหลังก่อน (CI ✅) → (2) lint/type กั้น build จริง (✅ core) → (3) จบด่าน zod ให้ครบ (4b) → (4) งานเดี่ยวเล็กเสี่ยงต่ำ (4c) → (5) งานที่รอ decision ภายนอก (4d) → (6) migration เสี่ยงสูงท้ายสุด (5)
 
@@ -187,7 +202,7 @@
 | 3.8 | สมุดที่อยู่ไม่เชื่อม checkout | `shop/orders` รับ `delivery_address` เป็น object ดิบ ไม่รองรับ `address_id` จาก `addressService` |
 | 3.9 | ~~Google login = ID token flow เท่านั้น (env บอกใบ้ code flow)~~ | ✅ แก้แล้ว (2026-09-11) — `loginWithGoogle` ใช้ ID-token flow + `jose.jwtVerify` ตรวจ sig/iss/aud/exp ครบอยู่แล้ว · ลบ `GOOGLE_CLIENT_SECRET`/`GOOGLE_CALLBACK_URL` ออกจาก `.env.example` (เหลือ `GOOGLE_CLIENT_ID` + คอมเมนต์) · เพิ่มเช็ค `email_verified === false` → reject (กันสวมสิทธิ์ผ่าน link-by-email) · `docs/env.md` อัปเดต · รายละเอียด → [`security-hardening.md`](security-hardening.md) §2 |
 | 3.10 | 🟡 CORS / CSRF — เพิ่ม defense-in-depth (same-origin) | ✅ (2026-09-11) — `src/lib/csrf.ts` `isCsrfSafe(method, origin, host)` + `middleware.ts` block mutation ที่ Origin ข้ามโดเมน → `403 CROSS_ORIGIN` (เสริม cookie `SameSite=Lax` เดิม) · CORS: ยืนยัน API เป็น **same-origin** (ไม่ส่ง `Access-Control-Allow-*`) · รายละเอียด → [`security-hardening.md`](security-hardening.md) §3 · **ยังเปิดค้าง:** ถ้า frontend แยก origin → ต้องเพิ่ม CORS allowlist + preflight + cookie `SameSite=None` + CSRF token จริง |
-| 3.11 | 🟡 เงินเก็บเป็น float (แก้แล้ว 8/17 model — เฟส 1-3) | ✅ **เฟส 1-3 (2026-09-12):** `orderModel`/`orderItemModel`/`preorderModel`/`preorderItemModel`/`paymentModel`/`promotionUsagesModel`/`expenseModel`/`deliveryZoneModel` เป็นสตางค์แล้ว (API ยังบาทเหมือนเดิม, ดู `src/lib/money.ts`) · **เหลือ:** `recipeModel`/`componentModel`/`ingredientModel` + `cost_per_unit`, `promotionModel`, `productModel`/`productVariantModel`/`productOptionModel`/`cartItemModel` — รายละเอียด/แผนเฟสที่เหลือ → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) §7 |
+| 3.11 | 🟡 เงินเก็บเป็น float (แก้แล้ว 12/17 model — เฟส 1-4) | ✅ **เฟส 1-4 (2026-09-12):** `orderModel`/`orderItemModel`/`preorderModel`/`preorderItemModel`/`paymentModel`/`promotionUsagesModel`/`expenseModel`/`deliveryZoneModel`/`recipeModel`/`componentModel`/`ingredientModel` + `cost_per_unit`(order/preorderItem)/`purchase_cost`(productModel) เป็นสตางค์แล้ว (API ยังบาทเหมือนเดิม, ดู `src/lib/money.ts`) · **เหลือ:** `promotionModel`, `productModel.product_price`/`sale_price`/`productVariantModel`/`productOptionModel`/`cartItemModel` — รายละเอียด/แผนเฟสที่เหลือ → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) §7 |
 | 3.12 | จุดต่อ LINE (`src/lib/notify.ts`) | ยังไม่สร้าง — ทำ no-op ไว้ก่อน แล้วเรียก `notify("order.paid", {...})` ที่ paymentService.verify / orderService.status / ingredient low-stock เพื่อให้ต่อ LINE ทีหลังแก้ที่เดียว |
 | 3.13 | ~~อัปโหลดเขียนลง `public/uploads/` ตรงๆ (`src/lib/upload.ts`)~~ | ✅ แก้แล้ว (2026-09-12) — เป็น `UploadDriver` interface แล้ว รายละเอียด → รอบ 4d ข้อ 11 ด้านบน |
 | 3.14 | ~~ลบรูปสินค้าที่ไม่ใช้~~ | ✅ แก้แล้ว (2026-09-12) — รายละเอียด → รอบ 4d ข้อ 12 ด้านบน |

@@ -7,6 +7,10 @@ import paymentModel from "@/models/paymentModel";
 import promotionUsagesModel from "@/models/promotionUsagesModel";
 import expenseModel from "@/models/expenseModel";
 import deliveryZoneModel from "@/models/deliveryZoneModel";
+import ingredientModel from "@/models/ingredientModel";
+import componentModel from "@/models/componentModel";
+import recipeModel from "@/models/recipeModel";
+import productModel from "@/models/productModel";
 import mongoose from "mongoose";
 import { runMigration } from "../../scripts/migrate-money-to-satang";
 import { makeUser, makeProduct, makePreorder } from "./helpers";
@@ -38,7 +42,18 @@ describe("scripts/migrate-money-to-satang", () => {
       quantity: 2,
       unit_price: 50,
       total_price: 100,
-      cost_per_unit: 20, // ต้อง "ไม่ถูกแตะ" — ยังเป็นบาทเหมือนเดิม
+      cost_per_unit: 20, // ต้องถูกแปลงด้วยตั้งแต่เฟส 4 (section แยกจาก order_items)
+    });
+    // orderItem อีกตัวที่ cost_per_unit เป็น null (ไม่มีสูตร/purchase_cost ตอนสร้างจริง) — ต้องยืนยันว่า
+    // $mul ไม่ error กลางทาง (MongoDB $mul ใช้กับ field ที่เป็น null ไม่ได้) และค่ายังเป็น null เหมือนเดิม
+    const orderItemNullCost = await orderItemModel.create({
+      order_id: order._id,
+      product_id: product._id,
+      product_snapshot: { product_name_th: "x", product_name_eng: "x" },
+      quantity: 1,
+      unit_price: 50,
+      total_price: 50,
+      cost_per_unit: null,
     });
 
     const preorder = await makePreorder(String(user._id), {
@@ -56,7 +71,7 @@ describe("scripts/migrate-money-to-satang", () => {
       quantity: 1,
       unit_price: 200,
       total_price: 200,
-      cost_per_unit: 80, // ต้อง "ไม่ถูกแตะ" เช่นกัน
+      cost_per_unit: 80, // ต้องถูกแปลงด้วยตั้งแต่เฟส 4 (section แยกจาก preorder_items)
     });
 
     const payment = await paymentModel.create({
@@ -87,16 +102,51 @@ describe("scripts/migrate-money-to-satang", () => {
       sort_order: 0,
     });
 
+    // BACKLOG §3.11 เฟส 4 — ingredient/component/recipe cost + product.purchase_cost
+    const ingredient = await ingredientModel.create({
+      ingredient_name: `วัตถุดิบ-migrate-${Date.now()}`,
+      ingredient_category_id: new mongoose.Types.ObjectId(),
+      unit_id: new mongoose.Types.ObjectId(),
+      current_stock: 0,
+      cost_per_unit: 15,
+      reorder_point: 5,
+    });
+    const component = await componentModel.create({
+      component_name: `ส่วนประกอบ-migrate-${Date.now()}`,
+      componentcategory_id: new mongoose.Types.ObjectId(),
+      yield_qty: 1,
+      yield_unit_id: new mongoose.Types.ObjectId(),
+      estimated_cost_per_batch: 60,
+      created_by: new mongoose.Types.ObjectId(),
+    });
+    const recipe = await recipeModel.create({
+      recipe_name: `สูตร-migrate-${Date.now()}`,
+      product_id: product._id,
+      yield_qty: 10,
+      yield_unit_id: new mongoose.Types.ObjectId(),
+      estimated_cost_per_batch: 90,
+      created_by: new mongoose.Types.ObjectId(),
+    });
+    // purchase_cost เป็น null สำหรับสินค้าส่วนใหญ่ (ไม่ใช่ "ซื้อมาขายต่อ") — ต้องยืนยันว่า $mul ไม่พัง
+    const productNullPurchaseCost = product; // makeProduct() ไม่ได้ตั้ง purchase_cost มา (default null)
+    const productWithPurchaseCost = await makeProduct({ purchase_cost: 70 });
+
     const summary = await runMigration();
     expect(summary).toMatchObject({
       orders: 1,
-      order_items: 1,
+      order_items: 2, // orderItem 2 ตัว (unit_price/total_price ไม่มีตัวไหนเป็น null)
+      order_items_cost_per_unit: 1, // จับได้แค่ตัวที่ cost_per_unit เป็นตัวเลขจริง (อีกตัวเป็น null ข้ามไป)
       preorders: 1,
       preorder_items: 1,
+      preorder_items_cost_per_unit: 1,
       payments: 1,
       promotion_usages: 1,
       expenses: 1,
       delivery_zones: 1,
+      ingredients: 1,
+      components: 1,
+      recipes: 1,
+      products_purchase_cost: 1, // เจอแค่ตัวที่มี purchase_cost เป็นตัวเลขจริง (filter $type:number)
     });
 
     const rOrder = await orderModel
@@ -116,7 +166,12 @@ describe("scripts/migrate-money-to-satang", () => {
     expect(rItem!.unit_price).toBe(5000);
     expect(rItem!.total_price).toBe(10000);
     expect(rItem!.selected_options[0].extra_price).toBe(500);
-    expect(rItem!.cost_per_unit).toBe(20); // ยืนยันว่าไม่ถูกแตะ (ยังเป็นบาท)
+    expect(rItem!.cost_per_unit).toBe(2000); // เฟส 4 — 20 บาท × 100 = 2000 สตางค์
+
+    const rItemNullCost = await orderItemModel
+      .findById(orderItemNullCost._id)
+      .lean<{ cost_per_unit: number | null }>();
+    expect(rItemNullCost!.cost_per_unit).toBeNull(); // $mul ข้าม (filter $type:number) ไม่พัง ไม่กลายเป็น 0
 
     const rPreorder = await preorderModel
       .findById(preorder._id)
@@ -129,7 +184,7 @@ describe("scripts/migrate-money-to-satang", () => {
       .lean<{ unit_price: number; total_price: number; cost_per_unit: number }>();
     expect(rPreorderItem!.unit_price).toBe(20000);
     expect(rPreorderItem!.total_price).toBe(20000);
-    expect(rPreorderItem!.cost_per_unit).toBe(80); // ยืนยันว่าไม่ถูกแตะ
+    expect(rPreorderItem!.cost_per_unit).toBe(8000); // เฟส 4 — 80 บาท × 100 = 8000 สตางค์
 
     const rPayment = await paymentModel.findById(payment._id).lean<{ amount: number }>();
     expect(rPayment!.amount).toBe(13000);
@@ -144,6 +199,32 @@ describe("scripts/migrate-money-to-satang", () => {
 
     const rZone = await deliveryZoneModel.findById(zone._id).lean<{ fee: number }>();
     expect(rZone!.fee).toBe(4500);
+
+    // ── เฟส 4 ──────────────────────────────────────────────────
+    const rIngredient = await ingredientModel
+      .findById(ingredient._id)
+      .lean<{ cost_per_unit: number }>();
+    expect(rIngredient!.cost_per_unit).toBe(1500);
+
+    const rComponent = await componentModel
+      .findById(component._id)
+      .lean<{ estimated_cost_per_batch: number }>();
+    expect(rComponent!.estimated_cost_per_batch).toBe(6000);
+
+    const rRecipe = await recipeModel
+      .findById(recipe._id)
+      .lean<{ estimated_cost_per_batch: number }>();
+    expect(rRecipe!.estimated_cost_per_batch).toBe(9000);
+
+    const rProductNull = await productModel
+      .findById(productNullPurchaseCost._id)
+      .lean<{ purchase_cost: number | null }>();
+    expect(rProductNull!.purchase_cost).toBeNull(); // $mul ข้าม ไม่พัง ไม่กลายเป็น 0
+
+    const rProductWithCost = await productModel
+      .findById(productWithPurchaseCost._id)
+      .lean<{ purchase_cost: number | null }>();
+    expect(rProductWithCost!.purchase_cost).toBe(7000);
   });
 
   it("กันรันซ้ำต่อ collection — รันครั้งที่สองต้องไม่คูณ ×100 ซ้ำอีกรอบ (section ที่รันแล้ว = null)", async () => {
@@ -203,5 +284,45 @@ describe("scripts/migrate-money-to-satang", () => {
 
     const rExpense = await expenseModel.findById(expense._id).lean<{ amount: number }>();
     expect(rExpense!.amount).toBe(5000); // ถูกแปลงจริง
+  });
+
+  it("เพิ่ม field เงินเข้า collection ที่มี section เดิมอยู่แล้ว (เหมือนเฟส 4 เพิ่ม cost_per_unit เข้า order_items) — ต้องมี marker แยกของตัวเอง ไม่ใช้ marker เดิมร่วมกัน", async () => {
+    // จำลอง DB ที่เคยรันเฟส 1 ไปแล้วจริง (marker "order_items" มีอยู่แล้ว) แต่ cost_per_unit ของ
+    // orderItem เดิมยังเป็นบาทดิบค้างอยู่ (เพราะเฟส 1 ตั้งใจไม่แตะ cost_per_unit)
+    const db = mongoose.connection.db!;
+    await db.collection("migrations").insertOne({
+      _id: "money_to_satang_3_11_order_items",
+      applied_at: new Date(),
+      modified_count: 1,
+    });
+
+    const user = await makeUser();
+    const product = await makeProduct();
+    const order = await orderModel.create({
+      order_no: `OP-TEST-${Date.now()}`,
+      user_id: user._id,
+      order_type: "takeaway",
+      subtotal: 10000,
+      total_amount: 10000,
+    });
+    const orderItem = await orderItemModel.create({
+      order_id: order._id,
+      product_id: product._id,
+      product_snapshot: { product_name_th: "x", product_name_eng: "x" },
+      quantity: 1,
+      unit_price: 10000, // สมมติว่าแปลงไปแล้วตอนเฟส 1 (ตรงกับ marker ที่ใส่ไว้)
+      total_price: 10000,
+      cost_per_unit: 25, // ค้างเป็นบาทดิบ (เฟส 1 ไม่แตะ) — ต้องถูกแปลงในเฟส 4
+    });
+
+    const result = await runMigration();
+    expect(result.order_items).toBeNull(); // ข้าม (marker เดิมยังอยู่) — unit_price/total_price ไม่ถูกแตะซ้ำ
+    expect(result.order_items_cost_per_unit).toBe(1); // รันจริง เพราะเป็น marker คนละตัว
+
+    const rItem = await orderItemModel
+      .findById(orderItem._id)
+      .lean<{ unit_price: number; cost_per_unit: number }>();
+    expect(rItem!.unit_price).toBe(10000); // ไม่ถูกคูณซ้ำ (section order_items ถูกข้าม)
+    expect(rItem!.cost_per_unit).toBe(2500); // ถูกแปลงจริง (section แยกต่างหาก)
   });
 });

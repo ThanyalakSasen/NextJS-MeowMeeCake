@@ -11,6 +11,10 @@ import paymentModel from "../src/models/paymentModel";
 import promotionUsagesModel from "../src/models/promotionUsagesModel";
 import expenseModel from "../src/models/expenseModel";
 import deliveryZoneModel from "../src/models/deliveryZoneModel";
+import ingredientModel from "../src/models/ingredientModel";
+import componentModel from "../src/models/componentModel";
+import recipeModel from "../src/models/recipeModel";
+import productModel from "../src/models/productModel";
 
 /**
  * BACKLOG §3.11 — ย้ายข้อมูลเงินเดิมที่เก็บเป็น "บาท" (float) ให้เป็น "สตางค์" (integer) ครั้งเดียว
@@ -21,15 +25,29 @@ import deliveryZoneModel from "../src/models/deliveryZoneModel";
  * preorderModel, preorderItemModel, paymentModel, promotionUsagesModel
  * ครอบคลุม (เฟส 2): expenseModel.amount
  * ครอบคลุม (เฟส 3): deliveryZoneModel.fee
- * **ไม่รวม** cost_per_unit (orderItem/preorderItem) หรือ field เงินใน productModel/promotionModel/
- * deliveryZoneModel/recipeModel/componentModel/ingredientModel เพราะยังไม่ถูกแปลง (ดู
+ * ครอบคลุม (เฟส 4): ingredientModel.cost_per_unit, componentModel.estimated_cost_per_batch,
+ * recipeModel.estimated_cost_per_batch, productModel.purchase_cost (**ไม่รวม** product_price/
+ * sale_price — ยังไม่แปลง), orderItemModel.cost_per_unit, preorderItemModel.cost_per_unit
+ * (ค้างจากเฟส 1 — ต้องรอ recipeModel/ingredientModel/componentModel แปลงก่อนถึงจะแปลงตามได้)
+ * **ไม่รวม** field เงินใน productModel (product_price/sale_price)/productVariantModel/
+ * productOptionModel/promotionModel/cartItemModel เพราะยังไม่ถูกแปลง (ดู
  * docs/hardening-5-money-phase1.md §7 แผนเฟสที่เหลือ)
  *
  * **กันรันซ้ำแบบต่อ collection** (ไม่ใช่ marker เดียวทั้งไฟล์!) — แต่ละ section ด้านล่างมี id ของตัวเอง
  * บันทึกไว้ใน collection `migrations` แยกกัน เพราะไฟล์นี้จะถูกต่อเติมฟิลด์ใหม่เข้ามาเรื่อย ๆ ทุกเฟส
  * (เฟส 2 เพิ่ม expenseModel เข้ามาทีหลังเฟส 1) — ถ้าใช้ marker เดียวทั้งไฟล์ รัน migrate ซ้ำหลัง merge
  * เฟส 2 บน DB ที่เคยรันเฟส 1 ไปแล้วจะ "ข้ามทั้งไฟล์" ทันทีโดยไม่แตะ expenseModel เลย (บั๊กจริงที่เจอ
- * ตอนเขียนเฟส 2 นี้เอง — แก้ก่อน merge)
+ * ตอนเขียนเฟส 2 นี้เอง — แก้ก่อน merge) — **บั๊กเดิมเจออีกครั้งตอนเขียนเฟส 4**: orderItem/
+ * preorderItem.cost_per_unit เป็น field ที่มีอยู่แล้วตั้งแต่เฟส 1 แต่จงใจไม่รวมใน $mul ตอนนั้น ถ้าใส่
+ * cost_per_unit เพิ่มเข้าไปใน $mul ของ section "order_items"/"preorder_items" เดิมตรง ๆ, DB ที่เคยรัน
+ * เฟส 1 ไปแล้ว (marker มีอยู่แล้ว) จะข้าม section นั้นทั้งหมดทันที ไม่แตะ cost_per_unit เลย จึงต้องแยก
+ * เป็น section ใหม่ "order_items_cost_per_unit"/"preorder_items_cost_per_unit" เสมอเมื่อเพิ่ม field
+ * เงินเข้าไปใน collection ที่เคยมี section ของตัวเองอยู่ก่อนแล้ว
+ *
+ * **กันพังตอน $mul เจอ field ที่เป็น null**: cost_per_unit (orderItem/preorderItem) กับ
+ * productModel.purchase_cost เป็น nullable (default: null) — MongoDB `$mul` ทำงานกับ field ที่เป็น
+ * null ไม่ได้ (error, ไม่ใช่แค่ข้ามเฉย ๆ) ต้อง filter query ด้วย `{ field: { $type: "number" } }` ก่อน
+ * เสมอสำหรับ field เงินที่ nullable (field required อื่น ๆ ในไฟล์นี้ไม่ต้องกรองเพราะไม่มีทาง null)
  */
 interface MigrationDoc {
   _id: string;
@@ -125,6 +143,69 @@ export async function runMigration(): Promise<Record<string, number | null>> {
     const res = await deliveryZoneModel.updateMany({}, { $mul: { fee: 100 } });
     return res.modifiedCount;
   });
+
+  // ── เฟส 4 ──────────────────────────────────────────────────
+  // cost_per_unit/estimated_cost_per_batch เป็น required + มี default (ไม่มีทาง null) → $mul ตรง ๆ
+  // ได้เลยทั้ง collection ไม่ต้องกรอง
+  summary.ingredients = await runSection(db, "money_to_satang_3_11_ingredients", async () => {
+    const res = await ingredientModel.updateMany({}, { $mul: { cost_per_unit: 100 } });
+    return res.modifiedCount;
+  });
+
+  summary.components = await runSection(db, "money_to_satang_3_11_components", async () => {
+    const res = await componentModel.updateMany({}, { $mul: { estimated_cost_per_batch: 100 } });
+    return res.modifiedCount;
+  });
+
+  summary.recipes = await runSection(db, "money_to_satang_3_11_recipes", async () => {
+    const res = await recipeModel.updateMany({}, { $mul: { estimated_cost_per_batch: 100 } });
+    return res.modifiedCount;
+  });
+
+  // productModel.purchase_cost เป็น nullable (default: null, สินค้าส่วนใหญ่ไม่มีค่านี้เลยถ้าไม่ใช่
+  // "ซื้อมาขายต่อ") — MongoDB `$mul` ล้มเหลวถ้าเจอ field ที่เป็น null ตรง ๆ (ไม่ใช่ non-numeric type ปกติ)
+  // ต้อง filter เอาเฉพาะเอกสารที่ purchase_cost เป็นตัวเลขจริงก่อน ไม่งั้น updateMany ทั้ง collection จะ
+  // พังกลางทาง (ต่างจาก field required ด้านบนที่ไม่มีค่า null ให้ต้องกังวล)
+  summary.products_purchase_cost = await runSection(
+    db,
+    "money_to_satang_3_11_products_purchase_cost",
+    async () => {
+      const res = await productModel.updateMany(
+        { purchase_cost: { $type: "number" } },
+        { $mul: { purchase_cost: 100 } }
+      );
+      return res.modifiedCount;
+    }
+  );
+
+  // orderItem/preorderItem.cost_per_unit เป็น nullable เหมือนกัน (default: null, ค้างมาตั้งแต่เฟส 1
+  // ที่ตั้งใจไม่แปลง) — ใช้ section id ใหม่แยกจาก "order_items"/"preorder_items" เดิมโดยเจตนา ถ้าใช้
+  // marker เดิมร่วมกัน DB ที่เคยรันเฟส 1 ไปแล้ว (marker "order_items"/"preorder_items" มีอยู่แล้ว) จะ
+  // ข้ามทั้ง section ทันทีโดยไม่แตะ cost_per_unit เลย — เป็นบั๊กแบบเดียวกับที่เจอตอนเฟส 2 เป๊ะ
+  // (ดู docs/hardening-5-money-phase1.md §4) จึงต้องแยก marker ให้ section ที่เพิ่ม field ทีหลังเสมอ
+  summary.order_items_cost_per_unit = await runSection(
+    db,
+    "money_to_satang_3_11_order_items_cost_per_unit",
+    async () => {
+      const res = await orderItemModel.updateMany(
+        { cost_per_unit: { $type: "number" } },
+        { $mul: { cost_per_unit: 100 } }
+      );
+      return res.modifiedCount;
+    }
+  );
+
+  summary.preorder_items_cost_per_unit = await runSection(
+    db,
+    "money_to_satang_3_11_preorder_items_cost_per_unit",
+    async () => {
+      const res = await preorderItemModel.updateMany(
+        { cost_per_unit: { $type: "number" } },
+        { $mul: { cost_per_unit: 100 } }
+      );
+      return res.modifiedCount;
+    }
+  );
 
   console.log("migrate-money-to-satang จบแล้ว:");
   for (const [k, v] of Object.entries(summary)) {

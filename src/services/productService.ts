@@ -17,9 +17,17 @@ import unitModel from "../models/unitModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
 import { deleteImages } from "../lib/upload";
+import { toSatang, toBahtFields } from "../lib/money";
 
 /** เกณฑ์ "สต็อกเหลือน้อย" ของสินค้า (ตรงกับดีฟอลต์ของ getLowStockProducts) */
 const LOW_STOCK_THRESHOLD = 5;
+
+// BACKLOG §3.11 เฟส 4 — purchase_cost เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// (เฉพาะ purchase_cost เท่านั้น — product_price/sale_price ยังไม่แปลง รอเฟส 5 พร้อม product pricing
+// อื่นทั้งหมด ดู recipeService.getUnitCostByProduct comment สำหรับเหตุผลที่ purchase_cost ต้องแปลงก่อน)
+function presentProduct<T extends Record<string, unknown>>(product: T): T {
+  return toBahtFields(product, ["purchase_cost"] as const);
+}
 
 /**
  * productService — CRUD + จัดการสต็อกของสินค้า (Products)
@@ -212,7 +220,7 @@ export async function createProduct(input: CreateProductInput) {
     product_description: input.product_description ?? null,
     preparation_heating: input.preparation_heating ?? null,
     yield_per_batch: input.yield_per_batch ?? null,
-    purchase_cost: input.purchase_cost ?? null,
+    purchase_cost: input.purchase_cost != null ? toSatang(Number(input.purchase_cost)) : null,
     unit_id: input.unit_id,
     product_type: input.product_type,
     product_stock_quantity: isStockProductType(input.product_type)
@@ -241,7 +249,7 @@ export async function createProduct(input: CreateProductInput) {
     }
   }
 
-  return doc.toObject();
+  return presentProduct(doc.toObject());
 }
 
 // ── READ by รหัสสินค้า (product_id เช่น "pos-0126487") ────────
@@ -259,7 +267,7 @@ export async function getProductByCode(
     .populate("unit_id", "unit_name unit_abbr")
     .lean();
   if (!product) throw new ProductError("ไม่พบสินค้าตามรหัสที่ระบุ", 404);
-  return product;
+  return presentProduct(product);
 }
 
 /**
@@ -342,7 +350,7 @@ export async function getProducts(query: ListProductQuery = {}) {
 
   // key `meta` (เดิม `pagination`) — โครงมาตรฐานเดียวของ list endpoint · ดู docs/api-conventions.md
   return {
-    items,
+    items: items.map(presentProduct),
     meta: {
       page,
       limit,
@@ -376,7 +384,7 @@ export async function getProductById(
   if (!product) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
-  return product;
+  return presentProduct(product);
 }
 
 // ── UPDATE ────────────────────────────────────────────────────
@@ -397,6 +405,11 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   }
   if (input.purchase_cost != null && input.purchase_cost < 0) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
+  }
+  // BACKLOG §3.11 เฟส 4 — input.purchase_cost เป็นบาทจาก request เสมอ (API contract) แปลงเป็นสตางค์
+  // ก่อนให้ loop `updatable` ด้านล่างเขียนลง existing.purchase_cost (ซึ่งเป็นสตางค์ใน DB แล้ว)
+  if (input.purchase_cost != null) {
+    input.purchase_cost = toSatang(Number(input.purchase_cost));
   }
   if (input.category_id) {
     await assertCategoryExists(input.category_id);
@@ -472,7 +485,7 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     if (removed.length > 0) await deleteImages(removed);
   }
 
-  return result;
+  return presentProduct(result);
 }
 
 // ── DELETE (soft) ─────────────────────────────────────────────
@@ -489,7 +502,7 @@ export async function deleteProduct(id: string) {
   if (!product) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ หรือถูกลบไปแล้ว", 404);
   }
-  return product;
+  return presentProduct(product);
 }
 
 // ── RESTORE (กู้คืนจาก soft delete) ───────────────────────────
@@ -506,7 +519,7 @@ export async function restoreProduct(id: string) {
   if (!product) {
     throw new ProductError("ไม่พบสินค้าที่ถูกลบไว้", 404);
   }
-  return product;
+  return presentProduct(product);
 }
 
 // ── DELETE (ถาวร) ────────────────────────────────────────────
@@ -516,7 +529,7 @@ export async function hardDeleteProduct(id: string) {
 
   const product = await productModel
     .findByIdAndDelete(id)
-    .lean<{ product_img?: string[] } | null>();
+    .lean<{ product_img?: string[]; purchase_cost?: number | null } | null>();
   if (!product) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
@@ -524,7 +537,7 @@ export async function hardDeleteProduct(id: string) {
   // BACKLOG §3.14 — ลบถาวรแล้ว ไม่มีทาง restore กลับมาแสดงรูปเดิมได้อีก เก็บไฟล์ไว้ไม่มีประโยชน์
   if (product.product_img?.length) await deleteImages(product.product_img);
 
-  return product;
+  return presentProduct(product);
 }
 
 // ─────────────────────────────────────────────────────────────

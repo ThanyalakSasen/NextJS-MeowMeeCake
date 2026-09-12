@@ -15,6 +15,7 @@ import { createCrudService } from "../lib/crudService";
 import ingredientModel from "../models/ingredientModel";
 import ingredientCategoryModel from "../models/ingredientCategoryModel";
 import unitModel from "../models/unitModel";
+import { toSatang, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -66,8 +67,22 @@ async function assertRefs(input: Record<string, any>): Promise<void> {
   }
 }
 
+// BACKLOG §3.11 เฟส 4 — cost_per_unit เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentIngredient<T extends Record<string, unknown>>(doc: T): T {
+  return toBahtFields(doc, ["cost_per_unit"] as const);
+}
+
 export const ingredientService = {
   ...base,
+
+  async list(args: Parameters<typeof base.list>[0]) {
+    const result = await base.list(args);
+    return { ...result, items: result.items.map(presentIngredient) };
+  },
+
+  async getById(id: string, includeDeleted?: boolean) {
+    return presentIngredient(await base.getById(id, includeDeleted));
+  },
 
   async create(input: Record<string, any>) {
     if (!input.ingredient_name) throw badRequest("กรุณาระบุ ingredient_name");
@@ -76,12 +91,25 @@ export const ingredientService = {
     if (input.cost_per_unit == null) throw badRequest("กรุณาระบุ cost_per_unit");
     if (input.reorder_point == null) throw badRequest("กรุณาระบุ reorder_point");
     await assertRefs(input);
-    return base.create(input);
+    const payload = { ...input, cost_per_unit: toSatang(Number(input.cost_per_unit)) };
+    return presentIngredient(await base.create(payload));
   },
 
   async update(id: string, input: Record<string, any>) {
     await assertRefs(input);
-    return base.update(id, input);
+    const payload =
+      input.cost_per_unit != null
+        ? { ...input, cost_per_unit: toSatang(Number(input.cost_per_unit)) }
+        : input;
+    return presentIngredient(await base.update(id, payload));
+  },
+
+  async remove(id: string) {
+    return presentIngredient(await base.remove(id));
+  },
+
+  async restore(id: string) {
+    return presentIngredient(await base.restore(id));
   },
 
   /** วัตถุดิบที่ current_stock <= reorder_point (เรียงจากขาดหนักสุด) */
@@ -100,7 +128,7 @@ export const ingredientService = {
       .populate("unit_id", "unit_name unit_abbr")
       .lean();
 
-    return { count: items.length, items };
+    return { count: items.length, items: items.map(presentIngredient) };
   },
 
   /** อ่านยอดคงเหลือปัจจุบัน */

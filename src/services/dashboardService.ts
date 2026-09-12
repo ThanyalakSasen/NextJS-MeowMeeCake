@@ -93,13 +93,13 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       ),
     ]);
 
-  // BACKLOG §3.11 — orderModel.total_amount/discount_amount เป็นสตางค์แล้ว (aggregate $sum ได้ผลรวม
-  // เป็นสตางค์เช่นกัน) แปลงเป็นบาทตรงนี้ก่อน — cogs/expenseTotal ยังเป็นบาทอยู่ (cost_per_unit ของ
-  // orderItem กับ expenseModel.amount ไม่ได้แปลงในเฟสนี้) ต้องแปลง revenue/discount ให้เป็นบาทก่อน
-  // เอามารวมกันในสูตร profit_estimate ไม่งั้นหน่วยจะปนกัน
+  // BACKLOG §3.11 — orderModel.total_amount/discount_amount เป็นสตางค์ (เฟส 1) และตั้งแต่เฟส 4
+  // orderItem.cost_per_unit ก็เป็นสตางค์ด้วยเช่นกัน (aggregate $sum ของทั้งคู่ได้ผลรวมเป็นสตางค์)
+  // expenseTotal (จาก expenseService.totalInRange) คืนบาทให้อยู่แล้วตั้งแต่เฟส 2 — แปลง
+  // revenue/discount/cogs เป็นบาทให้ครบก่อนเอามารวมกันในสูตร profit_estimate ไม่งั้นหน่วยจะปนกัน
   const revenue = toBaht(paidRows[0]?.revenue ?? 0);
   const discount = toBaht(paidRows[0]?.discount ?? 0);
-  const cogs = cogsRows[0]?.cogs ?? 0;
+  const cogs = toBaht(cogsRows[0]?.cogs ?? 0);
   const paidOrders = paidRows[0]?.orders ?? 0;
 
   const byStatus: Record<string, number> = {};

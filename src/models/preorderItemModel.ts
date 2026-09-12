@@ -19,7 +19,7 @@ const preorderItemSchema = new mongoose.Schema(
     special_request: { type: String, default: null },
     quantity: { type: Number, required: true, min: 1 },
     // BACKLOG §3.11 — unit_price/total_price เป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12
-    // cost_per_unit ยังเป็นบาท (float) เหมือนเดิม — เหตุผลเดียวกับ orderItemModel
+    // cost_per_unit ก็เป็นสตางค์เช่นกันตั้งแต่เฟส 4 — เหตุผลเดียวกับ orderItemModel
     unit_price: { type: Number, required: true, min: 0 },
     total_price: { type: Number, required: true, min: 0 },
     cost_per_unit: { type: Number, default: null },
