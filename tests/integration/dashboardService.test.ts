@@ -6,10 +6,10 @@ import { expenseService } from "@/services/expenseService";
 import { makeUser, makeProduct } from "./helpers";
 
 /**
- * BACKLOG §3.11 — dashboardService.overview() รวม revenue (satang, จาก orderModel) กับ
- * cogs/expenseTotal (บาท, ยังไม่แปลงในเฟส 1-2 ยกเว้น expense ที่แปลงแล้วในเฟส 2 แต่
- * totalInRange() คืนบาทให้อยู่แล้ว) — เป็นจุดเสี่ยงสุดถ้าผสมหน่วยผิด (กำไรเพี้ยน x100 เงียบ ๆ)
- * เทสนี้ยืนยันว่า profit_estimate คำนวณถูกต้องหลัง expense ย้ายไปเป็นสตางค์ด้วย (เฟส 2)
+ * BACKLOG §3.11 — dashboardService.overview() รวม revenue/cogs (satang, จาก orderModel/orderItemModel)
+ * กับ expenseTotal (totalInRange() คืนบาทให้อยู่แล้วตั้งแต่เฟส 2) — เป็นจุดเสี่ยงสุดถ้าผสมหน่วยผิด
+ * (กำไรเพี้ยน x100 เงียบ ๆ) ตั้งแต่เฟส 4 orderItem.cost_per_unit ก็เป็นสตางค์แล้วเช่นกัน (ก่อนหน้านี้
+ * ยังเป็นบาทค้างอยู่ตัวเดียวในระบบ) เทสนี้ยืนยันว่า profit_estimate คำนวณถูกต้องครบทุกองค์ประกอบแล้ว
  */
 describe("dashboardService.overview — ผสม revenue (order) + expense ถูกหน่วย", () => {
   it("profit_estimate = revenue - expenses - cogs เป็นบาทถูกต้อง ไม่มีหน่วยปนกัน", async () => {
@@ -34,7 +34,7 @@ describe("dashboardService.overview — ผสม revenue (order) + expense ถ�
       quantity: 1,
       unit_price: 100000,
       total_price: 100000,
-      cost_per_unit: 300, // ยังเป็นบาท (ไม่แปลงจนกว่าจะถึงเฟส 4) — cogs = 300*1 = 300 บาท
+      cost_per_unit: 30000, // 300 บาท (สตางค์ตั้งแต่เฟส 4) — cogs = 30000*1 สตางค์ = 300 บาท
     });
 
     // ค่าใช้จ่าย 200 บาท (เก็บเป็นสตางค์ในเฟส 2 — totalInRange() คืนบาทให้)

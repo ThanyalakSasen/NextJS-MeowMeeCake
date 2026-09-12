@@ -483,7 +483,9 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
 // 2026-09-12 ไม่ให้เป็น breaking change) — แปลงกลับตรงนี้ที่เดียวก่อนส่งออกทุกจุดที่ query ตรง ๆ
 // (ฟังก์ชันที่ return ผ่าน getOrderById/getOrderByNo อยู่แล้วไม่ต้องแปลงซ้ำ)
 const ORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount"] as const;
-const ORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price"] as const; // ไม่รวม cost_per_unit (ยังเป็นบาท)
+// cost_per_unit เป็นสตางค์เช่นกันตั้งแต่เฟส 4 (มาจาก recipeService.getUnitCostByProduct() ซึ่งคืน
+// สตางค์ล้วนแล้ว — ดู comment ที่นั่น) toBahtFields ข้าม key ที่เป็น null ไว้เฉย ๆ อยู่แล้ว จึงปลอดภัย
+const ORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price", "cost_per_unit"] as const;
 
 function presentOrder<T extends Record<string, unknown>>(order: T): T {
   return toBahtFields(order, ORDER_MONEY_FIELDS);

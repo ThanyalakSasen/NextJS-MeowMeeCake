@@ -23,6 +23,7 @@ import ingredientModel from "../models/ingredientModel";
 import componentModel from "../models/componentModel";
 import unitModel from "../models/unitModel";
 import userModel from "../models/userModel";
+import { toSatang, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -76,16 +77,60 @@ async function prepare(input: Record<string, any>, isCreate: boolean): Promise<v
   }
 
   // คิดต้นทุน/แบทช์ อัตโนมัติเมื่อไม่ได้ส่งมา และมีข้อมูลรายการพอจะคิด
+  // BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ (integer) แล้ว เหมือน componentService:
+  //   1) auto-calc → ingCost/compCost มาจาก DB (satang อยู่แล้ว) ปัด Math.round() ตรง ๆ เป็น integer
+  //      สตางค์ (ไม่ใช่ ×100/100 แบบเดิมที่ปัดทศนิยมบาท 2 ตำแหน่ง — ไม่มีความหมายอีกต่อไป)
+  //   2) ส่งมาเอง → เป็นบาททศนิยมตาม API contract ต้องแปลงเป็นสตางค์เอง
   const hasItemsInfo = input.ingredients !== undefined || input.components !== undefined;
   if ((isCreate || hasItemsInfo) && input.estimated_cost_per_batch == null) {
     const ingCost = await ingredientItemsCost(input.ingredients ?? [], ingredientModel as Model<any>);
     const compCost = await componentItemsCost(input.components ?? [], componentModel as Model<any>);
-    input.estimated_cost_per_batch = Math.round((ingCost + compCost) * 100) / 100;
+    input.estimated_cost_per_batch = Math.round(ingCost + compCost);
+  } else if (input.estimated_cost_per_batch != null) {
+    input.estimated_cost_per_batch = toSatang(Number(input.estimated_cost_per_batch));
   }
+}
+
+// BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentRecipe<T extends Record<string, unknown>>(doc: T): T {
+  return toBahtFields(doc, ["estimated_cost_per_batch"] as const);
+}
+
+/** getExpanded() populate ทั้ง ingredients.ingredient_id (cost_per_unit) และ components.component_id
+ *  (estimated_cost_per_batch) เป็น object เต็ม — เส้นทาง populate ไม่ผ่าน presenter ของ service เจ้าของ
+ *  เลย ต้องแปลงซ้อนเองทั้งสองจุด เหมือน componentService.presentExpandedComponent() */
+function presentExpandedRecipe(doc: Record<string, any>): Record<string, any> {
+  const presented = presentRecipe(doc);
+  return {
+    ...presented,
+    ingredients: (presented.ingredients ?? []).map((it: any) => ({
+      ...it,
+      ingredient_id:
+        it.ingredient_id && typeof it.ingredient_id === "object"
+          ? toBahtFields(it.ingredient_id, ["cost_per_unit"] as const)
+          : it.ingredient_id,
+    })),
+    components: (presented.components ?? []).map((it: any) => ({
+      ...it,
+      component_id:
+        it.component_id && typeof it.component_id === "object"
+          ? toBahtFields(it.component_id, ["estimated_cost_per_batch"] as const)
+          : it.component_id,
+    })),
+  };
 }
 
 export const recipeService = {
   ...base,
+
+  async list(args: Parameters<typeof base.list>[0]) {
+    const result = await base.list(args);
+    return { ...result, items: result.items.map(presentRecipe) };
+  },
+
+  async getById(id: string, includeDeleted?: boolean) {
+    return presentRecipe(await base.getById(id, includeDeleted));
+  },
 
   async create(input: Record<string, any>) {
     for (const f of ["recipe_name", "product_id", "yield_qty", "yield_unit_id", "created_by"] as const) {
@@ -96,23 +141,32 @@ export const recipeService = {
     await prepare(input, true);
     // created_by ไม่ได้อยู่ใน WRITABLE (กัน mass-assign ที่ layer อื่น) — ใส่ตรงนี้เอง
     const doc = await recipeModel.create({ ...pickWritable(input), created_by: input.created_by });
-    return doc.toObject();
+    return presentRecipe(doc.toObject());
   },
 
   async update(id: string, input: Record<string, any>) {
     await prepare(input, false);
-    return base.update(id, input);
+    return presentRecipe(await base.update(id, input));
+  },
+
+  async remove(id: string) {
+    return presentRecipe(await base.remove(id));
+  },
+
+  async restore(id: string) {
+    return presentRecipe(await base.restore(id));
   },
 
   /** สูตรทั้งหมดของสินค้าตัวหนึ่ง */
   async listByProduct(productId: string) {
     await dbConnect();
     assertObjectId(productId, "product_id");
-    return recipeModel
+    const items = await recipeModel
       .find({ product_id: productId, deleted_at: null })
       .populate("yield_unit_id", "unit_name unit_abbr")
       .sort({ created_at: -1 })
       .lean();
+    return items.map(presentRecipe);
   },
 
   /** ดึงสูตรพร้อม populate วัตถุดิบ/ส่วนประกอบแบบเต็ม (ใช้ตอนวางแผนผลิต) */
@@ -129,7 +183,7 @@ export const recipeService = {
       .populate("components.unit_id", "unit_name unit_abbr")
       .lean();
     if (!recipe) throw notFound("ไม่พบสูตรการผลิตที่ระบุ");
-    return recipe;
+    return presentExpandedRecipe(recipe);
   },
 };
 
@@ -144,7 +198,16 @@ function pickWritable(input: Record<string, any>): Record<string, any> {
  * ใช้ตอนสร้างออเดอร์เพื่อ snapshot cost_per_unit ลง orderItem (คำนวณกำไรใน dashboard)
  * ลำดับความสำคัญ: 1) สูตรล่าสุดที่มี yield_qty > 0  2) product.purchase_cost ที่แอดมินกรอกมือ
  * (BACKLOG §3.16 — เผื่อสินค้าที่ไม่มีสูตร เช่น ซื้อมาขายต่อ)  3) null (ไม่มีข้อมูลต้นทุนเลย)
- * คืน Map<productId, number | null> — null = ไม่มีทั้งสูตรและ purchase_cost
+ *
+ * BACKLOG §3.11 เฟส 4 — ฟังก์ชันนี้เป็น "internal only" ไม่เคย expose ตรงผ่าน API เลย (ใช้แค่ภายใน
+ * orderService/preorderService ตอน snapshot cost_per_unit ลง item) จึงตั้งใจคืนค่าเป็น**สตางค์**
+ * ไม่ใช่บาท — ไม่ต้องผ่าน presenter เพราะ orderItemModel/preorderItemModel.cost_per_unit ก็เก็บเป็น
+ * สตางค์เหมือนกันแล้ว (รับค่ามาใช้ตรง ๆ ได้เลยไม่ต้องแปลง) ทั้งฝั่งสูตร (estimated_cost_per_batch
+ * มาจาก DB เป็นสตางค์อยู่แล้ว) และฝั่ง purchase_cost fallback (แปลงเป็นสตางค์ใน productService แล้ว
+ * เช่นกัน) — **ทั้งสองฝั่งต้องแปลงพร้อมกันเสมอ** ไม่งั้น Map ที่คืนจะมีหน่วยปนกันโดยไม่มีทางรู้จาก
+ * ภายนอกว่าค่าไหนมาจากไหน (นี่คือเหตุผลที่ purchase_cost ถูกดึงเข้ามาแปลงในเฟส 4 พร้อมกัน แทนที่จะ
+ * รอเฟส 5 กับ product pricing ตัวอื่น — ดู docs/hardening-5-money-phase1.md §7)
+ * คืน Map<productId, number(สตางค์) | null> — null = ไม่มีทั้งสูตรและ purchase_cost
  */
 export async function getUnitCostByProduct(
   productIds: string[]
@@ -169,14 +232,16 @@ export async function getUnitCostByProduct(
     const key = String(r.product_id);
     if (seen.has(key)) continue;
     seen.add(key);
+    // ปัดเป็นจำนวนเต็มสตางค์ตรง ๆ (ไม่ใช่ ×100/100 แบบเดิมที่ปัดทศนิยมบาท 2 ตำแหน่ง — ไม่มีความหมาย
+    // อีกต่อไปเพราะทั้งตัวตั้งและผลลัพธ์เป็นสตางค์แล้ว)
     const unit =
-      r.yield_qty && r.yield_qty > 0
-        ? Math.round((r.estimated_cost_per_batch / r.yield_qty) * 100) / 100
-        : null;
+      r.yield_qty && r.yield_qty > 0 ? Math.round(r.estimated_cost_per_batch / r.yield_qty) : null;
     out.set(key, unit);
   }
 
   // fallback: สินค้าที่ยังไม่มีต้นทุนจากสูตร (ไม่มีสูตรเลย หรือมีแต่ yield_qty = 0) ใช้ purchase_cost ที่กรอกมือแทน
+  // productModel.purchase_cost เก็บเป็นสตางค์แล้วเช่นกัน (BACKLOG §3.11 เฟส 4) — ใช้ค่าดิบจาก DB ตรง ๆ
+  // ได้เลย ไม่ต้องแปลง (สอดคล้องกับฝั่งสูตรด้านบนที่เป็นสตางค์เหมือนกัน)
   const missing = validIds.filter((id) => out.get(id) == null);
   if (missing.length > 0) {
     const products = await productModel

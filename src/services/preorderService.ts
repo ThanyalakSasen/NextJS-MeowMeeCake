@@ -277,7 +277,8 @@ export async function createPreorder(
 // ── READ ─────────────────────────────────────────────────────
 // BACKLOG §3.11 — DB เก็บเงินเป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม (เหมือน orderService)
 const PREORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount"] as const;
-const PREORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price"] as const; // ไม่รวม cost_per_unit (ยังเป็นบาท)
+// cost_per_unit เป็นสตางค์เช่นกันตั้งแต่เฟส 4 — เหตุผลเดียวกับ orderService (ORDER_ITEM_MONEY_FIELDS)
+const PREORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price", "cost_per_unit"] as const;
 
 function presentPreorder<T extends Record<string, unknown>>(preorder: T): T {
   return toBahtFields(preorder, PREORDER_MONEY_FIELDS);

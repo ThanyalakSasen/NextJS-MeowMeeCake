@@ -184,7 +184,7 @@ test: unit 155→**163** / integration 56→**79** · ก่อนลงมื�
 
 ---
 
-## รอบ 5 — เงินเป็น integer (สตางค์) — 🟡 เฟส 3/5 (2026-09-12) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)
+## รอบ 5 — เงินเป็น integer (สตางค์) — 🟡 เฟส 4/5 (2026-09-12) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)
 
 สำรวจก่อนลงมือพบเงินกระจายใน 17 model — แบ่งเป็น 5 เฟสตามโดเมนที่ผูกกันจริงทางโค้ด (ทำทีเดียวเสี่ยงเกิน
 รีวิวไหว) ถามผู้ใช้เรื่อง API contract ก่อน: **DB เก็บสตางค์ แต่ API ยังบาททศนิยมเหมือนเดิม** (ไม่ breaking)
@@ -194,8 +194,8 @@ test: unit 155→**163** / integration 56→**79** · ก่อนลงมื�
 | 1 | Order+OrderItem+Preorder+PreorderItem+Payment+PromotionUsages+dashboardService | ✅ เสร็จ |
 | 2 | Expense (`expenseModel.amount`) | ✅ เสร็จ |
 | 3 | Delivery zone (`deliveryZoneModel.fee`) | ✅ เสร็จ |
-| 4 | Recipe/Component/Ingredient cost (+ `cost_per_unit` ที่ปล่อยเป็นบาทไว้ในเฟส 1) | ⬜ |
-| 5 | Promotion definition + Product pricing (`product_price`/`variant_price`/`extra_price`/`cartItemModel`) | ⬜ |
+| 4 | Recipe/Component/Ingredient cost + `cost_per_unit`/`purchase_cost` | ✅ เสร็จ |
+| 5 | Promotion definition + Product pricing ที่เหลือ (`product_price`/`variant_price`/`extra_price`/`cartItemModel`) | ⬜ |
 
 เฟส 1 ต้องรวม order+preorder เข้าด้วยกันเพราะ `paymentModel` เป็น collection กลางที่ใช้ร่วมกัน (แยกแปลง
 ไม่ได้ — จะกำกวมว่า doc ไหนหน่วยอะไร) · migration script `npm run migrate:money-to-satang` · เจอ+แก้บั๊ก
@@ -210,14 +210,24 @@ migration script เอง: marker เดิมเป็นก้อนเดี
 ตั้งใจ ปล่อยเป็นสตางค์ดิบไว้ ให้ `deliveryService.ts` แปลงเองตรงจุดใช้จริง — ส่วนที่ expose จริง
 (`/api/admin/delivery-zones`) ผ่าน presenter ตามปกติ
 
-test unit 163→171→171→**171** (คงที่ตั้งแต่เฟส 2) / integration 82→89→**93**
+เฟส 4 (Recipe/Component/Ingredient + `cost_per_unit`/`purchase_cost`) เสี่ยงกว่าเฟส 2-3 เพราะมี field
+ที่ "ค้าง" จากเฟส 1 (`orderItem`/`preorderItem.cost_per_unit`) ต้องรอเฟสนี้ก่อนถึงจะแปลงตามได้ — ดึง
+`productModel.purchase_cost` เข้ามาแปลงพร้อมกันด้วยทั้งที่อยู่ในแผนเฟส 5 (Product pricing) เพราะ
+`recipeService.getUnitCostByProduct()` ผสมค่าจากสูตรกับ `purchase_cost` fallback เข้าด้วยกัน ถ้าปล่อย
+`purchase_cost` ไว้ก่อนจะได้ Map ที่หน่วยปนกัน **เจอบั๊กใหม่ 2 จุด:** (1) สูตรปัดเศษเดิมออกแบบไว้สำหรับ
+บาท (ปัดทศนิยม 2 ตำแหน่ง) ต้องเปลี่ยนเป็นปัด integer สตางค์ตรง ๆ (2) MongoDB `$mul` error ทันทีถ้าเจอ
+field ที่เป็น `null` (ยืนยันด้วยการทดสอบจริง) — field เงินที่ nullable ต้อง filter `$type:"number"`
+ก่อนเสมอ ไม่งั้น migration พังกลางทาง · เจอบั๊กมาร์กเกอร์ซ้ำแบบเดียวกับเฟส 2 อีกครั้ง (เพิ่ม field เข้า
+collection ที่มี section เดิมอยู่แล้ว ต้องแยก section id ใหม่) — ดู `hardening-5-money-phase1.md` §4
+
+test unit 163→171→171→171→**171** (คงที่ตั้งแต่เฟส 2) / integration 82→89→93→**104**
 
 ---
 
 ## ที่เหลือ (ยังไม่ทำ)
 
 > **ลำดับ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"** — รอบ 4b/4c/4d ปิดครบแล้ว, รอบ 5
-> (3.11) เหลือ 2 เฟสจาก 5 (ดูตารางด้านบน)
+> (3.11) เหลือ 1 เฟสจาก 5 (ดูตารางด้านบน)
 
 ### §1 Blockers — ขั้น deploy (ไม่ใช่โค้ด)
 `npm run seed` · `npm run backfill:product-codes` · MongoDB `product_type` เดิม → `inStore` ·
@@ -242,7 +252,7 @@ test unit 163→171→171→**171** (คงที่ตั้งแต่เฟ�
 | [`hardening-4b-plan.md`](hardening-4b-plan.md) | รอบ 4b — zod tail ครบ (`/admin/orders`+อีก 5 กลุ่ม) · รื้อ `pick()` 8/8 · `no-explicit-any` บน `src/lib` (PR #20–#21) |
 | [`hardening-4c-plan.md`](hardening-4c-plan.md) | รอบ 4c — address_id→checkout · purchase_cost · integration test เพิ่ม (+ §0 บทเรียนเรื่อง §2b/§2c ที่เคยรายงานผิดว่า merge แล้ว) (PR #23–#25) |
 | [`hardening-4d-plan.md`](hardening-4d-plan.md) | รอบ 4d — object storage abstraction · ลบรูปที่ไม่ใช้ · delivery zone เป็น DB (PR #28) |
-| [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | รอบ 5 §3.11 เฟส 1-3 — เงินเป็นสตางค์: Order+Preorder+Payment+Expense+DeliveryZone · แผนเฟสที่เหลือ |
+| [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | รอบ 5 §3.11 เฟส 1-4 — เงินเป็นสตางค์: Order+Preorder+Payment+Expense+DeliveryZone+Recipe/Component/Ingredient+purchase_cost · แผนเฟสที่เหลือ |
 | [`infra-tooling.md`](infra-tooling.md) | §3.6 eslint · §3.3 logger · §3.4 testing |
 | [`validation.md`](validation.md) | §3.1 zod — สถานะ adopt ราย route |
 | [`security-hardening.md`](security-hardening.md) | §3.2 rate-limit · §3.9 Google · §3.10 CSRF |
