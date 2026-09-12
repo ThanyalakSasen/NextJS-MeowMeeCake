@@ -161,6 +161,91 @@ discount_amount = toSatang(result.discount_amount);
   ครอบ `cogs` ก่อนเอาไปรวมในสูตร `profit_estimate` — เป็นจุดเสี่ยงเดิมที่เคยเตือนไว้ตั้งแต่เฟส 1 ว่า "รอ
   เฟส 4 มาแก้" (ดู comment เดิมในโค้ด) ตอนนี้แก้ครบแล้วทุกองค์ประกอบของสูตร
 
+### ตัวอย่างโค้ดจริงที่แก้ในเฟส 4 (ก่อน/หลัง)
+
+**1) `componentService.prepare()`/`recipeService.prepare()` — ต้อง handle 2 เส้นทางแยกกัน ไม่ใช่แค่
+เปลี่ยนสูตรปัดเศษ:**
+
+```ts
+// ก่อนแก้ (เฟส 1-3): แปลงแค่เส้นทาง auto-calc เท่านั้น เพราะตอนนั้น input.estimated_cost_per_batch
+// ที่ "ส่งมาเอง" ยังเป็นบาทและ DB ก็ยังเก็บเป็นบาท จึงไม่ต้องแปลงอะไรเลยถ้าผู้ใช้กรอกมือมา
+if ((isCreate || input.ingredients !== undefined) && input.estimated_cost_per_batch == null) {
+  const cost = await ingredientItemsCost(input.ingredients ?? [], ingredientModel);
+  input.estimated_cost_per_batch = Math.round(cost * 100) / 100; // ปัดทศนิยมบาท 2 ตำแหน่ง
+}
+// (ไม่มี else — ค่าที่ส่งมาเองผ่านตรงไปเก็บ DB โดยไม่ถูกแตะ)
+
+// หลังแก้ (เฟส 4): DB เป็นสตางค์แล้ว ต้อง handle ทั้ง 2 เส้นทาง
+if ((isCreate || input.ingredients !== undefined) && input.estimated_cost_per_batch == null) {
+  const cost = await ingredientItemsCost(input.ingredients ?? [], ingredientModel);
+  input.estimated_cost_per_batch = Math.round(cost); // cost มาจาก DB เป็นสตางค์แล้ว ปัด integer ตรง ๆ
+} else if (input.estimated_cost_per_batch != null) {
+  // เพิ่มเส้นทางนี้ใหม่ทั้งหมด — ค่าที่แอดมินกรอกมือเป็นบาทตาม API contract ต้องแปลงเป็นสตางค์เอง
+  // (เดิมไม่มี branch นี้เลยเพราะไม่จำเป็น — เป็นจุดที่พลาดง่ายถ้าดูแค่ diff ของสูตรปัดเศษอย่างเดียว)
+  input.estimated_cost_per_batch = toSatang(Number(input.estimated_cost_per_batch));
+}
+```
+
+**2) `recipeService.getUnitCostByProduct()` — จุดหารที่ยังเป็นบาทแบบเก่า:**
+
+```ts
+// ก่อนแก้: r.estimated_cost_per_batch เป็นบาท (float) → หารแล้วปัดทศนิยม 2 ตำแหน่งให้เหมือนราคาบาทจริง
+const unit = r.yield_qty > 0
+  ? Math.round((r.estimated_cost_per_batch / r.yield_qty) * 100) / 100
+  : null;
+
+// หลังแก้: r.estimated_cost_per_batch เป็นสตางค์ (integer) อยู่แล้ว → ปัด integer ตรง ๆ พอ
+const unit = r.yield_qty > 0
+  ? Math.round(r.estimated_cost_per_batch / r.yield_qty)
+  : null;
+```
+
+**3) migration script — filter กัน `$mul` พังกับ `null` (field required เดิมไม่เคยต้องมี filter นี้):**
+
+```ts
+// field required ทั่วไป (เฟส 1-3) — ไม่มีทางเป็น null จึง $mul ทั้ง collection ได้เลย
+await orderModel.updateMany({}, { $mul: { subtotal: 100, total_amount: 100 } });
+
+// field nullable (เฟส 4) — ต้องกรองก่อนเสมอ ไม่งั้น updateMany ทั้งคำสั่ง throw ทันทีที่เจอเอกสาร
+// แรกที่ field เป็น null (ดูหัวข้อถัดไปสำหรับ error message จริงที่ยืนยันจากการทดสอบ)
+await orderItemModel.updateMany(
+  { cost_per_unit: { $type: "number" } },
+  { $mul: { cost_per_unit: 100 } }
+);
+```
+
+**4) `componentService.getExpanded()`/`recipeService.getExpanded()` — presenter ต้องแปลง "ซ้อน" เข้าไปใน
+ผลลัพธ์ populate ด้วย เพราะ populate ไม่เรียกผ่าน presenter ของเจ้าของ field เอง:**
+
+```ts
+function presentExpandedComponent(doc: Record<string, any>) {
+  const presented = presentComponent(doc); // แปลง estimated_cost_per_batch ของตัว component เอง
+  return {
+    ...presented,
+    // ingredients[].ingredient_id ถูก .populate() เป็น object เต็ม (มี cost_per_unit ติดมาด้วย)
+    // — ต้องแปลงตรงนี้เองอีกชั้น ไม่งั้นฟิลด์นี้จะหลุดเป็นสตางค์ดิบปนอยู่กับฟิลด์อื่นที่เป็นบาทแล้ว
+    ingredients: (presented.ingredients ?? []).map((it: any) => ({
+      ...it,
+      ingredient_id:
+        it.ingredient_id && typeof it.ingredient_id === "object"
+          ? toBahtFields(it.ingredient_id, ["cost_per_unit"] as const)
+          : it.ingredient_id,
+    })),
+  };
+}
+```
+
+**5) `ORDER_ITEM_MONEY_FIELDS`/`PREORDER_ITEM_MONEY_FIELDS` — เพิ่ม field เดียว ไม่ต้องแตะ logic assign:**
+
+```ts
+// เฟส 1: cost_per_unit ยังเป็นบาท จงใจไม่รวมในลิสต์นี้
+const ORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price"] as const;
+
+// เฟส 4: cost_per_unit เป็นสตางค์แล้ว เพิ่มเข้าไปตรง ๆ — toBahtFields() ข้าม key ที่เป็น null อยู่แล้ว
+// (ดู src/lib/money.ts) จึงไม่ error แม้บาง orderItem จะไม่มี cost_per_unit เลยก็ตาม
+const ORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price", "cost_per_unit"] as const;
+```
+
 ### บั๊กปัดเศษที่เจอในเฟส 4: `Math.round(x*100)/100` ใช้ไม่ได้กับสตางค์อีกต่อไป
 
 `componentService.prepare()`/`recipeService.prepare()` (คิด `estimated_cost_per_batch` อัตโนมัติจาก
