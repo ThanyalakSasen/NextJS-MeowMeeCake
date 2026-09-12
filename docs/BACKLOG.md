@@ -19,7 +19,7 @@
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
 | อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — บันทึกลงดิสก์ (self-host เท่านั้น, ดู §3.13) |
 | Preorder (เฟส 5) | 🟡 service + API เสร็จ (ดู §8 · [preorder.md](preorder.md)) — เหลือผูก payment/production/promotion |
-| §3 คุณภาพ / hardening | 🟡 ✅ D1/D2/D3 + audit log (PR #5–#12) · ✅ รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · ✅ **รอบ 4b เสร็จสมบูรณ์ทั้ง 3 ข้อ** (zod tail ครบ `/admin/orders`+`/admin/attendances`+`/admin/permissions`+`/admin/preorder-rounds*`+`/admin/users`, รื้อ `pick()` 8/8 ไฟล์, `no-explicit-any` error บน `src/lib` ทั้งหมด — lint warning 13→5) · 4c (3.8/3.12/3.16) · 4d (3.13–3.15) · 3.11 |
+| §3 คุณภาพ / hardening | 🟡 ✅ D1/D2/D3 + audit log (PR #5–#12) · ✅ รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · ✅ **รอบ 4b เสร็จสมบูรณ์ทั้ง 3 ข้อ** (zod tail ครบ `/admin/orders`+`/admin/attendances`+`/admin/permissions`+`/admin/preorder-rounds*`+`/admin/users`, รื้อ `pick()` 8/8 ไฟล์, `no-explicit-any` error บน `src/lib` ทั้งหมด — lint warning 13→5) · ✅ **รอบ 4c เสร็จสมบูรณ์** (3.8 address_id, ~~3.12~~ ล้าสมัย, 3.16 purchase_cost, 3.4 integration tests) · 4d (3.13–3.15) · 3.11 |
 | Notification | ✅ ทำแล้ว (2026-09-12) — `notificationService.ts` + LINE push (`src/lib/line.ts`) + `/api/admin/notifications` · ผูกเข้า order ใหม่/สลิปรอตรวจ/สต็อกใกล้หมด (เดิมตัดออกไว้ก่อน ดู §3.12 ประวัติ) |
 
 **คำสั่งตรวจสอบ:** `npm run typecheck` · `typecheck:test` · `npm run lint` · `npm test` (unit) · `npm run test:integration` · `npm run build` — ปัจจุบันผ่านทั้งหมด
@@ -128,12 +128,12 @@
 5. ✅ **รื้อ `pick()` / `createFields` / `pickWritable()` ที่ซ้ำ zod — ปิดครบ 8/8** (2026-09-12) — เพิ่ม zod adopt ให้ 5 กลุ่ม route ที่เหลือไปพร้อมกัน (`/admin/orders/[id]/delivery`, `/admin/permissions`, `/admin/preorder-rounds*` + `/admin/preorder-round-items`, `/admin/users`) แล้วถอด `pick()` ตาม: `orderService.updateDelivery`, `permissionService` (create/update), `preorderRoundService` (round + item), `preorderService` (narrow refactor — ไม่ได้รอ adopt เพราะ `pick()` จุดนี้ไม่ใช่ whitelist ที่ทับซ้อนกับ validation ชั้นไหน), `userService` (create/update, ไม่แตะ `updateProfile` ที่ถอดไปแล้วใน B รอบแรก) · **M**
 6. ✅ **`no-explicit-any` = `error` บน `src/lib`** (2026-09-12) — แก้ครบ 5 ไฟล์: `refs.ts`(3), `discountEngine.ts`(3), `crudService.ts`(5), `bom.ts`(16, มี interface `IngredientItem`/`ComponentItem` อยู่แล้วแต่ไม่เคยใช้จริง), `crudRoutes.ts`(2 จุด) — **ไม่เหลือ `any` ใน `src/lib/` เลยสักจุด** ไม่ต้องใช้ disable-next-line ที่ไหนเลย · lint warning ลด 13 → 11 (เหลือแต่ใน `src/app/api/**/route.ts`) · (option) `no-floating-promises` ยังไม่ทำ · **S–M**
 
-**รอบ 4c — feature เล็ก + เทสเพิ่ม (หลัง launch ได้)**
+**✅ รอบ 4c — feature เล็ก + เทสเพิ่ม (เสร็จสมบูรณ์ 2026-09-12)**
 
 7. **3.8 address_id → checkout** — zod `oneOf([{address_id},{delivery_address}])` + `addressService.getById` snapshot ลง order · **S–M**
 8. **3.12 `src/lib/notify.ts`** — no-op + log ก่อน · wire `paymentService.verifyPayment` / `orderService.updateOrderStatus` / ingredient low-stock · **S**
 9. **3.16 `purchase_cost`** — field ใน `productModel` + `getUnitCostByProduct` fallback เมื่อไม่มีสูตร · แก้ COGS/กำไรใน dashboard · **S**
-10. **3.4 integration tests เพิ่ม** — `cartService` · `ingredientTransactionService` · `deliveryService.quoteForCart` · **S–M**
+10. ✅ **3.4 integration tests เพิ่ม** (2026-09-12) — `cartService.test.ts` (7 เคส: ปฏิเสธ preorder/is_visible=false, คิดราคา base+variant+option, merge/แยกรายการตาม option set, quantity=0 ลบ, ลบต่างคนไม่ได้, clearCart) · `createTransaction.test.ts` (8 เคส: receive/use/adjust ครบ, use ไม่พอสต็อก, allowNegative, type/qty ผิด, void adjust ไม่ได้ — คู่กับ `voidTransaction.test.ts` เดิมที่คุม 2c.2 ไปแล้ว) · `deliveryQuoteForCart.test.ts` (4 เคส: wiring จริงกับตะกร้า ไม่ใช่แค่ `calcDeliveryFee` ตรงๆ) · integration รวม 27→48
 
 **รอบ 4d — ขึ้นกับการตัดสินใจ hosting**
 
