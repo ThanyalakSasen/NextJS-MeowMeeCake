@@ -1,9 +1,8 @@
 # แผน รอบ 4b — จบ §3.1 (zod tail) + §3.6 (no-explicit-any บน src/lib)
 
 > อัปเดตล่าสุด: 2026-09-12
-> สถานะ: ✅ **ข้อ A + C เสร็จสมบูรณ์ · ข้อ B ทำแล้ว 3/8 ไฟล์** (branch `hardening-4b-orders-attendances`,
-> ยังไม่ merge เข้า `addModels`) — เหลือ B2 (5 ไฟล์ที่ route ต้นทางยังไม่ adopt zod) เป็นงานยกไปพร้อม
-> การ adopt zod ของ route เหล่านั้น ไม่ใช่ blocker ของรอบนี้
+> สถานะ: ✅ **เสร็จสมบูรณ์ทั้ง 3 ข้อ (A, B รวม B2, C)** — บน `addModels` แล้ว
+> (PR #20 merge ข้อ A+C+B core · branch `hardening-4b-pick-cleanup-b2` ปิด B2)
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ" รอบ 4b · ต่อจาก [`hardening-4a-plan.md`](hardening-4a-plan.md) §"ยกไปรอบ 4b"
 
 รอบ 4b = 3 งานที่เหลือจาก 4a เรียงตาม**ลำดับพึ่งพา** (ทำ A ก่อนเพราะ B ต้องมี schema ของ A
@@ -101,7 +100,7 @@ factory เพราะ auth logic พิเศษ (`user_id !== session.user_id
 
 ---
 
-## B. รื้อ `pick()` / `createFields` / `pickWritable()` — **M** 🟡 ทำแล้ว 3/8 ไฟล์ (2026-09-12)
+## B. รื้อ `pick()` / `createFields` / `pickWritable()` — **M** ✅ ปิดครบ 8/8 ไฟล์ (2026-09-12, B + B2)
 
 **หลักการ:** หลัง route มี zod เป็นด่านแรกแล้ว (`.strip()` ทิ้ง field เกินอัตโนมัติ) service **ไม่ต้อง
 whitelist ซ้ำ** ด้วย `pick()` อีกชั้น — แต่ต้องเช็ค**ทีละไฟล์**ว่า route ที่เรียก service นั้น adopt zod
@@ -109,21 +108,27 @@ whitelist ซ้ำ** ด้วย `pick()` อีกชั้น — แต่�
 
 | ไฟล์ | route ที่เรียก | adopt zod แล้วหรือยัง | ผล |
 |---|---|---|---|
-| `addressService.ts` | `/shop/addresses` | ✅ (4a PR E) | ✅ **ถอดแล้ว** |
-| `promotionService.ts` | `/admin/promotions` | ✅ (ก่อน 4a) | ✅ **ถอดแล้ว** (+ ลบเช็ค required/enum ซ้ำที่ zod ทำแทนแล้ว) |
-| `attendanceService.ts` | `/admin/attendances*` (POST/PATCH/check-in/check-out) | ✅ (ข้อ A รอบนี้) | ✅ **ถอดแล้ว** (เฉพาะ `updateAttendance` — ฟังก์ชันเดียวที่มี `pick()`) |
-| `orderService.ts` | ⚠️ **แก้ไขจากแผนเดิม** — `pick()` เดียวใน service นี้อยู่ใน `updateDelivery()` ซึ่งเรียกจาก `PATCH /admin/orders/[id]/delivery` **คนละ route** กับที่ข้อ A adopt zod ไป (shop/orders + admin/orders POST) — route `.../delivery` ยังเป็น `req.json()` ดิบ | ❌ `updateDelivery` ยังไม่ adopt | ⬜ **ข้าม** — ต้อง adopt zod ให้ route `.../delivery` ก่อนถึงจะถอดได้ (ยกไปทำพร้อม route นี้ทีหลัง ไม่ใช่ scope ของรอบนี้) |
-| `permissionService.ts` | `/admin/permissions` | ❌ ยืนยันแล้ว — ไม่มี route ไหน import `@/lib/validate` เลย | ⬜ ข้าม |
-| `preorderRoundService.ts` | `/admin/preorder-rounds*` | ❌ ยืนยันแล้ว | ⬜ ข้าม |
-| `preorderService.ts` | `/shop/preorders`, `/admin/preorders` | ❌ ยืนยันแล้ว | ⬜ ข้าม |
-| `userService.ts` | `/admin/users` | ❌ ยืนยันแล้ว | ⬜ ข้าม |
+| `addressService.ts` | `/shop/addresses` | ✅ (4a PR E) | ✅ **ถอดแล้ว** (รอบ B) |
+| `promotionService.ts` | `/admin/promotions` | ✅ (ก่อน 4a) | ✅ **ถอดแล้ว** (รอบ B, + ลบเช็ค required/enum ซ้ำที่ zod ทำแทนแล้ว) |
+| `attendanceService.ts` | `/admin/attendances*` (POST/PATCH/check-in/check-out) | ✅ (ข้อ A รอบนี้) | ✅ **ถอดแล้ว** (รอบ B, เฉพาะ `updateAttendance` — ฟังก์ชันเดียวที่มี `pick()`) |
+| `orderService.ts` | ⚠️ `pick()` เดียวอยู่ใน `updateDelivery()` ซึ่งเรียกจาก `PATCH /admin/orders/[id]/delivery` **คนละ route** กับ `createOrder`/`createOrderFromCart` | ✅ adopt แล้ว (B2 — เพิ่ม `order.ts` `updateDeliveryBody`) | ✅ **ถอดแล้ว** (B2) |
+| `permissionService.ts` | `/admin/permissions` + `[id]` | ✅ adopt แล้ว (B2 — เพิ่ม `rbac.ts` `permissionCreate`/`permissionUpdate`) | ✅ **ถอดแล้ว** (B2, ทั้ง `createPermission`/`updatePermission`) |
+| `preorderRoundService.ts` | `/admin/preorder-rounds*` + `/admin/preorder-round-items/[id]` | ✅ adopt แล้ว (B2 — ไฟล์ใหม่ `preorderRound.ts` 4 schema) | ✅ **ถอดแล้ว** (B2, ทั้ง `updateRound`/`updateRoundItem`) |
+| `preorderService.ts` | `/shop/preorders`, `/admin/preorders` (ยังไม่ adopt เต็มรูปแบบ — items/discount ซับซ้อน แยกเป็นงานใหญ่กว่านี้) | ❌ ยังไม่ adopt | ✅ **ถอดแล้ว** (B2) — **ข้อยกเว้นของกฎ:** `pick(addr, ADDRESS_FIELDS)` ตัวนี้ไม่ใช่ whitelist ที่ทับซ้อนกับ validation ชั้นไหน (แค่ narrow shape หลังเช็ค required field ครบแล้วในบรรทัดก่อนหน้า) เปลี่ยนเป็น `Object.fromEntries(ADDRESS_FIELDS.map(...))` ได้อย่างปลอดภัยโดยไม่ต้องรอ route adopt |
+| `userService.ts` | `/admin/users` + `[id]` (create/update) · `/shop/me` (`updateProfile`, adopt แล้วตั้งแต่ 4a) | ✅ adopt แล้ว (B2 — เพิ่ม `user.ts` `createUserBody`/`updateUserBody`) | ✅ **ถอดแล้ว** (B2, ทั้ง `createUser`/`updateUser` — `updateProfile` ถอดไปแล้วในรอบ B) |
 
 **บทเรียนจากรอบนี้:** "route adopt แล้วหรือยัง" ต้องเช็คเป็น**ต่อฟังก์ชัน**ไม่ใช่ต่อไฟล์ — `orderService.ts`
 มีทั้งฟังก์ชันที่ route adopt แล้ว (`createOrder`) และยังไม่ adopt (`updateDelivery`) ปนกันในไฟล์เดียว
-โชคดีที่ฟังก์ชันที่ adopt แล้วไม่มี `pick()` อยู่แล้ว (ไม่งั้นจะถอดผิดฟังก์ชันได้) — **ตรวจ grep `pick(`
-แล้วไล่ดูว่าอยู่ในฟังก์ชันไหน เรียกจาก route ไหนจริง ๆ ทุกครั้ง อย่าเชื่อว่า "ไฟล์นี้ route adopt แล้ว" เฉย ๆ**
-4 ไฟล์ที่เหลือ (permission/preorderRound/preorder/user) ยืนยันด้วย grep ตรง ๆ ว่าไม่มี route ไหน
-import `@/lib/validate` เลยสักไฟล์ — ชัดเจนว่ายังไม่ adopt ไม่ต้องไล่ทีละฟังก์ชัน
+ตอนแรกเข้าใจผิดว่า "ไฟล์นี้ route adopt แล้ว" จนเกือบถอด `pick()` ผิดจุด — ต้อง grep `pick(` แล้วไล่ดูว่า
+อยู่ในฟังก์ชันไหน เรียกจาก route ไหนจริง ๆ เสมอ · อีกบทเรียน: **ไม่ใช่ `pick()` ทุกจุดต้องรอ route adopt
+zod ก่อน** — `preorderService.ts` เป็นตัวอย่างที่ `pick()` แค่ narrow shape หลังเช็ค required ผ่านแล้ว
+ไม่ได้ทำหน้าที่กัน mass-assignment เลย ถอดได้ทันทีโดยไม่กระทบความปลอดภัย
+
+### สรุป B2 — adopt zod เพิ่ม 5 กลุ่ม route (แผนเดิมเข้าใจผิดว่ามี 5 "ไฟล์" ต้องข้าม แต่จริง ๆ
+ทำได้ทั้งหมดในรอบเดียวเมื่อลงมือ adopt route จริง — ไม่มีจุดไหนซับซ้อนเกินคาด):
+- schema ใหม่: `preorderRound.ts` (ทั้งไฟล์) · เพิ่มใน `rbac.ts` (permission) และ `user.ts` (create/update user) · เพิ่มใน `order.ts` (`updateDeliveryBody`)
+- เทสใหม่: 13 เคส กระจายใน `schemas.test.ts` (+2) และ `schemas-admin.test.ts` (+11) → unit **149/17**
+- lint warning ลดจาก 11 (ตอนจบ A+C) → **5** (ทุกจุดที่เคย `const result: any = await service(...)` หายไปพร้อมกับที่ route มี type จริงจาก zod)
 
 ### วิธีถอด (ต่อไฟล์)
 ```ts
@@ -196,18 +201,19 @@ body/query ตรง ๆ (`Number(body.qty)`) ที่ตอนนี้ zod `z
 |---|---|
 | **4b-A** | ✅ zod: `admin/orders` POST + `admin/attendances` (4 ไฟล์) — branch `hardening-4b-orders-attendances` |
 | **4b-B** | ✅ รื้อ `pick()` — addressService, promotionService, attendanceService (3/8, `orderService` ข้ามเพราะ `pick()` เดียวผูกกับ route ที่ยังไม่ adopt) — branch เดียวกับ 4b-A |
-| **4b-B2** | (ค้าง) adopt zod ให้ `admin/orders/[id]/delivery` + route ที่เหลือ (permissions/preorder-rounds/preorders/users) แล้วค่อยถอด `pick()` ของ orderService (`updateDelivery`) + permissionService/preorderRoundService/preorderService/userService — **5 ไฟล์เหลือ** |
+| **4b-B2** | ✅ adopt zod: `admin/orders/[id]/delivery` + `admin/permissions` + `admin/preorder-rounds*`/`preorder-round-items` + `admin/users` → ถอด `pick()` ที่เหลือทั้งหมด (5 ไฟล์: orderService/permissionService/preorderRoundService/preorderService/userService) — branch `hardening-4b-pick-cleanup-b2` |
 | **4b-C** | ✅ `no-explicit-any` error บน `src/lib` (5 ไฟล์: `refs`/`discountEngine`/`crudService`/`bom`/`crudRoutes`) — branch เดียวกับ 4b-A/B |
 
 ### doc ที่ต้องอัปเดตท้ายรอบ
-- [x] [`validation.md`](validation.md) — §3 ตาราง adopt (ปิด `admin/orders`, `admin/attendances`) + §5 pick() (4b-A/B)
+- [x] [`validation.md`](validation.md) — §3 ตาราง adopt ครบทุก route (4b-A/B2) + §5 pick() ปิด 8/8
 - [x] [`infra-tooling.md`](infra-tooling.md) — §1 no-explicit-any error บน src/lib (4b-C)
-- [x] [`BACKLOG.md`](BACKLOG.md) §3 — ปิดข้อ 4/6 เต็ม + ข้อ 5 บางส่วน (3/8)
+- [x] [`BACKLOG.md`](BACKLOG.md) §3 — ปิดข้อ 4/5/6 ครบทั้ง 3 ข้อ
 
 ## เกณฑ์เสร็จรอบ 4b
-- [x] `/admin/orders` POST validate ด้วย zod (ไม่มี PATCH endpoint จริง)
+- [x] `/admin/orders` POST + `.../delivery` PATCH validate ด้วย zod (ไม่มี `PATCH /admin/orders/[id]` ตรง ๆ)
 - [x] `/admin/attendances` ทั้ง 4 route validate ด้วย zod (`recorded_by` inject จาก session เสมอตอน POST)
-- [x] `pick()` ในไฟล์ที่ route adopt zod ครบแล้วถูกถอดออก — **3/8** (address/promotion/attendance) — เหลือ 5 ไฟล์ที่ route ต้นทางยังไม่ adopt zod (ไม่ใช่บั๊ก แค่ยังไม่ถึงคิว — ดูข้อ B2)
-- [x] `no-explicit-any` = error บน `src/lib/**` ทั้งหมด — `npm run lint` 0 error (11 warning เหลือใน route layer)
-- [x] `typecheck` / `typecheck:test` / `test` (137) / `test:integration` (13) / `build` ผ่านหมดทุก PR (A+B+C)
+- [x] `/admin/permissions`, `/admin/preorder-rounds*` + `preorder-round-items`, `/admin/users` validate ด้วย zod (B2)
+- [x] `pick()` ถูกถอดออกครบ **8/8 ไฟล์** — ไม่เหลือไฟล์ไหนที่ยัง whitelist ซ้ำกับ zod
+- [x] `no-explicit-any` = error บน `src/lib/**` ทั้งหมด — `npm run lint` 0 error (5 warning เหลือใน route layer, ลดจาก 13 ตอนเริ่มรอบ)
+- [x] `typecheck` / `typecheck:test` / `test` (149) / `test:integration` (13) / `build` ผ่านหมดทุก PR (A+B+B2+C)
 - [x] doc อัปเดตครบ (`validation.md`, `infra-tooling.md`, `BACKLOG.md`, `hardening-4b-plan.md`)

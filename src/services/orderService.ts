@@ -20,7 +20,7 @@ import dbConnect from "../lib/dbConnect";
 import { log } from "../lib/logger";
 import { Saga } from "../lib/compensation";
 import { badRequest, conflict, notFound, isHttpError } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import orderModel from "../models/orderModel";
@@ -37,6 +37,10 @@ import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import * as productService from "./productService";
 import { notificationService } from "./notificationService";
+import type { z } from "zod";
+import type { updateDeliveryBody } from "../schemas/order";
+
+type UpdateDeliveryInput = z.infer<typeof updateDeliveryBody>;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -655,7 +659,8 @@ export async function setPaymentStatus(orderId: string, status: PaymentStatus, p
 }
 
 // ── อัปเดตข้อมูลการจัดส่ง ───────────────────────────────────
-export async function updateDelivery(id: string, input: Record<string, any>) {
+// delivery_status enum validate ที่ route ผ่าน schemas/order.ts updateDeliveryBody แล้ว
+export async function updateDelivery(id: string, input: UpdateDeliveryInput) {
   await dbConnect();
   assertObjectId(id);
 
@@ -665,20 +670,7 @@ export async function updateDelivery(id: string, input: Record<string, any>) {
     throw badRequest("ออเดอร์นี้ไม่ใช่ประเภทจัดส่ง (delivery)");
   }
 
-  if (
-    input.delivery_status !== undefined &&
-    !DELIVERY_STATUSES.includes(input.delivery_status)
-  ) {
-    throw badRequest(`delivery_status ต้องเป็นหนึ่งใน: ${DELIVERY_STATUSES.join(", ")}`);
-  }
-
-  const payload = pick(input, [
-    "delivery_status",
-    "tracking_no",
-    "shipped_at",
-    "delivered_at",
-    "delivered_note",
-  ]);
+  const payload: Record<string, any> = { ...input };
   if (payload.delivery_status === "shipping" && !order.shipped_at && !payload.shipped_at) {
     payload.shipped_at = new Date();
   }

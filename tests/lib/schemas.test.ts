@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createOrderBody, adminCreateOrderBody, listOrderQuery } from "@/schemas/order";
+import { createOrderBody, adminCreateOrderBody, listOrderQuery, updateDeliveryBody } from "@/schemas/order";
 import { addCartItemBody, updateCartItemBody } from "@/schemas/cart";
 import { createPaymentBody, submitSlipBody } from "@/schemas/payment";
 
@@ -78,6 +78,18 @@ describe("schemas/order — adminCreateOrderBody (BACKLOG §3.1, รอบ 4b)",
       adminCreateOrderBody.safeParse({ user_id: OID, order_type: "takeaway", delivery_fee: -1 })
         .success
     ).toBe(false);
+  });
+});
+
+describe("schemas/order — updateDeliveryBody (BACKLOG §3, รอบ 4b ข้อ B2)", () => {
+  it("รับทุกฟิลด์เป็น optional, enum delivery_status ถูกต้อง", () => {
+    expect(updateDeliveryBody.safeParse({}).success).toBe(true);
+    expect(updateDeliveryBody.safeParse({ delivery_status: "shipping" }).success).toBe(true);
+    expect(updateDeliveryBody.safeParse({ delivery_status: "flying" }).success).toBe(false);
+  });
+  it("coerce shipped_at/delivered_at จาก string เป็น Date", () => {
+    const r = updateDeliveryBody.parse({ shipped_at: "2026-01-10T00:00:00Z" });
+    expect(r.shipped_at).toBeInstanceOf(Date);
   });
 });
 

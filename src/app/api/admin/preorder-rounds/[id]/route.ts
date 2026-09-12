@@ -7,7 +7,9 @@
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
+import { parseBody } from "@/lib/validate";
 import { parseBool } from "@/lib/queryParams";
+import { updateRoundBody } from "@/schemas/preorderRound";
 import * as preorderRoundService from "@/services/preorderRoundService";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -20,8 +22,8 @@ export const GET = withPermission("preorder", "view", async (_s, req, ctx: Ctx) 
 
 export const PATCH = withPermission("preorder", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
-  const body = await req.json();
-  const round: any = await preorderRoundService.updateRound(id, body);
+  const body = await parseBody(req, updateRoundBody);
+  const round = await preorderRoundService.updateRound(id, body);
   audit(req, {
     action: `แก้ไขรอบพรีออเดอร์ "${round?.round_name ?? ""}"`,
     action_type: "UPDATE",

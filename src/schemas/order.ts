@@ -71,3 +71,13 @@ export const listOrderQuery = z.object({
   order_type: z.enum(["delivery", "takeaway"]).optional(),
 });
 export type ListOrderQuery = z.infer<typeof listOrderQuery>;
+
+/** PATCH /api/admin/orders/[id]/delivery — ตรงกับ orderService.updateDelivery() */
+export const updateDeliveryBody = z.object({
+  delivery_status: z.enum(["pending", "shipping", "delivered", "failed"]).optional(),
+  tracking_no: z.string().trim().max(200).nullish(),
+  shipped_at: z.coerce.date().nullish(),
+  delivered_at: z.coerce.date().nullish(),
+  delivered_note: z.string().trim().max(1000).nullish(),
+});
+export type UpdateDeliveryBody = z.infer<typeof updateDeliveryBody>;

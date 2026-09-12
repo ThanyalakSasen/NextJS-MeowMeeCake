@@ -5,13 +5,15 @@
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
+import { parseBody } from "@/lib/validate";
+import { updateDeliveryBody } from "@/schemas/order";
 import * as orderService from "@/services/orderService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const PATCH = withPermission("orders", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
-  const body = await req.json();
+  const body = await parseBody(req, updateDeliveryBody);
   const result = await orderService.updateDelivery(id, body);
   audit(req, {
     action: "อัปเดตสถานะจัดส่ง",

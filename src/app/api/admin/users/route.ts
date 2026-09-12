@@ -6,7 +6,9 @@
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
+import { parseBody } from "@/lib/validate";
 import { parseBool, parsePagination, parseSort } from "@/lib/queryParams";
+import { createUserBody } from "@/schemas/user";
 import * as userService from "@/services/userService";
 
 export const GET = withPermission("employees", "view", async (_s, req) => {
@@ -28,8 +30,8 @@ export const GET = withPermission("employees", "view", async (_s, req) => {
 });
 
 export const POST = withPermission("employees", "create", async (_s, req) => {
-  const body = await req.json();
-  const result: any = await userService.createUser(body);
+  const body = await parseBody(req, createUserBody);
+  const result = await userService.createUser(body);
   audit(req, {
     action: "สร้างผู้ใช้ใหม่",
     action_type: "CREATE",

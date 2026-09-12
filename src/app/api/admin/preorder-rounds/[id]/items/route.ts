@@ -8,7 +8,9 @@
 import { okList, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
+import { parseBody } from "@/lib/validate";
 import { parseBool } from "@/lib/queryParams";
+import { addRoundItemBody } from "@/schemas/preorderRound";
 import * as preorderRoundService from "@/services/preorderRoundService";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -25,14 +27,8 @@ export const GET = withPermission("preorder", "view", async (_s, req, ctx: Ctx) 
 
 export const POST = withPermission("preorder", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
-  const body = await req.json();
-  const item: any = await preorderRoundService.addRoundItem(id, {
-    product_id: body.product_id,
-    price_override: body.price_override ?? null,
-    min_order_qty: body.min_order_qty,
-    max_qty_total: body.max_qty_total,
-    is_active: body.is_active,
-  });
+  const body = await parseBody(req, addRoundItemBody);
+  const item = await preorderRoundService.addRoundItem(id, body);
   audit(req, {
     action: "เพิ่มสินค้าเข้ารอบพรีออเดอร์",
     action_type: "UPDATE",
