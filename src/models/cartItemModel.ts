@@ -13,6 +13,8 @@ const selectedOptionSchema = new mongoose.Schema(
       type: String,
       required: true,
     },
+    // BACKLOG §3.11 เฟส 5b — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (สแนปช็อตจาก
+    // productOptionModel.extra_price ตอนหยิบใส่ตะกร้า) API (cartService) ยังรับ-ส่งบาททศนิยมเหมือนเดิม
     extra_price: {
       type: Number,  // ✅ แก้จาก String → Number
       default: 0,
@@ -51,6 +53,8 @@ const cartItemSchema = new mongoose.Schema(
       required: true,
       min: 1,
     },
+    // BACKLOG §3.11 เฟส 5b — เก็บเป็นสตางค์เช่นกัน (คำนวณจาก product_price/sale_price/variant_price/
+    // extra_price ที่เป็นสตางค์ทั้งหมดแล้ว — ดู cartService.addItem())
     price_snapshot: {
       type: Number,
       required: true,

@@ -11,6 +11,7 @@ import unitModel from "../models/unitModel";
 import { createCrudService, type ListArgs } from "../lib/crudService";
 import { assertRefExists } from "../lib/refs";
 import { badRequest } from "../lib/httpError";
+import { toSatang, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -45,24 +46,50 @@ async function assertRefs(input: Record<string, any>): Promise<void> {
   }
 }
 
+// BACKLOG §3.11 เฟส 5b — variant_price เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentVariant<T extends Record<string, unknown>>(v: T): T {
+  return toBahtFields(v, ["variant_price"] as const);
+}
+
 export const productVariantService = {
   ...base,
 
   /** list โดยกรองด้วย product_id ได้ (?product_id=) ผ่าน filter ที่ route ส่งมา */
-  list(args: ListArgs) {
-    return base.list(args);
+  async list(args: ListArgs) {
+    const result = await base.list(args);
+    return { ...result, items: result.items.map(presentVariant) };
+  },
+
+  async getById(id: string, includeDeleted?: boolean) {
+    return presentVariant(await base.getById(id, includeDeleted));
   },
 
   async create(input: Record<string, any>) {
     if (!input.product_id) throw badRequest("กรุณาระบุ product_id");
     if (!input.variant_name) throw badRequest("กรุณาระบุ variant_name");
     await assertRefs(input);
-    return base.create(input);
+    const payload =
+      input.variant_price != null
+        ? { ...input, variant_price: toSatang(Number(input.variant_price)) }
+        : input;
+    return presentVariant(await base.create(payload));
   },
 
   async update(id: string, input: Record<string, any>) {
     await assertRefs(input);
-    return base.update(id, input);
+    const payload =
+      input.variant_price != null
+        ? { ...input, variant_price: toSatang(Number(input.variant_price)) }
+        : input;
+    return presentVariant(await base.update(id, payload));
+  },
+
+  async remove(id: string) {
+    return presentVariant(await base.remove(id));
+  },
+
+  async restore(id: string) {
+    return presentVariant(await base.restore(id));
   },
 };
 

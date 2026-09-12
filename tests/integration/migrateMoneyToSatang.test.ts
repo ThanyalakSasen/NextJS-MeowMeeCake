@@ -12,6 +12,10 @@ import componentModel from "@/models/componentModel";
 import recipeModel from "@/models/recipeModel";
 import productModel from "@/models/productModel";
 import promotionModel from "@/models/promotionModel";
+import productVariantModel from "@/models/productVariantModel";
+import productOptionModel from "@/models/productOptionModel";
+import cartItemModel from "@/models/cartItemModel";
+import preorderRoundItemModel from "@/models/preorderRoundItemModel";
 import mongoose from "mongoose";
 import { runMigration } from "../../scripts/migrate-money-to-satang";
 import { makeUser, makeProduct, makePreorder } from "./helpers";
@@ -176,6 +180,50 @@ describe("scripts/migrate-money-to-satang", () => {
       created_by: new mongoose.Types.ObjectId(),
     });
 
+    // BACKLOG §3.11 เฟส 5b — สร้างตรงผ่าน model ทั้งหมด (ไม่ผ่าน makeProduct()/makeVariant()/
+    // makeOption() ที่แปลงบาท→สตางค์ให้อัตโนมัติแล้วตั้งแต่เฟส 5b — ถ้าใช้ helper พวกนั้นในเทสนี้จะได้
+    // เอกสารที่ "เป็นสตางค์อยู่แล้ว" ปนกับเอกสารดิบที่จำลองว่ายังไม่เคย migrate จริง ทำให้ทดสอบ
+    // migration ไม่ได้ตรงตามจริง)
+    const rawProduct = await productModel.create({
+      product_id: `pos-migrate-${Date.now()}`,
+      product_name_th: "สินค้าดิบ",
+      product_name_eng: "Raw product",
+      category_id: new mongoose.Types.ObjectId(),
+      unit_id: new mongoose.Types.ObjectId(),
+      product_price: 35,
+      sale_price: 28,
+      product_type: "inStore",
+      product_stock_quantity: 10,
+    });
+    const rawVariant = await productVariantModel.create({
+      product_id: rawProduct._id,
+      variant_name: "ไซส์ใหญ่",
+      variant_price: 12,
+    });
+    const rawOption = await productOptionModel.create({
+      product_id: rawProduct._id,
+      option_name: "เพิ่มไข่",
+      extra_price: 5,
+    });
+    const rawCartItem = await cartItemModel.create({
+      cart_id: new mongoose.Types.ObjectId(),
+      product_id: rawProduct._id,
+      selected_options: [{ option_name: "เพิ่มไข่", extra_price: 5, text_value: null }],
+      quantity: 2,
+      price_snapshot: 40,
+    });
+    const rawRoundItemWithOverride = await preorderRoundItemModel.create({
+      round_id: new mongoose.Types.ObjectId(),
+      product_id: rawProduct._id,
+      price_override: 33,
+      max_qty_total: 10,
+    });
+    const rawRoundItemNullOverride = await preorderRoundItemModel.create({
+      round_id: new mongoose.Types.ObjectId(),
+      product_id: rawProduct._id,
+      max_qty_total: 10, // price_override ไม่ระบุ = null (default) — ต้องยืนยันว่า $multiply ไม่พัง
+    });
+
     const summary = await runMigration();
     expect(summary).toMatchObject({
       orders: 1,
@@ -193,6 +241,11 @@ describe("scripts/migrate-money-to-satang", () => {
       recipes: 1,
       products_purchase_cost: 1, // เจอแค่ตัวที่มี purchase_cost เป็นตัวเลขจริง (filter $type:number)
       promotions: 3, // pipeline update แก้ทั้ง 3 เอกสาร (conditional อยู่ข้างในแต่ละเอกสารเอง)
+      products_pricing: 3, // product (makeProduct) + productWithPurchaseCost (makeProduct) + rawProduct
+      product_variants: 1,
+      product_options: 1,
+      cart_items: 1,
+      preorder_round_items: 2, // ทั้งตัวที่มี price_override และตัวที่เป็น null (pipeline ไม่พัง)
     });
 
     const rOrder = await orderModel
@@ -293,6 +346,40 @@ describe("scripts/migrate-money-to-satang", () => {
       .findById(promoFreeShipping._id)
       .lean<{ discount_value: number }>();
     expect(rPromoShip!.discount_value).toBe(0); // FreeShipping → ไม่ถูกแตะเช่นกัน
+
+    // ── เฟส 5b ─────────────────────────────────────────────────
+    const rRawProduct = await productModel
+      .findById(rawProduct._id)
+      .lean<{ product_price: number; sale_price: number }>();
+    expect(rRawProduct!.product_price).toBe(3500);
+    expect(rRawProduct!.sale_price).toBe(2800);
+
+    const rRawVariant = await productVariantModel
+      .findById(rawVariant._id)
+      .lean<{ variant_price: number }>();
+    expect(rRawVariant!.variant_price).toBe(1200);
+
+    const rRawOption = await productOptionModel
+      .findById(rawOption._id)
+      .lean<{ extra_price: number }>();
+    expect(rRawOption!.extra_price).toBe(500);
+
+    const rRawCartItem = await cartItemModel.findById(rawCartItem._id).lean<{
+      price_snapshot: number;
+      selected_options: { extra_price: number }[];
+    }>();
+    expect(rRawCartItem!.price_snapshot).toBe(4000);
+    expect(rRawCartItem!.selected_options[0].extra_price).toBe(500);
+
+    const rRawRoundItemWithOverride = await preorderRoundItemModel
+      .findById(rawRoundItemWithOverride._id)
+      .lean<{ price_override: number }>();
+    expect(rRawRoundItemWithOverride!.price_override).toBe(3300);
+
+    const rRawRoundItemNullOverride = await preorderRoundItemModel
+      .findById(rawRoundItemNullOverride._id)
+      .lean<{ price_override: number | null }>();
+    expect(rRawRoundItemNullOverride!.price_override).toBeNull(); // $multiply ไม่พัง ไม่กลายเป็น 0
   });
 
   it("กันรันซ้ำต่อ collection — รันครั้งที่สองต้องไม่คูณ ×100 ซ้ำอีกรอบ (section ที่รันแล้ว = null)", async () => {

@@ -19,6 +19,7 @@ import productModel from "../models/productModel";
 import productVariantModel from "../models/productVariantModel";
 import productOptionModel from "../models/productOptionModel";
 import userModel from "../models/userModel";
+import { toBaht, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -39,6 +40,21 @@ interface ResolvedOption {
   option_name: string;
   extra_price: number;
   text_value: string | null;
+}
+
+// BACKLOG §3.11 เฟส 5b — price_snapshot/selected_options[].extra_price เก็บเป็นสตางค์ (คำนวณจาก
+// product_price/sale_price/variant_price/extra_price ที่เป็นสตางค์ทั้งหมดแล้ว) แต่ API ยังรับ-ส่ง
+// บาททศนิยมเหมือนเดิม — ไม่มีจุด "รับ input เป็นบาท" ในไฟล์นี้เลย (price_snapshot คำนวณจาก DB ล้วน ๆ
+// ไม่เคยรับราคาจาก client ตรง ๆ) จึงมีแค่ presenter ฝั่งคืนค่า ไม่มีฝั่งแปลงเข้า
+function presentCartItem(it: Record<string, any>): any {
+  const presented = toBahtFields(it, ["price_snapshot"] as const);
+  return {
+    ...presented,
+    selected_options: (presented.selected_options ?? []).map((o: any) => ({
+      ...o,
+      extra_price: toBaht(o.extra_price),
+    })),
+  };
 }
 
 // ── ตะกร้า ───────────────────────────────────────────────────
@@ -63,11 +79,27 @@ export async function getCartDetail(userId: string) {
     .populate("variant_id", "variant_name variant_price")
     .lean();
 
-  const line = (items as any[]).map((it) => ({
-    ...it,
-    line_total: (it.price_snapshot ?? 0) * (it.quantity ?? 0),
-  }));
-  const subtotal = line.reduce((s, it) => s + it.line_total, 0);
+  // คำนวณ line_total เป็นสตางค์ (integer) ก่อนเสมอ แล้วค่อยแปลงเป็นบาทตอนสุดท้าย (กันปัดเศษสะสมจาก
+  // การคูณ/บวกเลขทศนิยม — BACKLOG §3.11) price_snapshot ที่นี่ยังเป็นสตางค์ดิบจาก DB (ยังไม่ผ่าน
+  // presentCartItem) ส่วน .populate("variant_id", "... variant_price") ก็ติดสตางค์ดิบมาด้วยเช่นกัน
+  // ต้องแปลงซ้อนอีกชั้นเหมือน componentService/recipeService.getExpanded() ในเฟส 4
+  const line = (items as any[]).map((it) => {
+    const lineTotalSatang = (it.price_snapshot ?? 0) * (it.quantity ?? 0);
+    const presented = presentCartItem(it);
+    return {
+      ...presented,
+      variant_id:
+        presented.variant_id && typeof presented.variant_id === "object"
+          ? toBahtFields(presented.variant_id, ["variant_price"] as const)
+          : presented.variant_id,
+      line_total: toBaht(lineTotalSatang),
+    };
+  });
+  const subtotalSatang = (items as any[]).reduce(
+    (s, it) => s + (it.price_snapshot ?? 0) * (it.quantity ?? 0),
+    0
+  );
+  const subtotal = toBaht(subtotalSatang);
 
   return {
     cart: { _id: cart._id, user_id: cart.user_id },
@@ -162,6 +194,10 @@ export async function addItem(userId: string, input: AddCartItemInput) {
 
   const options = await resolveOptions(input.product_id, input.selected_options);
 
+  // BACKLOG §3.11 เฟส 5b — product/variant/option ทั้ง 3 แหล่งเป็นสตางค์แล้วทั้งหมด (query ตรงจาก
+  // model ข้าม service ที่มี presenter) price_snapshot ที่คำนวณตรงนี้จึงเป็นสตางค์โดยอัตโนมัติ ไม่ต้อง
+  // toSatang() เองเลย (ต่างจาก resolveLine() ของ orderService สมัยเฟส 1 ที่ยังต้องแปลงตอนจบ เพราะตอน
+  // นั้น product ยังเป็นบาทอยู่ — ตอนนี้ไม่มี "จุดข้ามโดเมน" แบบนั้นให้ต้องแปลงอีกแล้ว)
   const basePrice = product.sale_price ?? product.product_price;
   const variantPrice = variant?.variant_price ?? 0;
   const optionsPrice = options.reduce((s, o) => s + o.extra_price, 0);
@@ -182,7 +218,7 @@ export async function addItem(userId: string, input: AddCartItemInput) {
     dup.quantity += quantity;
     dup.price_snapshot = price_snapshot; // อัปเดตให้เป็นราคาปัจจุบัน
     await dup.save();
-    return dup.toObject();
+    return presentCartItem(dup.toObject());
   }
 
   const doc = await cartItemModel.create({
@@ -193,7 +229,7 @@ export async function addItem(userId: string, input: AddCartItemInput) {
     quantity,
     price_snapshot,
   });
-  return doc.toObject();
+  return presentCartItem(doc.toObject());
 }
 
 // ── แก้จำนวนของรายการในตะกร้า (0 = ลบ) ──────────────────────
@@ -226,7 +262,7 @@ export async function updateItemQuantity(
 
   item.quantity = qty;
   await item.save();
-  return item.toObject();
+  return presentCartItem(item.toObject());
 }
 
 // ── ลบรายการออกจากตะกร้า ────────────────────────────────────

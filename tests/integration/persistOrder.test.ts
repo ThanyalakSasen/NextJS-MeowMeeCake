@@ -39,7 +39,9 @@ describe("orderService.createOrder → persistOrder (integration)", () => {
   it("re-price: ราคาสินค้าเปลี่ยนหลังสร้าง product → ออเดอร์ใหม่ใช้ราคาปัจจุบัน", async () => {
     const user = await makeUser();
     const p = await makeProduct({ product_price: 100, product_stock_quantity: 20 });
-    await productModel.updateOne({ _id: p._id }, { $set: { product_price: 150 } });
+    // อัปเดตตรงผ่าน model (ข้าม makeProduct()'s auto-convert) — 15000 สตางค์ = 150 บาท
+    // (BACKLOG §3.11 เฟส 5b — productModel.product_price เก็บเป็นสตางค์แล้ว)
+    await productModel.updateOne({ _id: p._id }, { $set: { product_price: 15000 } });
 
     const order = await orderService.createOrder(String(user._id), {
       order_type: "takeaway",

@@ -215,10 +215,11 @@ async function resolveLine(input: OrderLineInput): Promise<PricedLine> {
     });
   }
 
-  // basePrice/variant_price/extra_price ทั้งหมดมาจาก productModel/productVariantModel/
-  // productOptionModel ซึ่งยังเป็น "บาท" (ยังไม่แปลงในเฟสนี้ — BACKLOG §3.11) — คำนวณ unit_price
-  // เป็นบาทให้เสร็จก่อนทั้งหมด แล้วแปลงเป็นสตางค์ครั้งเดียวตอนจบ (จุดที่ข้ามจากโดเมนสินค้า/บาท
-  // เข้าสู่โดเมนออเดอร์/สตางค์) กันปัญหาการปัดเศษคูณซ้อนถ้าแปลงทีละส่วนแล้วบวกกัน
+  // BACKLOG §3.11 เฟส 5b — basePrice/variant_price/extra_price ทั้งหมดมาจาก productModel/
+  // productVariantModel/productOptionModel ซึ่งเป็นสตางค์แล้วทั้งหมดตั้งแต่เฟส 5b (เดิมเฟส 1-4a เป็น
+  // บาท ต้องแปลงเป็นสตางค์ตอนจบด้วย toSatang() ตรงนี้ — "จุดข้ามโดเมน" นั้นไม่มีอยู่แล้วตอนนี้ เพราะ
+  // ทั้งฝั่งสินค้าและฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด unit_price ที่คำนวณตรงนี้จึงเป็นสตางค์อยู่แล้ว
+  // โดยอัตโนมัติ ไม่ต้องแปลงอะไรเพิ่ม)
   const basePrice = product.sale_price ?? product.product_price;
   const unit_price =
     basePrice + (variant?.variant_price ?? 0) + options.reduce((s, o) => s + o.extra_price, 0);
@@ -231,11 +232,11 @@ async function resolveLine(input: OrderLineInput): Promise<PricedLine> {
       product_name_eng: product.product_name_eng,
       variant_name: variant?.variant_name ?? null,
     },
-    // extra_price เก็บลง orderItem.selected_options เป็นสตางค์เช่นกัน (สแนปช็อตไว้แสดงผลย้อนหลัง)
-    selected_options: options.map((o) => ({ ...o, extra_price: toSatang(o.extra_price) })),
+    // extra_price เป็นสตางค์อยู่แล้ว (มาจาก productOptionModel) เก็บลง orderItem.selected_options ตรง ๆ
+    selected_options: options.map((o) => ({ ...o })),
     special_request: input.special_request?.trim() || null,
     quantity,
-    unit_price: toSatang(unit_price),
+    unit_price,
     cost_per_unit: null,
   };
 }

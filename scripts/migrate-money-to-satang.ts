@@ -16,6 +16,10 @@ import componentModel from "../src/models/componentModel";
 import recipeModel from "../src/models/recipeModel";
 import productModel from "../src/models/productModel";
 import promotionModel from "../src/models/promotionModel";
+import productVariantModel from "../src/models/productVariantModel";
+import productOptionModel from "../src/models/productOptionModel";
+import cartItemModel from "../src/models/cartItemModel";
+import preorderRoundItemModel from "../src/models/preorderRoundItemModel";
 
 /**
  * BACKLOG §3.11 — ย้ายข้อมูลเงินเดิมที่เก็บเป็น "บาท" (float) ให้เป็น "สตางค์" (integer) ครั้งเดียว
@@ -34,9 +38,10 @@ import promotionModel from "../src/models/promotionModel";
  * discount_value **เฉพาะตอน discount_type === "Amount"** (ตอน Percentage เป็นตัวเลข % ไม่แปลง) —
  * ใช้ pipeline-style update (`updateMany(filter, [stage, ...])`) แทน `$mul` ธรรมดา เพราะต้อง
  * conditional ตาม field อื่นในเอกสารเดียวกัน (ดูรายละเอียดที่ runSection ด้านล่าง)
- * **ไม่รวม** field เงินใน productModel (product_price/sale_price)/productVariantModel/
- * productOptionModel/cartItemModel/preorderRoundItemModel.price_override เพราะยังไม่ถูกแปลง (ดู
- * docs/hardening-5-money-phase1.md §7 แผนเฟสที่เหลือ)
+ * ครอบคลุม (เฟส 5b): productModel.product_price/sale_price (section ใหม่แยกจาก purchase_cost เดิม),
+ * productVariantModel.variant_price, productOptionModel.extra_price, cartItemModel.price_snapshot
+ * (รวม selected_options[].extra_price), preorderRoundItemModel.price_override
+ * — เก็บครบทุก field เงินที่เคยสำรวจไว้แล้ว (ดู docs/hardening-5-money-phase1.md §7)
  *
  * **กันรันซ้ำแบบต่อ collection** (ไม่ใช่ marker เดียวทั้งไฟล์!) — แต่ละ section ด้านล่างมี id ของตัวเอง
  * บันทึกไว้ใน collection `migrations` แยกกัน เพราะไฟล์นี้จะถูกต่อเติมฟิลด์ใหม่เข้ามาเรื่อย ๆ ทุกเฟส
@@ -244,6 +249,61 @@ export async function runMigration(): Promise<Record<string, number | null>> {
     );
     return res.modifiedCount;
   });
+
+  // ── เฟส 5b ─────────────────────────────────────────────────
+  // section ใหม่แยกจาก "products_purchase_cost" เดิมโดยเจตนา (field เงินเพิ่มเข้า collection ที่มี
+  // section ของตัวเองอยู่แล้ว ต้องแยก section id ใหม่เสมอ — บทเรียนจากเฟส 2/4) ใช้ pipeline-style
+  // เพราะ sale_price เป็น nullable (ไม่ต้อง filter $type:"number" ตามที่ค้นพบในเฟส 5a)
+  summary.products_pricing = await runSection(db, "money_to_satang_3_11_products_pricing", async () => {
+    const res = await productModel.updateMany(
+      {},
+      [
+        {
+          $set: {
+            product_price: { $multiply: ["$product_price", 100] },
+            sale_price: { $multiply: ["$sale_price", 100] },
+          },
+        },
+      ],
+      { updatePipeline: true }
+    );
+    return res.modifiedCount;
+  });
+
+  // variant_price/extra_price เป็น required + มี default (ไม่มีทาง null) → $mul ตรง ๆ ได้เลย
+  summary.product_variants = await runSection(db, "money_to_satang_3_11_product_variants", async () => {
+    const res = await productVariantModel.updateMany({}, { $mul: { variant_price: 100 } });
+    return res.modifiedCount;
+  });
+
+  summary.product_options = await runSection(db, "money_to_satang_3_11_product_options", async () => {
+    const res = await productOptionModel.updateMany({}, { $mul: { extra_price: 100 } });
+    return res.modifiedCount;
+  });
+
+  // price_snapshot required, selected_options[].extra_price มี default (ไม่มีทาง null เหมือนกัน
+  // กับ selected_options ของ orderItemModel ในเฟส 1) — $mul ตรง ๆ รวม positional-all ได้เลย
+  summary.cart_items = await runSection(db, "money_to_satang_3_11_cart_items", async () => {
+    const res = await cartItemModel.updateMany(
+      {},
+      { $mul: { price_snapshot: 100, "selected_options.$[].extra_price": 100 } }
+    );
+    return res.modifiedCount;
+  });
+
+  // price_override เป็น nullable (default: null) — ใช้ pipeline-style เหมือน sale_price ด้านบน
+  summary.preorder_round_items = await runSection(
+    db,
+    "money_to_satang_3_11_preorder_round_items",
+    async () => {
+      const res = await preorderRoundItemModel.updateMany(
+        {},
+        [{ $set: { price_override: { $multiply: ["$price_override", 100] } } }],
+        { updatePipeline: true }
+      );
+      return res.modifiedCount;
+    }
+  );
 
   console.log("migrate-money-to-satang จบแล้ว:");
   for (const [k, v] of Object.entries(summary)) {

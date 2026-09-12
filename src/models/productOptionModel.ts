@@ -22,6 +22,8 @@ const productOptionSchema = new mongoose.Schema({
     type: Number,
     default: null, // null ถ้า option ไม่ใช่ text input
   },
+  // BACKLOG §3.11 เฟส 5b — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (ดู src/lib/money.ts)
+  // API (productOptionService) ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม
   extra_price: {
     //ราคาที่เพิ่มขึ้นจากราคาสินค้าหลัก
     type: Number,
