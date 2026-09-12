@@ -47,6 +47,14 @@ const ingredientTransactionSchema = new mongoose.Schema(
       ref: "Users",
       required: true,
     },
+    // BACKLOG §2c.3 — back-ref ไปยังรายการผลิตที่สร้างธุรกรรมนี้ (consumeStock/reverseStock ใน
+    // productionItemService) — null = ธุรกรรมที่บันทึกมือปกติ ไม่เกี่ยวกับการผลิต
+    // มีไว้กัน voidTransaction() ย้อนรายการที่ผูกกับการผลิตแบบไม่รู้ตัว (ดู ingredientTransactionService)
+    production_item_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ProductionItems",
+      default: null,
+    },
     deleted_at: {
       type: Date,
       default: null,
@@ -60,6 +68,7 @@ const ingredientTransactionSchema = new mongoose.Schema(
 ingredientTransactionSchema.index({ ingredient_id: 1, created_at: -1 });
 ingredientTransactionSchema.index({ type: 1 });
 ingredientTransactionSchema.index({ deleted_at: 1 });
+ingredientTransactionSchema.index({ production_item_id: 1 });
 
 const IngredientTransaction =
   mongoose.models.IngredientTransactions ||

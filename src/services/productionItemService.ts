@@ -216,6 +216,7 @@ export async function consumeStock(
         performed_by: opts.performed_by,
         note: `ผลิต ${ref}`,
         allowNegative: !!opts.allowNegative,
+        production_item_id: String(item._id),
       });
       applied.push(l);
     }
@@ -230,6 +231,7 @@ export async function consumeStock(
           unit_id: String(l.unit_id),
           performed_by: opts.performed_by,
           note: `ยกเลิกการหักสต็อก (ผลิต ${ref})`,
+          production_item_id: String(item._id),
         })
         .catch(() => undefined);
     }
@@ -267,6 +269,7 @@ export async function reverseStock(id: string, opts: { performed_by: string }) {
       unit_id: String(l.unit_id),
       performed_by: opts.performed_by,
       note: `คืนสต็อกจากการยกเลิกผลิต ${ref}`,
+      production_item_id: String(item._id),
     });
   }
 
