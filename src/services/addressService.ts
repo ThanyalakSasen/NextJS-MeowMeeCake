@@ -4,19 +4,14 @@
  * มีที่อยู่ default ได้ 1 อันต่อผู้ใช้ (ตั้งใหม่ = ยกเลิกอันเดิม)
  */
 import dbConnect from "../lib/dbConnect";
-import { badRequest, notFound } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { notFound } from "../lib/httpError";
+import { assertObjectId } from "../lib/objectId";
 import addressModel from "../models/addressModel";
+import type { z } from "zod";
+import type { addressCreate, addressUpdate } from "../schemas/address";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-const FIELDS = [
-  "house_no",
-  "sub_district",
-  "district",
-  "province",
-  "zip_code",
-] as const;
+type CreateAddressInput = z.infer<typeof addressCreate>;
+type UpdateAddressInput = z.infer<typeof addressUpdate>;
 
 export async function listByUser(userId: string) {
   await dbConnect();
@@ -37,12 +32,11 @@ export async function getById(userId: string, id: string) {
   return doc;
 }
 
-export async function create(userId: string, input: Record<string, any>) {
+export async function create(userId: string, input: CreateAddressInput) {
   await dbConnect();
   assertObjectId(userId, "user_id");
-  for (const f of FIELDS) {
-    if (!input[f]) throw badRequest(`กรุณาระบุ ${f}`);
-  }
+  // required field ทั้งหมด (house_no/sub_district/district/province/zip_code) validate ที่
+  // route ผ่าน schemas/address.ts addressCreate แล้ว (ไม่ .optional()) — ไม่ต้องเช็คซ้ำที่นี่
 
   const count = await addressModel.countDocuments({ user_id: userId, deleted_at: null });
   const makeDefault = input.is_default === true || count === 0;
@@ -55,23 +49,26 @@ export async function create(userId: string, input: Record<string, any>) {
   }
 
   const doc = await addressModel.create({
-    ...pick(input, FIELDS),
+    ...input,
     user_id: userId,
-    is_default: makeDefault,
+    is_default: makeDefault, // เขียนทับ input.is_default เสมอ — คำนวณเองข้างบนแล้ว
   });
   return doc.toObject();
 }
 
-export async function update(userId: string, id: string, input: Record<string, any>) {
+export async function update(userId: string, id: string, input: UpdateAddressInput) {
   await dbConnect();
   assertObjectId(id);
 
   const addr = await addressModel.findOne({ _id: id, user_id: userId, deleted_at: null });
   if (!addr) throw notFound("ไม่พบที่อยู่ที่ระบุ");
 
-  Object.assign(addr, pick(input, FIELDS));
+  // is_default แยกจัดการเอง (ด้านล่าง) — ไม่ assign ตรงจาก input เพื่อไม่ให้ client
+  // ส่ง is_default: false มาปลดธงเองได้ (ต้องผ่าน setDefault ของที่อยู่อื่นแทนเท่านั้น)
+  const { is_default, ...rest } = input;
+  Object.assign(addr, rest);
 
-  if (input.is_default === true && !addr.is_default) {
+  if (is_default === true && !addr.is_default) {
     await addressModel.updateMany(
       { user_id: userId, deleted_at: null, _id: { $ne: id } },
       { $set: { is_default: false } }

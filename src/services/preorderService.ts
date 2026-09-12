@@ -13,11 +13,13 @@
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
 import { Saga } from "../lib/compensation";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { log } from "../lib/logger";
 import preorderModel from "../models/preorderModel";
 import preorderItemModel from "../models/preorderItemModel";
+import paymentModel from "../models/paymentModel";
 import userModel from "../models/userModel";
 import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
@@ -126,7 +128,10 @@ export async function createPreorder(
     for (const f of ADDRESS_FIELDS) {
       if (!addr[f]) throw badRequest(`delivery_address.${f} จำเป็นต้องระบุ`);
     }
-    delivery_address = pick(addr, ADDRESS_FIELDS) as Record<string, string>;
+    // ตัดฟิลด์เกินทิ้ง (เก็บเฉพาะ ADDRESS_FIELDS) — ไม่ใช้ pick() ตรงนี้ตั้งใจ: ผ่านการเช็ค
+    // required field ครบข้างบนแล้ว การ narrow shape แค่ Object.fromEntries ธรรมดาก็พอ
+    // (ไม่ได้ทำหน้าที่กัน mass-assignment ที่ต้องรอ route adopt zod เหมือน service อื่น)
+    delivery_address = Object.fromEntries(ADDRESS_FIELDS.map((f) => [f, addr[f]]));
   }
 
   // ── resolve รายการ + คิดราคา ──
@@ -353,14 +358,42 @@ export async function updatePreorderStatus(
   }
 
   if (next === "cancelled") {
+    // cleanup ตอนยกเลิก — best-effort ทั้งหมด (step ที่ fail จะ log ผ่าน logger ไม่ล้มการยกเลิก)
+    // ใช้ Saga เพื่อ log สม่ำเสมอ แทน .catch(() => undefined) ที่กลืน error เงียบ (เทียบ orderService)
+    const cleanup = new Saga();
+
     const items = await preorderItemModel
       .find({ preorder_id: preorder._id, deleted_at: null })
       .lean<any[]>();
     for (const it of items) {
-      await preorderRoundService
-        .releaseQty(String(it.round_item_id), it.quantity)
-        .catch(() => undefined);
+      cleanup.onRollback(`release-qty-${it._id}`, () =>
+        preorderRoundService.releaseQty(String(it.round_item_id), it.quantity)
+      );
     }
+
+    // พรีออเดอร์ที่จ่ายเงินแล้ว → คืนเงินอัตโนมัติ · กัน "preorder = cancelled แต่ payment ยัง paid"
+    // (BACKLOG 2b.3 — คู่ขนานกับ orderService.updateOrderStatus §2.8)
+    if (preorder.payment_status === "paid") {
+      const paidPayment = await paymentModel
+        .findOne({ preorder_id: preorder._id, status: "paid", deleted_at: null })
+        .lean<{ _id: unknown } | null>();
+      if (paidPayment && opts.cancelled_by) {
+        const verifiedBy = opts.cancelled_by;
+        cleanup.onRollback("auto-refund", async () => {
+          // dynamic import — เลี่ยง circular import (paymentService → preorderService)
+          const { refundPayment } = await import("./paymentService");
+          await refundPayment(String(paidPayment._id), { verified_by: verifiedBy });
+        });
+      } else {
+        log.warn("preorder.auto_refund_skipped", {
+          preorder_id: String(preorder._id),
+          reason: "ไม่พบ payment ที่ paid หรือไม่มี cancelled_by",
+        });
+      }
+    }
+
+    await cleanup.rollback();
+
     preorder.cancelled_at = new Date();
     if (opts.cancelled_by) {
       assertObjectId(opts.cancelled_by, "cancelled_by");
@@ -374,11 +407,43 @@ export async function updatePreorderStatus(
   return getPreorderById(id);
 }
 
+/** สถานะที่ "ลูกค้า" ยกเลิกพรีออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน
+ *  (เทียบ orderService.CUSTOMER_CANCELABLE_STATUSES) */
+export const CUSTOMER_CANCELABLE_STATUSES: readonly PreorderStatus[] = ["pending", "confirmed"];
+
 export async function cancelPreorder(
   id: string,
-  opts: { cancelled_by?: string; cancelled_reason?: string } = {}
+  opts: {
+    cancelled_by?: string;
+    cancelled_reason?: string;
+    /** ถ้าระบุ: ยกเลิกได้เฉพาะเมื่อสถานะปัจจุบันอยู่ในลิสต์นี้ (ใช้จำกัดสิทธิ์ฝั่งลูกค้า — แอดมินไม่ส่ง = ยกเลิกได้ทุกสถานะที่ยังไม่ completed) */
+    allowedFrom?: readonly PreorderStatus[];
+  } = {}
 ) {
-  return updatePreorderStatus(id, "cancelled", opts);
+  const { allowedFrom, ...rest } = opts;
+  if (allowedFrom) {
+    await dbConnect();
+    assertObjectId(id);
+    const preorder = await preorderModel
+      .findOne({ _id: id, deleted_at: null })
+      .select("order_status payment_status")
+      .lean<{ order_status: PreorderStatus; payment_status?: PaymentStatus } | null>();
+    if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
+    if (!allowedFrom.includes(preorder.order_status)) {
+      throw conflict(
+        `ยกเลิกพรีออเดอร์เองได้เฉพาะตอนสถานะ ${allowedFrom.join(" / ")} เท่านั้น ` +
+          `(สถานะปัจจุบัน: "${preorder.order_status}") — หากต้องการยกเลิกกรุณาติดต่อร้าน`
+      );
+    }
+    // พรีออเดอร์ที่ชำระเงินแล้ว: ลูกค้ายกเลิกเองไม่ได้ — ต้องให้แอดมินยกเลิก + คืนเงิน (refundPayment)
+    // ไม่งั้นจะได้ order_status = cancelled แต่ payment_status ยัง paid โดยไม่มี refund record
+    if (preorder.payment_status === "paid") {
+      throw conflict(
+        "พรีออเดอร์นี้ชำระเงินแล้ว ยกเลิกเองไม่ได้ — กรุณาติดต่อร้านเพื่อขอยกเลิกและคืนเงิน"
+      );
+    }
+  }
+  return updatePreorderStatus(id, "cancelled", rest);
 }
 
 // ── payment status (เรียกจาก paymentService ภายหลัง) ────────

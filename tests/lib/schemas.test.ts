@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createOrderBody, listOrderQuery } from "@/schemas/order";
+import { createOrderBody, adminCreateOrderBody, listOrderQuery, updateDeliveryBody } from "@/schemas/order";
 import { addCartItemBody, updateCartItemBody } from "@/schemas/cart";
 import { createPaymentBody, submitSlipBody } from "@/schemas/payment";
 
@@ -41,6 +41,55 @@ describe("schemas/order — createOrderBody", () => {
         items: [{ product_id: OID, quantity: 0 }],
       }).success
     ).toBe(false);
+  });
+});
+
+describe("schemas/order — adminCreateOrderBody (BACKLOG §3.1, รอบ 4b)", () => {
+  it("ต้องมี user_id, refine เดียวกับ createOrderBody ยังใช้ได้", () => {
+    expect(adminCreateOrderBody.safeParse({ order_type: "takeaway" }).success).toBe(false); // ไม่มี user_id
+    const r = adminCreateOrderBody.parse({ user_id: OID, order_type: "takeaway" });
+    expect(r.user_id).toBe(OID);
+    expect(r.channel).toBe("instore"); // default
+    expect(
+      adminCreateOrderBody.safeParse({
+        user_id: OID,
+        order_type: "delivery",
+        promotion_code: "X",
+        promotion_id: OID,
+      }).success
+    ).toBe(false);
+  });
+
+  it("รับ delivery_fee / discount_amount override, coerce จาก string ได้", () => {
+    const r = adminCreateOrderBody.parse({
+      user_id: OID,
+      order_type: "takeaway",
+      delivery_fee: "50",
+      discount_amount: "20",
+      channel: "online",
+    });
+    expect(r.delivery_fee).toBe(50);
+    expect(r.discount_amount).toBe(20);
+    expect(r.channel).toBe("online");
+  });
+
+  it("delivery_fee ติดลบ → fail", () => {
+    expect(
+      adminCreateOrderBody.safeParse({ user_id: OID, order_type: "takeaway", delivery_fee: -1 })
+        .success
+    ).toBe(false);
+  });
+});
+
+describe("schemas/order — updateDeliveryBody (BACKLOG §3, รอบ 4b ข้อ B2)", () => {
+  it("รับทุกฟิลด์เป็น optional, enum delivery_status ถูกต้อง", () => {
+    expect(updateDeliveryBody.safeParse({}).success).toBe(true);
+    expect(updateDeliveryBody.safeParse({ delivery_status: "shipping" }).success).toBe(true);
+    expect(updateDeliveryBody.safeParse({ delivery_status: "flying" }).success).toBe(false);
+  });
+  it("coerce shipped_at/delivered_at จาก string เป็น Date", () => {
+    const r = updateDeliveryBody.parse({ shipped_at: "2026-01-10T00:00:00Z" });
+    expect(r.shipped_at).toBeInstanceOf(Date);
   });
 });
 
