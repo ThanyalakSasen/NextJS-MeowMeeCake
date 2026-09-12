@@ -1,7 +1,7 @@
-# รอบ 5 — เงินเป็น integer (สตางค์), เฟส 1-2: Order+Preorder+Payment, Expense
+# รอบ 5 — เงินเป็น integer (สตางค์), เฟส 1-3: Order+Preorder+Payment, Expense, Delivery zone
 
 > อัปเดตล่าสุด: 2026-09-12
-> สถานะ: ✅ **เฟส 1-2 เสร็จสมบูรณ์** (จากทั้งหมด 5 เฟส — ดู §7 "เฟสที่เหลือ")
+> สถานะ: ✅ **เฟส 1-3 เสร็จสมบูรณ์** (จากทั้งหมด 5 เฟส — ดู §7 "เฟสที่เหลือ")
 > ที่มา: [`BACKLOG.md`](BACKLOG.md) §3.11 — งานเดี่ยวเสี่ยงสูงที่สุดในทั้งหมด (tag **L**)
 > ก่อนเริ่ม: สำรวจขอบเขตจริงก่อน (17 model + 9 schema แตะเงิน) แล้วถามผู้ใช้เรื่อง API contract
 
@@ -19,10 +19,10 @@
   subtotal ของทั้ง order/preorder ที่ตอนนี้เป็นสตางค์แล้ว)
 - `dashboardService` อ่านรวมจากทั้ง orderModel/orderItemModel เข้าด้วยกัน ต้องแก้พร้อมกันไปในตัว
 
-**สิ่งที่ยังไม่แตะ** (ตั้งใจ ไม่ใช่ลืม — `expenseModel.amount` แปลงไปแล้วในเฟส 2):
-`productModel`/`productVariantModel`/`productOptionModel` (ราคาสินค้า/variant/option),
+**สิ่งที่ยังไม่แตะ** (ตั้งใจ ไม่ใช่ลืม — `expenseModel.amount` แปลงในเฟส 2, `deliveryZoneModel.fee`
+แปลงในเฟส 3): `productModel`/`productVariantModel`/`productOptionModel` (ราคาสินค้า/variant/option),
 `promotionModel` (นิยามโปรโมชัน — `discount_value`/`min_order_amount`/`max_discount_amount`),
-`deliveryZoneModel.fee`, `recipeModel`/`componentModel`/`ingredientModel` (ต้นทุนวัตถุดิบ/สูตร),
+`recipeModel`/`componentModel`/`ingredientModel` (ต้นทุนวัตถุดิบ/สูตร),
 `cartItemModel.price_snapshot`, `orderItem`/`preorderItem`.`cost_per_unit` — ยังเป็นบาททั้งหมด ดู §7
 
 ---
@@ -89,6 +89,7 @@ discount_amount = toSatang(result.discount_amount);
 | `paymentModel` | `amount` (ใช้ร่วมทั้งฝั่ง order/preorder) | 1 |
 | `promotionUsagesModel` | `discount_applied` | 1 |
 | `expenseModel` | `amount` | 2 |
+| `deliveryZoneModel` | `fee` | 3 |
 
 ## 3. Service ที่แก้ + ตรรกะ presenter (สตางค์ → บาท ตอนคืนค่า)
 
@@ -111,8 +112,14 @@ discount_amount = toSatang(result.discount_amount);
   (aggregate ตามหมวด) และ `totalInRange()` (ใช้จาก `dashboardService`) แปลงผลรวมเป็นบาทก่อนคืน —
   **`dashboardService.ts` ไม่ต้องแก้อะไรเลยสักบรรทัดในเฟสนี้** เพราะ `totalInRange()` คืนบาทให้เหมือนเดิม
   ทุกประการ (ยืนยันด้วย `git diff` ว่าไฟล์นี้ไม่มีการเปลี่ยนแปลงในเฟส 2)
+- **`deliveryZoneService.ts`** (เฟส 3) — เพิ่ม `presentZone()` ใช้ใน `list`/`getById`/`create`/
+  `update`/`remove`/`restore` (ให้ `/api/admin/delivery-zones` ยังบาทเหมือนเดิม) **แต่**
+  `getActiveZonesCached()` (cache ภายในที่ `deliveryService.ts` เรียกใช้เท่านั้น ไม่เคยถูก expose ตรง
+  ให้ client) **ตั้งใจไม่ผ่าน presenter** — ปล่อยเป็นสตางค์ดิบไว้ ให้ `deliveryService.ts` แปลงเองตรงจุด
+  ที่ใช้จริง (`calcDeliveryFee()`/`listZones()`) ตามรูปแบบ "แปลงข้ามโดเมนตรงจุดที่ข้าม" เดียวกับเฟส 1
 
-**ไม่ต้องแก้ schema (`src/schemas/order.ts`, `payment.ts`, `expense.ts`) หรือ route ไหนเลยสักไฟล์** —
+**ไม่ต้องแก้ schema (`src/schemas/order.ts`, `payment.ts`, `expense.ts`, `delivery.ts`) หรือ route ไหน
+เลยสักไฟล์** —
 client ยังส่ง/รับบาททศนิยมเหมือนเดิมทุกประการ การแปลงทั้งหมดอยู่ในชั้น service ล้วน ๆ
 
 ---
@@ -142,8 +149,9 @@ integration test import `runMigration()` ไปเรียกตรง ๆ ไ�
 
 **ต้องรันก่อน deploy จริงครั้งแรกหลัง PR นี้ merge** (หรือรันกับ DB dev/staging ที่มีข้อมูลทดสอบอยู่แล้ว
 ถ้าอยากให้ตัวเลขเดิมยังถูกต้อง — ถ้าไม่รัน ข้อมูลเก่าจะโดนตีความเป็นสตางค์ทั้งที่จริงเป็นบาท เช่น
-`total_amount: 150` เดิม (150 บาท) จะกลายเป็นแค่ 1.50 บาทถ้าไม่ migrate) — **ถ้าเคยรันตอนจบเฟส 1 ไปแล้ว
-รันซ้ำอีกครั้งตอนนี้ได้เลยปลอดภัย** จะแค่เติม `expenses` section ที่ยังไม่เคยรันให้เท่านั้น
+`total_amount: 150` เดิม (150 บาท) จะกลายเป็นแค่ 1.50 บาทถ้าไม่ migrate) — **ถ้าเคยรันตอนจบเฟสก่อนหน้า
+ไปแล้ว รันซ้ำอีกครั้งตอนนี้ได้เลยปลอดภัยเสมอ** (marker แยกต่อ section) จะแค่เติม section ใหม่ที่ยังไม่
+เคยรันให้เท่านั้น (ตอนนี้คือ `delivery_zones`)
 
 ---
 
@@ -174,10 +182,13 @@ integration test import `runMigration()` ไปเรียกตรง ๆ ไ�
   list/getById คืนบาท, `summary()` รวมยอดตามหมวดถูกต้อง, `totalInRange()` คืนบาทตรง ๆ
 - `tests/integration/dashboardService.test.ts` (1 เคส, เฟส 2) — สร้างออเดอร์ paid (satang) +
   ค่าใช้จ่าย (satang หลังเฟส 2) พร้อมกัน ยืนยันว่า `profit_estimate` ไม่ผสมหน่วยผิด (จุดเสี่ยงสุดตาม §3)
+- `tests/integration/deliveryService.test.ts` (+4 เคส, เฟส 3) — create/update แปลง fee ถูกทาง,
+  list/getById (หน้าแอดมิน) คืนบาท, `calcDeliveryFee` คำนวณถูกเป๊ะแม้ fee เป็นทศนิยมที่ float มักพัง
+  (29.9 บาท)
 - แก้ assertion เดิมที่ query DB ตรง ๆ (bypass presenter) ใน `persistOrder.test.ts`,
   `createPaymentPreorder.test.ts`, `cancelPreorder.test.ts` ให้ตรงกับหน่วยสตางค์จริง + comment กำกับ
   ชัดว่าทำไมต่างจาก `order.*`/`preorder.*` ที่มาจาก service (บาทเหมือนเดิม)
-- unit 163 → 171 · integration 79 → 82 (เฟส 1) → **89** (เฟส 2)
+- unit 163 → 171 (คงที่ตั้งแต่เฟส 2) · integration 79 → 82 (เฟส 1) → 89 (เฟส 2) → **93** (เฟส 3)
 
 ---
 
@@ -186,7 +197,11 @@ integration test import `runMigration()` ไปเรียกตรง ๆ ไ�
 เรียงตามความเสี่ยง/ผลกระทบจากน้อยไปมาก:
 
 1. ~~**Expense** (`expenseModel.amount`)~~ — ✅ เสร็จแล้ว (เฟส 2, 2026-09-12)
-2. **Delivery zone** (`deliveryZoneModel.fee`) — โดดเดี่ยวเช่นกัน (env fallback ก็ต้องแปลงด้วยถ้าจะทำ)
+2. ~~**Delivery zone** (`deliveryZoneModel.fee`)~~ — ✅ เสร็จแล้ว (เฟส 3, 2026-09-12) — โดดเดี่ยวตามคาด
+   แต่ `getActiveZonesCached()` (cache ภายในที่ `deliveryService.ts` ใช้) ต้องปล่อยเป็นสตางค์ดิบไว้
+   ไม่ผ่าน presenter (presenter มีไว้เฉพาะ `/api/admin/delivery-zones` เท่านั้น) — env fallback
+   (`DELIVERY_FEE_METRO`/`DELIVERY_FEE_UPCOUNTRY`) **ไม่ได้แปลง** เพราะยังเป็น "บาท" ทั้งระบบเหมือนเดิม
+   (ค่านั้นไม่เคยถูกเก็บลง DB เป็นสตางค์เลย ใช้ตรงในฟังก์ชันเป็นบาทตลอด ไม่มีอะไรต้องแก้)
 3. **Recipe/Component/Ingredient cost** (`estimated_cost_per_batch`, `cost_per_unit`) — ผูกกับ
    `orderItem.cost_per_unit`/`preorderItem.cost_per_unit` ที่ปล่อยไว้เป็นบาทในเฟส 1 — ทำเฟสนี้เมื่อไหร่
    ต้องกลับมาแปลง 2 field นั้นให้เป็นสตางค์ด้วยพร้อมกัน (ตอนนี้คงเป็นบาทไว้ตั้งใจ)

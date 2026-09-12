@@ -6,6 +6,7 @@ import preorderItemModel from "@/models/preorderItemModel";
 import paymentModel from "@/models/paymentModel";
 import promotionUsagesModel from "@/models/promotionUsagesModel";
 import expenseModel from "@/models/expenseModel";
+import deliveryZoneModel from "@/models/deliveryZoneModel";
 import mongoose from "mongoose";
 import { runMigration } from "../../scripts/migrate-money-to-satang";
 import { makeUser, makeProduct, makePreorder } from "./helpers";
@@ -80,6 +81,12 @@ describe("scripts/migrate-money-to-satang", () => {
       payment_method: "เงินสด",
     });
 
+    const zone = await deliveryZoneModel.create({
+      zone_name: "โซนทดสอบ",
+      fee: 45,
+      sort_order: 0,
+    });
+
     const summary = await runMigration();
     expect(summary).toMatchObject({
       orders: 1,
@@ -89,6 +96,7 @@ describe("scripts/migrate-money-to-satang", () => {
       payments: 1,
       promotion_usages: 1,
       expenses: 1,
+      delivery_zones: 1,
     });
 
     const rOrder = await orderModel
@@ -133,6 +141,9 @@ describe("scripts/migrate-money-to-satang", () => {
 
     const rExpense = await expenseModel.findById(expense._id).lean<{ amount: number }>();
     expect(rExpense!.amount).toBe(30000);
+
+    const rZone = await deliveryZoneModel.findById(zone._id).lean<{ fee: number }>();
+    expect(rZone!.fee).toBe(4500);
   });
 
   it("กันรันซ้ำต่อ collection — รันครั้งที่สองต้องไม่คูณ ×100 ซ้ำอีกรอบ (section ที่รันแล้ว = null)", async () => {

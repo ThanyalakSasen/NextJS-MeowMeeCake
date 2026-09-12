@@ -10,6 +10,7 @@ import preorderItemModel from "../src/models/preorderItemModel";
 import paymentModel from "../src/models/paymentModel";
 import promotionUsagesModel from "../src/models/promotionUsagesModel";
 import expenseModel from "../src/models/expenseModel";
+import deliveryZoneModel from "../src/models/deliveryZoneModel";
 
 /**
  * BACKLOG §3.11 — ย้ายข้อมูลเงินเดิมที่เก็บเป็น "บาท" (float) ให้เป็น "สตางค์" (integer) ครั้งเดียว
@@ -19,6 +20,7 @@ import expenseModel from "../src/models/expenseModel";
  * ครอบคลุม (เฟส 1): orderModel, orderItemModel (รวม selected_options[].extra_price),
  * preorderModel, preorderItemModel, paymentModel, promotionUsagesModel
  * ครอบคลุม (เฟส 2): expenseModel.amount
+ * ครอบคลุม (เฟส 3): deliveryZoneModel.fee
  * **ไม่รวม** cost_per_unit (orderItem/preorderItem) หรือ field เงินใน productModel/promotionModel/
  * deliveryZoneModel/recipeModel/componentModel/ingredientModel เพราะยังไม่ถูกแปลง (ดู
  * docs/hardening-5-money-phase1.md §7 แผนเฟสที่เหลือ)
@@ -115,6 +117,12 @@ export async function runMigration(): Promise<Record<string, number | null>> {
   // ── เฟส 2 ──────────────────────────────────────────────────
   summary.expenses = await runSection(db, "money_to_satang_3_11_expenses", async () => {
     const res = await expenseModel.updateMany({}, { $mul: { amount: 100 } });
+    return res.modifiedCount;
+  });
+
+  // ── เฟส 3 ──────────────────────────────────────────────────
+  summary.delivery_zones = await runSection(db, "money_to_satang_3_11_delivery_zones", async () => {
+    const res = await deliveryZoneModel.updateMany({}, { $mul: { fee: 100 } });
     return res.modifiedCount;
   });
 

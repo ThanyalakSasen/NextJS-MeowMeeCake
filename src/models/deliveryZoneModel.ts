@@ -18,6 +18,7 @@ const deliveryZoneSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    // BACKLOG §3.11 เฟส 3 — สตางค์ (integer) ตั้งแต่ 2026-09-12 (API ยังรับ-ส่งบาทเหมือนเดิม, ดู src/lib/money.ts)
     fee: {
       type: Number,
       required: true,
