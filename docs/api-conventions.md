@@ -134,3 +134,13 @@ parse ด้วย `parsePagination` / `parseSort` ใน `src/lib/queryParams.t
 ## 7. Soft delete
 
 model ส่วนใหญ่มี `deleted_at` (null = ใช้งานอยู่) · list ปกติกรอง `deleted_at: null` ให้ · ลบ = set `deleted_at` · กู้คืนผ่าน `POST /api/admin/<resource>/[id]/restore`
+
+---
+
+## 8. หน่วยเงิน (BACKLOG §3.11)
+
+**ทุก request/response ยังเป็นทศนิยมบาทเสมอ** (เช่น `total_amount: 150.50`) — ไม่เคยเป็นสตางค์ที่ชั้น
+API ไม่ว่า field นั้นจะถูกย้ายไปเก็บเป็นสตางค์ (integer) ใน DB แล้วหรือยัง (ดู
+[`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) ว่าตอนนี้ทำถึงไหน) — client **ไม่ต้อง
+สนใจ**และ**ไม่ควรแปลงหน่วยเอง** เด็ดขาด การแปลงเกิดขึ้นในชั้น service ทั้งหมด ถ้าเห็น field เงินไหนมีค่า
+มากผิดปกติ (เช่น `10050` แทนที่จะเป็น `100.50`) ให้รายงานเป็นบั๊ก ไม่ใช่พฤติกรรมที่ตั้งใจ

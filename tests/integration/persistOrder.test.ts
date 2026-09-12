@@ -29,10 +29,11 @@ describe("orderService.createOrder → persistOrder (integration)", () => {
     expect((await productModel.findById(p1._id).lean())!.product_stock_quantity).toBe(8);
     expect((await productModel.findById(p2._id).lean())!.product_stock_quantity).toBe(2);
 
-    // orderItem snapshot ราคาต่อหน่วยสด (p2 ใช้ sale_price)
+    // orderItem snapshot ราคาต่อหน่วยสด (p2 ใช้ sale_price) — query ตรงจาก DB เห็นเป็นสตางค์
+    // (BACKLOG §3.11 — ต่างจาก order.* ด้านบนที่มาจาก getOrderById ซึ่งแปลงกลับเป็นบาทให้แล้ว)
     const items = await orderItemModel.find({ order_id: order._id }).lean();
     const byProduct = new Map(items.map((it) => [String(it.product_id), it]));
-    expect(byProduct.get(String(p2._id))!.unit_price).toBe(60);
+    expect(byProduct.get(String(p2._id))!.unit_price).toBe(6000);
   });
 
   it("re-price: ราคาสินค้าเปลี่ยนหลังสร้าง product → ออเดอร์ใหม่ใช้ราคาปัจจุบัน", async () => {
@@ -67,6 +68,35 @@ describe("orderService.createOrder → persistOrder (integration)", () => {
     // deductStockForOrder คืนสต็อกที่ตัดไปบางส่วนแล้ว
     expect((await productModel.findById(ok._id).lean())!.product_stock_quantity).toBe(10);
     expect((await productModel.findById(low._id).lean())!.product_stock_quantity).toBe(1);
+  });
+
+  it("BACKLOG §3.11: ราคาที่ float คูณแล้วมี rounding error ค้าง → เก็บเป็นสตางค์ (integer) แม่นเป๊ะ", async () => {
+    const user = await makeUser();
+    // 29.9*3 = 89.69999999999999 ใน JS ดิบ (ไม่ใช่ 89.7 พอดี) — ก่อนแก้ §3.11 โค้ดเดิมไม่เคย round2()
+    // orderItem.total_price แต่ละบรรทัดเลย (round2 มีแค่ตอนรวม subtotal/total_amount) ทำให้
+    // total_price ของ "รายการเดียว" เก็บ float เพี้ยนแบบนี้ตรง ๆ ได้ — หลังแก้ค่าที่เก็บเป็น integer
+    // สตางค์เสมอ ไม่มีทางเพี้ยนแบบนี้อีกไม่ว่าราคา/จำนวนจะเป็นเท่าไหร่
+    expect(29.9 * 3).not.toBe(89.7); // sanity: ยืนยันว่า float ดิบมีปัญหาจริงก่อน
+    const p = await makeProduct({ product_price: 29.9, product_stock_quantity: 10 });
+
+    const order = await orderService.createOrder(String(user._id), {
+      order_type: "takeaway",
+      items: [{ product_id: String(p._id), quantity: 3 }],
+    });
+
+    expect(order.subtotal).toBe(89.7);
+    expect(order.total_amount).toBe(89.7);
+
+    // ยืนยันค่าที่เก็บจริงใน DB เป็นสตางค์ integer เป๊ะ ทั้งระดับออเดอร์และระดับรายการ
+    const rawOrder = await orderModel.findById(order._id).lean<{ subtotal: number }>();
+    expect(rawOrder!.subtotal).toBe(8970);
+    expect(Number.isInteger(rawOrder!.subtotal)).toBe(true);
+
+    const rawItem = await orderItemModel
+      .findOne({ order_id: order._id })
+      .lean<{ total_price: number }>();
+    expect(rawItem!.total_price).toBe(8970); // ไม่ใช่ 89.69999999999999 แบบที่ float ดิบจะให้
+    expect(Number.isInteger(rawItem!.total_price)).toBe(true);
   });
 
   it("preorder product → reject (ต้องสั่งผ่านระบบ preorder)", async () => {

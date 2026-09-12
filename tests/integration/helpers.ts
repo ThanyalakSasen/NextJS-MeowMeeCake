@@ -111,6 +111,7 @@ export async function makeAddress(userId: string, over: Record<string, unknown> 
 }
 
 /** สร้าง preorder ตรง ๆ ผ่าน model (ไม่ผ่าน preorderService — ไม่ต้องมีรอบ/โควตาจริงสำหรับเทส payment) */
+/** subtotal/total_amount เป็นสตางค์ (integer) — ค่าเริ่มต้น 10000 = 100 บาท (BACKLOG §3.11) */
 export async function makePreorder(userId: string, over: Record<string, unknown> = {}) {
   seq++;
   return preorderModel.create({
@@ -118,8 +119,8 @@ export async function makePreorder(userId: string, over: Record<string, unknown>
     user_id: userId,
     round_id: oid(),
     order_type: "takeaway",
-    subtotal: 100,
-    total_amount: 100,
+    subtotal: 10000,
+    total_amount: 10000,
     ...over,
   });
 }
