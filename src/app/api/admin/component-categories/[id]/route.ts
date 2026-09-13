@@ -5,5 +5,6 @@ import { componentCategoryService } from "@/services/componentCategoryService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(componentCategoryService, {
   auth: { menu: "recipes" },
+  audit: { entity: "ComponentCategory" },
   validate: { update: componentCategoryUpdate },
 });

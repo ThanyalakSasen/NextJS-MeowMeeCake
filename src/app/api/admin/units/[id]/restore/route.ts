@@ -2,4 +2,7 @@
 import { restoreRoute } from "@/lib/crudRoutes";
 import { unitService } from "@/services/unitService";
 
-export const { POST } = restoreRoute(unitService, { auth: { menu: "products" } });
+export const { POST } = restoreRoute(unitService, {
+  auth: { menu: "products" },
+  audit: { entity: "Unit" },
+});
