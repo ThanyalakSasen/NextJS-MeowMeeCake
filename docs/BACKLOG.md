@@ -1,6 +1,6 @@
 # MeowMeeCake Backend — สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก
 
-> อัปเดตล่าสุด: 2026-09-12
+> อัปเดตล่าสุด: 2026-09-13
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend
 > สรุปงานที่ทำแล้ว §2 + §3 (พร้อม PR + ดัชนีเอกสาร) → [`hardening-summary.md`](hardening-summary.md)
 
@@ -16,6 +16,7 @@
 | **§2 บั๊ก / ความถูกต้องข้อมูล (2.1–2.11)** | ✅ **ปิดครบทั้ง 11 ข้อ** — PR [#3](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/3) **merged** เข้า `addModels` (merge commit `055d71b`) · issue [#4](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/issues/4) closed — เหลือแค่ขั้น deploy: `npm run sync-indexes` + ลบข้อมูลซ้ำกับ DB จริง (ดู §6) · สรุปรวม → [`data-integrity-fixes.md`](data-integrity-fixes.md) |
 | **§2b บั๊ก preorder payment/cancellation (2026-09-12)** | ✅ **แก้ครบ 4/4 + merge เข้า `addModels` แล้ว** (PR [#19](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/19)) — พบจาก code review เต็ม `src/services/`, มีข้อ 1 ที่เคยเป็นช่องโหว่ความปลอดภัย (จ่ายเงินแทนคนอื่นได้) |
 | **§2c บั๊กความทนทาน/correctness เล็กอื่น ๆ** | ✅ **แก้ครบ 3/4** (PR #22 — 2c.1/2c.2 · 2c.3 ยืนยัน exploit จริงแล้วแก้ 2026-09-12) · เหลือ 2c.4 เป็น tradeoff ที่ตั้งใจไว้แล้วจริง (ตรวจสอบซ้ำแล้ว) ไม่ใช่บั๊ก |
+| **§2d บั๊กใหม่พบระหว่างตรวจ §6 migration กับ DB จริง (2026-09-13)** | 🟡 **พบ 2 ข้อ — แก้แล้ว 1/2** — ✅ 2d.1 `product_type` "ready"→"inStore" migrate แล้ว (แก้ผลข้างเคียง `updateProduct` ล้างสต็อกทิ้งไปด้วย) · 🔴 2d.2 `unitModel` unique index ไม่ partial (บล็อก `sync-indexes`) ยังไม่แก้ (ตั้งใจปล่อยไว้ก่อน) |
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
 | อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — `upload.ts` เป็น interface แล้ว เลือก driver (`localDisk`/`s3`) ผ่าน env `UPLOAD_DRIVER` (ดู §3.13) |
 | Preorder (เฟส 5) | 🟡 service + API เสร็จ (ดู §8 · [preorder.md](preorder.md)) — เหลือผูก payment/production/promotion |
@@ -104,6 +105,19 @@
 | 2c.2 | ~~`voidTransaction` ย้อนรายการ `receive` ไม่มี floor guard (ค่าติดลบได้)~~ | `src/services/ingredientTransactionService.ts` เทียบ `createTransaction` | ✅ แก้แล้ว (2026-09-12) — เพิ่ม `filter.current_stock = { $gte: -inc }` เมื่อ `inc < 0` (ทิศทางย้อน `receive` เท่านั้น — ย้อน `use` คืนสต็อกไม่มีทางติดลบ ไม่ต้องกัน) ผ่าน `updateOne` atomic เดียวกับ `createTransaction` · ไม่พบ = `throw conflict(...)` แนะนำให้ทำ `adjust` แทน (เลือก throw ไม่ clamp เงียบ ๆ — ดูเหตุผลเต็มในเอกสาร) |
 | 2c.3 | ~~`voidTransaction` ไม่มี back-reference กลับไปที่ production item — เสี่ยง double-credit~~ | `src/services/ingredientTransactionService.ts` เทียบ `productionItemService.ts` (`consumeStock`/`reverseStock`) | ✅ แก้แล้ว (2026-09-12) — **ยืนยัน exploit จริงก่อนแก้:** (1) `consume-stock` หักสต็อก + สร้างธุรกรรม `"use"` (2) แอดมินไป void ธุรกรรมนั้นตรง ๆ ที่หน้า "รายการเคลื่อนไหวสต็อก" (`DELETE /admin/ingredient-transactions/[id]`) → เครดิตกลับครั้งที่ 1 แต่ `productionItem.stock_updated_at` ไม่ถูกเคลียร์ (3) กด "คืนสต็อก" ที่หน้ารายการผลิตอีกที (`reverse-stock`) → เครดิตกลับครั้งที่ 2 ซ้ำ — ใช้ปุ่มที่ถูกต้อง 2 ปุ่มคนละหน้าจริง ไม่ต้องอาศัยช่องโหว่ · **แก้:** เพิ่ม `production_item_id` (nullable) ใน `ingredientTransactionModel` + `productionItemService` ผูก back-ref ให้ทุกธุรกรรมที่สร้าง (consume/rollback/reverse) + `voidTransaction` ปฏิเสธ (409) ธุรกรรมที่มี back-ref นี้ ให้ไปยกเลิกผ่าน `reverse-stock` แทน · รายละเอียดเต็ม + เหตุผล → [`order-cart-inventory-robustness.md`](order-cart-inventory-robustness.md) §3 · เทส: `productionStockDoubleCredit.test.ts` (5 เคส) |
 | 2c.4 | ℹ️ (ตรวจสอบซ้ำแล้ว 2026-09-12 — ยืนยันว่าเป็น tradeoff ตั้งใจจริง ไม่ใช่บั๊กที่พลาด) `recordUsage` error ที่ไม่ใช่ 422 ถูก swallow เงียบ | `src/services/orderService.ts:360-371` | โค้ดมีคอมเมนต์ระบุไว้ตรง ๆ ว่าเป็น **การตัดสินใจตั้งใจ** ("error อื่น (transient) = best-effort ไม่ล้มออเดอร์ที่สร้างสำเร็จแล้ว") — ไม่ใช่บั๊กที่หลุดไปโดยไม่รู้ตัวเหมือนข้ออื่น · **ผลข้างเคียงที่ยอมรับไว้แล้ว:** ถ้า `recordUsage` fail แบบ transient (ไม่ใช่ 422 เต็มโควตา) ออเดอร์จะมี `discount_amount`/`promotion_id` ติดอยู่ แต่ไม่มี `PromotionUsages` row / ไม่นับ `used_count` — usage reporting เพี้ยนจากส่วนลดที่ให้จริง (และ `revokeUsage` ตอนยกเลิกจะหาไม่เจอ ไม่มีอะไรให้ revoke) · **สรุปการตรวจสอบซ้ำ:** ผลกระทบเป็นแค่ reporting คลาดเคลื่อน ไม่ใช่เงินหาย/สต็อกผิด — **ตัดสินใจไม่แก้เพิ่ม** (effort/ผลกระทบไม่คุ้ม) · รายละเอียด → [`order-cart-inventory-robustness.md`](order-cart-inventory-robustness.md) §4 · **แนะนำ (ถ้าจะแก้ต่อในอนาคต):** เพิ่ม retry สั้น ๆ ก่อน swallow |
+
+---
+
+## 2d. 🔴 บั๊กใหม่พบระหว่างตรวจ §6 migration checklist กับ DB จริง (2026-09-13)
+
+> พบขณะตรวจสอบว่า §6 migration checklist รันจริงกับ MongoDB Atlas (`bakery` DB) หรือยัง — ตรวจด้วย
+> read-only aggregate/index query ตรง ๆ (ไม่ใช่แค่เชื่อเอกสาร) แล้วรัน `npm run sync-indexes` จริงตาม
+> คำขอผู้ใช้ · ทั้ง 2 ข้อยังไม่แก้ — 2d.2 ตั้งใจปล่อยไว้ก่อนตามที่ผู้ใช้เลือก, 2d.1 ยังไม่ได้รันสคริปต์
+
+| # | เรื่อง | ที่ไฟล์ | รายละเอียด / สถานะ |
+|---|---|---|---|
+| 2d.1 | ~~`product_type` เก่า `"ready"` ยังไม่ได้แปลงเป็น `"inStore"` ใน DB จริง — ทำให้ `updateProduct` ล้างสต็อกทิ้งโดยไม่ตั้งใจ~~ | `src/services/productService.ts:429-478` (`updateProduct`) เทียบ `src/lib/productCode.ts` (`isStockProductType`) | ✅ **แก้แล้ว (2026-09-13)** — รัน migration ตรงกับ DB จริงแล้ว (`{ready:30}→{inStore:30}`, matched/modified 30, ไม่แตะ `preorder:10`) ผ่านสคริปต์ครั้งเดียว (`scripts/_tmp-migrate-product-type.ts`, ลบทิ้งหลังรันแล้ว ไม่ commit) · สาเหตุเดิม: `updateProduct` คำนวณ `nextType = input.product_type ?? existing.product_type` แล้วเช็ค `isStockProductType(nextType)` ซึ่ง return `false` ให้ `"ready"` (เช็คเทียบตรงกับ `"inStore"`/`"online"` เท่านั้น) → ตกไป branch `else` ที่ตั้ง `existing.product_stock_quantity = null` แบบไม่มีเงื่อนไขป้องกัน — ก่อนแก้ แอดมินแก้ชื่อ/ราคา/รูปสินค้าเฉย ๆ โดยไม่แตะ `product_type` เลย จะโดนล้างสต็อกเป็น `null` ทันที |
+| 2d.2 | `unitModel` — `unit_name`/`unit_abbr` unique index ไม่ partial (ไม่กรอง `deleted_at`) ต่างจาก attendances/reviews/permissions/payments ที่แก้ไปแล้ว | `src/models/unitModel.ts:4-13` | `npm run sync-indexes` (รันจริง 2026-09-13) สำเร็จ 37/38 model — เหลือ `Units` fail ด้วย `E11000 duplicate key ... unit_abbr: "box"` เพราะ index เป็น `unique: true` ธรรมดา ไม่มี `partialFilterExpression: { deleted_at: null }` แบบโมเดลอื่น · ตรวจ DB พบ 4 คู่ซ้ำ (`unit_abbr`: `box`/`doz`/`loaf`/`pack`) แต่ละคู่เป็นแถวเก่าที่ถูก soft-delete ไปแล้ว 1 แถว (2026-08-18) + แถวที่ใช้งานจริงอยู่ 1 แถว — index ธรรมดายึดทั้งแถวที่ลบไปแล้วด้วยเลยสร้างไม่ผ่าน · **`--fix` ของ `sync-indexes.ts` ไม่ครอบ `units`** (โค้ดจัดการแค่ `attendances`/`reviews` เท่านั้น) ต้องแก้เอง · **ทางแก้ที่เสนอไว้ (ยังไม่ได้ทำตามที่ผู้ใช้เลือก "ยังไม่แก้ตอนนี้"):** (a) hard-delete 4 แถวเก่าที่ soft-deleted แล้ว ให้ sync-indexes ผ่าน 38/38 หรือ (b) แก้ schema ให้ partial-unique เหมือนโมเดลอื่นก่อน ค่อยลบข้อมูลซ้ำ (ถูกต้องกว่า กันบั๊กเดิมเกิดซ้ำในอนาคตตอน soft-delete unit อื่น) |
 
 ---
 
@@ -278,12 +292,16 @@ enum = `["inStore", "online", "preorder"]` (เดิม `"ready"` → `"inStore
 ```
 [x] เปลี่ยน JWT_SECRET / SESSION_SECRET / NEXTAUTH_SECRET ใน .env.local (dev)  — 2026-09-02
 [ ] production: สุ่ม secret ใหม่อีกครั้ง ตั้งผ่าน env ของ host (อย่า commit)
-[ ] npm run seed
-[ ] npm run backfill:product-codes           # เติม product_id (pos-/pre-) ให้สินค้าเก่า
-[ ] MongoDB: อัปเดต product_type ของสินค้าเดิมจาก "ready" → "inStore" (ถ้ามีข้อมูลเก่า)
-[ ] MongoDB: ลบ payment "pending" ซ้ำ (order_id/preorder_id เดียวกันมีหลายใบ) ให้เหลือใบเดียว — §2.10
-[ ] npm run sync-indexes                      # ตรวจข้อมูลซ้ำ + syncIndexes ทุก model
-[ ] npm run sync-indexes -- --fix             # ถ้าขั้นบนรายงานว่ามี attendance/review ซ้ำ
+[x] npm run seed                              — ยืนยันแล้ว 2026-09-13: role owner/staff/customer + user ครบ
+                                                 (⚠️ DB มี role ขยะจาก manual test ปนอยู่เพียบ — ไม่ใช่ปัญหาระบบ แค่ควรเคลียร์)
+[x] npm run backfill:product-codes           — ยืนยันแล้ว 2026-09-13: products 40/40 มี product_id ครบ
+[x] MongoDB: อัปเดต product_type ของสินค้าเดิมจาก "ready" → "inStore"
+    — ✅ รันแล้ว 2026-09-13 ({ready:30}→{inStore:30}, matched/modified 30, preorder:10 ไม่แตะ) — ดู §2d.1
+[x] MongoDB: ลบ payment "pending" ซ้ำ           — ยืนยันแล้ว 2026-09-13: ไม่มีข้อมูลซ้ำอยู่แล้ว (0 กลุ่ม) — §2.10
+[x] npm run sync-indexes                      — รันจริงแล้ว 2026-09-13: สำเร็จ 37/38 model
+                                                 (permissions/attendances/reviews/payments/products ยืนยัน index ถูกต้องแล้ว)
+                                                 ❌ Units fail — ดู §2d.2 (ไม่ใช่ attendance/review ซ้ำ จึง --fix เดิมช่วยไม่ได้)
+[ ] npm run sync-indexes -- --fix             # ไม่จำเป็นแล้ว (attendance/review ไม่ซ้ำ) — Units ต้องแก้แยก ดู §2d.2
 ```
 
 **`npm run sync-indexes` ทำอะไรให้ครบในคำสั่งเดียว:**
@@ -296,6 +314,7 @@ enum = `["inStore", "online", "preorder"]` (เดิม `"ready"` → `"inStore
     — ถ้ามี pending ซ้ำอยู่ก่อน index นี้จะสร้าง **ไม่ผ่าน** (❌) ต้องลบซ้ำด้วยมือก่อน (`--fix` ยังไม่ครอบ payments)
   - สร้าง unique sparse ของ `products.product_id`
 - model ไหน sync ไม่ผ่าน (เช่นยังมีข้อมูลซ้ำ) จะขึ้น ❌ พร้อมเหตุผล
+- **`units` ไม่ครอบด้วย `--fix`** เหมือน attendances/reviews — ไม่ผ่านตอนนี้เพราะ index ไม่ partial ดู §2d.2
 
 ---
 
