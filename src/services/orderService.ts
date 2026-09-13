@@ -157,88 +157,118 @@ function randomOrderNo(now = new Date()): string {
   return `OP-${ymd}-${rand}`;
 }
 
-// ── helper: resolve รายการสั่งซื้อจาก input ดิบ (ใช้ตอนสั่งเองไม่ผ่านตะกร้า) ──
-async function resolveLine(input: OrderLineInput): Promise<PricedLine> {
-  const quantity = Number(input.quantity);
-  if (!Number.isInteger(quantity) || quantity < 1) {
-    throw badRequest("quantity ของแต่ละรายการต้องเป็นจำนวนเต็มตั้งแต่ 1");
-  }
-  assertObjectId(input.product_id, "product_id");
+// ── helper: resolve รายการสั่งซื้อทั้งชุดจาก input ดิบ (ใช้ตอนสั่งเองไม่ผ่านตะกร้า และตอน re-price
+// จากตะกร้า) — BACKLOG §3.18: เดิมเป็น resolveLine() ตัวเดียว วน await ทีละรายการ (ตะกร้า/ออเดอร์ N
+// ชิ้น = query แยก ~3N ครั้ง ทยอยทีละรายการ) เปลี่ยนมา batch query ด้วย `$in` ครั้งเดียวต่อ collection
+// (product/variant/option) ก่อน แล้ว join ใน memory ทีหลัง — ยังคง validate/error message เดิมทุก
+// ประการต่อรายการ มีต่างแค่ "ลำดับ" ของ error เมื่อมีหลายรายการผิดพร้อมกัน (เช็ค quantity/รูปแบบ id
+// ของทุกรายการก่อน แล้วค่อยเช็คสิ่งที่ต้องรู้ผลจาก DB ทีละรายการตามลำดับเดิม — ไม่มีเทสไหนอิงลำดับ error
+// ข้ามรายการอยู่แล้ว)
+async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
+  // 1) validate รูปแบบ (sync, ไม่ต้องรอ DB) ให้ครบทุกรายการก่อน
+  const quantities = inputs.map((input) => {
+    const quantity = Number(input.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      throw badRequest("quantity ของแต่ละรายการต้องเป็นจำนวนเต็มตั้งแต่ 1");
+    }
+    assertObjectId(input.product_id, "product_id");
+    if (input.variant_id) assertObjectId(input.variant_id, "variant_id");
+    for (const sel of input.selected_options ?? []) assertObjectId(sel.option_id, "option_id");
+    return quantity;
+  });
 
-  const product = await productModel
-    .findOne({ _id: input.product_id, deleted_at: null })
-    .lean<any>();
-  if (!product) throw notFound(`ไม่พบสินค้า ${input.product_id}`);
-  if (product.product_type === "preorder") {
-    throw badRequest(
-      `สินค้า "${product.product_name_th}" เป็นสินค้าพรีออเดอร์ ต้องสั่งผ่านระบบพรีออเดอร์ (Preorders) ไม่ใช่ออเดอร์ปกติ`
-    );
-  }
+  // 2) รวบรวม id ที่ต้องใช้ทั้งหมดจากทุกรายการ แล้ว query แบบ `$in` ครั้งเดียวต่อ collection
+  const productIds = [...new Set(inputs.map((i) => i.product_id))];
+  const variantIds = [...new Set(inputs.map((i) => i.variant_id).filter((v): v is string => !!v))];
+  const optionIds = [
+    ...new Set(inputs.flatMap((i) => (i.selected_options ?? []).map((s) => s.option_id))),
+  ];
 
-  let variant: any = null;
-  if (input.variant_id) {
-    assertObjectId(input.variant_id, "variant_id");
-    variant = await productVariantModel
-      .findOne({ _id: input.variant_id, product_id: input.product_id, deleted_at: null })
-      .lean<any>();
-    if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
-  }
+  const [products, variants, options] = await Promise.all([
+    productModel.find({ _id: { $in: productIds }, deleted_at: null }).lean<any[]>(),
+    variantIds.length
+      ? productVariantModel.find({ _id: { $in: variantIds }, deleted_at: null }).lean<any[]>()
+      : Promise.resolve([]),
+    optionIds.length
+      ? productOptionModel.find({ _id: { $in: optionIds }, deleted_at: null }).lean<any[]>()
+      : Promise.resolve([]),
+  ]);
+  const productById = new Map(products.map((p) => [String(p._id), p]));
+  const variantById = new Map(variants.map((v) => [String(v._id), v]));
+  const optionById = new Map(options.map((o) => [String(o._id), o]));
 
-  const selected = input.selected_options ?? [];
-  let options: PricedLine["selected_options"] = [];
-  if (selected.length) {
-    const ids = selected.map((s) => {
-      assertObjectId(s.option_id, "option_id");
-      return s.option_id;
-    });
-    const found = await productOptionModel
-      .find({ _id: { $in: ids }, product_id: input.product_id, deleted_at: null })
-      .lean<any[]>();
-    const byId = new Map(found.map((o) => [String(o._id), o]));
-    options = selected.map((sel) => {
-      const opt = byId.get(String(sel.option_id));
-      if (!opt) throw badRequest(`ไม่พบตัวเลือกเสริม ${sel.option_id} ของสินค้านี้`);
-      let text: string | null = null;
-      if (opt.is_text_input) {
-        text = (sel.text_value ?? "").trim() || null;
-        if (opt.is_required && !text) throw badRequest(`ตัวเลือก "${opt.option_name}" ต้องกรอกข้อความ`);
-        if (text && opt.max_text_length && text.length > opt.max_text_length) {
-          throw badRequest(`ข้อความของ "${opt.option_name}" ยาวเกิน ${opt.max_text_length} ตัวอักษร`);
+  // 3) join ใน memory ทีละรายการ ตามลำดับเดิม — logic การ validate/error message เดิมทุกจุด
+  return inputs.map((input, idx) => {
+    const quantity = quantities[idx];
+
+    const product = productById.get(String(input.product_id));
+    if (!product) throw notFound(`ไม่พบสินค้า ${input.product_id}`);
+    if (product.product_type === "preorder") {
+      throw badRequest(
+        `สินค้า "${product.product_name_th}" เป็นสินค้าพรีออเดอร์ ต้องสั่งผ่านระบบพรีออเดอร์ (Preorders) ไม่ใช่ออเดอร์ปกติ`
+      );
+    }
+
+    let variant: any = null;
+    if (input.variant_id) {
+      const v = variantById.get(String(input.variant_id));
+      // ต้องเป็น variant ของ product_id นี้จริง (query เดิมกรอง product_id ไว้ในตัว — ที่นี่ query
+      // ด้วย _id ล้วนแล้วเช็คทีหลัง เพราะ $in ข้าม product_id ของแต่ละรายการไม่ได้ในคำสั่งเดียว)
+      variant = v && String(v.product_id) === String(input.product_id) ? v : null;
+      if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
+    }
+
+    const selected = input.selected_options ?? [];
+    let resolvedOptions: PricedLine["selected_options"] = [];
+    if (selected.length) {
+      resolvedOptions = selected.map((sel) => {
+        const opt = optionById.get(String(sel.option_id));
+        const belongsToProduct = opt && String(opt.product_id) === String(input.product_id);
+        if (!belongsToProduct) throw badRequest(`ไม่พบตัวเลือกเสริม ${sel.option_id} ของสินค้านี้`);
+        let text: string | null = null;
+        if (opt.is_text_input) {
+          text = (sel.text_value ?? "").trim() || null;
+          if (opt.is_required && !text) throw badRequest(`ตัวเลือก "${opt.option_name}" ต้องกรอกข้อความ`);
+          if (text && opt.max_text_length && text.length > opt.max_text_length) {
+            throw badRequest(`ข้อความของ "${opt.option_name}" ยาวเกิน ${opt.max_text_length} ตัวอักษร`);
+          }
         }
-      }
-      return {
-        option_id: opt._id,
-        option_name: opt.option_name,
-        extra_price: opt.extra_price ?? 0,
-        text_value: text,
-      };
-    });
-  }
+        return {
+          option_id: opt._id,
+          option_name: opt.option_name,
+          extra_price: opt.extra_price ?? 0,
+          text_value: text,
+        };
+      });
+    }
 
-  // BACKLOG §3.11 เฟส 5b — basePrice/variant_price/extra_price ทั้งหมดมาจาก productModel/
-  // productVariantModel/productOptionModel ซึ่งเป็นสตางค์แล้วทั้งหมดตั้งแต่เฟส 5b (เดิมเฟส 1-4a เป็น
-  // บาท ต้องแปลงเป็นสตางค์ตอนจบด้วย toSatang() ตรงนี้ — "จุดข้ามโดเมน" นั้นไม่มีอยู่แล้วตอนนี้ เพราะ
-  // ทั้งฝั่งสินค้าและฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด unit_price ที่คำนวณตรงนี้จึงเป็นสตางค์อยู่แล้ว
-  // โดยอัตโนมัติ ไม่ต้องแปลงอะไรเพิ่ม)
-  const basePrice = product.sale_price ?? product.product_price;
-  const unit_price =
-    basePrice + (variant?.variant_price ?? 0) + options.reduce((s, o) => s + o.extra_price, 0);
+    // BACKLOG §3.11 เฟส 5b — basePrice/variant_price/extra_price ทั้งหมดมาจาก productModel/
+    // productVariantModel/productOptionModel ซึ่งเป็นสตางค์แล้วทั้งหมดตั้งแต่เฟส 5b (เดิมเฟส 1-4a เป็น
+    // บาท ต้องแปลงเป็นสตางค์ตอนจบด้วย toSatang() ตรงนี้ — "จุดข้ามโดเมน" นั้นไม่มีอยู่แล้วตอนนี้ เพราะ
+    // ทั้งฝั่งสินค้าและฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด unit_price ที่คำนวณตรงนี้จึงเป็นสตางค์อยู่แล้ว
+    // โดยอัตโนมัติ ไม่ต้องแปลงอะไรเพิ่ม)
+    const basePrice = product.sale_price ?? product.product_price;
+    const unit_price =
+      basePrice +
+      (variant?.variant_price ?? 0) +
+      resolvedOptions.reduce((s, o) => s + o.extra_price, 0);
 
-  return {
-    product_id: product._id,
-    variant_id: variant?._id ?? null,
-    product_snapshot: {
-      product_name_th: product.product_name_th,
-      product_name_eng: product.product_name_eng,
-      variant_name: variant?.variant_name ?? null,
-    },
-    // extra_price เป็นสตางค์อยู่แล้ว (มาจาก productOptionModel) เก็บลง orderItem.selected_options ตรง ๆ
-    selected_options: options.map((o) => ({ ...o })),
-    special_request: input.special_request?.trim() || null,
-    quantity,
-    unit_price,
-    cost_per_unit: null,
-  };
+    return {
+      product_id: product._id,
+      variant_id: variant?._id ?? null,
+      product_snapshot: {
+        product_name_th: product.product_name_th,
+        product_name_eng: product.product_name_eng,
+        variant_name: variant?.variant_name ?? null,
+      },
+      // extra_price เป็นสตางค์อยู่แล้ว (มาจาก productOptionModel) เก็บลง orderItem.selected_options ตรง ๆ
+      selected_options: resolvedOptions.map((o) => ({ ...o })),
+      special_request: input.special_request?.trim() || null,
+      quantity,
+      unit_price,
+      cost_per_unit: null,
+    };
+  });
 }
 
 // ── helper: บันทึกออเดอร์ + รายการ + ตัดสต็อก (best-effort) ──
@@ -435,27 +465,26 @@ export async function createOrderFromCart(
   }
 
   // re-price ทุกบรรทัดจากราคาปัจจุบัน — ไม่เชื่อ price_snapshot ที่แช่ไว้ตอนหยิบใส่ตะกร้า
-  // ใช้ resolveLine ตัวเดียวกับ path สั่งเอง (POS): ได้ราคา/ชื่อสินค้าสด + re-validate ว่าสินค้า/variant/option ยังมีอยู่
+  // ใช้ resolveLines() ตัวเดียวกับ path สั่งเอง (POS): ได้ราคา/ชื่อสินค้าสด + re-validate ว่าสินค้า/
+  // variant/option ยังมีอยู่ — batch query ครั้งเดียวทั้งตะกร้า ไม่ใช่ทีละรายการ (BACKLOG §3.18)
   const notes = input.item_notes ?? {};
-  const lines: PricedLine[] = [];
-  for (const it of detail.items as any[]) {
+  const lineInputs: OrderLineInput[] = (detail.items as any[]).map((it) => {
     const product = it.product_id ?? {};
     const variant = it.variant_id ?? null;
-    lines.push(
-      await resolveLine({
-        product_id: String(product._id ?? it.product_id),
-        variant_id: variant?._id ? String(variant._id) : null,
-        selected_options: (it.selected_options ?? [])
-          .filter((o: any) => o?.option_id != null)
-          .map((o: any) => ({
-            option_id: String(o.option_id),
-            text_value: o.text_value ?? null,
-          })),
-        special_request: notes[String(it._id)] ?? null,
-        quantity: it.quantity,
-      })
-    );
-  }
+    return {
+      product_id: String(product._id ?? it.product_id),
+      variant_id: variant?._id ? String(variant._id) : null,
+      selected_options: (it.selected_options ?? [])
+        .filter((o: any) => o?.option_id != null)
+        .map((o: any) => ({
+          option_id: String(o.option_id),
+          text_value: o.text_value ?? null,
+        })),
+      special_request: notes[String(it._id)] ?? null,
+      quantity: it.quantity,
+    };
+  });
+  const lines = await resolveLines(lineInputs);
 
   const order = await persistOrder(userId, lines, input);
   // เคลียร์ตะกร้า — best-effort เหมือน notify ด้านบน: ออเดอร์ commit สำเร็จไปแล้ว (persistOrder
@@ -475,8 +504,7 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
   if (!Array.isArray(input.items) || input.items.length === 0) {
     throw badRequest("ต้องระบุ items อย่างน้อย 1 รายการ");
   }
-  const lines: PricedLine[] = [];
-  for (const raw of input.items) lines.push(await resolveLine(raw));
+  const lines = await resolveLines(input.items);
 
   return persistOrder(userId, lines, input);
 }
