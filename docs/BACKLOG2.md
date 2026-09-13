@@ -1,12 +1,12 @@
 # MeowMeeCake Backend — BACKLOG 2: บั๊ก/ความเสี่ยงชุดใหม่
 
-> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-13 (แก้ §1 + §2 ครบแล้ว)
+> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-13 (§1/§2/§4 แก้ครบแล้ว — เหลือ §5 เป็นความเสี่ยงเชิงออกแบบ
+> ที่ยังไม่ต้องแก้เพราะยังไม่มีจุดพังจริง)
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
-> **สถานะ: §1 + §2 แก้ครบแล้ว** (2026-09-13) — ตรวจ + บันทึกปัญหาไว้ก่อน แล้วผู้ใช้สั่งให้แก้ต่อทันที
-> เหมือนที่ [`BACKLOG.md`](BACKLOG.md) §2d ผ่านมา — verify ผ่านหมดหลังแก้: `typecheck` /
-> `typecheck:test` / `lint` (0 error) / `test` (171) / `test:integration` (132) / `build`
+> **สถานะ: §1 + §2 + §4 แก้ครบแล้ว** (2026-09-13) — verify ผ่านหมดหลังแก้ทุกรอบ: `typecheck` /
+> `typecheck:test` / `lint` (0 error) / `test` (171) / `test:integration` (138) / `build`
 
 ## สถานะโดยรวม
 
@@ -16,6 +16,8 @@
 | **§2 N+1 query ซ้ำ pattern เดิมจาก §3.18 (checkout)** | ✅ **แก้ครบ 2/2** (2026-09-13) — เพิ่ม `getOrderableRoundItems()`/`addItems()` (พหูพจน์) แบบ batch เหมือน `orderService.resolveLines()` แล้วเปลี่ยน `createPreorder()`/`createProductionOrder()` มาเรียกแทน loop เดิม |
 | ownership/IDOR ของ shop routes (`addresses`, `cart/items`, `reviews`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — ทุกจุด scope ด้วย `user_id` ที่ service layer ถูกต้อง (เทียบกับ `2b.1` ที่เคยพลาด) |
 | duplicate-key error handling ทั่วไป (`crudService`/`apiResponse`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — `toErrorResponse()` แปลง Mongo `11000` เป็น response ที่มีโครงสร้างอยู่แล้ว ไม่ใช่ 500 ดิบ |
+| **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | ✅ **แก้แล้ว** (2026-09-13) — เพิ่ม `preorderService.updateDelivery()` + `PATCH /api/admin/preorders/[id]/delivery` คู่กับของ order + เทส 6 เคสใหม่ |
+| **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | 🟡 **ความเสี่ยงเชิงออกแบบ ไม่ใช่บั๊กที่เกิดจริง** — ตรวจ 14 service ที่ใช้จริงครบแล้ว ทุกตัวระบุ `createFields` ถูกต้อง |
 
 ---
 
@@ -114,11 +116,86 @@ model ในครั้งเดียว ไม่ต้อง cleanup ข้�
 
 ---
 
-## 4. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
+## 4. ✅ พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งได้เลย — คู่ขนานกับ `orderService.updateDelivery` ที่ไม่เคย fix ตาม (พบ + แก้แล้ว 2026-09-13)
 
-รอบนี้เน้น 2 pattern ที่มีประวัติเป็นบั๊กมาก่อนแล้วไล่หาที่ซ้ำ (§1/§2) เป็นหลัก ยังไม่ได้ทำ:
-- ไล่เทียบ `preorderService`/`productionOrderService`/`preorderRoundService` กับ `orderService` ทีละ
-  ฟังก์ชันแบบเดียวกับที่ §2b เคยทำ (เจอ 4 บั๊ก) — อาจมี divergence อื่นที่ยังไม่เจอ
+> พบจากการไล่เทียบฟังก์ชัน `orderService.ts` กับ `preorderService.ts` ทีละตัวแบบเดียวกับที่ §2b เคยทำ
+> (เจอ 4 บั๊กตอนนั้น) — รอบนี้ไล่เทียบ export ทั้งหมดของทั้งสองไฟล์ พบว่า `orderService` มีฟังก์ชัน
+> `updateDelivery()` ที่ `preorderService` **ไม่มีเลย**
+
+**ยืนยันด้วยการอ่านโค้ดจริงครบทุกชั้น (ไม่ใช่แค่เดา):**
+- `preorderModel.ts` มีฟิลด์ `delivery_status` (enum `pending/shipping/delivered/failed`),
+  `shipped_at`, `delivered_at`, `tracking_no`, `delivered_note` — **ครบทุกฟิลด์เหมือน `orderModel.ts`
+  เป๊ะ** — แปลว่า schema ถูกออกแบบมาให้รองรับการติดตามสถานะจัดส่งของพรีออเดอร์ตั้งแต่แรกจริง ๆ
+- `preorderService.ts` **ไม่มีฟังก์ชัน `updateDelivery()`** เทียบเท่า `orderService.updateDelivery()`
+  เลย (เช็ค export ทั้งไฟล์แล้ว) — `updatePreorderStatus()` แก้ได้แค่ `order_status` (state machine
+  pending→confirmed→...) เท่านั้น ไม่แตะฟิลด์ delivery ใด ๆ ทั้งสิ้น
+- `src/app/api/admin/preorders/[id]/status/route.ts` (route เดียวที่แก้พรีออเดอร์ได้นอกจาก
+  create/delete) อ่านแค่ `body.order_status` + `body.cancelled_reason` เท่านั้น ไม่มี body field
+  อื่นถูกใช้เลย
+- **ไม่มี** `src/app/api/admin/preorders/[id]/delivery/route.ts` ทั้งที่ order มี
+  `src/app/api/admin/orders/[id]/delivery/route.ts` (`PATCH`, body:
+  `delivery_status?/tracking_no?/shipped_at?/delivered_at?/delivered_note?`, ผ่าน
+  `updateDeliveryBody` zod schema) คู่กันอยู่
+
+**ผลกระทบ:** พรีออเดอร์ที่ `order_type: "delivery"` — เมื่อร้านแพ็คของแล้วจะจัดส่ง **ไม่มีทางบันทึกเลขพัสดุ
+(`tracking_no`) หรือเปลี่ยน `delivery_status` เป็น `"shipping"`/`"delivered"` ได้ผ่าน API เลยแม้แต่ทางเดียว**
+— ฟิลด์เหล่านี้จะค้างอยู่ที่ค่า default (`delivery_status: "pending"`, ที่เหลือเป็น `null`) ตลอดไปไม่ว่า
+พรีออเดอร์จะถูกจัดส่งจริงไปแล้วกี่ใบก็ตาม (ต่างจากออเดอร์ปกติที่แอดมินอัปเดตได้ผ่าน
+`PATCH /api/admin/orders/[id]/delivery`)
+
+**วิธีแก้ที่ใช้จริง (2026-09-13):** เพิ่ม `preorderService.updateDelivery()` ก็อปโครงจาก
+`orderService.updateDelivery()` เป๊ะ (เช็ค `order_type === "delivery"`, auto-set `shipped_at`/
+`delivered_at` เมื่อเปลี่ยนสถานะและยังไม่เคยตั้งมาก่อน) + **reuse** `updateDeliveryBody` จาก
+`schemas/order.ts` ตรง ๆ (shape generic เหมือนกันเป๊ะ ไม่ต้องสร้างซ้ำ) +
+`PATCH /api/admin/preorders/[id]/delivery` route คู่กับของ order (`withPermission("preorder",
+"update")` + audit log) · เทสใหม่ `tests/integration/preorderDelivery.test.ts` (6 เคส: auto-set
+shipped_at/delivered_at, ไม่ทับ shipped_at เดิม, reject order_type=takeaway, reject ไม่พบพรีออเดอร์,
+persist ลง DB จริง) · ยืนยันด้วย `typecheck`/`typecheck:test`/`lint`(0 error)/`test`(171)/
+`test:integration`(138, +6 เคสใหม่)/`build`(route `/api/admin/preorders/[id]/delivery` ขึ้นจริง)
+ผ่านหมด
+
+---
+
+## 5. 🟡 ความเสี่ยงเชิงออกแบบใน `crudService.ts` — ยังไม่ถูกกระตุ้นจริง แต่เป็นกับดักไว้รอ (พบ 2026-09-13)
+
+> พบระหว่างตรวจว่า mass-assignment ผ่าน crud-factory (`createCrudService`) ปลอดภัยดีไหม —
+> **ตรวจ 14 service ที่ใช้ `createCrudService` ทุกตัวแล้ว ปลอดภัยหมด** (ทุกตัวระบุ `createFields`
+> ครบ ซึ่ง `updateFields` จะ fallback ไปใช้ค่านี้อัตโนมัติถ้าไม่ได้ระบุแยก) — **แต่ตัว library เองมี
+> ดีไซน์ที่เป็นกับดัก** ไว้รอ service ในอนาคตที่ลืมระบุ
+
+`src/lib/crudService.ts` — `create()`/`update()`:
+```ts
+const payload = createFields ? pick(input, createFields) : input;   // create()
+const payload = updateFields ? pick(input, updateFields) : input;   // update()
+```
+ถ้า service ไหน**ไม่ระบุ** `createFields`/`updateFields` ตอนเรียก `createCrudService(model, opts)` —
+`payload` จะเป็น **request body ดิบทั้งก้อนไม่มี whitelist เลย** ไปเขียนลง DB ตรง ๆ ผ่าน `$set` (`update`)
+หรือ `model.create()` (`create`) — client ส่งฟิลด์อะไรมาก็ตั้งได้หมด รวมถึงฟิลด์อ่อนไหวที่ไม่ควรแตะตรง ๆ
+เช่น `deleted_at`, `used_count`, `current_stock` (ถ้า model มีฟิลด์แบบนี้)
+
+**สถานะปัจจุบัน (ตรวจแล้ว 2026-09-13):** ทั้ง 14 service (`banner`/`componentCategory`/`component`/
+`deliveryZone`/`expense`/`ingredientCategory`/`ingredient`/`notification`/`productCategory`/
+`productOption`/`productVariant`/`recipe`/`role`/`sentiment (aspect+semanticTerm)`) ระบุ `createFields`
+ครบทุกตัว — spot-check `ingredientService.ts` เจอว่าตั้งใจแยก `createFields`/`updateFields` สองชุดถูกต้อง
+ด้วยซ้ำ (`current_stock` อยู่ใน `createFields` เท่านั้น ไม่อยู่ใน `updateFields` — มีคอมเมนต์กำกับไว้ตรงว่า
+"current_stock ตั้งได้แค่ตอนสร้าง (ยอดยกมา) หลังจากนั้นต้องผ่าน transaction") **ไม่มีบั๊กที่เกิดขึ้นจริงตอนนี้**
+
+**ทำไมยังบันทึกไว้:** เป็นความเสี่ยงเชิง "ออกแบบ" (footgun) ที่ต้องอาศัยวินัยของทุก service ที่เรียกใช้
+`createCrudService` ในอนาคตให้จำระบุ `createFields` เสมอ ไม่มี safety net ระดับ library กันไว้เลยถ้าลืม —
+**ข้อเสนอ (ยังไม่ได้ทำ, ไม่เร่งด่วนเพราะยังไม่มีจุดพัง):** เปลี่ยน `createFields`/`updateFields` ใน
+`CrudOptions` จาก optional (`?:`) เป็น required ใน `CrudOptions` (บังคับด้วย TypeScript ให้ทุก service
+ต้องระบุ ป้องกัน silent gap ในอนาคตแทนที่จะพึ่งวินัยคนเขียนโค้ดอย่างเดียว)
+
+---
+
+## 6. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
+
+- ไล่เทียบ `productionOrderService`/`preorderRoundService` กับฟังก์ชันคู่ขนานอื่น (ไม่มี "ต้นแบบ" ที่
+  ชัดเจนเท่า order/preorder จึงยังไม่ได้ทำแบบเดียวกับ §4)
 - ตรวจ race condition อื่นนอกจาก quota/usage ที่มีการ์ดแล้ว (เช่น stock ระดับ variant)
 - ตรวจ validation coverage ของ `/api/shop/preorders` (POST) ที่ [BACKLOG.md §3.8](BACKLOG.md) บันทึกไว้
   แล้วว่ายังไม่ zod-adopt เต็ม — เป็น gap ที่รู้ตัวอยู่แล้ว ไม่ใช่ของใหม่
+- ตรวจ path traversal / file validation ของ `src/lib/upload.ts` ให้ละเอียดกว่าที่เอกสารเดิมบันทึกไว้
+- ตรวจ rate-limit coverage ของ endpoint สาธารณะอื่นนอกจาก auth (เช่น `/api/shop/promotions/validate`,
+  `/api/shop/orders/delivery-quote`) — ตอนนี้ตั้งใจครอบแค่ 4 endpoint ตาม [BACKLOG.md §3.2](BACKLOG.md)
+  ยังไม่ได้ประเมินว่าควรขยายไหม
