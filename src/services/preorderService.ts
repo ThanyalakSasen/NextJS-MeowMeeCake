@@ -25,6 +25,10 @@ import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
+import type { z } from "zod";
+// BACKLOG2 §4 — schema เดียวกับ orderService.updateDelivery() ทุกฟิลด์ (generic ไม่มีอะไรเฉพาะ order)
+// ใช้ร่วมกันได้เลย ไม่ต้องสร้างซ้ำ
+import type { updateDeliveryBody } from "../schemas/order";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -490,6 +494,35 @@ export async function setPaymentStatus(
     await preorderModel.updateOne({ _id: preorderId }, { $set: { order_status: "confirmed" } });
   }
   return presentPreorder(preorder);
+}
+
+// BACKLOG2 §4 — คู่ขนานกับ orderService.updateDelivery() เป๊ะ (เดิมพรีออเดอร์ไม่มีฟังก์ชันนี้เลย
+// ทั้งที่ preorderModel มีฟิลด์ delivery_status/shipped_at/delivered_at/tracking_no/delivered_note
+// ครบเหมือน orderModel ทุกประการ — แอดมินเลยไม่มีทางบันทึกว่าพรีออเดอร์ถูกจัดส่งไปแล้วเลย)
+type UpdateDeliveryInput = z.infer<typeof updateDeliveryBody>;
+
+export async function updateDelivery(id: string, input: UpdateDeliveryInput) {
+  await dbConnect();
+  assertObjectId(id);
+
+  const preorder = await preorderModel.findOne({ _id: id, deleted_at: null });
+  if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
+  if (preorder.order_type !== "delivery") {
+    throw badRequest("พรีออเดอร์นี้ไม่ใช่ประเภทจัดส่ง (delivery)");
+  }
+
+  const payload: Record<string, any> = { ...input };
+  if (payload.delivery_status === "shipping" && !preorder.shipped_at && !payload.shipped_at) {
+    payload.shipped_at = new Date();
+  }
+  if (payload.delivery_status === "delivered" && !payload.delivered_at) {
+    payload.delivered_at = new Date();
+  }
+
+  const updated = await preorderModel
+    .findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true })
+    .lean<any>();
+  return updated ? presentPreorder(updated) : updated;
 }
 
 // ── DELETE (soft) ───────────────────────────────────────────

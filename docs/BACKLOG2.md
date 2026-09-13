@@ -1,11 +1,12 @@
 # MeowMeeCake Backend — BACKLOG 2: บั๊ก/ความเสี่ยงชุดใหม่
 
-> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-13 (รอบ 2 — เพิ่ม §4/§5, §1+§2 แก้ครบตั้งแต่รอบแรกแล้ว)
+> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-13 (§1/§2/§4 แก้ครบแล้ว — เหลือ §5 เป็นความเสี่ยงเชิงออกแบบ
+> ที่ยังไม่ต้องแก้เพราะยังไม่มีจุดพังจริง)
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
-> **สถานะ: §1 + §2 แก้ครบแล้ว** (2026-09-13) · **§4 + §5 เป็นของใหม่รอบสอง (2026-09-13) — พบแล้ว
-> ยังไม่แก้** (ขั้นตอน "หา" ตามที่ผู้ใช้ขอ — รอตัดสินใจว่าจะแก้ข้อไหนก่อนเหมือนรอบแรก)
+> **สถานะ: §1 + §2 + §4 แก้ครบแล้ว** (2026-09-13) — verify ผ่านหมดหลังแก้ทุกรอบ: `typecheck` /
+> `typecheck:test` / `lint` (0 error) / `test` (171) / `test:integration` (138) / `build`
 
 ## สถานะโดยรวม
 
@@ -15,7 +16,7 @@
 | **§2 N+1 query ซ้ำ pattern เดิมจาก §3.18 (checkout)** | ✅ **แก้ครบ 2/2** (2026-09-13) — เพิ่ม `getOrderableRoundItems()`/`addItems()` (พหูพจน์) แบบ batch เหมือน `orderService.resolveLines()` แล้วเปลี่ยน `createPreorder()`/`createProductionOrder()` มาเรียกแทน loop เดิม |
 | ownership/IDOR ของ shop routes (`addresses`, `cart/items`, `reviews`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — ทุกจุด scope ด้วย `user_id` ที่ service layer ถูกต้อง (เทียบกับ `2b.1` ที่เคยพลาด) |
 | duplicate-key error handling ทั่วไป (`crudService`/`apiResponse`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — `toErrorResponse()` แปลง Mongo `11000` เป็น response ที่มีโครงสร้างอยู่แล้ว ไม่ใช่ 500 ดิบ |
-| **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | 🔴 **พบแล้ว ยังไม่แก้** (2026-09-13) — ยืนยันครบทุกชั้น (model มีฟิลด์ครบ, service ไม่มีฟังก์ชัน, route ไม่รับ body field นี้เลย) |
+| **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | ✅ **แก้แล้ว** (2026-09-13) — เพิ่ม `preorderService.updateDelivery()` + `PATCH /api/admin/preorders/[id]/delivery` คู่กับของ order + เทส 6 เคสใหม่ |
 | **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | 🟡 **ความเสี่ยงเชิงออกแบบ ไม่ใช่บั๊กที่เกิดจริง** — ตรวจ 14 service ที่ใช้จริงครบแล้ว ทุกตัวระบุ `createFields` ถูกต้อง |
 
 ---
@@ -115,7 +116,7 @@ model ในครั้งเดียว ไม่ต้อง cleanup ข้�
 
 ---
 
-## 4. 🔴 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งได้เลย — คู่ขนานกับ `orderService.updateDelivery` ที่ไม่เคย fix ตาม (พบ 2026-09-13, ยังไม่แก้)
+## 4. ✅ พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งได้เลย — คู่ขนานกับ `orderService.updateDelivery` ที่ไม่เคย fix ตาม (พบ + แก้แล้ว 2026-09-13)
 
 > พบจากการไล่เทียบฟังก์ชัน `orderService.ts` กับ `preorderService.ts` ทีละตัวแบบเดียวกับที่ §2b เคยทำ
 > (เจอ 4 บั๊กตอนนั้น) — รอบนี้ไล่เทียบ export ทั้งหมดของทั้งสองไฟล์ พบว่า `orderService` มีฟังก์ชัน
@@ -142,11 +143,16 @@ model ในครั้งเดียว ไม่ต้อง cleanup ข้�
 พรีออเดอร์จะถูกจัดส่งจริงไปแล้วกี่ใบก็ตาม (ต่างจากออเดอร์ปกติที่แอดมินอัปเดตได้ผ่าน
 `PATCH /api/admin/orders/[id]/delivery`)
 
-**วิธีแก้ที่แนะนำ (ยังไม่ได้ทำ):** เพิ่ม `preorderService.updateDelivery()` (ก็อปโครงจาก
-`orderService.updateDelivery()` เป๊ะ — เช็ค `order_type === "delivery"`, auto-set `shipped_at`/
-`delivered_at` เมื่อเปลี่ยนสถานะ) + schema `updateDeliveryBody` ใน `schemas/preorderRound.ts` หรือไฟล์ใหม่
-(reuse `schemas/order.ts`'s `updateDeliveryBody` ได้เลยถ้า shape เหมือนกันเป๊ะ) +
-`POST /api/admin/preorders/[id]/delivery` route คู่กับของ order
+**วิธีแก้ที่ใช้จริง (2026-09-13):** เพิ่ม `preorderService.updateDelivery()` ก็อปโครงจาก
+`orderService.updateDelivery()` เป๊ะ (เช็ค `order_type === "delivery"`, auto-set `shipped_at`/
+`delivered_at` เมื่อเปลี่ยนสถานะและยังไม่เคยตั้งมาก่อน) + **reuse** `updateDeliveryBody` จาก
+`schemas/order.ts` ตรง ๆ (shape generic เหมือนกันเป๊ะ ไม่ต้องสร้างซ้ำ) +
+`PATCH /api/admin/preorders/[id]/delivery` route คู่กับของ order (`withPermission("preorder",
+"update")` + audit log) · เทสใหม่ `tests/integration/preorderDelivery.test.ts` (6 เคส: auto-set
+shipped_at/delivered_at, ไม่ทับ shipped_at เดิม, reject order_type=takeaway, reject ไม่พบพรีออเดอร์,
+persist ลง DB จริง) · ยืนยันด้วย `typecheck`/`typecheck:test`/`lint`(0 error)/`test`(171)/
+`test:integration`(138, +6 เคสใหม่)/`build`(route `/api/admin/preorders/[id]/delivery` ขึ้นจริง)
+ผ่านหมด
 
 ---
 
