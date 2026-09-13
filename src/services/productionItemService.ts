@@ -106,6 +106,69 @@ export async function addItem(orderId: string, input: AddItemInput) {
   return doc.toObject();
 }
 
+/**
+ * batch version ของ addItem() — ใช้ตอนสร้างใบสั่งผลิตพร้อมหลายรายการทีเดียว (`createProductionOrder`)
+ * BACKLOG2 §2.2 — เดิม `createProductionOrder` วน `await addItem()` ทีละรายการ (แต่ละครั้ง fetch
+ * order ซ้ำ + query product/recipe แยก = ~4N query ต่อใบสั่งผลิต N รายการ) เปลี่ยนมา batch fetch
+ * order ครั้งเดียว + product/recipe ด้วย `$in` ครั้งเดียวต่อ collection แล้ว `insertMany` รวด — ไม่
+ * แตะ `addItem()` (เอกพจน์) เพราะยังใช้เดี่ยว ๆ จริงที่ `POST /admin/production-orders/[id]/items`
+ * (เพิ่มรายการทีละรายการเข้าใบสั่งผลิตที่มีอยู่แล้ว — ไม่ใช่ N+1 เพราะเป็นคนละ request ต่อครั้งอยู่แล้ว)
+ * validate/error message เดิมทุกจุดต่อรายการ ต่างแค่ "ลำดับ" ของ error เมื่อหลายรายการผิดพร้อมกัน
+ * (เหมือนที่ยอมรับไว้แล้วใน `orderService.resolveLines()` §3.18 และ `preorderRoundService.
+ * getOrderableRoundItems()` §2.1)
+ */
+export async function addItems(orderId: string, inputs: AddItemInput[]) {
+  await dbConnect();
+  assertObjectId(orderId, "production_order_id");
+  if (!inputs.length) return [];
+
+  const order = await productionOrderModel
+    .findOne({ _id: orderId, deleted_at: null })
+    .lean<any>();
+  if (!order) throw notFound("ไม่พบใบสั่งผลิตที่ระบุ");
+  if (!["planned", "in_progress"].includes(order.production_status)) {
+    throw conflict("เพิ่มรายการได้เฉพาะใบสั่งผลิตที่ยัง planned หรือ in_progress");
+  }
+
+  for (const input of inputs) {
+    if (!input.product_id || !input.recipe_id) throw badRequest("ต้องระบุ product_id และ recipe_id");
+    if (input.planned_qty == null || Number(input.planned_qty) <= 0) {
+      throw badRequest("planned_qty ต้องมากกว่า 0");
+    }
+    assertObjectId(input.product_id, "product_id");
+    assertObjectId(input.recipe_id, "recipe_id");
+  }
+
+  const productIds = [...new Set(inputs.map((i) => String(i.product_id)))];
+  const recipeIds = [...new Set(inputs.map((i) => String(i.recipe_id)))];
+  const [products, recipes] = await Promise.all([
+    productModel.find({ _id: { $in: productIds }, deleted_at: null }).select("_id").lean<any[]>(),
+    recipeModel.find({ _id: { $in: recipeIds }, deleted_at: null }).lean<any[]>(),
+  ]);
+  const productIdSet = new Set(products.map((p) => String(p._id)));
+  const recipeById = new Map(recipes.map((r) => [String(r._id), r]));
+
+  const docs = inputs.map((input) => {
+    if (!productIdSet.has(String(input.product_id))) throw notFound("ไม่พบสินค้าที่ระบุ");
+    const recipe = recipeById.get(String(input.recipe_id));
+    if (!recipe) throw notFound("ไม่พบสูตรการผลิตที่ระบุ");
+    if (String(recipe.product_id) !== String(input.product_id)) {
+      throw badRequest("สูตรที่เลือกไม่ตรงกับสินค้าที่จะผลิต");
+    }
+    return {
+      production_order_id: orderId,
+      product_id: input.product_id,
+      recipe_id: input.recipe_id,
+      round_item_id: input.round_item_id ?? null,
+      planned_qty: Number(input.planned_qty),
+      notes: input.notes ?? null,
+    };
+  });
+
+  const created = await productionItemModel.insertMany(docs);
+  return created.map((doc) => doc.toObject());
+}
+
 export async function listByOrder(orderId: string) {
   await dbConnect();
   assertObjectId(orderId, "production_order_id");

@@ -2,4 +2,7 @@
 import { restoreRoute } from "@/lib/crudRoutes";
 import { componentCategoryService } from "@/services/componentCategoryService";
 
-export const { POST } = restoreRoute(componentCategoryService, { auth: { menu: "recipes" } });
+export const { POST } = restoreRoute(componentCategoryService, {
+  auth: { menu: "recipes" },
+  audit: { entity: "ComponentCategory" },
+});

@@ -475,31 +475,49 @@ export async function assertRoundOrderable(roundId: string) {
 }
 
 /**
- * ดึง round item + product สำหรับคิดราคาตอนสร้างพรีออเดอร์
+ * ดึง round item + product สำหรับคิดราคาตอนสร้างพรีออเดอร์ (batch)
  * BACKLOG §3.11 เฟส 5b — ฟังก์ชันนี้เป็น "internal only" ไม่เคย expose ผ่าน API ตรง ๆ (ใช้แค่ภายใน
  * preorderService ตอนสร้างพรีออเดอร์) `unit_price` ที่คืนจึงตั้งใจเป็น**สตางค์**ตรง ๆ (ไม่ผ่าน
  * presentRoundItem()) เพราะ item.price_override/product.sale_price/product.product_price เป็น
  * สตางค์ทั้งหมดแล้ว — ผู้เรียก (preorderService) ก็ไม่ต้องแปลงอะไรเพิ่มเพราะรับค่ามาใส่
  * preorderItem.unit_price ตรง ๆ (satang เหมือนกัน) — เหมือน recipeService.getUnitCostByProduct()
  * ในเฟส 4 เป๊ะ
+ *
+ * BACKLOG2 §2 — เดิมชื่อ getOrderableRoundItem() (เอกพจน์) รับ roundItemId เดียว ให้
+ * createPreorder() เรียกวน await ทีละรายการ (N รายการ = query ~2N ครั้งทยอย) เปลี่ยนเป็น batch
+ * ด้วย $in ครั้งเดียวต่อ collection (preorderRoundItem/product) แล้ว join ใน memory เหมือน
+ * orderService.resolveLines() ที่แก้ไว้แล้วใน §3.18 — คืนผลลัพธ์เรียงตามลำดับ `roundItemIds` เดิม
+ * เป๊ะ (รายการไหนไม่พบ/ไม่ active จะ throw ตอน join ตามลำดับนั้น เหมือนพฤติกรรมเดิมทุกประการ)
  */
-export async function getOrderableRoundItem(roundItemId: string, roundId: string) {
+export async function getOrderableRoundItems(roundItemIds: string[], roundId: string) {
   await dbConnect();
-  assertObjectId(roundItemId, "round_item_id");
-  const item = await preorderRoundItemModel
-    .findOne({ _id: roundItemId, round_id: roundId, deleted_at: null })
-    .lean<any>();
-  if (!item) throw badRequest("ไม่พบรายการสินค้านี้ในรอบที่เลือก");
-  if (!item.is_active) throw conflict("รายการสินค้านี้ปิดการขายในรอบนี้แล้ว");
+  roundItemIds.forEach((id) => assertObjectId(id, "round_item_id"));
 
-  const product = await productModel
-    .findOne({ _id: item.product_id, deleted_at: null })
-    .select("product_name_th product_name_eng product_price sale_price product_type")
-    .lean<any>();
-  if (!product) throw notFound("ไม่พบสินค้าของรายการนี้");
+  const items = await preorderRoundItemModel
+    .find({ _id: { $in: roundItemIds }, round_id: roundId, deleted_at: null })
+    .lean<any[]>();
+  const itemById = new Map(items.map((it) => [String(it._id), it]));
 
-  const unit_price = item.price_override ?? product.sale_price ?? product.product_price ?? 0;
-  return { item, product, unit_price };
+  const productIds = [...new Set(items.map((it) => String(it.product_id)))];
+  const products = productIds.length
+    ? await productModel
+        .find({ _id: { $in: productIds }, deleted_at: null })
+        .select("product_name_th product_name_eng product_price sale_price product_type")
+        .lean<any[]>()
+    : [];
+  const productById = new Map(products.map((p) => [String(p._id), p]));
+
+  return roundItemIds.map((roundItemId) => {
+    const item = itemById.get(String(roundItemId));
+    if (!item) throw badRequest("ไม่พบรายการสินค้านี้ในรอบที่เลือก");
+    if (!item.is_active) throw conflict("รายการสินค้านี้ปิดการขายในรอบนี้แล้ว");
+
+    const product = productById.get(String(item.product_id));
+    if (!product) throw notFound("ไม่พบสินค้าของรายการนี้");
+
+    const unit_price = item.price_override ?? product.sale_price ?? product.product_price ?? 0;
+    return { item, product, unit_price };
+  });
 }
 
 /** จอง current_qty (กันเกิน max_qty_total ด้วย $expr) */

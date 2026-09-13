@@ -5,5 +5,6 @@ import { semanticTermService } from "@/services/sentimentService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(semanticTermService, {
   auth: { menu: "reports" },
+  audit: { entity: "SemanticTerm" },
   validate: { update: semanticTermUpdate },
 });

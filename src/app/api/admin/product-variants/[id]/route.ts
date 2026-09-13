@@ -5,5 +5,6 @@ import { productVariantService } from "@/services/productVariantService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(productVariantService, {
   auth: { menu: "products" },
+  audit: { entity: "ProductVariant" },
   validate: { update: productVariantUpdate },
 });

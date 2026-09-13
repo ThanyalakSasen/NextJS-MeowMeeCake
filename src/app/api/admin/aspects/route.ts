@@ -7,5 +7,6 @@ export const { GET, POST } = collectionRoutes(aspectService, {
   sortable: ["created_at", "aspect_name_th", "aspect_name_eng"],
   defaultSort: "aspect_name_th",
   auth: { menu: "reports" },
+  audit: { entity: "Aspect" },
   validate: { create: aspectCreate },
 });

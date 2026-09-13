@@ -91,9 +91,9 @@ export async function createProductionOrder(input: CreateProductionOrderInput) {
   }
 
   if (Array.isArray(input.items) && input.items.length) {
-    for (const raw of input.items) {
-      await productionItemService.addItem(String(order._id), raw);
-    }
+    // BACKLOG2 §2.2 — เดิมวน await addItem() ทีละรายการ (แต่ละครั้ง fetch order ซ้ำ + query
+    // product/recipe แยก) เปลี่ยนมา addItems() (พหูพจน์) แบบ batch ครั้งเดียว
+    await productionItemService.addItems(String(order._id), input.items);
   }
 
   return getProductionOrderById(String(order._id));

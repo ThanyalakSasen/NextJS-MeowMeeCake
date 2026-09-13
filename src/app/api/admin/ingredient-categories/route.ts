@@ -7,5 +7,6 @@ export const { GET, POST } = collectionRoutes(ingredientCategoryService, {
   sortable: ["created_at", "ingredient_category_name"],
   defaultSort: "ingredient_category_name",
   auth: { menu: "ingredients" },
+  audit: { entity: "IngredientCategory" },
   validate: { create: ingredientCategoryCreate },
 });

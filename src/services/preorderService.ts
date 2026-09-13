@@ -134,18 +134,14 @@ export async function createPreorder(
   }
 
   // ── resolve รายการ + คิดราคา ──
+  // BACKLOG2 §2: เดิมวน await ทีละรายการ (พรีออเดอร์ N รายการ = query ~2N ครั้งทยอยทีละรายการ ผ่าน
+  // getOrderableRoundItem() ตัวเดียว) เปลี่ยนมา batch ผ่าน getOrderableRoundItems() (พหูพจน์) ครั้ง
+  // เดียว เหมือน orderService.resolveLines() ที่แก้ไว้แล้วใน §3.18 — validate/error message เดิมทุก
+  // จุดต่อรายการ ต่างแค่ "ลำดับ" ของ error เมื่อมีหลายรายการผิดพร้อมกัน (เช็ค id/quantity ของทุก
+  // รายการก่อน แล้วค่อยเช็คสิ่งที่ต้องรู้ผลจาก DB — เหมือนที่ยอมรับไว้แล้วใน resolveLines ไม่มีเทสไหน
+  // อิงลำดับ error ข้ามรายการอยู่แล้ว)
   const seen = new Set<string>();
-  const lines: Array<{
-    round_item_id: any;
-    product_id: any;
-    product_snapshot: { product_name_th: string; product_name_eng: string };
-    quantity: number;
-    unit_price: number;
-    total_price: number;
-    special_request: string | null;
-  }> = [];
-
-  for (const raw of input.items) {
+  const quantities = input.items.map((raw) => {
     assertObjectId(raw.round_item_id, "round_item_id");
     if (seen.has(String(raw.round_item_id))) {
       throw badRequest("มี round_item_id ซ้ำใน items — รวมจำนวนเป็นรายการเดียว");
@@ -156,22 +152,27 @@ export async function createPreorder(
     if (!Number.isInteger(quantity) || quantity < 1) {
       throw badRequest("quantity ของแต่ละรายการต้องเป็นจำนวนเต็มตั้งแต่ 1");
     }
+    return quantity;
+  });
 
-    const { item, product, unit_price } = await preorderRoundService.getOrderableRoundItem(
-      raw.round_item_id,
-      String(round._id)
-    );
+  const resolvedItems = await preorderRoundService.getOrderableRoundItems(
+    input.items.map((raw) => raw.round_item_id),
+    String(round._id)
+  );
+
+  const lines = resolvedItems.map(({ item, product, unit_price }, idx) => {
+    const quantity = quantities[idx];
     if (quantity < (item.min_order_qty ?? 1)) {
       throw badRequest(
         `"${product.product_name_th}" สั่งขั้นต่ำ ${item.min_order_qty} ชิ้นต่อรายการ`
       );
     }
 
-    // BACKLOG §3.11 เฟส 5b — unit_price จาก preorderRoundService.getOrderableRoundItem() เป็นสตางค์
+    // BACKLOG §3.11 เฟส 5b — unit_price จาก preorderRoundService.getOrderableRoundItems() เป็นสตางค์
     // อยู่แล้ว (price_override/sale_price/product_price เป็นสตางค์ทั้งหมดตั้งแต่เฟส 5b) ไม่ต้องแปลง
     // อะไรเพิ่ม — ก่อนหน้านี้ (เฟส 1-5a) ยังต้อง toSatang() ตรงนี้เพราะฝั่งสินค้ายังเป็นบาทอยู่
     const unitPriceSatang = unit_price;
-    lines.push({
+    return {
       round_item_id: item._id,
       product_id: product._id,
       product_snapshot: {
@@ -181,9 +182,9 @@ export async function createPreorder(
       quantity,
       unit_price: unitPriceSatang,
       total_price: unitPriceSatang * quantity,
-      special_request: raw.special_request?.trim() || null,
-    });
-  }
+      special_request: input.items[idx].special_request?.trim() || null,
+    };
+  });
 
   const subtotal = lines.reduce((s, l) => s + l.total_price, 0);
 

@@ -29,6 +29,7 @@
 - **บันทึกกิจกรรมผู้ใช้ (audit log) → [`docs/auditLog.md`](docs/auditLog.md)**
 - **ระบบพรีออเดอร์ (รอบ / โควตา / API) → [`docs/preorder.md`](docs/preorder.md)**
 - **สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก + Migration checklist → [`docs/BACKLOG.md`](docs/BACKLOG.md)**
+- **บั๊ก/ความเสี่ยงชุดใหม่ที่พบหลังปิด BACKLOG.md (แก้แล้ว) → [`docs/BACKLOG2.md`](docs/BACKLOG2.md)**
 - **สรุปงาน hardening §2 + §3 (พร้อม PR / ดัชนีเอกสาร) → [`docs/hardening-summary.md`](docs/hardening-summary.md)**
 - **มาตรฐาน API (envelope / status / list / auth) → [`docs/api-conventions.md`](docs/api-conventions.md)**
 - **แผนงานคุณภาพ / hardening (§3 ชั้น D) → [`docs/hardening-plan.md`](docs/hardening-plan.md)** · D3 → [`docs/hardening-d3-plan.md`](docs/hardening-d3-plan.md) · รอบ 4a → [`docs/hardening-4a-plan.md`](docs/hardening-4a-plan.md)

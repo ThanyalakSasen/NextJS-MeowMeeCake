@@ -5,5 +5,6 @@ import { unitService } from "@/services/unitService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(unitService, {
   auth: { menu: "products" },
+  audit: { entity: "Unit" },
   validate: { update: unitUpdate },
 });
