@@ -4,7 +4,6 @@ const ingredientSchema = new mongoose.Schema({
   ingredient_name: {
     type: String,
     required: true,
-    unique: true,
   },
   ingredient_category_id: {
     type: mongoose.Schema.Types.ObjectId,
@@ -51,6 +50,12 @@ const ingredientSchema = new mongoose.Schema({
 ingredientSchema.index({ ingredient_category_id: 1 });
 ingredientSchema.index({ current_stock: 1 });
 ingredientSchema.index({ deleted_at: 1 });
+// ingredient_name ห้ามซ้ำ แต่เฉพาะวัตถุดิบที่ยังไม่ถูกลบ (partial unique) — BACKLOG2 §1: เดิมเป็น
+// unique ธรรมดา ลบวัตถุดิบทิ้งแล้วสร้างชื่อเดิมใหม่ไม่ได้อีกเลย
+ingredientSchema.index(
+  { ingredient_name: 1 },
+  { unique: true, partialFilterExpression: { deleted_at: null } }
+);
 
 const IngredientModel =
   mongoose.models.Ingredients ||           // ✅ เช็คก่อนว่ามีแล้วหรือยัง

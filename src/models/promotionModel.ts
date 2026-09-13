@@ -4,7 +4,6 @@ const promotionSchema = new mongoose.Schema({
     promotion_code: { //รหัสโปรโมชั่น
         type: String,
         required: true,
-        unique: true,
     },
     promotion_name: { //ชื่อโปรโมชั่น
         type: String,
@@ -98,6 +97,12 @@ const promotionSchema = new mongoose.Schema({
 
 promotionSchema.index({ promo_code: 1 });
 promotionSchema.index({ start_date: 1, end_date: 1 });
+// promotion_code ห้ามซ้ำ แต่เฉพาะโปรโมชันที่ยังไม่ถูกลบ (partial unique) — BACKLOG2 §1: เดิมเป็น
+// unique ธรรมดา ลบโปรโมชันทิ้งแล้วสร้างโค้ดเดิมซ้ำไม่ได้อีกเลย (โค้ดสั้น ๆ มักถูกใช้ซ้ำปีต่อปี)
+promotionSchema.index(
+  { promotion_code: 1 },
+  { unique: true, partialFilterExpression: { deleted_at: null } }
+);
 
 const PromotionModel = 
   mongoose.models.Promotions || mongoose.model("Promotions", promotionSchema);

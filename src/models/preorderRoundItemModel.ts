@@ -20,7 +20,13 @@ const preorderRoundItemSchema = new mongoose.Schema(
 );
 
 preorderRoundItemSchema.index({ round_id: 1 });
-preorderRoundItemSchema.index({ round_id: 1, product_id: 1 }, { unique: true });
+// { round_id, product_id } ห้ามซ้ำ แต่เฉพาะรายการที่ยังไม่ถูกลบ (partial unique) — BACKLOG2 §1:
+// เดิมเป็น unique ธรรมดา เอาสินค้าออกจากรอบ (soft delete) แล้วเพิ่มสินค้าตัวเดิมกลับเข้ารอบเดิม
+// ไม่ได้อีกเลย
+preorderRoundItemSchema.index(
+  { round_id: 1, product_id: 1 },
+  { unique: true, partialFilterExpression: { deleted_at: null } }
+);
 
 const PreorderRoundItem = mongoose.models.PreorderRoundItems || mongoose.model("PreorderRoundItems", preorderRoundItemSchema);
 export default PreorderRoundItem;
