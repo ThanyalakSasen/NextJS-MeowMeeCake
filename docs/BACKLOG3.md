@@ -4,8 +4,8 @@
 > ขอบเขต: `src/services/` + `src/lib/` เท่านั้น (ตามที่ผู้ใช้เลือก) — **ไม่ใช่บั๊ก** ทุกข้อผ่านการตรวจสอบ
 > ความถูกต้องมาแล้วอย่างละเอียดใน [`BACKLOG.md`](BACKLOG.md)/[`BACKLOG2.md`](BACKLOG2.md) — เอกสารนี้คุม
 > เฉพาะงาน "โค้ดซ้ำ/เขียนได้กระชับกว่า/มี query เกินจำเป็น" ที่พบจาก `/code-review` (2026-09-15)
-> **สถานะ: กลุ่มเสี่ยงต่ำ 2/2 แก้แล้ว** — เหลือกลุ่มปานกลาง (4 ข้อ) + กลุ่มเสี่ยงสูง/งานใหญ่ (4 ข้อ) รอ
-> ตัดสินใจว่าจะทำต่อไหม
+> **สถานะ: กลุ่มเสี่ยงต่ำ 2/2 + §3 แก้แล้ว** — เหลือกลุ่มปานกลาง (3 ข้อ) + กลุ่มเสี่ยงสูง/งานใหญ่ (4 ข้อ)
+> รอตัดสินใจว่าจะทำต่อไหม
 
 ## สถานะโดยรวม
 
@@ -13,7 +13,7 @@
 |---|---|
 | **§1 `round2()` ปัดบาท ซ้ำ 4 ไฟล์** | ✅ **แก้แล้ว** (2026-09-15) — ย้ายมาไว้ที่ `src/lib/money.ts` ที่เดียว |
 | **§2 ตัวสร้างเลขที่เอกสาร (order/preorder/production) ซ้ำ 3 จุด** | ✅ **แก้แล้ว** (2026-09-15) — รวมเป็น `generateDocNo()` ใน `src/lib/productCode.ts` |
-| §3 `productService.ts` ไม่ใช้ shared helper (`assertObjectId`/`escapeRegExp`/pagination) | 🟡 ยังไม่ทำ — ปานกลาง |
+| **§3 `productService.ts` ไม่ใช้ shared helper (`assertObjectId`/`escapeRegExp`/pagination)** | ✅ **แก้แล้ว** (2026-09-15) — เปลี่ยนมาใช้ `src/lib/objectId.ts` + `src/lib/queryParams.ts` เหมือน service อื่นทุกตัว |
 | §4 `authService.login()` fetch user ซ้ำ 3 รอบ | 🟡 ยังไม่ทำ — ปานกลาง |
 | §5 `orderService.persistOrder`/`updateOrderStatus` เรียก `getOrderById` ซ้ำหลัง save | 🟡 ยังไม่ทำ — ปานกลาง (hot path) |
 | §6 `cartService.resolveOptions` vs `orderService.resolveLines` validate option ซ้ำ | 🟡 ยังไม่ทำ — ปานกลาง |
@@ -74,18 +74,44 @@ string` ใน `src/lib/productCode.ts` (เป็นเจ้าของ "huma
 
 ---
 
-## 3. 🟡 `productService.ts` ไม่ใช้ shared helper — ยังไม่ทำ
+## 3. ✅ `productService.ts` ไม่ใช้ shared helper — แก้แล้ว (2026-09-15)
 
-`productService.ts` เป็น service เดียวที่ reimplement `assertObjectId` เอง (ซ้ำกับ `src/lib/objectId.ts`),
-`escapeRegExp` เอง (ซ้ำกับ `src/lib/queryParams.ts` ไบต์ต่อไบต์), และ `getProducts()` คำนวณ
-page/limit/skip + meta object (`{page, limit, total, totalPages, hasNextPage, hasPrevPage}`) เองแทนเรียก
-`parsePagination`/`buildMeta` ที่ service อื่นทุกตัวใช้ — ความเสี่ยงถ้าไม่แก้: บั๊ก edge-case ของ
-pagination-meta (เช่น `totalPages` fallback) หรือ ObjectId validation ที่แก้ที่ `src/lib/` จะไม่มีผลกับ
-product listing/lookup โดยอัตโนมัติ
+**พบ:** `productService.ts` เป็น service เดียวที่ reimplement `assertObjectId` เอง (ซ้ำกับ
+`src/lib/objectId.ts`), `escapeRegExp` เอง (ซ้ำกับ `src/lib/queryParams.ts` ไบต์ต่อไบต์), และ
+`getProducts()` คำนวณ page/limit/skip + meta object (`{page, limit, total, totalPages, hasNextPage,
+hasPrevPage}`) เองแทนเรียก `parsePagination`/`buildMeta` ที่ service อื่นทุกตัวใช้
 
-**ทำไมยังไม่แก้:** ต้องไล่เทียบพฤติกรรม edge case ของ `buildMeta`/`parsePagination` กับโค้ดมือของ
-`productService.ts` ให้ตรงกันก่อนสลับ (ความเสี่ยงว่า metadata เปลี่ยนรูปเงียบ ๆ ถ้าสูตรไม่ตรงกันเป๊ะ) —
-เป็นงานปานกลาง ไม่ใช่แค่ swap import ตรง ๆ
+**ยืนยันก่อนแก้ว่าปลอดภัย:**
+- `assertObjectId` ในไฟล์ throw `new ProductError(msg, 400)` (code `"BAD_REQUEST"`) — เทียบกับของกลาง
+  `src/lib/objectId.ts` ที่ throw `badRequest(msg)` (`new HttpError(msg, 400, "BAD_REQUEST")`) — **response
+  shape เหมือนกันเป๊ะ** (`{status:400, code:"BAD_REQUEST", message}`) ต่างแค่ `err.name`
+  (`"ProductError"` vs `"HttpError"`) ซึ่งไม่เคยถูกใช้ใน `apiResponse.ts` เลย (grep แล้วไม่มี `.name`
+  ที่ไหนในไฟล์นั้น) และไม่มี `instanceof ProductError` check อยู่ที่ไหนในระบบเลยสักจุด (grep ทั้ง
+  `src/`) — สลับได้โดยไม่กระทบ response ที่ client เห็น
+- `escapeRegExp` ในไฟล์กับของกลางเป็นโค้ดเดียวกันไบต์ต่อไบต์อยู่แล้ว
+- `parsePagination(sp, defaultLimit=20, maxLimit=100)` ของกลาง มี default เดียวกับที่
+  `productService.ts` hardcode ไว้เป๊ะ (`limit` เริ่มต้น 20, สูงสุด 100) — เป็น drop-in replacement จริง
+  ไม่มี edge case ต่างกัน
+
+**วิธีแก้ที่ใช้จริง:** ลบ `assertObjectId`/`escapeRegExp` เวอร์ชัน private ออก import จาก
+`src/lib/objectId.ts`/`src/lib/queryParams.ts` แทน · `ListProductQuery.page?`/`limit?` เปลี่ยนเป็น
+`pagination: Pagination` (ให้ตรงกับ `*Query` interface ของทุก service อื่นในระบบ เช่น
+`ListOrderQuery`/`ListPreorderQuery`) · `getProducts()` ใช้ `query.pagination.skip/limit` +
+`buildMeta(total, query.pagination)` แทนของที่คำนวณเอง · 2 route ที่เรียก (`GET /api/catalog/products`,
+`GET /api/admin/products`) เปลี่ยนมาสร้าง `pagination: parsePagination(sp)` แทนแกะ `page`/`limit` จาก
+`URLSearchParams` เอง
+
+**ตั้งใจไม่แตะ:** `sortBy`/`sortOrder` — `queryParams.ts` มี `parseSort(sp, allowed, fallback)` แต่ต้องส่ง
+allowlist ของ field ที่ยอมให้ sort ได้ ขณะที่ `productService.getProducts()` ปัจจุบันรับ `sortBy` เป็น
+field name อะไรก็ได้ไม่เช็ค allowlist — สลับไปใช้ `parseSort` จะ**เปลี่ยนพฤติกรรม** (reject sortBy บาง
+ค่าที่ตอนนี้ผ่าน) ไม่ใช่ dedup ล้วน ๆ เหมือน 3 จุดข้างบน จึงไม่แตะในรอบนี้
+
+**ไฟล์ที่แก้:** `src/services/productService.ts`, `src/app/api/catalog/products/route.ts`,
+`src/app/api/admin/products/route.ts`, `tests/integration/{productPricingMoney,recipeCostMoney}.test.ts`
+(2 จุดเรียก `getProducts({ limit: 100 })` เดิม ปรับเป็น `{ pagination: { page:1, limit:100, skip:0 } }`)
+
+ยืนยันด้วย `typecheck`/`typecheck:test`/`lint`(0 error, 4 warning ไม่เปลี่ยน)/`test`(185)/
+`test:integration`(141, ผ่านหมดรวม 2 เทสที่แก้ไป)/`build` ผ่านหมด
 
 ---
 
