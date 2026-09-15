@@ -1,7 +1,7 @@
 # MeowMeeCake Backend — BACKLOG 2: บั๊ก/ความเสี่ยงชุดใหม่
 
-> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-15 (§1/§2/§4/§5/§7 แก้ครบแล้ว · §3 เพิ่ม upload.ts audit
-> ไม่พบ path traversal, แก้ 1 จุด S3 config gap · เหลือ §8 บางข้อยังไม่ได้ตรวจ)
+> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-15 (§1/§2/§4/§5/§7/§8 แก้ครบแล้ว · §3 เพิ่ม upload.ts audit
+> ไม่พบ path traversal, แก้ 1 จุด S3 config gap · เหลือ §9 บางข้อยังไม่ได้ตรวจ)
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
@@ -18,6 +18,7 @@
 | duplicate-key error handling ทั่วไป (`crudService`/`apiResponse`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — `toErrorResponse()` แปลง Mongo `11000` เป็น response ที่มีโครงสร้างอยู่แล้ว ไม่ใช่ 500 ดิบ |
 | path traversal / file validation (`src/lib/upload.ts`) | ✅ ตรวจแล้ว **ไม่พบ path traversal ที่ใช้ได้จริง** (2026-09-15) — แก้ 1 จุดที่เกี่ยวข้อง: `createS3Driver` ไม่เคยเช็ค `S3_PUBLIC_URL_BASE` (ลบไฟล์ไม่ได้เงียบ ๆ ถ้าลืมตั้ง) |
 | **§7 rate-limit coverage ของ public endpoint อื่น** | ✅ **แก้ 1/2** (2026-09-15) — เพิ่ม rate-limit ที่ `/shop/promotions/validate` (กันเดารหัสโปรโมชัน) · `delivery-quote`/`orders/by-no`/`catalog/**` ตรวจแล้วไม่ต้องแก้ |
+| **§8 validation coverage ของ `POST /api/shop/preorders`** | ✅ **แก้แล้ว** (2026-09-15) — เพิ่ม `schemas/preorder.ts` (zod) + รองรับ `address_id` (ปิด gap เดิมของ [BACKLOG.md §3.8](BACKLOG.md) ไปพร้อมกัน) |
 | **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | ✅ **แก้แล้ว** (2026-09-13) — เพิ่ม `preorderService.updateDelivery()` + `PATCH /api/admin/preorders/[id]/delivery` คู่กับของ order + เทส 6 เคสใหม่ |
 | **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | ✅ **แก้แล้ว** (2026-09-15) — `createFields` เปลี่ยนจาก optional เป็น required ใน `CrudOptions` — compiler เจอ **1 จุดจริง** ที่ยังไม่ระบุ (`notificationService.ts`, ดู §5 ด้านล่าง) |
 
@@ -254,10 +255,59 @@ service และ route บอกตรงกันว่า "สร้างไ
 
 ---
 
-## 8. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
+## 8. ✅ validation coverage ของ `POST /api/shop/preorders` — ปิด gap ที่รู้ตัวจาก BACKLOG.md §3.8 (2026-09-15)
+
+> [`BACKLOG.md` §3.8](BACKLOG.md) เคยบันทึกไว้แล้วว่า `/api/shop/preorders` (POST) เป็น "path คู่ขนาน"
+> ของ `/api/shop/orders` ที่**ไม่ผ่าน zod เลย** และ**ไม่รองรับ `address_id`** (ต้องกรอกที่อยู่ใหม่ทั้งก้อน
+> ทุกครั้ง ใช้สมุดที่อยู่ไม่ได้) — รอบนี้ไล่อ่าน route + service จริงแล้วปิดทั้งสองช่องพร้อมกัน เพราะเป็น
+> การแก้จุดเดียวกัน (schema ใหม่ต้องมี `address_id` อยู่แล้วถ้าจะ mirror `createOrderBody`)
+
+**สถานะก่อนแก้ (ยืนยันด้วยการอ่านโค้ดจริง):**
+- `src/app/api/shop/preorders/route.ts` — `POST` อ่าน `body.round_id`/`order_type`/`delivery_address`/
+  `items` ตรงจาก `await req.json()` ไม่ผ่าน `parseBody`/zod เลย (ตัวแปรผลลัพธ์เป็น `preorder: any` —
+  ตรงกับ `no-explicit-any` warning ที่ lint เคยเก็บไว้ที่บรรทัดนี้)
+- `preorderService.createPreorder()` มี manual validation ของตัวเองอยู่แล้ว (เช็ค `order_type` enum,
+  `items.length>0`, `round_item_id` เป็น ObjectId, `quantity` เป็นจำนวนเต็ม ≥1, `delivery_address`
+  field ครบตาม `ADDRESS_FIELDS`) — **ไม่ใช่ mass-assignment/injection ที่ใช้ประโยชน์ได้จริง** (route ดึง
+  แค่ 4 field ที่รู้จักจาก body ไม่ spread ทั้งก้อน) แต่ไม่มีทาง reuse `addressService.resolveDeliverySnapshot()`
+  ได้เลยเพราะไม่รับ `address_id`/`recipient_name`/`recipient_phone` — ลูกค้าพรีออเดอร์แบบ delivery ต้อง
+  พิมพ์ที่อยู่ใหม่ทุกครั้ง ใช้สมุดที่อยู่ที่มีอยู่แล้วไม่ได้ ต่างจาก `/shop/orders` ที่ทำได้ตั้งแต่รอบ 4c
+- `GET` ก็เช่นกัน — cast query param ด้วย `as PreorderStatus | null` ตรง ๆ ไม่ผ่าน enum validation
+  (ส่ง `order_status=garbage` มาจะไม่ error แค่ได้ผลลัพธ์ว่างเงียบ ๆ แทนที่จะเป็น 400 ที่อธิบายได้)
+
+**วิธีแก้ที่ใช้จริง (2026-09-15):** สร้าง `src/schemas/preorder.ts` ใหม่ (ไฟล์เดิมไม่มี — `preorderRound.ts`
+เป็นคนละเรื่อง คือ validation ของ `/api/admin/preorder-rounds*` การจัดการรอบฝั่งแอดมิน):
+- `createPreorderBody` — mirror `createOrderBody` ทุกประการสำหรับส่วนที่ preorder มีร่วมกับ order
+  (เงื่อนไข `address_id`/`delivery_address` oneOf + `recipient_name`/`recipient_phone` บังคับคู่กับ
+  `address_id` — **โค้ดซ้ำกับ `schemas/order.ts` ตั้งใจ** เหมือนเหตุผลที่ `order.ts` เองก็ไม่ดึง
+  `.refine()` ระหว่าง `createOrderBody`/`adminCreateOrderBody` มาเป็นฟังก์ชันกลาง — zod v4 `.extend()`
+  ต้องมาก่อน `.refine()` เสมอ) `items` เป็น `z.array(...).min(1)` แทนการเช็คใน service (ยังคงเช็คซ้ำใน
+  service ไว้เหมือนเดิม เป็นชั้นป้องกันที่สองสำหรับ caller อื่นที่ไม่ผ่าน route)
+- `listPreorderQuery` — mirror `listOrderQuery` (enum `order_status`/`payment_status`/`order_type` +
+  `round_id` เป็น `objectId`)
+- **ไม่ import ค่า enum จาก `preorderService.ts` มาใช้ซ้ำ** (แม้จะมี `PREORDER_STATUSES`/
+  `PAYMENT_STATUSES` export อยู่แล้วก็ตาม) — hardcode ค่าเดิมแยกไว้ในสคีมาแทน ตรงกับ convention เดิมของ
+  `schemas/order.ts#listOrderQuery` ที่ก็ hardcode เอง ไม่ import ข้ามชั้นจาก service (schemas ควรเป็น
+  leaf-level dependency ไม่ใช่ service → schema)
+- `route.ts` เปลี่ยนมาใช้ `parseBody(req, createPreorderBody)` + `parseQuery(sp, listPreorderQuery)` +
+  `addressService.resolveDeliverySnapshot()` (ฟังก์ชันเดียวกับที่ `/shop/orders` ใช้ — generic พอใช้ร่วม
+  ได้ทันทีไม่ต้องแก้) — ปิด `any` ที่ lint เคยเก็บไว้ไปด้วยในตัว (ไม่ต้องแก้แยก)
+- เทสใหม่ `tests/lib/schemas-preorder.test.ts` (10 เคส: shape พื้นฐาน, `items` ว่าง, enum/quantity ผิด,
+  ObjectId รูปแบบผิด, `address_id`/`delivery_address` oneOf ครบ 5 เคสเหมือนที่ `schemas/order.ts` มี,
+  `listPreorderQuery` enum) — ไม่มี unit/integration test เดิมยิงเข้า route นี้ตรง ๆ (เทสเดิมเรียก
+  `preorderService.createPreorder` ตรง ไม่ผ่าน route/schema) จึงไม่มีอะไรพังจากการเปลี่ยนนี้
+
+ยืนยันด้วย `typecheck`/`typecheck:test`/`lint` (0 error, **4 warning** ลดจาก 5 — `no-explicit-any` ที่
+`shop/preorders/route.ts` หายไปพร้อมกับการลบ `preorder: any`)/`test` (171→**181**, +10)/
+`test:integration` (138, ไม่เปลี่ยน — ไม่ต้องเพิ่มเพราะ `resolveDeliverySnapshot()` มีเทส integration
+อยู่แล้ว (`tests/integration/resolveDeliverySnapshot.test.ts`) และ route layer ของ endpoint อื่นทั้งระบบ
+ก็ไม่มี integration test แบบยิง HTTP จริงเช่นกัน — เทียบเท่า `/shop/orders` ที่ก็ครอบแค่ระดับ schema
+unit test)/`build` ผ่านหมด
+
+---
+
+## 9. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
 
 - ไล่เทียบ `productionOrderService`/`preorderRoundService` กับฟังก์ชันคู่ขนานอื่น (ไม่มี "ต้นแบบ" ที่
   ชัดเจนเท่า order/preorder จึงยังไม่ได้ทำแบบเดียวกับ §4)
 - ตรวจ race condition อื่นนอกจาก quota/usage ที่มีการ์ดแล้ว (เช่น stock ระดับ variant)
-- ตรวจ validation coverage ของ `/api/shop/preorders` (POST) ที่ [BACKLOG.md §3.8](BACKLOG.md) บันทึกไว้
-  แล้วว่ายังไม่ zod-adopt เต็ม — เป็น gap ที่รู้ตัวอยู่แล้ว ไม่ใช่ของใหม่
