@@ -168,6 +168,10 @@ function createS3Driver(): UploadDriver {
       const bucket = process.env.S3_BUCKET;
       if (!bucket) throw new Error("UPLOAD_DRIVER=s3 ต้องตั้ง env S3_BUCKET");
       const base = (process.env.S3_PUBLIC_URL_BASE || "").replace(/\/$/, "");
+      // ไม่มี base → url ที่คืนจะเป็น raw key (ไม่มีโดเมนนำหน้า) และ keyFromUrl() ตอน delete() จะแกะกลับ
+      // ไม่ได้เลย (เงื่อนไข `base && url.startsWith(...)` เป็นเท็จเสมอ) — ลบไฟล์จริงไม่ได้ตลอดไปเงียบ ๆ
+      // แทนที่จะปล่อยให้พังแบบไม่รู้ตัวตอน §3.14 (ลบรูปที่ไม่ใช้) ให้ fail-fast ตอน save() แทน
+      if (!base) throw new Error("UPLOAD_DRIVER=s3 ต้องตั้ง env S3_PUBLIC_URL_BASE");
       const safeDir = dir.replace(/[^a-z0-9_-]/gi, "") || "misc";
 
       const { PutObjectCommand } = await import("@aws-sdk/client-s3");

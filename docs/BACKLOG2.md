@@ -1,7 +1,7 @@
 # MeowMeeCake Backend — BACKLOG 2: บั๊ก/ความเสี่ยงชุดใหม่
 
-> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-13 (§1/§2/§4 แก้ครบแล้ว — เหลือ §5 เป็นความเสี่ยงเชิงออกแบบ
-> ที่ยังไม่ต้องแก้เพราะยังไม่มีจุดพังจริง)
+> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-15 (§1/§2/§4/§5 แก้ครบแล้ว · §3 เพิ่ม upload.ts audit
+> ไม่พบ path traversal, แก้ 1 จุด S3 config gap · เหลือ §6 บางข้อยังไม่ได้ตรวจ)
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
@@ -16,6 +16,7 @@
 | **§2 N+1 query ซ้ำ pattern เดิมจาก §3.18 (checkout)** | ✅ **แก้ครบ 2/2** (2026-09-13) — เพิ่ม `getOrderableRoundItems()`/`addItems()` (พหูพจน์) แบบ batch เหมือน `orderService.resolveLines()` แล้วเปลี่ยน `createPreorder()`/`createProductionOrder()` มาเรียกแทน loop เดิม |
 | ownership/IDOR ของ shop routes (`addresses`, `cart/items`, `reviews`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — ทุกจุด scope ด้วย `user_id` ที่ service layer ถูกต้อง (เทียบกับ `2b.1` ที่เคยพลาด) |
 | duplicate-key error handling ทั่วไป (`crudService`/`apiResponse`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — `toErrorResponse()` แปลง Mongo `11000` เป็น response ที่มีโครงสร้างอยู่แล้ว ไม่ใช่ 500 ดิบ |
+| path traversal / file validation (`src/lib/upload.ts`) | ✅ ตรวจแล้ว **ไม่พบ path traversal ที่ใช้ได้จริง** (2026-09-15) — แก้ 1 จุดที่เกี่ยวข้อง: `createS3Driver` ไม่เคยเช็ค `S3_PUBLIC_URL_BASE` (ลบไฟล์ไม่ได้เงียบ ๆ ถ้าลืมตั้ง) |
 | **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | ✅ **แก้แล้ว** (2026-09-13) — เพิ่ม `preorderService.updateDelivery()` + `PATCH /api/admin/preorders/[id]/delivery` คู่กับของ order + เทส 6 เคสใหม่ |
 | **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | ✅ **แก้แล้ว** (2026-09-15) — `createFields` เปลี่ยนจาก optional เป็น required ใน `CrudOptions` — compiler เจอ **1 จุดจริง** ที่ยังไม่ระบุ (`notificationService.ts`, ดู §5 ด้านล่าง) |
 
@@ -113,6 +114,36 @@ model ในครั้งเดียว ไม่ต้อง cleanup ข้�
   บั๊กในเฟส 4 ของ §3.11) ที่เหลืออยู่ใน `dashboardService.ts`/`expenseService.ts`/`reviewService.ts`/
   `discountEngine.ts` — **ตรวจแล้วถูกต้อง** ทุกจุดเป็นการปัด **บาท** (field ที่ยังเป็น float ตาม design
   เช่น `avg_rating`, ค่าที่ผ่าน `toBaht()` มาแล้วก่อนปัด) ไม่ใช่การปัดสตางค์ดิบแบบที่เคยผิดในเฟส 4
+- **Path traversal / file validation ของ `src/lib/upload.ts` (2026-09-15)** — ไล่อ่านทั้งไฟล์ +
+  entry point เดียวที่เรียกจริง (`POST /api/admin/products/images`) แล้วยืนยัน **ไม่พบช่องทาง path
+  traversal ที่ใช้ได้จริง**:
+  - `saveImages(files, dir)` — `dir` เป็น literal `"products"` ที่ hardcode ในโค้ด ไม่เคยมาจาก client
+    เลยสักจุด (grep แล้วมี caller เดียว) การ sanitize `dir.replace(/[^a-z0-9_-]/gi, "")` จึงเป็น
+    defense-in-depth เฉย ๆ ไม่ใช่แนวป้องกันเดียว
+  - `deleteImages(urls)` — `urls` ที่ส่งเข้ามาทุกจุด (`productService.updateProduct`/
+    `hardDeleteProduct`) เป็น **subset ของ `oldImages`** (ค่าที่อ่านจาก DB ก่อนอัปเดต ซึ่งมาจาก
+    `saveImages()` เองเท่านั้น) — client ควบคุม url ที่จะถูก "ลบ" ไม่ได้แม้จะยัดค่าแปลกใน
+    `product_img` มาตอน update ก็ตาม (ค่านั้นกลายเป็นส่วนหนึ่งของ "kept" ไม่ใช่ "removed")
+  - regex ใน `localDiskDriver.delete()` (`/^\/uploads\/([a-z0-9_-]+)\/([^/\\]+)$/i`) กัน `/`,`\` ได้ครบ —
+    ทดสอบเคส edge `filename = ".."` (ผ่าน regex ได้เพราะ `.` ไม่ถูกห้ามใน `[^/\\]+`) แล้วพบว่า
+    resolve ได้แค่ `public/uploads/` (ไดเรกทอรีเอง ไม่ใช่ไฟล์) → `unlink()` throw `EISDIR` → ถูกกลืนใน
+    `deleteImages()` (`.catch(log.error)`) อยู่แล้ว **ไม่มีผลจริง** ไม่ใช่ช่องโหว่
+  - เทสเดิม (`tests/lib/upload.test.ts`) มีเคส path traversal แบบ `/uploads/../../etc/passwd` +
+    `/uploads/a/b/c/d.png` อยู่แล้วและผ่าน ยืนยันตรงกับผลตรวจรอบนี้
+  - การตรวจไฟล์ 3 ชั้น (size → นามสกุล client → magic bytes จริง) ใช้ **นามสกุลจาก magic bytes**
+    (`realExt`) ตอนตั้งชื่อไฟล์ที่บันทึกจริงเสมอ ไม่ใช่นามสกุลจาก `file.name` — กัน mismatch ระหว่างชื่อ
+    ไฟล์กับเนื้อหาได้ถูกต้อง · ไม่รับ SVG (ไม่มี signature ให้ sniff ผ่าน) จึงไม่มีช่อง stored-XSS ผ่านรูป
+  - **พบ + แก้ 1 จุดที่เกี่ยวข้อง (ไม่ใช่ path traversal แต่เป็น "file validation" ตามขอบเขตที่ตรวจ):**
+    `createS3Driver().save()` เช็ค `S3_BUCKET` ว่าตั้งค่าไว้ (throw ถ้าไม่ตั้ง) แต่ **ไม่เคยเช็ค
+    `S3_PUBLIC_URL_BASE`** ทั้งที่ `keyFromUrl()` ตอน `delete()` ต้องพึ่งค่านี้แกะ key กลับ — ถ้าไม่ตั้ง
+    จะ silent: อัปโหลดสำเร็จได้ปกติ (url เป็น raw key ไม่มีโดเมนนำหน้า) แต่ `deleteImages()` จะ no-op
+    ตลอดไปทุกครั้งเงียบ ๆ (เงื่อนไข `base && url.startsWith(...)` เป็นเท็จเสมอ) — ทำให้ §3.14 (ลบรูปที่
+    ไม่ใช้) ใช้งานไม่ได้เลยถ้าเลือก `UPLOAD_DRIVER=s3` แล้วลืมตั้งตัวแปรนี้ตัวเดียว แก้โดยเพิ่ม throw
+    แบบเดียวกับ `S3_BUCKET` (`docs/env.md` อัปเดตคอลัมน์ "จำเป็น" ของ `S3_PUBLIC_URL_BASE` ด้วย) — ไม่มี
+    unit test เพิ่มเพราะ driver instance เป็น module-level singleton ที่เลือกครั้งเดียวตอน `getDriver()`
+    แรกสุด (เหมือน `S3_BUCKET` guard เดิมที่ก็ไม่เคยมี unit test เช่นกัน — s3 driver ทดสอบผ่าน
+    integration/manual เท่านั้นตามที่ระบุไว้ในเทสไฟล์) · ยืนยันด้วย `typecheck`/`typecheck:test`/
+    `lint`(0 error)/`test`(171)/`test:integration`(138)/`build` ผ่านหมด
 
 ---
 
@@ -209,7 +240,6 @@ service และ route บอกตรงกันว่า "สร้างไ
 - ตรวจ race condition อื่นนอกจาก quota/usage ที่มีการ์ดแล้ว (เช่น stock ระดับ variant)
 - ตรวจ validation coverage ของ `/api/shop/preorders` (POST) ที่ [BACKLOG.md §3.8](BACKLOG.md) บันทึกไว้
   แล้วว่ายังไม่ zod-adopt เต็ม — เป็น gap ที่รู้ตัวอยู่แล้ว ไม่ใช่ของใหม่
-- ตรวจ path traversal / file validation ของ `src/lib/upload.ts` ให้ละเอียดกว่าที่เอกสารเดิมบันทึกไว้
 - ตรวจ rate-limit coverage ของ endpoint สาธารณะอื่นนอกจาก auth (เช่น `/api/shop/promotions/validate`,
   `/api/shop/orders/delivery-quote`) — ตอนนี้ตั้งใจครอบแค่ 4 endpoint ตาม [BACKLOG.md §3.2](BACKLOG.md)
   ยังไม่ได้ประเมินว่าควรขยายไหม
