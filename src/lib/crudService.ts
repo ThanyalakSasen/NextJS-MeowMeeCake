@@ -27,8 +27,11 @@ export interface CrudOptions {
   label: string;
   /** ฟิลด์ที่ค้นด้วย ?search= ได้ (regex, case-insensitive) */
   searchFields?: string[];
-  /** ฟิลด์ที่อนุญาตให้เขียนตอน create (ถ้าไม่ระบุ = รับทุกฟิลด์ตาม schema) */
-  createFields?: readonly string[];
+  /**
+   * ฟิลด์ที่อนุญาตให้เขียนตอน create — **บังคับระบุเสมอ** กันรับ request body ดิบทั้งก้อนไปเขียน DB
+   * ตรง ๆ (mass assignment) ถ้า service ไหนอยากรับทุกฟิลด์ตาม schema จริง ๆ ให้ระบุ list ครบเอง
+   */
+  createFields: readonly string[];
   /** ฟิลด์ที่อนุญาตให้เขียนตอน update (ถ้าไม่ระบุ = ใช้ createFields) */
   updateFields?: readonly string[];
   /** ใช้ soft delete หรือไม่ (ค่าเริ่มต้น: true) */
@@ -115,7 +118,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
 
   async function create(input: Doc) {
     await dbConnect();
-    const payload = createFields ? pick(input, createFields) : input;
+    const payload = pick(input, createFields);
     const doc = await model.create(payload);
     return doc.toObject() as Doc;
   }
@@ -124,7 +127,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
     await dbConnect();
     assertObjectId(id);
 
-    const payload = updateFields ? pick(input, updateFields) : input;
+    const payload = pick(input, updateFields);
     const doc = await model
       .findOneAndUpdate(
         { _id: id, ...activeFilter() },

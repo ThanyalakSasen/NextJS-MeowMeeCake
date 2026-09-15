@@ -5,7 +5,7 @@
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
-> **สถานะ: §1 + §2 + §4 แก้ครบแล้ว** (2026-09-13) — verify ผ่านหมดหลังแก้ทุกรอบ: `typecheck` /
+> **สถานะ: §1 + §2 + §4 + §5 แก้ครบแล้ว** (2026-09-13/15) — verify ผ่านหมดหลังแก้ทุกรอบ: `typecheck` /
 > `typecheck:test` / `lint` (0 error) / `test` (171) / `test:integration` (138) / `build`
 
 ## สถานะโดยรวม
@@ -17,7 +17,7 @@
 | ownership/IDOR ของ shop routes (`addresses`, `cart/items`, `reviews`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — ทุกจุด scope ด้วย `user_id` ที่ service layer ถูกต้อง (เทียบกับ `2b.1` ที่เคยพลาด) |
 | duplicate-key error handling ทั่วไป (`crudService`/`apiResponse`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — `toErrorResponse()` แปลง Mongo `11000` เป็น response ที่มีโครงสร้างอยู่แล้ว ไม่ใช่ 500 ดิบ |
 | **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | ✅ **แก้แล้ว** (2026-09-13) — เพิ่ม `preorderService.updateDelivery()` + `PATCH /api/admin/preorders/[id]/delivery` คู่กับของ order + เทส 6 เคสใหม่ |
-| **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | 🟡 **ความเสี่ยงเชิงออกแบบ ไม่ใช่บั๊กที่เกิดจริง** — ตรวจ 14 service ที่ใช้จริงครบแล้ว ทุกตัวระบุ `createFields` ถูกต้อง |
+| **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | ✅ **แก้แล้ว** (2026-09-15) — `createFields` เปลี่ยนจาก optional เป็น required ใน `CrudOptions` — compiler เจอ **1 จุดจริง** ที่ยังไม่ระบุ (`notificationService.ts`, ดู §5 ด้านล่าง) |
 
 ---
 
@@ -156,7 +156,7 @@ persist ลง DB จริง) · ยืนยันด้วย `typecheck`/`t
 
 ---
 
-## 5. 🟡 ความเสี่ยงเชิงออกแบบใน `crudService.ts` — ยังไม่ถูกกระตุ้นจริง แต่เป็นกับดักไว้รอ (พบ 2026-09-13)
+## 5. ✅ ความเสี่ยงเชิงออกแบบใน `crudService.ts` — พบ + แก้แล้ว (พบ 2026-09-13, แก้ 2026-09-15)
 
 > พบระหว่างตรวจว่า mass-assignment ผ่าน crud-factory (`createCrudService`) ปลอดภัยดีไหม —
 > **ตรวจ 14 service ที่ใช้ `createCrudService` ทุกตัวแล้ว ปลอดภัยหมด** (ทุกตัวระบุ `createFields`
@@ -180,11 +180,25 @@ const payload = updateFields ? pick(input, updateFields) : input;   // update()
 ด้วยซ้ำ (`current_stock` อยู่ใน `createFields` เท่านั้น ไม่อยู่ใน `updateFields` — มีคอมเมนต์กำกับไว้ตรงว่า
 "current_stock ตั้งได้แค่ตอนสร้าง (ยอดยกมา) หลังจากนั้นต้องผ่าน transaction") **ไม่มีบั๊กที่เกิดขึ้นจริงตอนนี้**
 
-**ทำไมยังบันทึกไว้:** เป็นความเสี่ยงเชิง "ออกแบบ" (footgun) ที่ต้องอาศัยวินัยของทุก service ที่เรียกใช้
-`createCrudService` ในอนาคตให้จำระบุ `createFields` เสมอ ไม่มี safety net ระดับ library กันไว้เลยถ้าลืม —
-**ข้อเสนอ (ยังไม่ได้ทำ, ไม่เร่งด่วนเพราะยังไม่มีจุดพัง):** เปลี่ยน `createFields`/`updateFields` ใน
-`CrudOptions` จาก optional (`?:`) เป็น required ใน `CrudOptions` (บังคับด้วย TypeScript ให้ทุก service
-ต้องระบุ ป้องกัน silent gap ในอนาคตแทนที่จะพึ่งวินัยคนเขียนโค้ดอย่างเดียว)
+**วิธีแก้ที่ใช้จริง (2026-09-15):** เปลี่ยน `createFields` ใน `CrudOptions` (`src/lib/crudService.ts`) จาก
+optional (`?:`) เป็น **required** — `updateFields` ปล่อยเป็น optional ต่อไปได้เพราะ fallback
+(`opts.updateFields ?? opts.createFields`) รับประกันว่ามีค่าเสมอเมื่อ `createFields` required แล้ว ·
+`create()`/`update()` เปลี่ยนจาก `createFields ? pick(...) : input` เป็น `pick(input, createFields)` ตรง ๆ
+(ไม่มีทางเป็น `undefined` อีกต่อไป ตัด dead branch ออก)
+
+**ผลจากการเปลี่ยน type — compiler เจอจุดจริง 1 จุดทันที:** `src/services/notificationService.ts` เรียก
+`createCrudService` โดยระบุแค่ `updateFields: ["is_read"]` **ไม่มี `createFields` เลย** — แปลว่าก่อนแก้
+`base.create()` (ที่ถูก spread ออกมาเป็น `notificationService.create` ผ่าน `{ ...base, notify }`) จะรับ
+request body ดิบทั้งก้อนไม่มี whitelist จริงตามที่ §5 กังวลไว้ทุกประการ — **ไม่ได้ถูกเรียกจริงในโค้ด
+ตอนนี้** (ยืนยันแล้ว: `GET /api/admin/notifications` มีแค่ `GET` ไม่มี `POST` route — คอมเมนต์บนทั้งไฟล์
+service และ route บอกตรงกันว่า "สร้างได้ทางเดียวคือ `notify()`" ซึ่งเขียนผ่าน `notificationModel.create()`
+ตรง ๆ ไม่ผ่าน `base` เลย) แต่เป็น dead-but-exposed method ที่ถ้ามีใครเพิ่ม `POST` route ในอนาคตแล้วลืม
+เช็คจุดนี้ก่อนจะกลายเป็นช่องโหว่ทันที — เพิ่ม `createFields: ["title", "message", "module", "type",
+"link", "is_read"]` (ชุดเดียวกับฟิลด์ที่ `notify()` เขียนจริง ไม่รวม `line_sent`/`line_error`/`deleted_at`
+ที่ควรถูกจัดการภายในเท่านั้น) ปิดช่องนี้แล้ว
+
+ยืนยันด้วย `typecheck` (เจอ error ที่ `notificationService.ts` ก่อนแก้ ตรงตามคาด) / `typecheck:test` /
+`lint` (0 error, 5 warning เดิมไม่เปลี่ยน) / `test` (171) / `test:integration` (138) / `build` ผ่านหมด
 
 ---
 
