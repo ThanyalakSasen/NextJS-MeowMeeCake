@@ -15,8 +15,14 @@ import { createCrudService } from "../lib/crudService";
 import ingredientModel from "../models/ingredientModel";
 import ingredientCategoryModel from "../models/ingredientCategoryModel";
 import unitModel from "../models/unitModel";
+import { toSatang, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+// BACKLOG §3.11 เฟส 4 — cost_per_unit เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentIngredient<T extends Record<string, unknown>>(doc: T): T {
+  return toBahtFields(doc, ["cost_per_unit"] as const);
+}
 
 const base = createCrudService(ingredientModel as Model<any>, {
   label: "วัตถุดิบ",
@@ -45,6 +51,7 @@ const base = createCrudService(ingredientModel as Model<any>, {
     { path: "ingredient_category_id", select: "ingredient_category_name" },
     { path: "unit_id", select: "unit_name unit_abbr" },
   ],
+  present: presentIngredient, // BACKLOG3 §8 — ครอบ list/getById/create/update/remove/restore ให้เองในตัว
 });
 
 async function assertRefs(input: Record<string, any>): Promise<void> {
@@ -66,6 +73,8 @@ async function assertRefs(input: Record<string, any>): Promise<void> {
   }
 }
 
+// BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
+// override เพราะมี validation เพิ่มเติม + แปลง cost_per_unit บาท→สตางค์ก่อนเขียน
 export const ingredientService = {
   ...base,
 
@@ -76,12 +85,17 @@ export const ingredientService = {
     if (input.cost_per_unit == null) throw badRequest("กรุณาระบุ cost_per_unit");
     if (input.reorder_point == null) throw badRequest("กรุณาระบุ reorder_point");
     await assertRefs(input);
-    return base.create(input);
+    const payload = { ...input, cost_per_unit: toSatang(Number(input.cost_per_unit)) };
+    return base.create(payload);
   },
 
   async update(id: string, input: Record<string, any>) {
     await assertRefs(input);
-    return base.update(id, input);
+    const payload =
+      input.cost_per_unit != null
+        ? { ...input, cost_per_unit: toSatang(Number(input.cost_per_unit)) }
+        : input;
+    return base.update(id, payload);
   },
 
   /** วัตถุดิบที่ current_stock <= reorder_point (เรียงจากขาดหนักสุด) */
@@ -100,7 +114,7 @@ export const ingredientService = {
       .populate("unit_id", "unit_name unit_abbr")
       .lean();
 
-    return { count: items.length, items };
+    return { count: items.length, items: items.map(presentIngredient) };
   },
 
   /** อ่านยอดคงเหลือปัจจุบัน */

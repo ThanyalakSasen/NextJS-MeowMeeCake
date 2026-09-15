@@ -8,12 +8,14 @@ import * as orderService from "@/services/orderService";
 import * as paymentService from "@/services/paymentService";
 import { makeUser, makeProduct } from "./helpers";
 
+// สร้างตรงผ่าน model (ข้าม promotionService ที่แปลงบาท↔สตางค์ให้) — discount_value เป็นสตางค์แล้ว
+// (BACKLOG §3.11 เฟส 5a) ตอน discount_type: "Amount" ค่านี้เท่ากับ 20 บาท
 async function makePromo(over: Record<string, unknown> = {}) {
   return promotionModel.create({
     promotion_code: "C" + Math.random().toString(36).slice(2, 8).toUpperCase(),
     promotion_name: "cancel test",
     discount_type: "Amount",
-    discount_value: 20,
+    discount_value: 2000,
     start_date: new Date(Date.now() - 86_400_000),
     end_date: new Date(Date.now() + 86_400_000),
     created_by: new mongoose.Types.ObjectId(),

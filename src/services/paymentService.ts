@@ -18,12 +18,18 @@ import paymentModel from "../models/paymentModel";
 import orderModel from "../models/orderModel";
 import preorderModel from "../models/preorderModel";
 import userModel from "../models/userModel";
+import { notificationService } from "./notificationService";
+import { log } from "../lib/logger";
 import * as orderService from "./orderService";
+import * as preorderService from "./preorderService";
+import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import type { PaymentStatus } from "./orderService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-const AMOUNT_TOLERANCE = 0.01;
+// BACKLOG §3.11 — order.total_amount/preorder.total_amount เป็นสตางค์ (integer) แล้ว เทียบกับ amount
+// ที่แปลงเป็นสตางค์ด้วย toSatang() ก่อนเทียบ — เผื่อ 1 สตางค์ กัน edge case ปัดเศษที่อาจหลงเหลือ
+const AMOUNT_TOLERANCE = 1;
 
 export interface CreatePaymentInput {
   user_id: string;
@@ -46,14 +52,14 @@ export interface ListPaymentQuery {
 }
 
 // ── helper: ผลักสถานะไปที่ order หรือ preorder ที่ผูกไว้ ─────
+// BACKLOG 2b.2: preorder ต้องผ่าน preorderService.setPaymentStatus() เหมือน order ผ่าน
+// orderService.setPaymentStatus() — ไม่งั้น auto-advance order_status pending→confirmed
+// ตอนจ่ายเงินจะไม่ทำงาน (เดิมเขียน payment_status ตรงผ่าน preorderModel.updateOne เฉย ๆ)
 async function propagateStatus(payment: any, status: PaymentStatus) {
   if (payment.order_id) {
     await orderService.setPaymentStatus(String(payment.order_id), status, String(payment._id));
   } else if (payment.preorder_id) {
-    await preorderModel.updateOne(
-      { _id: payment.preorder_id, deleted_at: null },
-      { $set: { payment_status: status, payment_id: payment._id } }
-    );
+    await preorderService.setPaymentStatus(String(payment.preorder_id), status, String(payment._id));
   }
 }
 
@@ -70,7 +76,9 @@ export async function createPayment(input: CreatePaymentInput) {
     throw badRequest("ต้องระบุ order_id หรือ preorder_id อย่างใดอย่างหนึ่ง");
   }
 
-  const amount = Number(input.amount);
+  // input.amount เป็นบาทจาก client เสมอ (API ไม่เปลี่ยน — BACKLOG §3.11) แปลงเป็นสตางค์ทันทีตรงนี้
+  // แล้วใช้สตางค์ตลอดที่เหลือ (เทียบกับ order/preorder.total_amount ที่เป็นสตางค์แล้ว)
+  const amount = toSatang(Number(input.amount));
   if (!Number.isFinite(amount) || amount <= 0) {
     throw badRequest("amount ต้องเป็นตัวเลขมากกว่า 0");
   }
@@ -87,7 +95,7 @@ export async function createPayment(input: CreatePaymentInput) {
     if (order.payment_status === "paid") throw conflict("ออเดอร์นี้ชำระเงินแล้ว");
     if (order.order_status === "cancelled") throw conflict("ออเดอร์นี้ถูกยกเลิกแล้ว");
     if (Math.abs(amount - order.total_amount) > AMOUNT_TOLERANCE) {
-      throw badRequest(`ยอดชำระต้องเท่ากับยอดออเดอร์ (${order.total_amount} บาท)`);
+      throw badRequest(`ยอดชำระต้องเท่ากับยอดออเดอร์ (${toBaht(order.total_amount)} บาท)`);
     }
   } else {
     assertObjectId(input.preorder_id as string, "preorder_id");
@@ -95,7 +103,14 @@ export async function createPayment(input: CreatePaymentInput) {
       .findOne({ _id: input.preorder_id, deleted_at: null })
       .lean<any>();
     if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
+    if (String(preorder.user_id) !== String(input.user_id)) {
+      throw badRequest("พรีออเดอร์นี้ไม่ได้เป็นของผู้ใช้ที่ระบุ");
+    }
     if (preorder.payment_status === "paid") throw conflict("พรีออเดอร์นี้ชำระเงินแล้ว");
+    if (preorder.order_status === "cancelled") throw conflict("พรีออเดอร์นี้ถูกยกเลิกแล้ว");
+    if (Math.abs(amount - preorder.total_amount) > AMOUNT_TOLERANCE) {
+      throw badRequest(`ยอดชำระต้องเท่ากับยอดพรีออเดอร์ (${toBaht(preorder.total_amount)} บาท)`);
+    }
   }
 
   // กันสร้าง payment ซ้ำ: 1 order/preorder มีใบที่ยัง active (pending) ได้ใบเดียว
@@ -138,7 +153,12 @@ export async function createPayment(input: CreatePaymentInput) {
     );
   }
 
-  return payment.toObject();
+  return presentPayment(payment.toObject());
+}
+
+// BACKLOG §3.11 — DB เก็บ amount เป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม (เหมือน order/preorder)
+function presentPayment<T extends Record<string, unknown>>(payment: T): T {
+  return toBahtFields(payment, ["amount"] as const);
 }
 
 // ── READ ────────────────────────────────────────────────────
@@ -173,7 +193,7 @@ export async function listPayments(query: ListPaymentQuery) {
     paymentModel.countDocuments(filter),
   ]);
 
-  return { items, meta: buildMeta(total, query.pagination) };
+  return { items: items.map(presentPayment), meta: buildMeta(total, query.pagination) };
 }
 
 export async function getPaymentById(id: string) {
@@ -185,7 +205,7 @@ export async function getPaymentById(id: string) {
     .populate("verified_by", "user_fullname email")
     .lean();
   if (!doc) throw notFound("ไม่พบรายการชำระเงินที่ระบุ");
-  return doc;
+  return presentPayment(doc);
 }
 
 // ── ลูกค้าแนบสลิป / แก้สลิป (ก่อนแอดมินตรวจ) ─────────────────
@@ -207,7 +227,19 @@ export async function submitSlip(
   if (input.promptpay_ref !== undefined) payment.promptpay_ref = input.promptpay_ref;
   payment.status = "pending"; // ส่งใหม่หลังเคยถูกปฏิเสธ → กลับมารอตรวจ
   await payment.save();
-  return payment.toObject();
+
+  // แจ้งเตือนสลิปเข้าใหม่ (DB + LINE) — best-effort ไม่ทำให้แนบสลิปล้มเหลวถ้าแจ้งเตือนพัง
+  notificationService
+    .notify({
+      title: "มีสลิปโอนเงินรอตรวจสอบ",
+      message: `ยอด ${toBaht(payment.amount).toLocaleString("th-TH")} บาท`,
+      module: "finance",
+      type: "info",
+      link: payment.order_id ? `/owner/orders/manageOrders?id=${payment.order_id}` : null,
+    })
+    .catch((err) => log.error("payment.notify_failed", { payment_id: String(payment._id), err }));
+
+  return presentPayment(payment.toObject());
 }
 
 // ── แอดมินตรวจสลิป ─────────────────────────────────────────
@@ -231,7 +263,7 @@ export async function verifyPayment(
   await payment.save();
 
   await propagateStatus(payment, payment.status as PaymentStatus);
-  return payment.toObject();
+  return presentPayment(payment.toObject());
 }
 
 // ── คืนเงิน ─────────────────────────────────────────────────
@@ -251,7 +283,7 @@ export async function refundPayment(id: string, input: { verified_by: string }) 
   await payment.save();
 
   await propagateStatus(payment, "refunded");
-  return payment.toObject();
+  return presentPayment(payment.toObject());
 }
 
 // ── DELETE (soft) ───────────────────────────────────────────

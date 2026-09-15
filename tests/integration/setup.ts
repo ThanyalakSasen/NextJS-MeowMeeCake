@@ -21,8 +21,14 @@ const conn = await mongoose.connect(process.env.MONGODB_URI);
 };
 
 afterEach(async () => {
-  const collections = mongoose.connection.collections;
-  await Promise.all(Object.values(collections).map((c) => c.deleteMany({})));
+  // list จาก DB จริงแทน mongoose.connection.collections (แคชแค่ collection ที่เคยผ่าน model ของ
+  // mongoose เท่านั้น) — collection ที่ถูกสร้าง/เขียนตรงผ่าน native driver (เช่น db.collection("x")
+  // ใน scripts/migrate-*.ts) จะไม่ถูกเคลียร์ถ้าใช้ mongoose.connection.collections อย่างเดียว ทำให้
+  // ข้อมูลรั่วข้ามเทสในไฟล์เดียวกันได้ (BACKLOG §3.11 — เจอตอนเทส migrate-money-to-satang)
+  const db = mongoose.connection.db;
+  if (!db) return;
+  const collections = await db.listCollections().toArray();
+  await Promise.all(collections.map((c) => db.collection(c.name).deleteMany({})));
 });
 
 afterAll(async () => {

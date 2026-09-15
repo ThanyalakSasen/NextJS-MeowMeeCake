@@ -14,6 +14,7 @@ import reviewModel from "../models/reviewModel";
 import orderItemModel from "../models/orderItemModel";
 import orderModel from "../models/orderModel";
 import productModel from "../models/productModel";
+import { round2 } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -27,7 +28,7 @@ async function recomputeProductRating(productId: string): Promise<void> {
   const count = rows[0]?.count ?? 0;
   await productModel.updateOne(
     { _id: productId },
-    { $set: { avg_rating: avg == null ? null : Math.round(avg * 100) / 100, review_count: count } }
+    { $set: { avg_rating: avg == null ? null : round2(avg), review_count: count } }
   );
 }
 
@@ -156,7 +157,7 @@ export async function getProductReviewSummary(productId: string) {
   }
   return {
     product_id: productId,
-    average: total ? Math.round((sum / total) * 100) / 100 : null,
+    average: total ? round2(sum / total) : null,
     count: total,
     distribution,
   };

@@ -7,6 +7,8 @@
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
+import { parseBody } from "@/lib/validate";
+import { permissionUpdate } from "@/schemas/rbac";
 import * as permissionService from "@/services/permissionService";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -18,7 +20,7 @@ export const GET = withPermission("employees", "view", async (_s, _r, ctx: Ctx) 
 
 export const PATCH = withPermission("employees", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
-  const body = await req.json();
+  const body = await parseBody(req, permissionUpdate);
   const result = await permissionService.updatePermission(id, body);
   audit(req, {
     action: "แก้ไขสิทธิ์เมนู",

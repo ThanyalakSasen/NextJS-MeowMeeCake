@@ -2,8 +2,10 @@
  * /api/shop/orders  (ออเดอร์ของผู้ใช้ที่ล็อกอินเท่านั้น)
  *   GET  — รายการออเดอร์ของตัวเอง (?order_status=&payment_status=&order_type=&page=&limit=&sortBy=&sortOrder=)
  *   POST — สั่งซื้อของตัวเอง — ตรวจ body ด้วย schemas/order.createOrderBody
- *          body: { source?: "cart"|"items", order_type, delivery_address?,
+ *          body: { source?: "cart"|"items", order_type,
+ *                  address_id? (จากสมุดที่อยู่ + recipient_name/recipient_phone) | delivery_address? (กรอกใหม่ทั้งก้อน),
  *                  promotion_code? | promotion_id?, items?, item_notes? }
+ *          - ที่อยู่จัดส่ง: ระบุ address_id หรือ delivery_address อย่างใดอย่างหนึ่งเท่านั้น (BACKLOG §3.8)
  *          - ค่าส่ง (delivery_fee) คิดฝั่ง server จากที่อยู่ + ยอดสั่งซื้อ — ลูกค้ากรอกเองไม่ได้
  *          - ส่วนลดคิดจากโปรโมชันที่ระบบตรวจเอง — กรอก discount_amount เองไม่ได้
  *          - พรีวิวค่าส่งก่อนกดสั่ง: POST /api/shop/orders/delivery-quote
@@ -15,6 +17,7 @@ import { parsePagination, parseSort } from "@/lib/queryParams";
 import { parseBody, parseQuery } from "@/lib/validate";
 import { createOrderBody, listOrderQuery } from "@/schemas/order";
 import * as orderService from "@/services/orderService";
+import * as addressService from "@/services/addressService";
 
 export const GET = withAuth(async (session, req) => {
   const sp = req.nextUrl.searchParams;
@@ -32,9 +35,10 @@ export const GET = withAuth(async (session, req) => {
 
 export const POST = withAuth(async (session, req) => {
   const body = await parseBody(req, createOrderBody);
+  const delivery_address = await addressService.resolveDeliverySnapshot(session.user_id, body);
   const common = {
     order_type: body.order_type,
-    delivery_address: body.delivery_address ?? null,
+    delivery_address,
     promotion_code: body.promotion_code ?? null,
     promotion_id: body.promotion_id ?? null,
     channel: "online" as const,

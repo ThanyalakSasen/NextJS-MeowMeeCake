@@ -8,8 +8,7 @@
  * ⚠️ ไม่เช็ค is_active / ช่วงวันที่ / usage_limit / max_user_per_user — เป็นหน้าที่ของ promotionService
  */
 import { badRequest, unprocessable } from "./httpError";
-
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import { round2 } from "./money";
 
 export type DiscountType = "Percentage" | "Amount" | "FreeShipping";
 export type PromotionChannel = "online" | "instore";
@@ -39,14 +38,26 @@ export interface DiscountResult {
   eligible_amount: number;
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+/** field ที่ใช้จริงจาก promotion doc — lean() คืน object ดิบ ไม่ใช่ Mongoose document ที่ type ชัดเจน */
+export interface PromotionLike {
+  _id: unknown;
+  promotion_code: string;
+  discount_type: string;
+  discount_value?: number | null;
+  applicable_channels?: string[];
+  applicable_products?: unknown[];
+  applicable_categories?: unknown[];
+  min_order_amount?: number | null;
+  min_quantity?: number | null;
+  max_discount_amount?: number | null;
+}
 
-function idIn(list: any[] | undefined, id: string | null | undefined): boolean {
+function idIn(list: unknown[] | undefined, id: string | null | undefined): boolean {
   if (!list?.length || !id) return false;
   return list.some((x) => String(x) === String(id));
 }
 
-export function computeDiscount(promo: any, ctx: DiscountContext): DiscountResult {
+export function computeDiscount(promo: PromotionLike, ctx: DiscountContext): DiscountResult {
   const type = promo.discount_type as DiscountType;
 
   // ── ช่องทาง ──

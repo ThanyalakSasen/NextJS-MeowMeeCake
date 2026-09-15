@@ -7,7 +7,9 @@
 import type { NextRequest } from "next/server";
 import { ok, created, route } from "@/lib/apiResponse";
 import { requireAuth, requirePermission } from "@/lib/authGuard";
+import { parseBody } from "@/lib/validate";
 import { parseBool, parsePagination } from "@/lib/queryParams";
+import { recordAttendanceBody } from "@/schemas/attendance";
 import * as attendanceService from "@/services/attendanceService";
 import type { AttendanceStatus } from "@/services/attendanceService";
 
@@ -33,7 +35,7 @@ export const GET = route(async (req: NextRequest) => {
 export const POST = route(async (req: NextRequest) => {
   const session = requireAuth(req);
   await requirePermission(session, "employees", "create");
-  const body = await req.json();
+  const body = await parseBody(req, recordAttendanceBody);
   return created(
     await attendanceService.recordAttendance({ ...body, recorded_by: session.user_id })
   );

@@ -2,14 +2,14 @@ import type { Model } from "mongoose";
 import { assertObjectId } from "./objectId";
 import { notFound } from "./httpError";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 /**
  * ยืนยันว่าเอกสารที่ id อ้างถึงมีอยู่จริงและยังไม่ถูก soft delete
  * ใช้ตรวจ foreign key ก่อน create/update เช่น product_id, category_id
+ * generic <T> แทน Model<any> — โมเดลแต่ละตัวในโปรเจกต์นี้ export เป็น
+ * `mongoose.models.X || mongoose.model(...)` (ไม่มี doc type ระบุ) เรียกด้วยโมเดลไหนก็ได้
  */
-export async function assertRefExists(
-  model: Model<any>,
+export async function assertRefExists<T>(
+  model: Model<T>,
   id: string,
   label: string,
   field = "id"
@@ -20,8 +20,8 @@ export async function assertRefExists(
 }
 
 /** เหมือน assertRefExists แต่ใช้กับ model ที่ไม่มีฟิลด์ deleted_at */
-export async function assertRefExistsHard(
-  model: Model<any>,
+export async function assertRefExistsHard<T>(
+  model: Model<T>,
   id: string,
   label: string,
   field = "id"

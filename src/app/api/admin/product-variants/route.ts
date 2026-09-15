@@ -8,5 +8,6 @@ export const { GET, POST } = collectionRoutes(productVariantService, {
   defaultSort: "created_at",
   filterFromQuery: (sp) => ({ product_id: sp.get("product_id") ?? undefined }),
   auth: { menu: "products" },
+  audit: { entity: "ProductVariant" },
   validate: { create: productVariantCreate },
 });

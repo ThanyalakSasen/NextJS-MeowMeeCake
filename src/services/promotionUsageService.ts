@@ -12,6 +12,12 @@ import { assertObjectId } from "../lib/objectId";
 import { buildMeta, type Pagination } from "../lib/queryParams";
 import promotionUsagesModel from "../models/promotionUsagesModel";
 import promotionModel from "../models/promotionModel";
+import { toBahtFields } from "../lib/money";
+
+// BACKLOG §3.11 — discount_applied เก็บเป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม
+function presentUsage<T extends Record<string, unknown>>(usage: T): T {
+  return toBahtFields(usage, ["discount_applied"] as const);
+}
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -78,7 +84,7 @@ export async function recordUsage(input: RecordUsageInput) {
       }
     }
 
-    return doc.toObject();
+    return presentUsage(doc.toObject());
   } catch (err) {
     await promotionModel
       .updateOne({ _id: input.promotion_id, used_count: { $gt: 0 } }, { $inc: { used_count: -1 } })
@@ -150,7 +156,7 @@ export async function listUsages(query: ListUsageQuery) {
       .lean(),
     promotionUsagesModel.countDocuments(filter),
   ]);
-  return { items, meta: buildMeta(total, query.pagination) };
+  return { items: items.map(presentUsage), meta: buildMeta(total, query.pagination) };
 }
 
 export async function getUsageById(id: string) {
@@ -162,5 +168,5 @@ export async function getUsageById(id: string) {
     .populate("user_id", "user_fullname email")
     .lean();
   if (!doc) throw notFound("ไม่พบบันทึกการใช้โปรโมชันที่ระบุ");
-  return doc;
+  return presentUsage(doc);
 }

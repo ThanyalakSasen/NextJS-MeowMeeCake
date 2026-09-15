@@ -43,6 +43,8 @@ const componentSchema = new mongoose.Schema(
       ref: "Units",
       required: true,
     },
+    // BACKLOG §3.11 เฟส 4 — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (ดู src/lib/money.ts)
+    // API (componentService) ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม
     estimated_cost_per_batch: {
       type: Number,
       required: true,

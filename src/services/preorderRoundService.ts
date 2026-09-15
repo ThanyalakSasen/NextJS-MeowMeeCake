@@ -14,16 +14,23 @@
  */
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { restoreDoc } from "../lib/crudService";
 import preorderRoundModel from "../models/preorderRoundModel";
 import preorderRoundItemModel from "../models/preorderRoundItemModel";
 import preorderModel from "../models/preorderModel";
 import productModel from "../models/productModel";
 import userModel from "../models/userModel";
+import type { z } from "zod";
+import type { updateRoundBody, updateRoundItemBody } from "../schemas/preorderRound";
+import { toSatang, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+type UpdateRoundInput = z.infer<typeof updateRoundBody>;
+type UpdateRoundItemInput = z.infer<typeof updateRoundItemBody>;
 
 export const ROUND_STATUSES = ["scheduled", "open", "closed", "cancelled"] as const;
 export type RoundStatus = (typeof ROUND_STATUSES)[number];
@@ -38,6 +45,22 @@ const NEXT_ROUND_STATUS: Record<RoundStatus, RoundStatus[]> = {
 
 const PRODUCT_SELECT =
   "product_name_th product_name_eng product_price sale_price product_img product_type preorder_config";
+
+// BACKLOG §3.11 เฟส 5b — price_override เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// ต้องแปลง "ซ้อน" เข้าไปในผลลัพธ์ populate (product_id.product_price/sale_price) ด้วย เพราะ populate
+// ไม่เรียกผ่าน productService.presentProduct() เลย (เหมือน componentService/recipeService.
+// getExpanded() ในเฟส 4) — ใช้กับทั้ง listRoundItems()/getRoundDetail() (current_price คำนวณจาก
+// สตางค์ล้วนแล้วแปลงเป็นบาทตรงนี้ทีเดียว)
+function presentRoundItem(it: Record<string, any>): Record<string, any> {
+  const presented = toBahtFields(it, ["price_override", "current_price"] as const);
+  return {
+    ...presented,
+    product_id:
+      presented.product_id && typeof presented.product_id === "object"
+        ? toBahtFields(presented.product_id, ["product_price", "sale_price"] as const)
+        : presented.product_id,
+  };
+}
 
 // ── Types ────────────────────────────────────────────────────
 export interface RoundItemInput {
@@ -135,7 +158,11 @@ export async function createRound(input: CreateRoundInput, createdBy: string) {
       }
       resolvedItems.push({
         product_id: product._id,
-        price_override: it.price_override != null ? Math.max(0, Number(it.price_override) || 0) : null,
+        // BACKLOG §3.11 เฟส 5b — price_override เป็นบาทจาก request เสมอ (API contract) แปลงเป็น
+        // สตางค์ก่อนเก็บ (DB เป็นสตางค์แล้ว ผูก fallback chain เดียวกับ product.sale_price/
+        // product_price ใน getOrderableRoundItem()/getRoundDetail() ด้านล่าง)
+        price_override:
+          it.price_override != null ? toSatang(Math.max(0, Number(it.price_override) || 0)) : null,
         min_order_qty: Math.max(1, Number(it.min_order_qty) || 1),
         max_qty_total: assertMaxQty(it.max_qty_total),
         is_active: it.is_active ?? true,
@@ -228,18 +255,22 @@ export async function getRoundDetail(
     ...round,
     items: items.map((it) => {
       const product = it.product_id ?? {};
+      // price_override/product.sale_price/product.product_price เป็นสตางค์ทั้งหมดแล้ว (เฟส 5b) —
+      // current_price ที่คำนวณตรงนี้จึงเป็นสตางค์ไปด้วยโดยอัตโนมัติ แปลงเป็นบาทพร้อมกับ field อื่นใน
+      // presentRoundItem() ทีเดียวด้านล่าง
       const base = it.price_override ?? product.sale_price ?? product.product_price ?? 0;
-      return {
+      return presentRoundItem({
         ...it,
         current_price: base,
         remaining_qty: Math.max(0, (it.max_qty_total ?? 0) - (it.current_qty ?? 0)),
-      };
+      });
     }),
   };
 }
 
 // ── UPDATE (แก้ได้เฉพาะชื่อ + ช่วงเวลา) ──────────────────────
-export async function updateRound(id: string, input: Record<string, any>) {
+// "ต้องมีอย่างน้อย 1 ฟิลด์" / round_name ไม่ว่าง validate ที่ route ผ่าน schemas/preorderRound.ts แล้ว
+export async function updateRound(id: string, input: UpdateRoundInput) {
   await dbConnect();
   assertObjectId(id);
 
@@ -249,14 +280,7 @@ export async function updateRound(id: string, input: Record<string, any>) {
     throw conflict(`รอบสถานะ "${round.round_status}" แก้ไขรายละเอียดไม่ได้`);
   }
 
-  const payload = pick(input, ["round_name", "open_date", "close_date", "pickup_date"]);
-  if (Object.keys(payload).length === 0) {
-    throw badRequest("ไม่มีฟิลด์ที่อนุญาตให้แก้ไข (round_name/open_date/close_date/pickup_date)");
-  }
-  if (payload.round_name !== undefined) {
-    payload.round_name = String(payload.round_name).trim();
-    if (!payload.round_name) throw badRequest("round_name ห้ามว่าง");
-  }
+  const payload: Record<string, any> = { ...input };
 
   const open_date = payload.open_date !== undefined ? toDate(payload.open_date, "open_date") : round.open_date;
   const close_date = payload.close_date !== undefined ? toDate(payload.close_date, "close_date") : round.close_date;
@@ -318,18 +342,10 @@ export async function deleteRound(id: string) {
   return { deleted: true, _id: round._id };
 }
 
+// BACKLOG3 §9 — pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน (deleteRound ด้านบนมี
+// pre-check + cascade ที่ไม่เข้ากับ primitive แบบง่าย ๆ เลยยังคงเขียนเองต่อไป)
 export async function restoreRound(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const round = await preorderRoundModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: { $ne: null } },
-      { $set: { deleted_at: null } },
-      { new: true }
-    )
-    .lean<any>();
-  if (!round) throw notFound("ไม่พบรอบพรีออเดอร์ที่ถูกลบไว้");
-  return round;
+  return restoreDoc(preorderRoundModel, id, { notFoundMsg: "ไม่พบรอบพรีออเดอร์ที่ถูกลบไว้" });
 }
 
 // ── ROUND ITEMS ────────────────────────────────────────────
@@ -342,11 +358,12 @@ export async function listRoundItems(
   const filter: Record<string, any> = { round_id: roundId };
   if (!opts.includeDeleted) filter.deleted_at = null;
   if (opts.activeOnly) filter.is_active = true;
-  return preorderRoundItemModel
+  const items = await preorderRoundItemModel
     .find(filter)
     .populate("product_id", PRODUCT_SELECT)
     .sort({ created_at: 1 })
     .lean();
+  return items.map(presentRoundItem);
 }
 
 export async function addRoundItem(roundId: string, input: RoundItemInput) {
@@ -373,13 +390,14 @@ export async function addRoundItem(roundId: string, input: RoundItemInput) {
     const doc = await preorderRoundItemModel.create({
       round_id: roundId,
       product_id: input.product_id,
-      price_override: input.price_override != null ? Math.max(0, Number(input.price_override) || 0) : null,
+      price_override:
+        input.price_override != null ? toSatang(Math.max(0, Number(input.price_override) || 0)) : null,
       min_order_qty: Math.max(1, Number(input.min_order_qty) || 1),
       max_qty_total: assertMaxQty(input.max_qty_total),
       current_qty: 0,
       is_active: input.is_active ?? true,
     });
-    return doc.toObject();
+    return presentRoundItem(doc.toObject());
   } catch (err: any) {
     if (err?.code === 11000) {
       throw conflict("สินค้านี้อยู่ในรอบนี้แล้ว (ใช้การแก้ไขแทน)");
@@ -388,19 +406,17 @@ export async function addRoundItem(roundId: string, input: RoundItemInput) {
   }
 }
 
-export async function updateRoundItem(itemId: string, input: Record<string, any>) {
+// "ต้องมีอย่างน้อย 1 ฟิลด์" validate ที่ route ผ่าน schemas/preorderRound.ts updateRoundItemBody แล้ว
+export async function updateRoundItem(itemId: string, input: UpdateRoundItemInput) {
   await dbConnect();
   assertObjectId(itemId, "id");
 
   const item = await preorderRoundItemModel.findOne({ _id: itemId, deleted_at: null });
   if (!item) throw notFound("ไม่พบรายการสินค้าในรอบที่ระบุ");
 
-  const payload = pick(input, ["price_override", "min_order_qty", "max_qty_total", "is_active"]);
-  if (Object.keys(payload).length === 0) {
-    throw badRequest("ไม่มีฟิลด์ที่อนุญาตให้แก้ไข (price_override/min_order_qty/max_qty_total/is_active)");
-  }
+  const payload: Record<string, any> = { ...input };
   if (payload.price_override !== undefined && payload.price_override !== null) {
-    payload.price_override = Math.max(0, Number(payload.price_override) || 0);
+    payload.price_override = toSatang(Math.max(0, Number(payload.price_override) || 0));
   }
   if (payload.min_order_qty !== undefined) {
     payload.min_order_qty = Math.max(1, Number(payload.min_order_qty) || 1);
@@ -414,7 +430,7 @@ export async function updateRoundItem(itemId: string, input: Record<string, any>
 
   Object.assign(item, payload);
   await item.save();
-  return item.toObject();
+  return presentRoundItem(item.toObject());
 }
 
 export async function removeRoundItem(itemId: string) {
@@ -451,24 +467,50 @@ export async function assertRoundOrderable(roundId: string) {
   return round;
 }
 
-/** ดึง round item + product สำหรับคิดราคาตอนสร้างพรีออเดอร์ */
-export async function getOrderableRoundItem(roundItemId: string, roundId: string) {
+/**
+ * ดึง round item + product สำหรับคิดราคาตอนสร้างพรีออเดอร์ (batch)
+ * BACKLOG §3.11 เฟส 5b — ฟังก์ชันนี้เป็น "internal only" ไม่เคย expose ผ่าน API ตรง ๆ (ใช้แค่ภายใน
+ * preorderService ตอนสร้างพรีออเดอร์) `unit_price` ที่คืนจึงตั้งใจเป็น**สตางค์**ตรง ๆ (ไม่ผ่าน
+ * presentRoundItem()) เพราะ item.price_override/product.sale_price/product.product_price เป็น
+ * สตางค์ทั้งหมดแล้ว — ผู้เรียก (preorderService) ก็ไม่ต้องแปลงอะไรเพิ่มเพราะรับค่ามาใส่
+ * preorderItem.unit_price ตรง ๆ (satang เหมือนกัน) — เหมือน recipeService.getUnitCostByProduct()
+ * ในเฟส 4 เป๊ะ
+ *
+ * BACKLOG2 §2 — เดิมชื่อ getOrderableRoundItem() (เอกพจน์) รับ roundItemId เดียว ให้
+ * createPreorder() เรียกวน await ทีละรายการ (N รายการ = query ~2N ครั้งทยอย) เปลี่ยนเป็น batch
+ * ด้วย $in ครั้งเดียวต่อ collection (preorderRoundItem/product) แล้ว join ใน memory เหมือน
+ * orderService.resolveLines() ที่แก้ไว้แล้วใน §3.18 — คืนผลลัพธ์เรียงตามลำดับ `roundItemIds` เดิม
+ * เป๊ะ (รายการไหนไม่พบ/ไม่ active จะ throw ตอน join ตามลำดับนั้น เหมือนพฤติกรรมเดิมทุกประการ)
+ */
+export async function getOrderableRoundItems(roundItemIds: string[], roundId: string) {
   await dbConnect();
-  assertObjectId(roundItemId, "round_item_id");
-  const item = await preorderRoundItemModel
-    .findOne({ _id: roundItemId, round_id: roundId, deleted_at: null })
-    .lean<any>();
-  if (!item) throw badRequest("ไม่พบรายการสินค้านี้ในรอบที่เลือก");
-  if (!item.is_active) throw conflict("รายการสินค้านี้ปิดการขายในรอบนี้แล้ว");
+  roundItemIds.forEach((id) => assertObjectId(id, "round_item_id"));
 
-  const product = await productModel
-    .findOne({ _id: item.product_id, deleted_at: null })
-    .select("product_name_th product_name_eng product_price sale_price product_type")
-    .lean<any>();
-  if (!product) throw notFound("ไม่พบสินค้าของรายการนี้");
+  const items = await preorderRoundItemModel
+    .find({ _id: { $in: roundItemIds }, round_id: roundId, deleted_at: null })
+    .lean<any[]>();
+  const itemById = new Map(items.map((it) => [String(it._id), it]));
 
-  const unit_price = item.price_override ?? product.sale_price ?? product.product_price ?? 0;
-  return { item, product, unit_price };
+  const productIds = [...new Set(items.map((it) => String(it.product_id)))];
+  const products = productIds.length
+    ? await productModel
+        .find({ _id: { $in: productIds }, deleted_at: null })
+        .select("product_name_th product_name_eng product_price sale_price product_type")
+        .lean<any[]>()
+    : [];
+  const productById = new Map(products.map((p) => [String(p._id), p]));
+
+  return roundItemIds.map((roundItemId) => {
+    const item = itemById.get(String(roundItemId));
+    if (!item) throw badRequest("ไม่พบรายการสินค้านี้ในรอบที่เลือก");
+    if (!item.is_active) throw conflict("รายการสินค้านี้ปิดการขายในรอบนี้แล้ว");
+
+    const product = productById.get(String(item.product_id));
+    if (!product) throw notFound("ไม่พบสินค้าของรายการนี้");
+
+    const unit_price = item.price_override ?? product.sale_price ?? product.product_price ?? 0;
+    return { item, product, unit_price };
+  });
 }
 
 /** จอง current_qty (กันเกิน max_qty_total ด้วย $expr) */

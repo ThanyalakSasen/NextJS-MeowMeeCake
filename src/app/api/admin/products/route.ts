@@ -6,15 +6,14 @@
 import { okList, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
-import { parseBool } from "@/lib/queryParams";
+import { parseBool, parsePagination } from "@/lib/queryParams";
 import * as productService from "@/services/productService";
 import type { ProductType } from "@/lib/productCode";
 
 export const GET = withPermission("products", "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await productService.getProducts({
-    page: Number(sp.get("page")) || undefined,
-    limit: Number(sp.get("limit")) || undefined,
+    pagination: parsePagination(sp),
     search: sp.get("search") ?? undefined,
     category_id: sp.get("category_id") ?? undefined,
     product_type: (sp.get("product_type") as ProductType | null) ?? undefined,

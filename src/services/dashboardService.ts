@@ -13,6 +13,7 @@ import orderItemModel from "../models/orderItemModel";
 import productModel from "../models/productModel";
 import ingredientModel from "../models/ingredientModel";
 import * as expenseService from "./expenseService";
+import { toBaht, round2 } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -92,8 +93,13 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       ),
     ]);
 
-  const revenue = paidRows[0]?.revenue ?? 0;
-  const cogs = cogsRows[0]?.cogs ?? 0;
+  // BACKLOG §3.11 — orderModel.total_amount/discount_amount เป็นสตางค์ (เฟส 1) และตั้งแต่เฟส 4
+  // orderItem.cost_per_unit ก็เป็นสตางค์ด้วยเช่นกัน (aggregate $sum ของทั้งคู่ได้ผลรวมเป็นสตางค์)
+  // expenseTotal (จาก expenseService.totalInRange) คืนบาทให้อยู่แล้วตั้งแต่เฟส 2 — แปลง
+  // revenue/discount/cogs เป็นบาทให้ครบก่อนเอามารวมกันในสูตร profit_estimate ไม่งั้นหน่วยจะปนกัน
+  const revenue = toBaht(paidRows[0]?.revenue ?? 0);
+  const discount = toBaht(paidRows[0]?.discount ?? 0);
+  const cogs = toBaht(cogsRows[0]?.cogs ?? 0);
   const paidOrders = paidRows[0]?.orders ?? 0;
 
   const byStatus: Record<string, number> = {};
@@ -106,12 +112,12 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
   return {
     range: { date_from: opts.date_from ?? null, date_to: opts.date_to ?? null },
     orders: { total: totalOrders, by_status: byStatus, paid: paidOrders },
-    revenue: Math.round(revenue * 100) / 100,
-    discount_given: Math.round((paidRows[0]?.discount ?? 0) * 100) / 100,
-    avg_order_value: paidOrders ? Math.round((revenue / paidOrders) * 100) / 100 : 0,
-    expenses: Math.round(expenseTotal * 100) / 100,
-    cogs: Math.round(cogs * 100) / 100,
-    profit_estimate: Math.round((revenue - expenseTotal - cogs) * 100) / 100,
+    revenue: round2(revenue),
+    discount_given: round2(discount),
+    avg_order_value: paidOrders ? round2(revenue / paidOrders) : 0,
+    expenses: round2(expenseTotal),
+    cogs: round2(cogs),
+    profit_estimate: round2(revenue - expenseTotal - cogs),
     low_stock: { products: lowProducts, ingredients: lowIngredients },
   };
 }
@@ -141,7 +147,7 @@ export async function salesByDay(opts: { days?: number } = {}) {
     to: bangkokDateString(new Date()),
     series: rows.map((r) => ({
       date: r._id,
-      revenue: Math.round(r.revenue * 100) / 100,
+      revenue: round2(toBaht(r.revenue)), // total_amount เป็นสตางค์ (BACKLOG §3.11)
       orders: r.orders,
     })),
   };
@@ -196,7 +202,7 @@ export async function topProducts(opts: {
       product_id: String(r._id),
       product_name_th: r.name,
       quantity_sold: r.qty,
-      revenue: Math.round(r.revenue * 100) / 100,
+      revenue: round2(toBaht(r.revenue)), // orderItem.total_price เป็นสตางค์ (BACKLOG §3.11)
     })),
   };
 }

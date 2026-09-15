@@ -13,15 +13,28 @@
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
 import { Saga } from "../lib/compensation";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import {
+  registerAutoRefundOnCancel,
+  assertCustomerCancelAllowed,
+  setEntityPaymentStatus,
+  applyEntityDeliveryUpdate,
+  softDeleteEntityWithItems,
+} from "../lib/orderLifecycle";
 import preorderModel from "../models/preorderModel";
 import preorderItemModel from "../models/preorderItemModel";
 import userModel from "../models/userModel";
 import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
+import { toSatang, toBaht, toBahtFields } from "../lib/money";
+import { generateDocNo } from "../lib/productCode";
+import type { z } from "zod";
+// BACKLOG2 §4 — schema เดียวกับ orderService.updateDelivery() ทุกฟิลด์ (generic ไม่มีอะไรเฉพาะ order)
+// ใช้ร่วมกันได้เลย ไม่ต้องสร้างซ้ำ
+import type { updateDeliveryBody } from "../schemas/order";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -58,8 +71,6 @@ const ADDRESS_FIELDS = [
   "zip_code",
 ] as const;
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
-
 // ── Types ────────────────────────────────────────────────────
 export interface PreorderLineInput {
   round_item_id: string;
@@ -90,16 +101,6 @@ export interface ListPreorderQuery {
   sort?: Record<string, 1 | -1>;
 }
 
-// ── helper: ออกเลขพรีออเดอร์ PRE-YYYYMMDD-XXXXXX ────────────
-function randomPreorderNo(now = new Date()): string {
-  const ymd =
-    now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0");
-  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `PRE-${ymd}-${rand}`;
-}
-
 // ── CREATE ───────────────────────────────────────────────────
 export async function createPreorder(
   userId: string,
@@ -126,22 +127,21 @@ export async function createPreorder(
     for (const f of ADDRESS_FIELDS) {
       if (!addr[f]) throw badRequest(`delivery_address.${f} จำเป็นต้องระบุ`);
     }
-    delivery_address = pick(addr, ADDRESS_FIELDS) as Record<string, string>;
+    // ตัดฟิลด์เกินทิ้ง (เก็บเฉพาะ ADDRESS_FIELDS) — ไม่ใช้ pick() ตรงนี้ตั้งใจ: ผ่านการเช็ค
+    // required field ครบข้างบนแล้ว การ narrow shape แค่ Object.fromEntries ธรรมดาก็พอ
+    // (ไม่ได้ทำหน้าที่กัน mass-assignment ที่ต้องรอ route adopt zod เหมือน service อื่น)
+    delivery_address = Object.fromEntries(ADDRESS_FIELDS.map((f) => [f, addr[f]]));
   }
 
   // ── resolve รายการ + คิดราคา ──
+  // BACKLOG2 §2: เดิมวน await ทีละรายการ (พรีออเดอร์ N รายการ = query ~2N ครั้งทยอยทีละรายการ ผ่าน
+  // getOrderableRoundItem() ตัวเดียว) เปลี่ยนมา batch ผ่าน getOrderableRoundItems() (พหูพจน์) ครั้ง
+  // เดียว เหมือน orderService.resolveLines() ที่แก้ไว้แล้วใน §3.18 — validate/error message เดิมทุก
+  // จุดต่อรายการ ต่างแค่ "ลำดับ" ของ error เมื่อมีหลายรายการผิดพร้อมกัน (เช็ค id/quantity ของทุก
+  // รายการก่อน แล้วค่อยเช็คสิ่งที่ต้องรู้ผลจาก DB — เหมือนที่ยอมรับไว้แล้วใน resolveLines ไม่มีเทสไหน
+  // อิงลำดับ error ข้ามรายการอยู่แล้ว)
   const seen = new Set<string>();
-  const lines: Array<{
-    round_item_id: any;
-    product_id: any;
-    product_snapshot: { product_name_th: string; product_name_eng: string };
-    quantity: number;
-    unit_price: number;
-    total_price: number;
-    special_request: string | null;
-  }> = [];
-
-  for (const raw of input.items) {
+  const quantities = input.items.map((raw) => {
     assertObjectId(raw.round_item_id, "round_item_id");
     if (seen.has(String(raw.round_item_id))) {
       throw badRequest("มี round_item_id ซ้ำใน items — รวมจำนวนเป็นรายการเดียว");
@@ -152,18 +152,27 @@ export async function createPreorder(
     if (!Number.isInteger(quantity) || quantity < 1) {
       throw badRequest("quantity ของแต่ละรายการต้องเป็นจำนวนเต็มตั้งแต่ 1");
     }
+    return quantity;
+  });
 
-    const { item, product, unit_price } = await preorderRoundService.getOrderableRoundItem(
-      raw.round_item_id,
-      String(round._id)
-    );
+  const resolvedItems = await preorderRoundService.getOrderableRoundItems(
+    input.items.map((raw) => raw.round_item_id),
+    String(round._id)
+  );
+
+  const lines = resolvedItems.map(({ item, product, unit_price }, idx) => {
+    const quantity = quantities[idx];
     if (quantity < (item.min_order_qty ?? 1)) {
       throw badRequest(
         `"${product.product_name_th}" สั่งขั้นต่ำ ${item.min_order_qty} ชิ้นต่อรายการ`
       );
     }
 
-    lines.push({
+    // BACKLOG §3.11 เฟส 5b — unit_price จาก preorderRoundService.getOrderableRoundItems() เป็นสตางค์
+    // อยู่แล้ว (price_override/sale_price/product_price เป็นสตางค์ทั้งหมดตั้งแต่เฟส 5b) ไม่ต้องแปลง
+    // อะไรเพิ่ม — ก่อนหน้านี้ (เฟส 1-5a) ยังต้อง toSatang() ตรงนี้เพราะฝั่งสินค้ายังเป็นบาทอยู่
+    const unitPriceSatang = unit_price;
+    return {
       round_item_id: item._id,
       product_id: product._id,
       product_snapshot: {
@@ -171,31 +180,35 @@ export async function createPreorder(
         product_name_eng: product.product_name_eng,
       },
       quantity,
-      unit_price,
-      total_price: round2(unit_price * quantity),
-      special_request: raw.special_request?.trim() || null,
-    });
-  }
+      unit_price: unitPriceSatang,
+      total_price: unitPriceSatang * quantity,
+      special_request: input.items[idx].special_request?.trim() || null,
+    };
+  });
 
-  const subtotal = round2(lines.reduce((s, l) => s + l.total_price, 0));
+  const subtotal = lines.reduce((s, l) => s + l.total_price, 0);
 
-  // ── ค่าส่ง (server คิดเอง) ──
+  // ── ค่าส่ง (server คิดเอง) ── deliveryService ยังทำงานเป็นบาท — แปลงข้ามโดเมนแค่จุดนี้
   let delivery_fee = 0;
   if (input.order_type === "delivery") {
-    delivery_fee = deliveryService.calcDeliveryFee({
-      province: delivery_address?.province ?? null,
-      subtotal,
-    }).fee;
+    delivery_fee = toSatang(
+      (
+        await deliveryService.calcDeliveryFee({
+          province: delivery_address?.province ?? null,
+          subtotal: toBaht(subtotal),
+        })
+      ).fee
+    );
   }
 
-  // ── ส่วนลด (เฉพาะแอดมินกรอกมือ) ──
+  // ── ส่วนลด (เฉพาะแอดมินกรอกมือ — input.discount_amount เป็นบาทจาก request) ──
   const discount_amount = opts.allowManualDiscount
-    ? Math.max(0, Number(input.discount_amount) || 0)
+    ? toSatang(Math.max(0, Number(input.discount_amount) || 0))
     : 0;
   if (discount_amount > subtotal + delivery_fee) {
     throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
   }
-  const total_amount = round2(subtotal - discount_amount + delivery_fee);
+  const total_amount = subtotal - discount_amount + delivery_fee;
 
   // ── ต้นทุนต่อหน่วย (สแนปช็อตจากสูตรล่าสุด) ──
   const costByProduct = await recipeService.getUnitCostByProduct(
@@ -218,7 +231,7 @@ export async function createPreorder(
     for (let attempt = 0; attempt < 5 && !preorder; attempt++) {
       try {
         preorder = await preorderModel.create({
-          preorder_no: randomPreorderNo(),
+          preorder_no: generateDocNo("PRE"),
           user_id: userId,
           round_id: round._id,
           order_type: input.order_type,
@@ -263,6 +276,31 @@ export async function createPreorder(
 }
 
 // ── READ ─────────────────────────────────────────────────────
+// BACKLOG §3.11 — DB เก็บเงินเป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม (เหมือน orderService)
+const PREORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount"] as const;
+// cost_per_unit เป็นสตางค์เช่นกันตั้งแต่เฟส 4 — เหตุผลเดียวกับ orderService (ORDER_ITEM_MONEY_FIELDS)
+const PREORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price", "cost_per_unit"] as const;
+
+function presentPreorder<T extends Record<string, unknown>>(preorder: T): T {
+  return toBahtFields(preorder, PREORDER_MONEY_FIELDS);
+}
+
+function presentPreorderItem(item: any): any {
+  return toBahtFields(item, PREORDER_ITEM_MONEY_FIELDS);
+}
+
+/**
+ * BACKLOG3 §5/§10 — เทียบ orderService.presentOrderWithItems(): populate user_id/round_id บน document
+ * ที่มีอยู่แล้วตรง ๆ แทน getPreorderById(id) ที่ต้อง re-query ทั้ง header + items ใหม่ทั้งที่ไม่จำเป็น
+ */
+async function presentPreorderWithItems(preorder: any, items?: any[]): Promise<any> {
+  await preorder.populate("user_id", "user_fullname email user_phone");
+  await preorder.populate("round_id", "round_name open_date close_date pickup_date round_status");
+  const preorderItems =
+    items ?? (await preorderItemModel.find({ preorder_id: preorder._id, deleted_at: null }).lean());
+  return { ...presentPreorder(preorder.toObject()), items: preorderItems.map(presentPreorderItem) };
+}
+
 export async function listPreorders(query: ListPreorderQuery) {
   await dbConnect();
 
@@ -298,7 +336,7 @@ export async function listPreorders(query: ListPreorderQuery) {
     preorderModel.countDocuments(filter),
   ]);
 
-  return { items, meta: buildMeta(total, query.pagination) };
+  return { items: items.map(presentPreorder), meta: buildMeta(total, query.pagination) };
 }
 
 export async function getPreorderById(id: string, opts: { includeDeleted?: boolean } = {}) {
@@ -316,7 +354,7 @@ export async function getPreorderById(id: string, opts: { includeDeleted?: boole
   if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
 
   const items = await preorderItemModel.find({ preorder_id: preorder._id, deleted_at: null }).lean();
-  return { ...preorder, items };
+  return { ...presentPreorder(preorder), items: items.map(presentPreorderItem) };
 }
 
 export async function getPreorderByNo(preorderNo: string) {
@@ -328,7 +366,7 @@ export async function getPreorderByNo(preorderNo: string) {
     .lean<any>();
   if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
   const items = await preorderItemModel.find({ preorder_id: preorder._id, deleted_at: null }).lean();
-  return { ...preorder, items };
+  return { ...presentPreorder(preorder), items: items.map(presentPreorderItem) };
 }
 
 // ── UPDATE STATUS (state machine) ───────────────────────────
@@ -347,20 +385,43 @@ export async function updatePreorderStatus(
   if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
 
   const current = preorder.order_status as PreorderStatus;
-  if (current === next) return getPreorderById(id);
+  // BACKLOG3 §5 — เทียบ orderService.updateOrderStatus: populate แทน re-query ทั้ง header+items
+  if (current === next) return presentPreorderWithItems(preorder);
   if (!NEXT_STATUS[current].includes(next)) {
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
 
+  let cancelledItems: any[] | undefined;
   if (next === "cancelled") {
+    // cleanup ตอนยกเลิก — best-effort ทั้งหมด (step ที่ fail จะ log ผ่าน logger ไม่ล้มการยกเลิก)
+    // ใช้ Saga เพื่อ log สม่ำเสมอ แทน .catch(() => undefined) ที่กลืน error เงียบ (เทียบ orderService)
+    const cleanup = new Saga();
+
     const items = await preorderItemModel
       .find({ preorder_id: preorder._id, deleted_at: null })
       .lean<any[]>();
+    cancelledItems = items;
     for (const it of items) {
-      await preorderRoundService
-        .releaseQty(String(it.round_item_id), it.quantity)
-        .catch(() => undefined);
+      cleanup.onRollback(`release-qty-${it._id}`, () =>
+        preorderRoundService.releaseQty(String(it.round_item_id), it.quantity)
+      );
     }
+
+    // พรีออเดอร์ที่จ่ายเงินแล้ว → คืนเงินอัตโนมัติ · กัน "preorder = cancelled แต่ payment ยัง paid"
+    // (BACKLOG 2b.3 — คู่ขนานกับ orderService.updateOrderStatus §2.8) — BACKLOG3 §10: ย้ายไปใช้ร่วม
+    // กับ orderService ที่ lib/orderLifecycle.ts แล้ว (คืนโควตาต่อรายการด้านบนยังคงแยกเขียนเอง เพราะ
+    // เป็นคนละกลไกกับที่ order คืนสต็อก+ส่วนลด)
+    await registerAutoRefundOnCancel({
+      saga: cleanup,
+      entityKind: "preorder",
+      paymentFilter: { preorder_id: preorder._id },
+      currentPaymentStatus: preorder.payment_status,
+      cancelledBy: opts.cancelled_by,
+      entityId: preorder._id,
+    });
+
+    await cleanup.rollback();
+
     preorder.cancelled_at = new Date();
     if (opts.cancelled_by) {
       assertObjectId(opts.cancelled_by, "cancelled_by");
@@ -371,55 +432,78 @@ export async function updatePreorderStatus(
 
   preorder.order_status = next;
   await preorder.save();
-  return getPreorderById(id);
+  return presentPreorderWithItems(preorder, cancelledItems);
 }
+
+/** สถานะที่ "ลูกค้า" ยกเลิกพรีออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน
+ *  (เทียบ orderService.CUSTOMER_CANCELABLE_STATUSES) */
+export const CUSTOMER_CANCELABLE_STATUSES: readonly PreorderStatus[] = ["pending", "confirmed"];
 
 export async function cancelPreorder(
   id: string,
-  opts: { cancelled_by?: string; cancelled_reason?: string } = {}
+  opts: {
+    cancelled_by?: string;
+    cancelled_reason?: string;
+    /** ถ้าระบุ: ยกเลิกได้เฉพาะเมื่อสถานะปัจจุบันอยู่ในลิสต์นี้ (ใช้จำกัดสิทธิ์ฝั่งลูกค้า — แอดมินไม่ส่ง = ยกเลิกได้ทุกสถานะที่ยังไม่ completed) */
+    allowedFrom?: readonly PreorderStatus[];
+  } = {}
 ) {
-  return updatePreorderStatus(id, "cancelled", opts);
+  const { allowedFrom, ...rest } = opts;
+  // BACKLOG3 §10 — logic เหมือน orderService.cancelOrder เป๊ะ ย้ายไปใช้ร่วมกัน
+  if (allowedFrom) {
+    await assertCustomerCancelAllowed({
+      model: preorderModel,
+      id,
+      allowedFrom,
+      entityLabel: "พรีออเดอร์",
+    });
+  }
+  return updatePreorderStatus(id, "cancelled", rest);
 }
 
 // ── payment status (เรียกจาก paymentService ภายหลัง) ────────
+// BACKLOG3 §10 — logic เหมือน orderService.setPaymentStatus เป๊ะ ย้ายไปใช้ร่วมกัน
 export async function setPaymentStatus(
   preorderId: string,
   status: PaymentStatus,
   paymentId?: string
 ) {
-  await dbConnect();
-  assertObjectId(preorderId, "preorder_id");
-  if (!PAYMENT_STATUSES.includes(status)) {
-    throw badRequest(`payment_status ต้องเป็นหนึ่งใน: ${PAYMENT_STATUSES.join(", ")}`);
-  }
-  const set: Record<string, any> = { payment_status: status };
-  if (paymentId) set.payment_id = paymentId;
+  const preorder = await setEntityPaymentStatus({
+    model: preorderModel,
+    id: preorderId,
+    idField: "preorder_id",
+    status,
+    statuses: PAYMENT_STATUSES,
+    paymentId,
+    entityLabel: "พรีออเดอร์",
+  });
+  return presentPreorder(preorder);
+}
 
-  const preorder = await preorderModel
-    .findOneAndUpdate({ _id: preorderId, deleted_at: null }, { $set: set }, { new: true })
-    .lean<any>();
-  if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
+// BACKLOG2 §4 — คู่ขนานกับ orderService.updateDelivery() เป๊ะ (เดิมพรีออเดอร์ไม่มีฟังก์ชันนี้เลย
+// ทั้งที่ preorderModel มีฟิลด์ delivery_status/shipped_at/delivered_at/tracking_no/delivered_note
+// ครบเหมือน orderModel ทุกประการ — แอดมินเลยไม่มีทางบันทึกว่าพรีออเดอร์ถูกจัดส่งไปแล้วเลย)
+// BACKLOG3 §10 — implementation ย้ายไปใช้ร่วมกับ orderService ที่ lib/orderLifecycle.ts แล้ว
+type UpdateDeliveryInput = z.infer<typeof updateDeliveryBody>;
 
-  if (status === "paid" && preorder.order_status === "pending") {
-    await preorderModel.updateOne({ _id: preorderId }, { $set: { order_status: "confirmed" } });
-  }
-  return preorder;
+export async function updateDelivery(id: string, input: UpdateDeliveryInput) {
+  const updated = await applyEntityDeliveryUpdate({
+    model: preorderModel,
+    id,
+    input,
+    entityLabel: "พรีออเดอร์",
+  });
+  return updated ? presentPreorder(updated) : updated;
 }
 
 // ── DELETE (soft) ───────────────────────────────────────────
+// BACKLOG3 §10 — logic เหมือน orderService.deleteOrder เป๊ะ ย้ายไปใช้ร่วมกัน
 export async function deletePreorder(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const preorder = await preorderModel.findOne({ _id: id, deleted_at: null });
-  if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ หรือถูกลบไปแล้ว");
-  if (!["completed", "cancelled"].includes(preorder.order_status)) {
-    throw conflict("ลบได้เฉพาะพรีออเดอร์ที่เสร็จสิ้นหรือถูกยกเลิกแล้วเท่านั้น");
-  }
-  preorder.deleted_at = new Date();
-  await preorder.save();
-  await preorderItemModel.updateMany(
-    { preorder_id: preorder._id, deleted_at: null },
-    { $set: { deleted_at: new Date() } }
-  );
-  return { deleted: true, _id: preorder._id };
+  return softDeleteEntityWithItems({
+    model: preorderModel,
+    itemModel: preorderItemModel,
+    itemForeignKey: "preorder_id",
+    id,
+    entityLabel: "พรีออเดอร์",
+  });
 }

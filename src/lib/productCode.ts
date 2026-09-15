@@ -32,3 +32,20 @@ export function generateProductCode(type: ProductType, at: Date = new Date()): s
 export function isProductCode(value: unknown): value is string {
   return typeof value === "string" && PATTERN.test(value.trim());
 }
+
+/**
+ * generateDocNo — เลขที่เอกสารรูปแบบ `<prefix>-YYYYMMDD-<random>` (ตัวพิมพ์ใหญ่, base36) ใช้ร่วมกันโดย
+ * ออเดอร์ (`OP-`), พรีออเดอร์ (`PRE-`), ใบสั่งผลิต (`PRD-`) — ชนกันได้ (เลขสุ่ม ไม่การันตี unique) ผู้เรียก
+ * ต้องมี retry-on-duplicate-key ของตัวเองเสมอ (ดู `orderService`/`preorderService`/`productionOrderService`)
+ */
+export function generateDocNo(prefix: string, randomLength = 6, now: Date = new Date()): string {
+  const ymd =
+    now.getFullYear().toString() +
+    String(now.getMonth() + 1).padStart(2, "0") +
+    String(now.getDate()).padStart(2, "0");
+  const rand = Math.random()
+    .toString(36)
+    .slice(2, 2 + randomLength)
+    .toUpperCase();
+  return `${prefix}-${ymd}-${rand}`;
+}

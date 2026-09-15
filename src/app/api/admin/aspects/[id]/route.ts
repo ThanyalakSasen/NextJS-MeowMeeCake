@@ -5,5 +5,6 @@ import { aspectService } from "@/services/sentimentService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(aspectService, {
   auth: { menu: "reports" },
+  audit: { entity: "Aspect" },
   validate: { update: aspectUpdate },
 });

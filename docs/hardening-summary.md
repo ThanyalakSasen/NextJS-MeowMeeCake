@@ -1,6 +1,6 @@
-# สรุปงาน Backend hardening — §2 + §3 (2026-09-07 → 2026-09-11)
+# สรุปงาน Backend hardening — §2 + §3 (2026-09-07 → 2026-09-12)
 
-> อัปเดตล่าสุด: 2026-09-11
+> อัปเดตล่าสุด: 2026-09-12
 > **เอกสารนี้ = จุดเริ่มอ่าน** · แต่ละหัวข้อลิงก์ไปเอกสารรายละเอียด + PR
 > master tracker → [`BACKLOG.md`](BACKLOG.md) · มาตรฐาน API → [`api-conventions.md`](api-conventions.md)
 
@@ -16,16 +16,23 @@
 | **§3 D3 — consistency/robustness** (3.3b Saga · integration test · 3.7 envelope) | ✅ | #8 #9 #10 #11 |
 | **§3 3.5 audit log** | ✅ (นอกชุด D — `src/lib/audit.ts`) → [`auditLog.md`](auditLog.md) | — |
 | **§3 รอบ 4a — ปิด infra** (CI · lint gate · zod crud-factory + shop routes · `createInject`) | ✅ core → [`hardening-4a-plan.md`](hardening-4a-plan.md) | #13–#17 |
-| **§3 รอบ 4b — จบ 3.1/3.6** (`/admin/orders`+`/admin/attendances` zod · รื้อ `pick()` · `no-explicit-any` error บน `src/lib`) | ⬜ _(แผน: `hardening-4b-plan.md` — รอเริ่ม)_ | — |
-| **§3 D4 — feature/ops** (3.8 · 3.12–3.16) | ⬜ หลัง launch | — |
-| **§3 3.11 เงินเป็น integer** | ⬜ งานเดี่ยว | — |
+| **§3 รอบ 4b — จบ 3.1/3.6** (`/admin/orders`+`/admin/attendances`+อีก 5 กลุ่ม route zod · รื้อ `pick()` 8/8 · `no-explicit-any` error บน `src/lib`) | ✅ → [`hardening-4b-plan.md`](hardening-4b-plan.md) | #20 #21 |
+| **§2b บั๊ก preorder payment/cancellation** (IDOR + auto-refund/auto-confirm 4 ข้อ) | ✅ → [`preorder-payment-hardening.md`](preorder-payment-hardening.md) | #19 |
+| **§2c บั๊กความทนทาน** (clearCart error handling · voidTransaction floor guard) | ✅ → [`order-cart-inventory-robustness.md`](order-cart-inventory-robustness.md) | #22 |
+| **§3 รอบ 4c** (3.8 address_id→checkout · ~~3.12~~ ล้าสมัย · 3.16 purchase_cost · 3.4 integration test เพิ่ม) | ✅ → [`hardening-4c-plan.md`](hardening-4c-plan.md) | #23–#25 |
+| **§3 รอบ 4d — feature/ops** (3.13 object storage abstraction · 3.14 ลบรูปที่ไม่ใช้ · 3.15 delivery zone เป็น DB) | ✅ → [`hardening-4d-plan.md`](hardening-4d-plan.md) | #28 |
+| **§3 3.11 เงินเป็น integer** | 🟡 เฟส 3/5 (Order+Preorder+Payment+Expense+DeliveryZone) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | — |
 
 ทุก PR merge เข้า branch `addModels` · ทุก commit ผ่าน `typecheck` · `typecheck:test` · `lint` · `test` (unit) · `test:integration` · `build` · **CI (`.github/workflows/ci.yml`) รันครบทุกขั้นทุก PR ตั้งแต่ #13**
 
 **ลำดับที่ทำจริง** = ตามแผน [`hardening-plan.md`](hardening-plan.md) §ลำดับที่แนะนำ:
 D1 (3.6 → 3.3 → 3.4 → 3.1 infra) → D2 (3.2 → 3.9 → 3.10) →
 D3 (**3.3b compensation → integration test → 3.7 envelope** ตาม [`hardening-d3-plan.md`](hardening-d3-plan.md)) → 3.5 audit log →
-รอบ 4a (CI #13 → 3.6 cleanup #14 → 3.1 crud-factory #15/#16 → shop routes + `createInject` #17)
+รอบ 4a (CI #13 → 3.6 cleanup #14 → 3.1 crud-factory #15/#16 → shop routes + `createInject` #17) →
+รอบ 4b (zod tail + `pick()` cleanup + `no-explicit-any` บน `src/lib` #20/#21) →
+§2b/§2c (พบจาก code review เต็ม `src/services/` #19/#22 — ดู [`hardening-4c-plan.md`](hardening-4c-plan.md) §0 เรื่องที่ทั้งสองอันเคยรายงานผิดว่า merge แล้วทั้งที่ยังไม่ merge) →
+รอบ 4c (address_id→checkout · purchase_cost · integration test เพิ่ม #23–#25) →
+รอบ 4d (object storage abstraction · ลบรูปที่ไม่ใช้ · delivery zone เป็น DB #28)
 
 ---
 
@@ -129,25 +136,128 @@ test: unit 91→**115** / 15 ไฟล์ · lint = **0 error / 13 warning** (`n
 
 ---
 
+## รอบ 4b — จบ §3.1 + §3.6 (✅ เสร็จสมบูรณ์, PR #20–#21) → [`hardening-4b-plan.md`](hardening-4b-plan.md)
+
+| ข้อ | ทำแล้ว | PR |
+|---|---|---|
+| **A. zod tail** | `/admin/orders` (POST) + `/admin/attendances` (4 route) + อีก 5 กลุ่ม route ที่พบว่ายังไม่ adopt ระหว่างทำ B2 (`.../delivery`, `/admin/permissions`, `/admin/preorder-rounds*`+`preorder-round-items`, `/admin/users`) | #20 #21 |
+| **B. รื้อ `pick()`** | ปิดครบ **8/8 service** ที่เคย whitelist ซ้ำกับ zod — บทเรียนสำคัญ: ต้องเช็คการ adopt เป็น**ต่อฟังก์ชัน**ไม่ใช่ต่อไฟล์ | #20 #21 |
+| **C. `no-explicit-any` = error บน `src/lib`** | 5 ไฟล์ (`refs`/`discountEngine`/`crudService`/`bom`/`crudRoutes`) — ไม่เหลือ `any` เลยสักจุด ไม่ต้อง disable-next-line ที่ไหนเลย | #20 #21 |
+
+test: unit 137→**149** / 17 ไฟล์ · lint = **0 error / 5 warning** (ลดจาก 13 — เหลือแต่ใน route layer)
+
+## §2b — บั๊ก preorder payment/cancellation (✅ เสร็จ 4/4, PR #19) → [`preorder-payment-hardening.md`](preorder-payment-hardening.md)
+
+พบจาก code review เต็ม `src/services/` ไล่เทียบ `preorderService`/`paymentService` กับ `orderService`
+ที่ path คู่ขนานผ่าน hardening §2 มาแล้ว — preorder ไม่เคยได้ fix ตามเลย รวมช่องโหว่ IDOR 1 ข้อ
+(สร้าง payment ผูกกับพรีออเดอร์คนอื่นได้) + data-integrity 3 ข้อ (ไม่ auto-confirm/auto-refund/customer
+cancel guard) — เทสใหม่ 9 เคส
+
+## §2c — บั๊กความทนทาน/correctness เล็ก (✅ เสร็จ 2/4 ที่เป็นบั๊กจริง, PR #22) → [`order-cart-inventory-robustness.md`](order-cart-inventory-robustness.md)
+
+`clearCart` ไม่กัน error หลัง order commit แล้ว · `voidTransaction` ย้อนรายการ `receive` ไม่มี floor
+guard (ค่าติดลบได้) — อีก 2 ข้อที่พบพร้อมกัน (double-credit risk เชิงสถาปัตยกรรม, `recordUsage` swallow
+error) เป็น known-risk/tradeoff ที่ตั้งใจไว้แล้ว ไม่ใช่บั๊กที่ต้องรีบแก้
+
+## รอบ 4c — feature เล็ก + เทสเพิ่ม (✅ เสร็จสมบูรณ์, PR #23–#25) → [`hardening-4c-plan.md`](hardening-4c-plan.md)
+
+| ข้อ | ทำแล้ว | PR |
+|---|---|---|
+| **3.8** address_id → checkout | `oneOf(address_id, delivery_address)` + `addressService.resolveDeliverySnapshot()` — ไม่แตะ `orderService` เลย | #23 |
+| ~~**3.12** `src/lib/notify.ts`~~ | ล้าสมัย — ระบบแจ้งเตือนจริง (`notificationService.ts`+LINE) ถูกสร้างและ wire เสร็จแล้วก่อนหน้านี้ | — |
+| **3.16** `purchase_cost` | field ใหม่ใน `productModel` + fallback ใน `getUnitCostByProduct` เมื่อไม่มีสูตร (แก้ COGS/กำไรใน dashboard ที่เคยนับเป็น 0 เงียบ ๆ) | #24 |
+| **3.4** integration test เพิ่ม | `cartService`/`ingredientTransactionService`/`deliveryService.quoteForCart` (19 เคสใหม่) | #25 |
+
+test: unit **155** / integration 27→**56** · lint = **0 error / 5 warning** (ไม่เปลี่ยนจาก 4b)
+
+---
+
+## รอบ 4d — object storage + ลบรูปที่ไม่ใช้ + delivery zone เป็น DB (✅ เสร็จสมบูรณ์, PR #28) → [`hardening-4d-plan.md`](hardening-4d-plan.md)
+
+| ข้อ | ทำแล้ว | PR |
+|---|---|---|
+| **3.13** object storage abstraction | `upload.ts` เป็น `UploadDriver` interface — `localDisk` ดีฟอลต์ (พฤติกรรมเดิมทุกประการ) + `s3` (S3-compatible, lazy import) เลือกผ่าน env `UPLOAD_DRIVER` · ถอน `multer` ที่ไม่เคยถูกใช้ | #28 |
+| **3.14** ลบรูปสินค้าที่ไม่ใช้ | `updateProduct` diff รูปเก่า/ใหม่แล้วลบเฉพาะที่หายไป · `hardDeleteProduct` ลบทั้งหมด (soft delete ไม่ลบ — ยัง restore ได้) | #28 |
+| **3.15** delivery zone เป็น DB | `deliveryZoneModel`+`deliveryZoneService` (cache TTL invalidate ทันทีตอนแก้) + `/api/admin/delivery-zones` · `calcDeliveryFee` เป็น async เช็ค DB ก่อน fallback env เดิมถ้ายังไม่ตั้งค่า | #28 |
+
+test: unit 155→**163** / integration 56→**79** · ก่อนลงมือ 3.13 ถามผู้ใช้เรื่องแผน hosting ก่อน (ไม่เดา) — เลือกทำแบบเผื่ออนาคต (`localDisk` ดีฟอลต์ + `s3` driver พร้อมใช้เมื่อจำเป็น)
+
+---
+
+## รอบ 5 — เงินเป็น integer (สตางค์) — ✅ เสร็จสมบูรณ์ทั้งหมด (2026-09-12) → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)
+
+สำรวจก่อนลงมือพบเงินกระจายใน 17 model (ภายหลังพบเพิ่มอีก 1 ตัวระหว่างสำรวจเฟส 5 — รวมเป็น 18 ดูแถว
+เฟส 5b) — แบ่งเป็นเฟสตามโดเมนที่ผูกกันจริงทางโค้ด (ทำทีเดียวเสี่ยงเกินรีวิวไหว) ถามผู้ใช้เรื่อง API
+contract ก่อน: **DB เก็บสตางค์ แต่ API ยังบาททศนิยมเหมือนเดิม** (ไม่ breaking)
+
+| เฟส | ขอบเขต | สถานะ |
+|---|---|---|
+| 1 | Order+OrderItem+Preorder+PreorderItem+Payment+PromotionUsages+dashboardService | ✅ เสร็จ |
+| 2 | Expense (`expenseModel.amount`) | ✅ เสร็จ |
+| 3 | Delivery zone (`deliveryZoneModel.fee`) | ✅ เสร็จ |
+| 4 | Recipe/Component/Ingredient cost + `cost_per_unit`/`purchase_cost` | ✅ เสร็จ |
+| 5a | Promotion definition (`promotionModel`) | ✅ เสร็จ |
+| 5b | Product pricing ที่เหลือ (`product_price`/`variant_price`/`extra_price`/`cartItemModel`) + `preorderRoundItemModel.price_override` | ✅ เสร็จ |
+
+เฟส 1 ต้องรวม order+preorder เข้าด้วยกันเพราะ `paymentModel` เป็น collection กลางที่ใช้ร่วมกัน (แยกแปลง
+ไม่ได้ — จะกำกวมว่า doc ไหนหน่วยอะไร) · migration script `npm run migrate:money-to-satang` · เจอ+แก้บั๊ก
+ใน `tests/integration/setup.ts` ไปด้วย (afterEach เดิมไม่เคลียร์ raw collection ที่ไม่ผ่าน mongoose model)
+
+เฟส 2 (Expense) โดดเดี่ยวตามคาด — `dashboardService` ไม่ต้องแก้เลยสักบรรทัด แต่**เจอบั๊กสำคัญ**ใน
+migration script เอง: marker เดิมเป็นก้อนเดียวทั้งไฟล์ ถ้า DB เคยรันเฟส 1 ไปแล้วจะข้ามทั้งไฟล์รวมถึง
+`expenseModel` ที่เพิ่งเพิ่มมาด้วย (เงียบ ไม่มี error) — แก้เป็น marker แยกต่อ collection ก่อน merge
+
+เฟส 3 (Delivery zone) โดดเดี่ยวตามคาดเช่นกัน — จุดที่ต้องระวังคือ `getActiveZonesCached()`
+(cache ภายในที่ `deliveryService.ts` ใช้เท่านั้น ไม่เคย expose ตรงให้ client) ต้อง**ไม่**ผ่าน presenter
+ตั้งใจ ปล่อยเป็นสตางค์ดิบไว้ ให้ `deliveryService.ts` แปลงเองตรงจุดใช้จริง — ส่วนที่ expose จริง
+(`/api/admin/delivery-zones`) ผ่าน presenter ตามปกติ
+
+เฟส 4 (Recipe/Component/Ingredient + `cost_per_unit`/`purchase_cost`) เสี่ยงกว่าเฟส 2-3 เพราะมี field
+ที่ "ค้าง" จากเฟส 1 (`orderItem`/`preorderItem.cost_per_unit`) ต้องรอเฟสนี้ก่อนถึงจะแปลงตามได้ — ดึง
+`productModel.purchase_cost` เข้ามาแปลงพร้อมกันด้วยทั้งที่อยู่ในแผนเฟส 5 (Product pricing) เพราะ
+`recipeService.getUnitCostByProduct()` ผสมค่าจากสูตรกับ `purchase_cost` fallback เข้าด้วยกัน ถ้าปล่อย
+`purchase_cost` ไว้ก่อนจะได้ Map ที่หน่วยปนกัน **เจอบั๊กใหม่ 2 จุด:** (1) สูตรปัดเศษเดิมออกแบบไว้สำหรับ
+บาท (ปัดทศนิยม 2 ตำแหน่ง) ต้องเปลี่ยนเป็นปัด integer สตางค์ตรง ๆ (2) MongoDB `$mul` error ทันทีถ้าเจอ
+field ที่เป็น `null` (ยืนยันด้วยการทดสอบจริง) — field เงินที่ nullable ต้อง filter `$type:"number"`
+ก่อนเสมอ ไม่งั้น migration พังกลางทาง · เจอบั๊กมาร์กเกอร์ซ้ำแบบเดียวกับเฟส 2 อีกครั้ง (เพิ่ม field เข้า
+collection ที่มี section เดิมอยู่แล้ว ต้องแยก section id ใหม่) — ดู `hardening-5-money-phase1.md` §4
+
+**หมายเหตุระหว่างเตรียม merge เฟส 4:** เจอว่า CI (`typecheck:test` — คนละคำสั่งกับ `typecheck` ที่ไม่
+ครอบคลุม `tests/`) ของ PR เฟส 4/2/3 จริง ๆ FAILURE มาตลอด แต่ merge ผ่านเพราะ `verify` ไม่ใช่ required
+check — ต้นเหตุ `db.collection("migrations")` ไม่ได้ type ไว้ แก้แล้วและเพิ่มขั้นตอนนี้เข้า checklist
+
+เฟส 5a (Promotion) ซับซ้อนสุดตามคาดเพราะ `discount_value` เป็นเงินเฉพาะตอน `discount_type ===
+"Amount"` (`min_order_amount`/`max_discount_amount` เป็นเงินเสมอ) ต้อง handle conditional ทั้งตอน
+service และตอน migrate — `discountEngine.ts` ไม่ต้องแก้เลยเพราะ `presentPromotion()` ทำหน้าที่แปลง
+ข้ามโดเมนให้ก่อนส่งเข้า (ใช้ฟังก์ชันเดียวกับที่เป็น API presenter) **เจอว่า `$mul` ธรรมดาทำ
+conditional ไม่ได้** ต้องเปลี่ยนไปใช้ pipeline-style update แทน (`updateMany(filter, [stage],
+{ updatePipeline: true })`) — บวกกับค้นพบว่า aggregation `$multiply` คืน `null` เฉย ๆ เมื่อเจอ `null`
+(ไม่ throw เหมือน `$mul` ในเฟส 4) จึงไม่ต้อง filter `$type:"number"` เลยสำหรับ field nullable ในเฟสนี้
+— ปลอดภัยกว่าและสั้นกว่า `$mul` + filter · ยังพบ `preorderRoundItemModel.price_override` เป็น money
+field ที่พลาดจากการสำรวจ 17 model รอบแรก (ผูก fallback chain เดียวกับ `product.sale_price`/
+`product_price`) ต้องยกไปแปลงพร้อมเฟส 5b
+
+เฟส 5b (Product pricing + `preorderRoundItemModel.price_override`) — เฟสสุดท้ายของ §3.11 ปิดโครงการนี้
+ทั้งหมด แปลงครบทั้ง `productModel.product_price`/`sale_price`, `productVariantModel.variant_price`,
+`productOptionModel.extra_price`, `cartItemModel.price_snapshot`+`selected_options[].extra_price`,
+`preorderRoundItemModel.price_override` — ผลลัพธ์ที่น่าพอใจที่สุด: `orderService.resolveLine()`/
+`preorderService`'s round-item pricing ไม่มี "จุดข้ามโดเมน" ให้ต้อง `toSatang()` ปลายทางอีกแล้ว เพราะ
+ฝั่งสินค้ากับฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด **บั๊กที่ไม่ได้เจอ (แต่เกือบเจอ)**: test helper
+`makeProduct()`/`makeVariant()`/`makeOption()` มีจุดเรียกอยู่ก่อนแล้ว 51 จุดใน 12 ไฟล์ — แก้โดยให้
+helper แปลงบาท→สตางค์ให้อัตโนมัติในตัวเอง (ต่างจาก `makeIngredient`/`makeRecipe` ในเฟส 4 ที่ปรับแค่
+default) ทำให้จุดเรียกเดิมผ่านหมดโดยไม่ต้องแก้แม้แต่จุดเดียว (ยกเว้น 1 จุด)
+
+test unit 163→171→171→171→171→**171** (คงที่ตั้งแต่เฟส 2) / integration 82→89→93→104→115→**125**
+
+**สรุปทั้งรอบ 5:** 6 เฟสย่อย, 18 model, unit 163→171, integration 79→125 (+46 เคส) — รายละเอียด/
+บทเรียนทั้งหมด → `hardening-5-money-phase1.md` §8
+
+---
+
 ## ที่เหลือ (ยังไม่ทำ)
 
-> **ลำดับ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"** · รอบ 4b (จบ 3.1/3.6) · รอบ 4c (3.8/3.12/3.16) · รอบ 4d (3.13→3.14 · 3.15) · รอบ 5 (3.11)
-
-### รอบ 4b — จบ §3.1 + §3.6
-- `/api/admin/orders` (POST/PATCH) + `/api/admin/attendances` adopt zod (custom route ซับซ้อน)
-- รื้อ `pick()` / `createFields` / `pickWritable()` ที่ซ้ำกับ zod (8 service) — ให้ zod เป็นด่านเดียว
-- `no-explicit-any` = `error` บน `src/lib` (ลบ `/* eslint-disable */` header 5 ไฟล์) + เก็บ 13 warning ใน route
-- (option) type-aware `no-floating-promises`
-
-### §3.4 integration test — เพิ่ม
-`cartService` · `ingredientTransactionService` · `deliveryService.quoteForCart`
-
-### §3 D4 — หลัง launch → [`hardening-plan.md`](hardening-plan.md) §4
-3.8 address→checkout · 3.12 `notify.ts` (LINE) · 3.13 object storage → 3.14 ลบรูปที่ไม่ใช้ ·
-3.15 delivery zone เป็น DB · 3.16 `purchase_cost`
-
-### §3.11 — งานเดี่ยว
-เก็บเงินเป็น integer (สตางค์) · branch แยก · ต้องมี integration test ครอบ + freeze feature อื่น
+> **ลำดับ → [`BACKLOG.md`](BACKLOG.md) §3 "ลำดับการแก้ที่เหลือ"** — รอบ 4b/4c/4d/5 ปิดครบทั้งหมดแล้ว
+> ไม่มีงานค้างจาก §3 อีก
 
 ### §1 Blockers — ขั้น deploy (ไม่ใช่โค้ด)
 `npm run seed` · `npm run backfill:product-codes` · MongoDB `product_type` เดิม → `inStore` ·
@@ -164,10 +274,15 @@ test: unit 91→**115** / 15 ไฟล์ · lint = **0 error / 13 warning** (`n
 | [`api-conventions.md`](api-conventions.md) | มาตรฐาน response / status / list / auth / query |
 | [`data-integrity-fixes.md`](data-integrity-fixes.md) | §2.8–2.11 เชิงลึก |
 | [`reprice.md`](reprice.md) · [`promo-freeshipping.md`](promo-freeshipping.md) · [`order-cancel.md`](order-cancel.md) · [`concurrency-guards.md`](concurrency-guards.md) | §2.5 / §2.6+2.11 / §2.7+2.8 / §2.9+2.10 |
+| [`preorder-payment-hardening.md`](preorder-payment-hardening.md) | §2b — IDOR + auto-refund/auto-confirm พรีออเดอร์ (PR #19) |
+| [`order-cart-inventory-robustness.md`](order-cart-inventory-robustness.md) | §2c — clearCart error handling + voidTransaction floor guard (PR #22) |
 | [`hardening-plan.md`](hardening-plan.md) | แผน §3 ทั้งหมด (D1–D4) |
 | [`hardening-d3-plan.md`](hardening-d3-plan.md) | §3.7 envelope + §3.3b compensation (D3.1–D3.6 + D3.4b) |
 | [`hardening-4a-plan.md`](hardening-4a-plan.md) | รอบ 4a — CI + 3.6 lint gate + 3.1 crud-factory/shop routes (PR #13–#17) |
-| `hardening-4b-plan.md` _(รอเริ่ม)_ | รอบ 4b — `/admin/orders`+`/admin/attendances` zod · รื้อ `pick()` · `no-explicit-any` บน `src/lib` |
+| [`hardening-4b-plan.md`](hardening-4b-plan.md) | รอบ 4b — zod tail ครบ (`/admin/orders`+อีก 5 กลุ่ม) · รื้อ `pick()` 8/8 · `no-explicit-any` บน `src/lib` (PR #20–#21) |
+| [`hardening-4c-plan.md`](hardening-4c-plan.md) | รอบ 4c — address_id→checkout · purchase_cost · integration test เพิ่ม (+ §0 บทเรียนเรื่อง §2b/§2c ที่เคยรายงานผิดว่า merge แล้ว) (PR #23–#25) |
+| [`hardening-4d-plan.md`](hardening-4d-plan.md) | รอบ 4d — object storage abstraction · ลบรูปที่ไม่ใช้ · delivery zone เป็น DB (PR #28) |
+| [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) | รอบ 5 §3.11 — เสร็จสมบูรณ์ทั้งหมด (เฟส 1-5b, 18 model): Order+Preorder+Payment+Expense+DeliveryZone+Recipe/Component/Ingredient+Promotion+Product pricing เป็นสตางค์ |
 | [`infra-tooling.md`](infra-tooling.md) | §3.6 eslint · §3.3 logger · §3.4 testing |
 | [`validation.md`](validation.md) | §3.1 zod — สถานะ adopt ราย route |
 | [`security-hardening.md`](security-hardening.md) | §3.2 rate-limit · §3.9 Google · §3.10 CSRF |

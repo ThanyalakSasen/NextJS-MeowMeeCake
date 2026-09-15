@@ -9,6 +9,7 @@ import { badRequest, forbidden } from "../lib/httpError";
 import { signSession } from "../lib/jwt";
 import type { SessionUser } from "../lib/session";
 import * as userService from "./userService";
+import { stripSecrets } from "./userService";
 import * as userLogService from "./userLogService";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
@@ -40,6 +41,9 @@ async function issue(user: any) {
 
 // ── LOGIN (email + password) ───────────────────────────────
 export async function login(email: string, password: string, ctx: { ip?: string | null } = {}) {
+  // BACKLOG3 §4 — เดิม fetch user doc เดิมซ้ำถึง 3 รอบ (verifyCredentials → toSessionUser ดึง role
+  // แยก → getUserById ท้ายสุด) verifyCredentials() populate role_id + sync ค่าที่ update แล้วให้เอง
+  // (ดูคอมเมนต์ในไฟล์นั้น) ให้ user object เดียวใช้ต่อได้ตลอด ไม่ต้อง query ซ้ำเลย
   const user = await userService.verifyCredentials(email, password); // throw ถ้าผิด/ถูกล็อก
   const { session, token } = await issue(user);
   await userLogService.writeLog({
@@ -48,8 +52,7 @@ export async function login(email: string, password: string, ctx: { ip?: string 
     action_type: "LOGIN",
     ip_address: ctx.ip ?? null,
   });
-  const safeUser = await userService.getUserById(session.user_id);
-  return { user: safeUser, token, session };
+  return { user, token, session };
 }
 
 // ── REGISTER (ลูกค้าสมัครเอง) ──────────────────────────────
@@ -116,8 +119,11 @@ export async function loginWithGoogle(credential: string, ctx: { ip?: string | n
   // Google บอกว่าอีเมลนี้ยังไม่ยืนยัน → ไม่ให้ผูก/สร้างบัญชีด้วยอีเมลนี้ (กันสวมสิทธิ์)
   if (claims.email_verified === false) throw badRequest("อีเมลของบัญชี Google นี้ยังไม่ได้ยืนยัน");
 
+  // BACKLOG3 §4 — populate role_id ตรงนี้เลย (เหมือน userService.verifyCredentials) กัน
+  // toSessionUser() ต้อง roleModel.findById() แยกอีกรอบ
   let user: any = await userModel
     .findOne({ $or: [{ googleId }, { email }], deleted_at: null })
+    .populate("role_id", "role_name role_type")
     .lean();
 
   if (user) {
@@ -127,7 +133,12 @@ export async function loginWithGoogle(credential: string, ctx: { ip?: string | n
         { _id: user._id },
         { $set: { googleId, is_email_verified: true } }
       );
+      // sync ค่าที่เพิ่ง update ลง object ในหน่วยความจำด้วย (ไม่ใช่แค่ DB) — ดูเหตุผลเดียวกับ
+      // userService.verifyCredentials()
+      user.googleId = googleId;
+      user.is_email_verified = true;
     }
+    user = stripSecrets(user); // findOne ตรงนี้ไม่ผ่าน userService เลยยังไม่ถูก strip
   } else {
     const role = await roleModel.findOne({ role_name: "customer", deleted_at: null }).lean<any>();
     if (!role) throw badRequest("ระบบยังไม่ได้ตั้งค่าบทบาท 'customer'");
@@ -138,6 +149,10 @@ export async function loginWithGoogle(credential: string, ctx: { ip?: string | n
       googleId,
       role_id: String(role._id),
     });
+    // createUser คืน role_id เป็น ObjectId ดิบ (ไม่ populate) — ผูก role ที่ query ไว้แล้วเข้าไปตรง ๆ
+    // แทนที่จะปล่อยให้ toSessionUser() ต้อง roleModel.findById() ซ้ำ (shape เดียวกับที่ populate
+    // ข้างบนให้ — เฉพาะ _id/role_name/role_type ไม่รวม field อื่นของ role)
+    user.role_id = { _id: role._id, role_name: role.role_name, role_type: role.role_type };
   }
 
   const { session, token } = await issue(user);
@@ -147,6 +162,5 @@ export async function loginWithGoogle(credential: string, ctx: { ip?: string | n
     action_type: "LOGIN",
     ip_address: ctx.ip ?? null,
   });
-  const safeUser = await userService.getUserById(session.user_id);
-  return { user: safeUser, token, session };
+  return { user, token, session };
 }
