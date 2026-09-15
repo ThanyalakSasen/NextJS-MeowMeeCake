@@ -7,5 +7,6 @@ export const { GET, POST } = collectionRoutes(productCategoryService, {
   sortable: ["created_at", "product_category_name"],
   defaultSort: "product_category_name",
   auth: { menu: "products" },
+  audit: { entity: "ProductCategory" },
   validate: { create: productCategoryCreate },
 });

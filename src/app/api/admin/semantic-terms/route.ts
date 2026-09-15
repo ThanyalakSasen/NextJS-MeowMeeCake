@@ -12,5 +12,6 @@ export const { GET, POST } = collectionRoutes(semanticTermService, {
   defaultSort: "term",
   filterFromQuery: (sp) => ({ aspect_id: sp.get("aspect_id") ?? undefined }),
   auth: { menu: "reports" },
+  audit: { entity: "SemanticTerm" },
   validate: { create: semanticTermCreate },
 });

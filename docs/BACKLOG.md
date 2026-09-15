@@ -1,8 +1,9 @@
 # MeowMeeCake Backend — สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก
 
-> อัปเดตล่าสุด: 2026-09-11
+> อัปเดตล่าสุด: 2026-09-13
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend
 > สรุปงานที่ทำแล้ว §2 + §3 (พร้อม PR + ดัชนีเอกสาร) → [`hardening-summary.md`](hardening-summary.md)
+> **บั๊ก/ความเสี่ยงชุดใหม่ที่พบหลังไฟล์นี้ปิดครบ → [`BACKLOG2.md`](BACKLOG2.md)** (แก้ครบแล้วเช่นกัน)
 
 ## สถานะโดยรวม
 
@@ -13,12 +14,15 @@
 | API routes | ✅ `/api/auth` · `/api/catalog` (สาธารณะ อ่านอย่างเดียว) · `/api/shop` (ลูกค้า) · `/api/admin` (พนักงาน + permission) |
 | Auth layer (JWT + middleware + RBAC 3 ชั้น) | ✅ ใช้อยู่ |
 | `product_type` = `inStore` / `online` / `preorder` | ✅ รองรับทั้งระบบ |
-| **§2 บั๊ก / ความถูกต้องข้อมูล (2.1–2.11)** | ✅ **ปิดครบทั้ง 11 ข้อ** — PR [#3](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/3) **merged** เข้า `addModels` (merge commit `055d71b`) · issue [#4](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/issues/4) closed — เหลือแค่ขั้น deploy: `npm run sync-indexes` + ลบข้อมูลซ้ำกับ DB จริง (ดู §6) · สรุปรวม → [`data-integrity-fixes.md`](data-integrity-fixes.md) |
+| **§2 บั๊ก / ความถูกต้องข้อมูล (2.1–2.11)** | ✅ **ปิดครบทั้ง 11 ข้อ** — PR [#3](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/3) **merged** เข้า `addModels` (merge commit `055d71b`) · issue [#4](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/issues/4) closed — ขั้น deploy (`sync-indexes` + ลบข้อมูลซ้ำ) ก็รันกับ DB จริงแล้ว 2026-09-13 (ดู §6) · สรุปรวม → [`data-integrity-fixes.md`](data-integrity-fixes.md) |
+| **§2b บั๊ก preorder payment/cancellation (2026-09-12)** | ✅ **แก้ครบ 4/4 + merge เข้า `addModels` แล้ว** (PR [#19](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/19)) — พบจาก code review เต็ม `src/services/`, มีข้อ 1 ที่เคยเป็นช่องโหว่ความปลอดภัย (จ่ายเงินแทนคนอื่นได้) |
+| **§2c บั๊กความทนทาน/correctness เล็กอื่น ๆ** | ✅ **แก้ครบ 3/4** (PR #22 — 2c.1/2c.2 · 2c.3 ยืนยัน exploit จริงแล้วแก้ 2026-09-12) · เหลือ 2c.4 เป็น tradeoff ที่ตั้งใจไว้แล้วจริง (ตรวจสอบซ้ำแล้ว) ไม่ใช่บั๊ก |
+| **§2d บั๊กใหม่พบระหว่างตรวจ §6 migration กับ DB จริง (2026-09-13)** | ✅ **แก้ครบ 2/2** — 2d.1 `product_type` "ready"→"inStore" migrate แล้ว (แก้ผลข้างเคียง `updateProduct` ล้างสต็อกทิ้งไปด้วย) · 2d.2 `unitModel` unique index เปลี่ยนเป็น partial แล้ว (`sync-indexes` ผ่าน 38/38) |
 | ระบบสแกนบาร์โค้ด POS | 🟡 core เสร็จ — เหลือ label sheet + รัน backfill กับ DB จริง (ดู §7) |
-| อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — บันทึกลงดิสก์ (self-host เท่านั้น, ดู §3.13) |
+| อัปโหลดรูปสินค้า | ✅ `POST /api/admin/products/images` (auth + ตรวจ 3 ชั้น) — `upload.ts` เป็น interface แล้ว เลือก driver (`localDisk`/`s3`) ผ่าน env `UPLOAD_DRIVER` (ดู §3.13) |
 | Preorder (เฟส 5) | 🟡 service + API เสร็จ (ดู §8 · [preorder.md](preorder.md)) — เหลือผูก payment/production/promotion |
-| §3 คุณภาพ / hardening | 🟡 ✅ D1/D2/D3 + audit log (PR #5–#12) · ✅ รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · ยังค้าง: **รอบ 4b** (`/admin/orders`+`/admin/attendances` zod · รื้อ `pick()` · `no-explicit-any` บน `src/lib`) · 4c (3.8/3.12/3.16) · 4d (3.13–3.15) · 3.11 |
-| Notification | ❌ ตัดออก (แจ้งเตือนผ่าน LINE แยกภายหลัง — ดู §3.12) |
+| §3 คุณภาพ / hardening | ✅ **เสร็จสมบูรณ์ทั้งหมดทุกข้อ** — D1/D2/D3 + audit log (PR #5–#12) · รอบ 4a: CI + lint gate + zod crud-factory/shop routes (PR #13–#17) · **รอบ 4b เสร็จสมบูรณ์ทั้ง 3 ข้อ** (zod tail ครบ `/admin/orders`+`/admin/attendances`+`/admin/permissions`+`/admin/preorder-rounds*`+`/admin/users`, รื้อ `pick()` 8/8 ไฟล์, `no-explicit-any` error บน `src/lib` ทั้งหมด — lint warning 13→5) · **รอบ 4c เสร็จสมบูรณ์** (3.8 address_id, ~~3.12~~ ล้าสมัย, 3.16 purchase_cost, 3.4 integration tests) · **รอบ 4d เสร็จสมบูรณ์** (3.13 object storage abstraction, 3.14 ลบรูปที่ไม่ใช้, 3.15 delivery zone เป็น DB) · **รอบ 5 (3.11) เสร็จสมบูรณ์ทั้งหมด** (เงินทุก field ในระบบ 18/18 model เป็นสตางค์แล้ว — Order+Preorder+Payment+Expense+DeliveryZone+Recipe/Component/Ingredient+purchase_cost+Promotion+Product pricing — ดู [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md)) · **3.17/3.18 แก้แล้ว** (2026-09-13, ดูตาราง §3) — ไม่มีข้อไหนค้างเป็นรอบอีก เหลือแค่ sub-note ที่ตั้งใจปล่อยไว้ (ดูตาราง §3 รายข้อ) |
+| Notification | ✅ ทำแล้ว (2026-09-12) — `notificationService.ts` + LINE push (`src/lib/line.ts`) + `/api/admin/notifications` · ผูกเข้า order ใหม่/สลิปรอตรวจ/สต็อกใกล้หมด (เดิมตัดออกไว้ก่อน ดู §3.12 ประวัติ) |
 
 **คำสั่งตรวจสอบ:** `npm run typecheck` · `typecheck:test` · `npm run lint` · `npm test` (unit) · `npm run test:integration` · `npm run build` — ปัจจุบันผ่านทั้งหมด
 
@@ -39,8 +43,8 @@
 | # | เรื่อง | ที่ไฟล์ | รายละเอียด / วิธีแก้ |
 |---|---|---|---|
 | 1.1 | ~~`JWT_SECRET` เป็น placeholder~~ | `.env.local` | ✅ แก้แล้ว (2026-09-02) — สุ่มค่าใหม่ 48 bytes (base64url) ให้ `JWT_SECRET`, `SESSION_SECRET`, `NEXTAUTH_SECRET` · ยืนยัน `next dev` boot ผ่าน / health 200 / auth 401 · **หมายเหตุ:** ก่อนขึ้น production จริงต้องสุ่มใหม่อีกครั้ง (ค่าปัจจุบันผ่านสายตา assistant แล้ว) และตั้งผ่าน env ของ host ไม่ใช่ commit |
-| 1.2 | ยังไม่ได้ seed | — | `npm run seed` (สร้าง role owner/staff/customer, units, หมวดหมู่, owner user) — ถ้าไม่รัน `register`/`login` throw ทันที |
-| 1.3 | index เก่าของ `permissions` ค้างใน DB | MongoDB | partial unique index ใหม่ `{role_id, menu_key} where deleted_at:null` จะสร้างไม่ได้ถ้ามี `role_id_1_menu_key_1` / `user_id_1_menu_key_1` เก่า → **`npm run sync-indexes`** จัดการให้ (drop เก่า + สร้างใหม่) |
+| 1.2 | ~~ยังไม่ได้ seed~~ | — | ✅ ยืนยันแล้ว (2026-09-13) — `npm run seed` รันแล้วจริง DB มี role owner/staff/customer + owner user ครบ (ดู §6) |
+| 1.3 | ~~index เก่าของ `permissions` ค้างใน DB~~ | MongoDB | ✅ แก้แล้ว (2026-09-13) — รัน `npm run sync-indexes` จริงกับ DB แล้ว index เก่า `role_id_1_menu_key_1` (ไม่ partial) ถูกแทนที่ด้วย partial unique `{role_id, menu_key} where deleted_at:null` ยืนยันด้วย index list ตรงจาก DB (ดู §6) |
 
 ---
 
@@ -48,21 +52,74 @@
 
 > ทั้งหมดแก้ในโค้ดแล้ว · typecheck + build ผ่าน · สรุปรวม 2.8–2.11 → [`data-integrity-fixes.md`](data-integrity-fixes.md)
 > tracking: PR [#3](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/pull/3) **merged** (2026-09-07, merge commit `055d71b` เข้า `addModels`) · issue [#4](https://github.com/ThanyalakSasen/NextJS-MeowMeeCake/issues/4) **closed** · branch `Debug-Validate-data` ยังไม่ลบ
-> **ค้างเป็นขั้น deploy เท่านั้น:** `npm run sync-indexes` กับ DB จริง (2.3 / 2.4 / 2.10) + ลบ payment `pending` ซ้ำก่อน (2.10) — ดู §6
+> **ขั้น deploy รันกับ DB จริงแล้ว (2026-09-13):** `npm run sync-indexes` (2.3 / 2.4 / 2.10 ยืนยัน index ถูกต้องแล้ว) — ไม่มี payment `pending` ซ้ำอยู่แล้ว (2.10) — ดู §6
 
 | # | เรื่อง | ที่ไฟล์ | รายละเอียด / วิธีแก้ |
 |---|---|---|---|
-| 2.1 | ~~ค่าส่ง (`delivery_fee`) เชื่อ client~~ | — | ✅ แก้แล้ว — `src/services/deliveryService.ts` คิดฝั่ง server จาก **โซนตามจังหวัด** (กทม.+ปริมณฑล = 40 / ต่างจังหวัด = 80 / ยอด ≥ 1500 ส่งฟรี — ปรับผ่าน env `DELIVERY_FEE_*` / `DELIVERY_FREE_MIN`) · `persistOrder` คิดเองเสมอ · `/api/shop/orders` ไม่รับ `delivery_fee` จากลูกค้าแล้ว · แอดมิน override ได้ (`/api/admin/orders` ส่ง `delivery_fee` มา = override) · พรีวิว: `POST /api/shop/orders/delivery-quote` · ดูโครง: `GET /api/admin/delivery-fee` · **ยังไม่มี**: ตารางโซนแบบ DB ที่แอดมินแก้เองได้ (ตอนนี้เป็น config + env) |
+| 2.1 | ~~ค่าส่ง (`delivery_fee`) เชื่อ client~~ | — | ✅ แก้แล้ว — `src/services/deliveryService.ts` คิดฝั่ง server จาก **โซนตามจังหวัด** (กทม.+ปริมณฑล = 40 / ต่างจังหวัด = 80 / ยอด ≥ 1500 ส่งฟรี — ปรับผ่าน env `DELIVERY_FEE_*` / `DELIVERY_FREE_MIN`) · `persistOrder` คิดเองเสมอ · `/api/shop/orders` ไม่รับ `delivery_fee` จากลูกค้าแล้ว · แอดมิน override ได้ (`/api/admin/orders` ส่ง `delivery_fee` มา = override) · พรีวิว: `POST /api/shop/orders/delivery-quote` · ดูโครง: `GET /api/admin/delivery-fee` · ~~ยังไม่มี: ตารางโซนแบบ DB ที่แอดมินแก้เองได้~~ — ✅ ทำแล้วในรอบ 4d (บรรทัดนี้เป็นข้อมูลเก่า ตรวจซ้ำ 2026-09-13) ดู §3.15 |
 | 2.2 | ~~`cost_per_unit` ไม่ถูก snapshot ลง `orderItem`~~ | — | ✅ แก้แล้ว — `recipeService.getUnitCostByProduct()` = `estimated_cost_per_batch / yield_qty` ของ **สูตรล่าสุด** ของสินค้า · `orderService.persistOrder` batch lookup แล้ว snapshot ลง `orderItem.cost_per_unit` ตอนสร้างออเดอร์ · `dashboardService` COGS/กำไรใช้ได้แล้ว · **ข้อจำกัด:** ต้นทุนเป็นระดับ *สินค้า* (ไม่แยกตาม variant) · สินค้าที่ไม่มีสูตร → `null` (dashboard นับเป็น 0) · ไม่มี field "ต้นทุนซื้อมา" สำหรับสินค้าที่ซื้อมาขายต่อ |
-| 2.3 | ~~`attendanceModel` index `{user_id, work_date}` ไม่ `unique`~~ | `src/models/attendanceModel.ts` | ✅ แก้แล้ว — เป็น **partial unique** `{ unique: true, partialFilterExpression: { deleted_at: null } }` (soft-deleted ไม่บล็อกการสร้างใหม่) · **ต้องรัน `npm run sync-indexes` กับ DB จริง** |
-| 2.4 | ~~`reviewModel.order_item_id` ไม่ `unique`~~ | `src/models/reviewModel.ts` | ✅ แก้แล้ว — partial unique `{ unique: true, partialFilterExpression: { deleted_at: null } }` · **ต้องรัน `npm run sync-indexes`** |
+| 2.3 | ~~`attendanceModel` index `{user_id, work_date}` ไม่ `unique`~~ | `src/models/attendanceModel.ts` | ✅ แก้แล้ว — เป็น **partial unique** `{ unique: true, partialFilterExpression: { deleted_at: null } }` (soft-deleted ไม่บล็อกการสร้างใหม่) · รัน `npm run sync-indexes` กับ DB จริงแล้ว (2026-09-13) ยืนยัน index ถูกต้องแล้ว |
+| 2.4 | ~~`reviewModel.order_item_id` ไม่ `unique`~~ | `src/models/reviewModel.ts` | ✅ แก้แล้ว — partial unique `{ unique: true, partialFilterExpression: { deleted_at: null } }` · รัน `npm run sync-indexes` กับ DB จริงแล้ว (2026-09-13) ยืนยัน index ถูกต้องแล้ว |
 | 2.5 | ~~ตะกร้าไม่ re-price ตอน checkout~~ | — | ✅ แก้แล้ว (2026-09-07) — `createOrderFromCart` เลิกใช้ `price_snapshot` ที่แช่ไว้ · วนแต่ละ cart item → `resolveLine()` (ตัวเดียวกับ path สั่งเอง/POS) → คิด `unit_price` สดจาก `product.sale_price ?? product.product_price` + `variant_price` + Σ `extra_price` ปัจจุบัน + re-validate ว่าสินค้า/variant/option ยังมีอยู่ (สินค้าถูกลบ / เป็น preorder / variant-option หาย → throw ตอน checkout) · รายละเอียด → [`reprice.md`](reprice.md) · **ข้อจำกัด:** ยังเป็น re-price แบบ *เงียบ* (ลูกค้าไม่เห็นว่าราคาเปลี่ยน — ต้องทำที่ `getCartDetail` เพิ่มถ้าจะโชว์) · ยังไม่เช็ค `is_visible === false` · ยิง DB ~1 query/บรรทัด (loop `await`) |
-| 2.6 | ~~โปรโมชัน FreeShipping กับออเดอร์ takeaway~~ | — | ✅ แก้แล้ว (2026-09-07) — `computeDiscount` สาขา `FreeShipping`: ถ้า `ctx.delivery_fee <= 0` (ออเดอร์รับเอง หรือได้ส่งฟรีอยู่แล้ว) → `throw unprocessable(...)` แทนที่จะคืน `discount = 0` · ครอบทั้ง path สร้างออเดอร์ (`orderService.persistOrder` → `validateForOrder`) และพรีวิว (`/api/shop/promotions/validate` → `previewForCart`) · รายละเอียด → [`promo-freeshipping.md`](promo-freeshipping.md) · **หมายเหตุ:** ยังมีเคสทั่วไปที่ `discount_amount = 0` จากโปรชนิดอื่น (เช่น Amount/Percentage ที่คิดออกมาเป็น 0) แล้ว order ยังผูก `promotion_id` โดยไม่บันทึก usage — ยังไม่แก้ (นอกสโคป 2.6) |
+| 2.6 | ~~โปรโมชัน FreeShipping กับออเดอร์ takeaway~~ | — | ✅ แก้แล้ว (2026-09-07) — `computeDiscount` สาขา `FreeShipping`: ถ้า `ctx.delivery_fee <= 0` (ออเดอร์รับเอง หรือได้ส่งฟรีอยู่แล้ว) → `throw unprocessable(...)` แทนที่จะคืน `discount = 0` · ครอบทั้ง path สร้างออเดอร์ (`orderService.persistOrder` → `validateForOrder`) และพรีวิว (`/api/shop/promotions/validate` → `previewForCart`) · รายละเอียด → [`promo-freeshipping.md`](promo-freeshipping.md) · **หมายเหตุ:** ~~ยังมีเคสทั่วไปที่ `discount_amount = 0` จากโปรชนิดอื่น ... ยังไม่แก้ (นอกสโคป 2.6)~~ — ✅ แก้แล้วเป็นเวอร์ชันทั่วไปที่ §2.11 (บรรทัดนี้เป็นข้อมูลเก่า ตรวจซ้ำ 2026-09-13) |
 | 2.7 | ~~ขอบเขตการยกเลิกของลูกค้ากว้างไป~~ | — | ✅ แก้แล้ว (2026-09-07) — เพิ่ม `orderService.CUSTOMER_CANCELABLE_STATUSES = ["pending","confirmed"]` + option `allowedFrom` ใน `cancelOrder()` (เช็คสถานะปัจจุบันก่อน ไม่อยู่ในลิสต์ → `conflict` 409 "ติดต่อร้าน") · route ลูกค้า `/api/shop/orders/[id]/cancel` ส่ง `allowedFrom` เข้าไป · **แอดมิน** (`/api/admin/orders/[id]/status` → `updateOrderStatus` ตรง ๆ) ไม่แตะ — ยังยกเลิกได้จาก `preparing`/`ready` · รายละเอียด → [`order-cancel.md`](order-cancel.md) · เปลี่ยนพฤติกรรมย่อย: ยกเลิกออเดอร์ที่ `cancelled` อยู่แล้วซ้ำ เดิม no-op สำเร็จ → ตอนนี้ 409 |
 | 2.8 | ~~ยกเลิกออเดอร์ที่จ่ายเงินแล้ว ไม่ผูกกับการคืนเงิน~~ | — | ✅ แก้แล้ว (2026-09-07) — **ลูกค้า:** `cancelOrder({ allowedFrom })` เช็ค `payment_status === "paid"` → `conflict` 409 "ติดต่อร้านเพื่อขอยกเลิกและคืนเงิน" · **แอดมิน:** `updateOrderStatus` สาขา cancel ถ้า `payment_status === "paid"` → หา payment ที่ `status:"paid"` แล้วเรียก `refundPayment(paymentId, { verified_by: cancelled_by })` (dynamic import เลี่ยง circular) · best-effort (try/catch + log, ไม่ล้มการยกเลิก) · `refundPayment` → `setPaymentStatus(orderId, "refunded")` → `order.payment_status = "refunded"` · เช็ค `=== "paid"` เท่านั้น = ยกเลิกซ้ำไม่คืนเงินซ้ำ · รายละเอียด → [`order-cancel.md`](order-cancel.md) §3 · **หมายเหตุ:** ยังไม่มี audit log แยกสำหรับ auto-refund · ยกเลิกแบบ "ยึดเงิน" (ไม่คืน) ยังไม่รองรับ |
 | 2.9 | ~~โปรโมชัน `usage_limit` / `max_user_per_user` ไม่ atomic~~ | — | ✅ แก้แล้ว (2026-09-07) — `promotionUsageService.recordUsage` จองสิทธิ์แบบ atomic: `findOneAndUpdate({ _id, $or:[{usage_limit:null},{ $expr:{ $lt:[{$ifNull:["$used_count",0]},"$usage_limit"] }}] }, { $inc:{ used_count:1 }})` (แนวเดียวกับ preorder quota §8) → จองไม่ได้ = `unprocessable` "ใช้ครบจำนวนแล้ว" · `max_user_per_user`: สร้าง row แล้ว count ใหม่ ถ้าเกิน → ลบ row + rollback `used_count` (optimistic — คนยิงพร้อมกันคนหลังแพ้) · `persistOrder` เรียก `recordUsage` ใน try block ตอนสร้างออเดอร์ — 422 = ล้มออเดอร์ (คืนสต็อก+ลบ), error อื่น = best-effort เดิม · `validateForOrder` ยังมี read-check ไว้ fast-fail + ใช้กับพรีวิว · รายละเอียด → [`concurrency-guards.md`](concurrency-guards.md) · **หมายเหตุ:** per-user ยังเป็น optimistic ไม่ atomic 100% (ไม่มี transaction ทั้ง codebase) |
-| 2.10 | ~~สร้าง payment ซ้ำได้หลายใบต่อ 1 ออเดอร์~~ | — | ✅ แก้แล้ว (2026-09-07) — `createPayment` ก่อนสร้างเช็ค payment ที่ยัง active (`status:"pending", deleted_at:null`) ของ order/preorder เดิม → เจอ = `conflict` "มีรายการชำระเงินที่รอตรวจสอบอยู่แล้ว" (แนบ `payment_id` เดิมใน details) · + partial unique index `paymentModel` `{ order_id } where { order_id:{$type:"objectId"}, status:"pending", deleted_at:null }` และ `{ preorder_id }` แบบเดียวกัน (กัน race ระดับ DB, `create` แปลง 11000 → conflict) · รายละเอียด → [`concurrency-guards.md`](concurrency-guards.md) · **ต้องรัน `npm run sync-indexes` กับ DB จริง** — ถ้ามี pending ซ้ำอยู่ก่อน ต้องลบซ้ำก่อน index ถึงจะสร้างผ่าน |
+| 2.10 | ~~สร้าง payment ซ้ำได้หลายใบต่อ 1 ออเดอร์~~ | — | ✅ แก้แล้ว (2026-09-07) — `createPayment` ก่อนสร้างเช็ค payment ที่ยัง active (`status:"pending", deleted_at:null`) ของ order/preorder เดิม → เจอ = `conflict` "มีรายการชำระเงินที่รอตรวจสอบอยู่แล้ว" (แนบ `payment_id` เดิมใน details) · + partial unique index `paymentModel` `{ order_id } where { order_id:{$type:"objectId"}, status:"pending", deleted_at:null }` และ `{ preorder_id }` แบบเดียวกัน (กัน race ระดับ DB, `create` แปลง 11000 → conflict) · รายละเอียด → [`concurrency-guards.md`](concurrency-guards.md) · รัน `npm run sync-indexes` กับ DB จริงแล้ว (2026-09-13) — ไม่มี pending ซ้ำอยู่ก่อนแล้ว index สร้างผ่านตรง |
 | 2.11 | ~~`discount_amount = 0` ยังผูก `promotion_id` กับออเดอร์~~ | — | ✅ แก้แล้ว (2026-09-07) — เวอร์ชันทั่วไปของ 2.6 · `computeDiscount` เพิ่มเช็คหลัง `round2(Math.max(0, discount))`: ถ้า `discount <= 0` → `throw unprocessable("โปรโมชันนี้ไม่ให้ส่วนลดกับออเดอร์นี้ (ส่วนลดเป็น 0)")` (ครอบทั้ง path สร้างออเดอร์ + พรีวิว เหมือน 2.6) · `persistOrder` ตัด guard `discount_amount > 0` ที่ `recordUsage` → เหลือ `if (appliedPromotion)` เพราะ discount > 0 เสมอเมื่อมี `appliedPromotion` · รายละเอียด → [`promo-freeshipping.md`](promo-freeshipping.md) §4 |
+
+---
+
+## 2b. ✅ บั๊ก preorder payment/cancellation — ปิดครบ 4/4 (2026-09-12)
+
+> พบจาก code review เต็ม `src/services/` (2026-09-12) — ไล่เทียบ `preorderService.ts`/`paymentService.ts` กับ
+> `orderService.ts` ที่ path คู่ขนานผ่านมาแล้วทุกจุด (§2.7/2.8) พบว่า preorder **ไม่เคยได้ fix ตาม** เลย
+> ทุกข้อ verify แล้วด้วยการอ่านโค้ดจริง (ไม่ใช่แค่รายงานดิบ) — reachable จริงผ่าน API ที่ใช้งานอยู่
+> (`/api/shop/payments`, `/api/shop/preorders/[id]/cancel`, `/api/admin/preorders/[id]/status`)
+> **แก้ครบทั้ง 4 ข้อแล้ว** บน branch `fix-preorder-payment-ownership` (commit `51f4a75`, `4bc09b1`) —
+> ยังไม่ merge เข้า `addModels` · เทสใหม่ `tests/integration/{createPaymentPreorder,cancelPreorder}.test.ts`
+> (9 เคส) · `typecheck`/`lint`/`test`/`test:integration`/`build` ผ่านหมดหลังแก้
+> **รายละเอียดปัญหา/วิธีแก้/เหตุผลที่แก้แบบนี้ (ทีละข้อ) → [`preorder-payment-hardening.md`](preorder-payment-hardening.md)**
+
+| # | เรื่อง | ที่ไฟล์ | รายละเอียด / วิธีแก้ |
+|---|---|---|---|
+| 2b.1 | ~~**สร้าง payment ผูกกับพรีออเดอร์คนอื่นได้ (IDOR)**~~ | `src/services/paymentService.ts:94-101` (เทียบ order branch `:86-93`) | ✅ แก้แล้ว (2026-09-12, commit `51f4a75`) — เพิ่ม 3 เช็คให้ branch `preorder` ตรงกับ branch `order` ทุกจุด: ownership (`preorder.user_id === input.user_id` — `input.user_id` มาจาก session เสมอ ไม่ใช่ client-controlled), cancelled-status (`order_status !== "cancelled"`), amount-tolerance (`Math.abs(amount - preorder.total_amount) > AMOUNT_TOLERANCE`) · เทส: `createPaymentPreorder.test.ts` (4 เคส) |
+| 2b.2 | ~~ยังไม่ได้เรียก `preorderService.setPaymentStatus()`~~ (เคยบันทึกไว้ที่ §8) | `src/services/paymentService.ts:54-58` (`propagateStatus`) · `preorderService.ts:385` (`setPaymentStatus`) | ✅ แก้แล้ว (2026-09-12, commit `4bc09b1`) — `propagateStatus` branch `preorder_id` เปลี่ยนจากเขียน `preorderModel.updateOne()` ตรง ๆ มาเรียก `preorderService.setPaymentStatus()` แทน (logic auto-advance `order_status` `pending→confirmed` มีอยู่แล้วในฟังก์ชันนี้ตั้งแต่ต้น แค่ไม่เคยถูกเรียก) · เทส: `cancelPreorder.test.ts` เคส "verify payment → auto-confirm" |
+| 2b.3 | ~~ยกเลิกพรีออเดอร์ที่จ่ายเงินแล้ว ไม่คืนเงิน ไม่ log~~ (คู่ขนาน §2.8) | `src/services/preorderService.ts` (`updatePreorderStatus` branch cancel) เทียบ `orderService.ts:562-580` | ✅ แก้แล้ว (2026-09-12, commit `4bc09b1`) — เปลี่ยนมาใช้ `Saga` (เหมือน orderService) + เพิ่ม auto-refund เมื่อ `payment_status==="paid"` (หา payment ที่ `paid` แล้วเรียก `paymentService.refundPayment` ผ่าน dynamic import กัน circular import) + `log.warn` ถ้าไม่พบ payment/`cancelled_by` แทนที่จะเงียบสนิท · เทส: `cancelPreorder.test.ts` เคส "แอดมินยกเลิก → auto-refund" |
+| 2b.4 | ~~ลูกค้ายกเลิกพรีออเดอร์ที่จ่ายเงินแล้วได้เอง ทุกสถานะ~~ (คู่ขนาน §2.7) | `src/services/preorderService.ts` (`cancelPreorder`) เทียบ `orderService.ts:609-630` (`cancelOrder`) | ✅ แก้แล้ว (2026-09-12, commit `4bc09b1`) — เพิ่ม `CUSTOMER_CANCELABLE_STATUSES = ["pending","confirmed"]` + option `allowedFrom` ใน `cancelPreorder()` (เช็คสถานะปัจจุบัน + block เมื่อ `payment_status==="paid"` → `conflict` 409 "ติดต่อร้าน") · route `/api/shop/preorders/[id]/cancel` ส่ง `allowedFrom` เข้าไปแล้ว (เดิมไม่ส่งเลย) · เทส: `cancelPreorder.test.ts` 3 เคส (จ่ายแล้ว/เกิน allowedFrom/ปกติ) |
+
+~~**ยังไม่ทำ:** push branch + เปิด PR เข้า `addModels`~~ — ✅ ทำแล้ว (ตรวจซ้ำ 2026-09-13 — บรรทัดนี้เป็นข้อมูลเก่าไม่ได้อัปเดต) ยืนยันด้วย `gh pr view 19`: PR #19 **merged** 2026-09-12T09:46:45Z เข้า `addModels` จริง
+
+---
+
+## 2c. ✅ บั๊กความทนทาน / correctness เล็กอื่น ๆ — ปิดครบ 3/4 (2c.4 เป็น tradeoff ไม่ใช่บั๊ก)
+
+> เจอพร้อมกับ §2b รอบเดียวกัน — verify ด้วยการอ่านโค้ดจริงทุกข้อแล้ว ไม่ใช่รายงานดิบจาก agent
+> **2c.1–2c.2 แก้แล้ว** (PR #22) **· 2c.3 แก้แล้ว** (2026-09-12, ยืนยัน exploit จริงก่อนแก้) — รายละเอียด
+> ปัญหา/วิธีแก้/เหตุผลครบทั้ง 4 ข้อ → [`order-cart-inventory-robustness.md`](order-cart-inventory-robustness.md)
+> · เทส `tests/integration/{createOrderFromCart,voidTransaction,productionStockDoubleCredit}.test.ts`
+> (10 เคสรวม) · `typecheck`/`lint`/`test`/`test:integration`/`build` ผ่านหมด
+
+| # | เรื่อง | ที่ไฟล์ | รายละเอียด / วิธีแก้ |
+|---|---|---|---|
+| 2c.1 | ~~`createOrderFromCart` — `clearCart()` ไม่มี try/catch หลังออเดอร์ commit ไปแล้ว~~ | `src/services/orderService.ts:440` | ✅ แก้แล้ว (2026-09-12) — ห่อ `cartService.clearCart(userId)` ด้วย `.catch(err => log.error("order.clear_cart_failed", {...}))` แบบเดียวกับจุดอื่นในไฟล์ (`notificationService.notify(...).catch(...)`) — order ที่ commit สำเร็จแล้วจะไม่ throw ตามถ้า clearCart พัง |
+| 2c.2 | ~~`voidTransaction` ย้อนรายการ `receive` ไม่มี floor guard (ค่าติดลบได้)~~ | `src/services/ingredientTransactionService.ts` เทียบ `createTransaction` | ✅ แก้แล้ว (2026-09-12) — เพิ่ม `filter.current_stock = { $gte: -inc }` เมื่อ `inc < 0` (ทิศทางย้อน `receive` เท่านั้น — ย้อน `use` คืนสต็อกไม่มีทางติดลบ ไม่ต้องกัน) ผ่าน `updateOne` atomic เดียวกับ `createTransaction` · ไม่พบ = `throw conflict(...)` แนะนำให้ทำ `adjust` แทน (เลือก throw ไม่ clamp เงียบ ๆ — ดูเหตุผลเต็มในเอกสาร) |
+| 2c.3 | ~~`voidTransaction` ไม่มี back-reference กลับไปที่ production item — เสี่ยง double-credit~~ | `src/services/ingredientTransactionService.ts` เทียบ `productionItemService.ts` (`consumeStock`/`reverseStock`) | ✅ แก้แล้ว (2026-09-12) — **ยืนยัน exploit จริงก่อนแก้:** (1) `consume-stock` หักสต็อก + สร้างธุรกรรม `"use"` (2) แอดมินไป void ธุรกรรมนั้นตรง ๆ ที่หน้า "รายการเคลื่อนไหวสต็อก" (`DELETE /admin/ingredient-transactions/[id]`) → เครดิตกลับครั้งที่ 1 แต่ `productionItem.stock_updated_at` ไม่ถูกเคลียร์ (3) กด "คืนสต็อก" ที่หน้ารายการผลิตอีกที (`reverse-stock`) → เครดิตกลับครั้งที่ 2 ซ้ำ — ใช้ปุ่มที่ถูกต้อง 2 ปุ่มคนละหน้าจริง ไม่ต้องอาศัยช่องโหว่ · **แก้:** เพิ่ม `production_item_id` (nullable) ใน `ingredientTransactionModel` + `productionItemService` ผูก back-ref ให้ทุกธุรกรรมที่สร้าง (consume/rollback/reverse) + `voidTransaction` ปฏิเสธ (409) ธุรกรรมที่มี back-ref นี้ ให้ไปยกเลิกผ่าน `reverse-stock` แทน · รายละเอียดเต็ม + เหตุผล → [`order-cart-inventory-robustness.md`](order-cart-inventory-robustness.md) §3 · เทส: `productionStockDoubleCredit.test.ts` (5 เคส) |
+| 2c.4 | ℹ️ (ตรวจสอบซ้ำแล้ว 2026-09-12 — ยืนยันว่าเป็น tradeoff ตั้งใจจริง ไม่ใช่บั๊กที่พลาด) `recordUsage` error ที่ไม่ใช่ 422 ถูก swallow เงียบ | `src/services/orderService.ts:360-371` | โค้ดมีคอมเมนต์ระบุไว้ตรง ๆ ว่าเป็น **การตัดสินใจตั้งใจ** ("error อื่น (transient) = best-effort ไม่ล้มออเดอร์ที่สร้างสำเร็จแล้ว") — ไม่ใช่บั๊กที่หลุดไปโดยไม่รู้ตัวเหมือนข้ออื่น · **ผลข้างเคียงที่ยอมรับไว้แล้ว:** ถ้า `recordUsage` fail แบบ transient (ไม่ใช่ 422 เต็มโควตา) ออเดอร์จะมี `discount_amount`/`promotion_id` ติดอยู่ แต่ไม่มี `PromotionUsages` row / ไม่นับ `used_count` — usage reporting เพี้ยนจากส่วนลดที่ให้จริง (และ `revokeUsage` ตอนยกเลิกจะหาไม่เจอ ไม่มีอะไรให้ revoke) · **สรุปการตรวจสอบซ้ำ:** ผลกระทบเป็นแค่ reporting คลาดเคลื่อน ไม่ใช่เงินหาย/สต็อกผิด — **ตัดสินใจไม่แก้เพิ่ม** (effort/ผลกระทบไม่คุ้ม) · รายละเอียด → [`order-cart-inventory-robustness.md`](order-cart-inventory-robustness.md) §4 · **แนะนำ (ถ้าจะแก้ต่อในอนาคต):** เพิ่ม retry สั้น ๆ ก่อน swallow |
+
+---
+
+## 2d. ✅ บั๊กใหม่พบระหว่างตรวจ §6 migration checklist กับ DB จริง — ปิดครบ 2/2 (2026-09-13)
+
+> พบขณะตรวจสอบว่า §6 migration checklist รันจริงกับ MongoDB Atlas (`bakery` DB) หรือยัง — ตรวจด้วย
+> read-only aggregate/index query ตรง ๆ (ไม่ใช่แค่เชื่อเอกสาร) แล้วรัน `npm run sync-indexes` จริงตาม
+> คำขอผู้ใช้ · **แก้ครบทั้ง 2 ข้อแล้ว** — 2d.1 รันวันที่พบ, 2d.2 เดิมตั้งใจปล่อยไว้ก่อนแต่ผู้ใช้ให้กลับมา
+> แก้ต่อพร้อม §3.4/§3.5/§3.8/§3.12 (ดู §3 — พบว่าโน้ตหลายข้อในตาราง §3 เป็นข้อมูลเก่าที่ไม่อัปเดตตามจริง)
+
+| # | เรื่อง | ที่ไฟล์ | รายละเอียด / สถานะ |
+|---|---|---|---|
+| 2d.1 | ~~`product_type` เก่า `"ready"` ยังไม่ได้แปลงเป็น `"inStore"` ใน DB จริง — ทำให้ `updateProduct` ล้างสต็อกทิ้งโดยไม่ตั้งใจ~~ | `src/services/productService.ts:429-478` (`updateProduct`) เทียบ `src/lib/productCode.ts` (`isStockProductType`) | ✅ **แก้แล้ว (2026-09-13)** — รัน migration ตรงกับ DB จริงแล้ว (`{ready:30}→{inStore:30}`, matched/modified 30, ไม่แตะ `preorder:10`) ผ่านสคริปต์ครั้งเดียว (`scripts/_tmp-migrate-product-type.ts`, ลบทิ้งหลังรันแล้ว ไม่ commit) · สาเหตุเดิม: `updateProduct` คำนวณ `nextType = input.product_type ?? existing.product_type` แล้วเช็ค `isStockProductType(nextType)` ซึ่ง return `false` ให้ `"ready"` (เช็คเทียบตรงกับ `"inStore"`/`"online"` เท่านั้น) → ตกไป branch `else` ที่ตั้ง `existing.product_stock_quantity = null` แบบไม่มีเงื่อนไขป้องกัน — ก่อนแก้ แอดมินแก้ชื่อ/ราคา/รูปสินค้าเฉย ๆ โดยไม่แตะ `product_type` เลย จะโดนล้างสต็อกเป็น `null` ทันที |
+| 2d.2 | ~~`unitModel` — `unit_name`/`unit_abbr` unique index ไม่ partial (ไม่กรอง `deleted_at`) ต่างจาก attendances/reviews/permissions/payments ที่แก้ไปแล้ว~~ | `src/models/unitModel.ts` | ✅ **แก้แล้ว (2026-09-13)** — เอา `unique: true` ระดับ field ออก เปลี่ยนเป็น `unitSchema.index({unit_name:1},{unique:true, partialFilterExpression:{deleted_at:null}})` + ตัวเดียวกันสำหรับ `unit_abbr` (รูปแบบเดียวกับ `attendanceModel`/`reviewModel`) · **ไม่ต้อง hard-delete ข้อมูลซ้ำเลย** — เพราะ partial index กรองเฉพาะ `deleted_at:null` แต่ละคู่ที่ซ้ำมีแค่ 1 แถวที่ active อยู่แล้ว (อีกแถวถูก soft-delete ไปก่อนแล้ว) จึงไม่ชนกันอีกต่อไป · ยืนยันด้วยการรัน `npm run sync-indexes` ซ้ำ → **38/38 model ผ่านหมด** (จากเดิม 37/38) · `typecheck`/`typecheck:test`/`lint`/`test`/`test:integration`/`build` ผ่านหมดหลังแก้ |
 
 ---
 
@@ -81,49 +138,125 @@
 2. ✅ **3.6 lint gate** — ลบ `eslint.ignoreDuringBuilds` · `no-explicit-any` `off`→`warn` + `error` บน `src/schemas`+`tests` · เก็บ warning `no-anonymous-default-export` (PR #14)
 3. ✅ **3.1 adopt (บางส่วน)** — crud-factory ทั้งหมด (`product-options`/`variants`/`aspects`/`semantic-terms`/`roles`/`components`/`recipes`) + shop `me`/`addresses`/`reviews` + `createInject` inject `created_by` (PR #15–#17)
 
-**รอบ 4b — จบ §3.1 + §3.6** _(แผนละเอียด: `hardening-4b-plan.md` — รอเริ่ม)_
+**รอบ 4b — จบ §3.1 + §3.6** _(แผนละเอียด: [`hardening-4b-plan.md`](hardening-4b-plan.md) — เริ่มแล้ว)_
 
-4. **`/admin/orders` (POST/PATCH) + `/admin/attendances` adopt zod** — custom route ซับซ้อน (order create + override, `recorded_by` inject) · **M**
-5. **รื้อ `pick()` / `createFields` / `pickWritable()` ที่ซ้ำ zod** — 8 service · ให้ zod เป็นด่านเดียว, service เหลือแค่ business rule · **M**
-6. **`no-explicit-any` = `error` บน `src/lib`** — ลบ `/* eslint-disable */` header 5 ไฟล์ + type `crudRoutes.ts` `doc:` · เก็บ 13 warning ใน `src/app/api/**/route.ts` · (option) `no-floating-promises` · **S–M**
+4. ✅ **`/admin/orders` (POST) + `/admin/attendances` adopt zod** (2026-09-12) — `adminCreateOrderBody` (`.extend()` จาก base ร่วมกับ `createOrderBody`) · `attendance.ts` ใหม่ (`recordAttendanceBody`/`updateAttendanceBody`/`checkInOutBody`) · ยืนยันแล้วไม่มี `PATCH /admin/orders/[id]` จริง (4a-plan เดิมเข้าใจผิด scope) · เทส `tests/lib/schemas.test.ts` + `schemas-admin.test.ts` (+9 → unit 137/17) · lint warning ลดจาก 13 → 12 (`admin/orders/route.ts` เลิกใช้ `any`)
+5. ✅ **รื้อ `pick()` / `createFields` / `pickWritable()` ที่ซ้ำ zod — ปิดครบ 8/8** (2026-09-12) — เพิ่ม zod adopt ให้ 5 กลุ่ม route ที่เหลือไปพร้อมกัน (`/admin/orders/[id]/delivery`, `/admin/permissions`, `/admin/preorder-rounds*` + `/admin/preorder-round-items`, `/admin/users`) แล้วถอด `pick()` ตาม: `orderService.updateDelivery`, `permissionService` (create/update), `preorderRoundService` (round + item), `preorderService` (narrow refactor — ไม่ได้รอ adopt เพราะ `pick()` จุดนี้ไม่ใช่ whitelist ที่ทับซ้อนกับ validation ชั้นไหน), `userService` (create/update, ไม่แตะ `updateProfile` ที่ถอดไปแล้วใน B รอบแรก) · **M**
+6. ✅ **`no-explicit-any` = `error` บน `src/lib`** (2026-09-12) — แก้ครบ 5 ไฟล์: `refs.ts`(3), `discountEngine.ts`(3), `crudService.ts`(5), `bom.ts`(16, มี interface `IngredientItem`/`ComponentItem` อยู่แล้วแต่ไม่เคยใช้จริง), `crudRoutes.ts`(2 จุด) — **ไม่เหลือ `any` ใน `src/lib/` เลยสักจุด** ไม่ต้องใช้ disable-next-line ที่ไหนเลย · lint warning ลด 13 → 11 (เหลือแต่ใน `src/app/api/**/route.ts`) · (option) `no-floating-promises` ยังไม่ทำ · **S–M**
 
-**รอบ 4c — feature เล็ก + เทสเพิ่ม (หลัง launch ได้)**
+**✅ รอบ 4c — feature เล็ก + เทสเพิ่ม (เสร็จสมบูรณ์ 2026-09-12)** _(สรุปเต็ม + §0 บทเรียนเรื่อง §2b/§2c: [`hardening-4c-plan.md`](hardening-4c-plan.md))_
 
-7. **3.8 address_id → checkout** — zod `oneOf([{address_id},{delivery_address}])` + `addressService.getById` snapshot ลง order · **S–M**
-8. **3.12 `src/lib/notify.ts`** — no-op + log ก่อน · wire `paymentService.verifyPayment` / `orderService.updateOrderStatus` / ingredient low-stock · **S**
-9. **3.16 `purchase_cost`** — field ใน `productModel` + `getUnitCostByProduct` fallback เมื่อไม่มีสูตร · แก้ COGS/กำไรใน dashboard · **S**
-10. **3.4 integration tests เพิ่ม** — `cartService` · `ingredientTransactionService` · `deliveryService.quoteForCart` · **S–M**
+7. ✅ **3.8 address_id → checkout** (2026-09-12) — `schemas/order.ts`: เพิ่ม `address_id`/`recipient_name`/`recipient_phone` + `.refine()` บังคับ `oneOf([address_id, delivery_address])` ตอน `order_type==="delivery"` (ทั้ง `createOrderBody`/`adminCreateOrderBody`) · `addressService.resolveDeliverySnapshot(userId, {address_id,recipient_name,recipient_phone,delivery_address})` ใหม่ — สแนปช็อตที่อยู่จากสมุด (`getById` สโคปด้วย userId กัน IDOR) ผสาน recipient_name/phone (สมุดที่อยู่เก็บแค่ตำแหน่ง ไม่เก็บชื่อ/เบอร์ผู้รับ — ต้องส่งแยกมาเผื่อสั่งให้คนอื่น) → คืน flat record เดิมให้ `orderService` ไม่ต้องแก้อะไรเลย (`/api/shop/orders`, `/api/admin/orders` เรียก resolve ก่อนส่งต่อ) · เทส: `tests/integration/resolveDeliverySnapshot.test.ts` (4 เคส) + `tests/lib/schemas.test.ts` (+6 เคส oneOf) · **ยังไม่ทำ (gap ที่รู้ตัว, บันทึกไว้กันลืมแบบ §2b):** `/api/shop/preorders` (POST) เป็น path คู่ขนานที่ยังไม่ zod-adopt เลย ยังใช้ `delivery_address` แบบกรอกเองอย่างเดียว ไม่มี `address_id` — ถ้าจะทำต้อง adopt zod ให้ route นี้ก่อน (งานคนละขนาดกับ 3.8 เดิม)
+8. ~~3.12 `src/lib/notify.ts`~~ — ✅ **ล้าสมัยแล้ว ไม่ต้องทำ** — ระบบแจ้งเตือนตัวจริงถูกสร้างเสร็จแล้วก่อนหน้านี้ในเซสชันนี้ (`src/services/notificationService.ts` + `src/lib/line.ts` push เข้า LINE คู่กัน + `/api/admin/notifications` routes) และ wire เข้า `orderService`/`paymentService`/`ingredientTransactionService`/`productService` จริงแล้ว (ยืนยันด้วย grep 2026-09-12) — ไฟล์ `src/lib/notify.ts` ที่ plan เดิมพูดถึงไม่มีอยู่จริง (ไม่เคยสร้างเป็น no-op stub เพราะสร้างของจริงไปเลย)
+9. ✅ **3.16 `purchase_cost`** (2026-09-12) — เพิ่ม field `purchase_cost` (nullable, min 0) ใน `productModel` + `productService.createProduct`/`updateProduct` (validate ≥0 เหมือน `sale_price`) · `recipeService.getUnitCostByProduct` fallback ไปใช้ `purchase_cost` เมื่อสินค้าไม่มีสูตร (หรือมีแต่ `yield_qty=0` คำนวณไม่ได้) — ลำดับความสำคัญ: สูตรมาก่อนเสมอ → `purchase_cost` → `null` · แก้ COGS/กำไรใน dashboard ให้ไม่ต่ำกว่าจริงสำหรับสินค้าซื้อมาขายต่อ (น้ำดื่ม/ของฝาก) · เทส: `tests/integration/getUnitCostByProduct.test.ts` (4 เคส ครบทุกลำดับความสำคัญ) · **ยังไม่ทำ:** ต้นทุนระดับ variant (คงเป็นระดับสินค้าเหมือนเดิม)
+10. ✅ **3.4 integration tests เพิ่ม** (2026-09-12) — `cartService.test.ts` (7 เคส: ปฏิเสธ preorder/is_visible=false, คิดราคา base+variant+option, merge/แยกรายการตาม option set, quantity=0 ลบ, ลบต่างคนไม่ได้, clearCart) · `createTransaction.test.ts` (8 เคส: receive/use/adjust ครบ, use ไม่พอสต็อก, allowNegative, type/qty ผิด, void adjust ไม่ได้ — คู่กับ `voidTransaction.test.ts` เดิมที่คุม 2c.2 ไปแล้ว) · `deliveryQuoteForCart.test.ts` (4 เคส: wiring จริงกับตะกร้า ไม่ใช่แค่ `calcDeliveryFee` ตรงๆ) · integration รวม 27→48
 
-**รอบ 4d — ขึ้นกับการตัดสินใจ hosting**
+**✅ รอบ 4d — เสร็จสมบูรณ์ทั้ง 3 ข้อ (2026-09-12)** _(สรุปเต็ม: [`hardening-4d-plan.md`](hardening-4d-plan.md))_
 
-11. **3.13 object storage** — abstract `upload.ts` เป็น interface (`localDisk` + `s3`/R2/GCS) เลือกด้วย env `UPLOAD_DRIVER` · **จำเป็นถ้า deploy serverless** · ถอน `multer` · **M**
-12. **3.14 ลบรูปสินค้าที่ไม่ใช้** — `upload.delete(oldKey)` best-effort ตอน `updateProduct`/`deleteProduct` · ต่อจากข้อ 11 · **S**
-13. **3.15 delivery zone เป็น DB** — model `deliveryZone` + admin CRUD + cache TTL · fallback config เดิม · **M**
+11. ✅ **3.13 object storage abstraction** — `upload.ts` เป็น `UploadDriver` interface (`save`/`delete`) เลือกผ่าน env `UPLOAD_DRIVER`: `localDisk` (ดีฟอลต์ พฤติกรรมเดิมทุกประการ) หรือ `s3` (S3-compatible: AWS S3/Cloudflare R2/GCS interop ผ่าน `@aws-sdk/client-s3`, lazy import ไม่กระทบ bundle ตอนไม่ได้ใช้) · ถอน `multer` ที่ไม่เคยถูก import ใช้จริง (route ใช้ `req.formData()`) ออกจาก `package.json` · **M**
+12. ✅ **3.14 ลบรูปสินค้าที่ไม่ใช้** — `productService.updateProduct` diff รูปเดิม/ใหม่แล้ว `deleteImages()` เฉพาะไฟล์ที่หายไป (ไม่แตะ `product_img` เลย = ไม่ลบอะไร) · `hardDeleteProduct` ลบไฟล์ทั้งหมด (soft `deleteProduct` **ไม่ลบ** — ยัง `restoreProduct()` กลับมาได้) · best-effort เสมอ (`log.error` ไม่ throw) · **S**
+13. ✅ **3.15 delivery zone เป็น DB** — model `deliveryZoneModel` + `deliveryZoneService` (ห่อ `createCrudService` เดิม + exclusivity ของ `is_catch_all` + cache TTL 60s invalidate ทันทีตอนแก้) + `/api/admin/delivery-zones`(+`[id]`,`[id]/restore`) · `deliveryService.calcDeliveryFee` เป็น `async` เช็ค DB ก่อนเสมอ ตกไป fallback env เดิมถ้ายังไม่ตั้งค่า/ไม่ match โซนไหนเลย (ไม่ breaking change) · **M**
 
-**รอบ 5 — งานเดี่ยวเสี่ยงสูง (branch แยก · ทำท้ายสุด)**
+เทส: `tests/lib/upload.test.ts` (9) · `tests/integration/{productImageCleanup,deliveryService}.test.ts` (5+13) · `schemas-admin.test.ts` (+4) · unit 155→**163** · integration 66→**79**
 
-14. **3.11 เงินเป็น integer (สตางค์)** — กระทบทุก model/service + `discountEngine`/`deliveryService`/`dashboardService` + migration ×100 · **ต้องมี integration test ครอบเต็มก่อน + freeze feature อื่น** · **L**
+**🟡 รอบ 5 — งานเดี่ยวเสี่ยงสูง (branch แยก · ทำท้ายสุด) — เฟส 3/5 เสร็จ (2026-09-12)**
+
+14. ✅ **3.11 เงินเป็น integer (สตางค์) — เสร็จสมบูรณ์ทั้งหมด** — แบ่งเป็น 6 เฟสย่อยตามโดเมนที่ผูกกัน
+    จริงทางโค้ด (สำรวจแล้วพบว่า "ทำทีเดียวทั้งหมด" เสี่ยงเกินรีวิวไหว — 18 model แตะเงินสุดท้าย จากที่
+    สำรวจแรกเจอ 17) รายละเอียดเต็ม + เหตุผลการแบ่งเฟส + บทเรียนทั้งโปรเจกต์ →
+    [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) §8 · **ตัดสินใจร่วมกับผู้ใช้:** DB เก็บ
+    สตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม (ไม่ breaking change) · **M** ต่อเฟส (รวม **L**)
+    - ✅ **เฟส 1: Order + OrderItem + Preorder + PreorderItem + Payment + PromotionUsages**
+      (2026-09-12) — ต้องรวม order+preorder เข้าเฟสเดียวเพราะ `paymentModel` เป็น collection กลางที่
+      ใช้ร่วมกัน แยกแปลงไม่ได้ · `dashboardService` แก้พร้อมกัน (ผสมหน่วย satang/baht ผิดจุดเดียวกำไร
+      เพี้ยน x100 เงียบ ๆ) · migration script `npm run migrate:money-to-satang` (กันรันซ้ำ) · เทส
+      unit 163/integration 82 · เจอ+แก้บั๊กใน `tests/integration/setup.ts` ไปด้วย (ไม่เคลียร์ raw
+      collection ที่ไม่ผ่าน mongoose model)
+    - ✅ **เฟส 2: Expense** (`expenseModel.amount`, 2026-09-12) — โดดเดี่ยว ไม่ผูกกับ collection อื่น
+      เลย ทำได้เร็วสุดตามคาด · `expenseService` เดิม export `createCrudService()` ตรง ๆ ไม่มี
+      override เลย เปลี่ยนมาห่อ base แบบเดียวกับ `deliveryZoneService` (รอบ 4d) · `dashboardService`
+      **ไม่ต้องแก้เลยสักบรรทัด** เพราะ `totalInRange()` คืนบาทให้เหมือนเดิม · **เจอบั๊กสำคัญระหว่างเขียน
+      เทส:** migration script เดิมใช้ marker เดียวทั้งไฟล์ — ถ้า DB เคยรันเฟส 1 ไปแล้ว รันสคริปต์เฟส 2
+      (ที่เพิ่ม expenseModel เข้ามา) จะข้ามทั้งไฟล์ทันที ไม่แตะ expenseModel เลย แก้เป็น marker แยกต่อ
+      collection ก่อน merge (ดู `hardening-5-money-phase1.md` §4) · เทส unit 171/integration 89
+    - ✅ **เฟส 3: Delivery zone** (`deliveryZoneModel.fee`, 2026-09-12) — โดดเดี่ยวตามคาด · เพิ่ม
+      `presentZone()` ให้ `/api/admin/delivery-zones` ยังบาทเหมือนเดิม แต่ `getActiveZonesCached()`
+      (cache ภายในที่ `deliveryService.ts` ใช้เท่านั้น ไม่เคย expose ตรงให้ client) ตั้งใจปล่อยเป็น
+      สตางค์ดิบไว้ ให้ `deliveryService.ts` แปลงเองตรงจุดใช้จริง (`calcDeliveryFee`/`listZones`) ·
+      เทส unit 171/integration 93
+    - ✅ **เฟส 4: Recipe/Component/Ingredient cost + `cost_per_unit`/`purchase_cost`** (2026-09-12) —
+      `ingredientModel.cost_per_unit`/`componentModel`+`recipeModel.estimated_cost_per_batch` เป็น
+      สตางค์แล้ว พร้อม `orderItem`/`preorderItem.cost_per_unit` ที่ปล่อยไว้เป็นบาทตั้งแต่เฟส 1 (ต้องรอ
+      เฟสนี้ก่อนเพราะที่มาคือ `recipeService.getUnitCostByProduct()`) · **ดึง `productModel.
+      purchase_cost` เข้ามาแปลงพร้อมกันด้วย** ทั้งที่อยู่ในกลุ่ม Product pricing ของแผนเดิม — เพราะ
+      `getUnitCostByProduct()` ผสมค่าจากทั้งสูตรกับ `purchase_cost` fallback เข้าด้วยกัน ถ้าปล่อย
+      `purchase_cost` ไว้ก่อนจะได้ Map ที่หน่วยปนกันโดยไม่มีทางรู้จากภายนอก · **เจอบั๊กใหม่ 2 จุด:**
+      (1) สูตรปัดเศษเดิม `Math.round(cost*100)/100` ออกแบบไว้ปัดทศนิยมบาท 2 ตำแหน่ง ถ้าไม่แก้จะปัด
+      สตางค์ละเอียดถึง 1/100 สตางค์ซึ่งไม่มีความหมาย ต้องเปลี่ยนเป็น `Math.round(cost)` ตรง ๆ ทั้ง
+      `componentService`/`recipeService`/`getUnitCostByProduct()` (2) MongoDB `$mul` **error ทันที**
+      ถ้าเจอ field ที่เป็น `null` (ยืนยันด้วยการทดสอบจริงกับ mongodb-memory-server) —
+      `cost_per_unit`/`purchase_cost` เป็น nullable ต้อง filter `{ field: { $type: "number" } }` ก่อน
+      $mul เสมอ, ไม่งั้น migration พังกลางทางทั้ง collection · **บั๊กมาร์กเกอร์ซ้ำ (แบบเดียวกับเฟส 2)
+      เจออีกครั้ง:** เพิ่ม `cost_per_unit` เข้า field ของ collection ที่มี section เดิมอยู่ก่อนแล้ว
+      (`order_items`/`preorder_items`) ต้องแยก section id ใหม่เสมอ (`order_items_cost_per_unit`/
+      `preorder_items_cost_per_unit`) ไม่งั้น DB ที่เคยรันเฟส 1 จะข้ามทั้ง section ไม่แตะ cost_per_unit
+      เลย · เทส unit 171/integration 104 · **หมายเหตุ:** ตอนเตรียม merge PR นี้พบว่า CI ของ PR นี้และ
+      PR #30/#31 ก่อนหน้า **FAILURE จริง** มาตลอด (`npm run typecheck:test` — คนละคำสั่งกับ
+      `typecheck` ปกติที่ไม่ครอบคลุม `tests/`) แต่ merge ผ่านได้เพราะ `verify` check ไม่ใช่ required
+      check ของ repo — ต้นเหตุคือ `db.collection("migrations")` (ข้าม mongoose model) ไม่ได้ type ไว้
+      ทำให้ insert `_id` เป็น string ชนกับ type `ObjectId` ที่ infer มาโดย default แก้แล้วด้วยการ type
+      ให้ชัดเจน (`db.collection<MigrationMarkerDoc>(...)`) — ตั้งแต่นี้ต้องรัน `typecheck:test` คู่กับ
+      `typecheck` ทุกครั้งก่อนถือว่า verify ผ่านจริง
+    - ✅ **เฟส 5a: Promotion definition** (`promotionModel`, 2026-09-12) — ซับซ้อนสุดตามคาดเพราะ
+      `discount_value` เป็นเงิน**เฉพาะ**ตอน `discount_type === "Amount"` (`min_order_amount`/
+      `max_discount_amount` เป็นเงินเสมอ) ต้อง handle conditional ทั้งตอน `createPromotion`/
+      `updatePromotion`/presenter และตอน migrate · `updatePromotion` ต้องอ่าน `discount_type`
+      ปัจจุบันจาก DB ก่อนถ้า payload ไม่ได้ส่งมาด้วย ถึงจะรู้ว่าควรแปลง `discount_value` หรือไม่ ·
+      **`discountEngine.ts` ไม่ต้องแก้เลยสักบรรทัด** — `promotionService.validateForOrder()` แปลง
+      `promo` doc เป็นบาทก่อนส่งเข้า (ใช้ `presentPromotion()` ตัวเดียวกับที่ API ใช้ซ้ำได้พอดี) ·
+      **เจอว่า `$mul` ธรรมดาทำ conditional ไม่ได้** ต้องเปลี่ยนไปใช้ pipeline-style update
+      (`updateMany(filter, [stage], { updatePipeline: true })`) แทน — พบ bonus ว่า aggregation
+      `$multiply` คืน `null` เฉย ๆ เมื่อเจอ `null` (ไม่ throw เหมือน `$mul` ในเฟส 4) จึงไม่ต้อง filter
+      `$type:"number"` เลย · เทส unit 171/integration 115
+    - ✅ **เฟส 5b: Product pricing + `preorderRoundItemModel.price_override`** (2026-09-12) —
+      `productModel.product_price`/`sale_price`, `productVariantModel.variant_price`,
+      `productOptionModel.extra_price`, `cartItemModel.price_snapshot`+`selected_options[].
+      extra_price`, `preorderRoundItemModel.price_override` เป็นสตางค์ครบแล้ว — เฟสสุดท้ายของ
+      §3.11 **ปิดโครงการนี้ทั้งหมด** · เจอ `preorderRoundItemModel.price_override` เป็น model ที่ 18
+      ระหว่างสำรวจขอบเขต (พลาดจากการสำรวจ 17 model ตอนเริ่มรอบ 5 — ผูก `??` fallback chain เดียวกับ
+      `product.sale_price`/`product_price` เป๊ะ เหมือน `purchase_cost` ในเฟส 4) · **ผลลัพธ์ที่คาดไว้
+      ตั้งแต่วางแผน**: `orderService.resolveLine()`/`preorderService`'s round-item pricing ไม่มี "จุด
+      ข้ามโดเมน" ให้ต้อง `toSatang()` ปลายทางอีกแล้ว เพราะทั้ง product/variant/option/cart เป็นสตางค์
+      หมดพร้อมกัน — โค้ดง่ายขึ้นจริง · **บั๊กที่ไม่ได้เจอ (แต่เกือบเจอ)**: `tests/integration/
+      helpers.ts`'s `makeProduct()`/`makeVariant()`/`makeOption()` มีจุดเรียกใช้อยู่ก่อนแล้ว 51 จุด
+      ใน 12 ไฟล์ทั่ว test suite — แก้โดยให้ helper แปลงบาท→สตางค์ให้อัตโนมัติในตัวเอง (ต่างจาก
+      `makeIngredient`/`makeRecipe` ในเฟส 4 ที่ปรับแค่ default เพราะจุดเรียกน้อยกว่ามาก) ทำให้ทุกจุด
+      เรียกเดิมผ่านหมดโดยไม่ต้องแก้แม้แต่จุดเดียว (ยกเว้น 1 จุดที่อัปเดตราคาตรงผ่าน model) · เทส
+      unit 171/integration 125 — **รวมทั้งโปรเจกต์: unit 163→171, integration 79→125 (+46 เคส ตลอด
+      6 เฟสย่อย)**
 
 > เกณฑ์จัดลำดับ: (1) ป้องกันการถอยหลังก่อน (CI ✅) → (2) lint/type กั้น build จริง (✅ core) → (3) จบด่าน zod ให้ครบ (4b) → (4) งานเดี่ยวเล็กเสี่ยงต่ำ (4c) → (5) งานที่รอ decision ภายนอก (4d) → (6) migration เสี่ยงสูงท้ายสุด (5)
 
 | # | เรื่อง | หมายเหตุ |
 |---|---|---|
-| 3.1 | 🟡 validation layer (zod) — infra + auth/shop/admin CRUD ทั้งหมด + shop custom routes (2026-09-11, PR #6/#15–#17) | `zod` v4 · `src/lib/validate.ts` · `src/schemas/` (`common`,`auth`,`order`,`cart`,`payment`,`catalog`,`expense`,`inventory`,`promotion`,`sentiment`,`rbac`,`bom`,`user`,`address`,`review`) · **`crudRoutes` option `validate` + `createInject`** · adopt: `/auth/*` · `/shop/{orders,cart,payments,me,addresses,reviews}` · **crud-factory ทั้งหมด** (units/categories/banners/ingredients/expenses/**product-options/variants/aspects/semantic-terms/roles/components/recipes**) · `/admin/promotions` · ตาราง adopt ราย route → [`validation.md`](validation.md) · **เหลือ (รอบ 4b):** `/admin/orders` (custom, ซับซ้อน) · `/admin/attendances` · รื้อ `pick()`/`createFields` ใน service |
+| 3.1 | ✅ validation layer (zod) — ครบทุก route ที่วางแผนไว้ (2026-09-12, PR #6/#15–#17 + รอบ 4b เต็ม) | `zod` v4 · `src/lib/validate.ts` · `src/schemas/` (`common`,`auth`,`order`,`cart`,`payment`,`catalog`,`expense`,`inventory`,`promotion`,`sentiment`,`rbac`,`bom`,`user`,`address`,`review`,`attendance`,**`preorderRound`**) · **`crudRoutes` option `validate` + `createInject`** · adopt: `/auth/*` · `/shop/{orders,cart,payments,me,addresses,reviews}` · **crud-factory ทั้งหมด** (units/categories/banners/ingredients/expenses/product-options/variants/aspects/semantic-terms/roles/components/recipes) · `/admin/promotions` · `/admin/orders` (POST + `.../delivery`) · `/admin/attendances` · **`/admin/permissions`, `/admin/preorder-rounds*`, `/admin/preorder-round-items`, `/admin/users`** · ตาราง adopt ราย route → [`validation.md`](validation.md) · รื้อ `pick()`/`createFields` ที่ซ้ำ zod เสร็จครบ 8/8 ไฟล์แล้ว (ดู §3 ข้อ 5) |
 | 3.2 | ~~ไม่มี rate-limit ที่ `/api/auth/login`~~ | ✅ แก้แล้ว (2026-09-11) — `src/lib/rateLimit.ts` (in-memory sliding window → `tooMany()` 429 + `retry_after_seconds`) · wire: `auth/login` 10/นาที · `auth/register` 5 · `auth/google` 10 · `shop/me/password` 5 (ต่อ IP, ทับ account-lockout ต่อบัญชี) · `httpError` เพิ่ม `tooMany()` + `TOO_MANY_REQUESTS` · รายละเอียด → [`security-hardening.md`](security-hardening.md) §1 · **หมายเหตุ:** in-memory = ไม่ share ข้าม instance → หลาย instance ต้องเปลี่ยนเป็น Redis (แก้ไฟล์เดียว) |
 | 3.3 | ✅ `logger.ts` (2026-09-10) · `compensation.ts` `Saga` + adopt `preorderService.createPreorder` / `orderService.persistOrder` / `updateOrderStatus` cancel (2026-09-11) | **logger:** `src/lib/logger.ts` (JSON บรรทัดเดียว, level, `LOG_LEVEL`, serialize `err`) แทน `console.error` 5 จุด · → [`infra-tooling.md`](infra-tooling.md) §2 · **compensation:** `src/lib/compensation.ts` `Saga` (`onRollback` / `rollback` reverse-order best-effort / `commit`) · adopt `createPreorder` + `persistOrder` + `updateOrderStatus` cancel (แทน nested try/catch + `if (order?._id)` + `.catch(()=>undefined)`) · validate ด้วย integration test (persistOrder + cancelOrder) · → [`hardening-d3-plan.md`](hardening-d3-plan.md) |
-| 3.4 | 🟡 unit + integration + CI (2026-09-10 → 2026-09-11) | vitest **2 projects**: `unit` (`tests/lib/`, ไม่ต่อ DB) + `integration` (`tests/integration/`, `mongodb-memory-server`) · scripts: `test` / `test:integration` / `test:all` / `typecheck:test` · **unit 115 / 15 ไฟล์** · **integration 13 / 3 ไฟล์:** `promotionUsage`, `persistOrder`, `cancelOrder` · ✅ **CI** `.github/workflows/ci.yml` (PR #13) รัน `typecheck → typecheck:test → lint → test → test:integration → build` ทุก push+PR · `tests/` exclude จาก `tsconfig.json` หลัก → `tsconfig.test.json` · → [`infra-tooling.md`](infra-tooling.md) §3 · **ยังไม่ทำ:** integration `cartService`/`ingredientTransactionService`/`deliveryService.quoteForCart` |
-| 3.5 | ~~audit log แทบว่าง~~ | ✅ แก้แล้ว — `src/lib/audit.ts` (`audit(req, {...})` fire-and-forget) · wire เข้า mutation สำคัญแล้ว: **ออเดอร์** (สร้าง/เปลี่ยนสถานะ/จัดส่ง/ลบ/ลูกค้ายกเลิก) · **payment** (verify/refund/ลบ) · **สต็อก** (ingredient transaction สร้าง/void, product stock PUT/PATCH) · **สิทธิ์** (permission สร้าง/แก้/ถอน/กู้คืน, role CRUD, user สร้าง/ลบ/กู้คืน/ปลดล็อก/ตั้งรหัสผ่าน/เปลี่ยน role) · **การผลิต** (start/complete/cancel, consume/reverse stock) · **แคตตาล็อก** (product CRUD + อัปโหลดรูป, recipe/component/ingredient/promotion/expense CRUD ผ่าน `crudRoutes` option `audit: { entity }`) · **ยังไม่ครอบ:** unit/หมวดหมู่/banner/variant/option/aspect/semantic-term (เพิ่ม `audit:{entity}` ในไฟล์ factory ได้), shop payment create/slip, before/after snapshot (ตอนนี้ log แค่ action + entity_id + details ย่อ) |
+| 3.4 | ~~unit + integration + CI~~ | ✅ **ปิดครบแล้ว** (2026-09-10 → 2026-09-12, ตรวจซ้ำ 2026-09-13 — โน้ต "ยังไม่ทำ" เดิมในแถวนี้เป็นข้อมูลเก่าไม่ได้อัปเดตตามรอบ 4c) — vitest **2 projects**: `unit` (`tests/lib/`, ไม่ต่อ DB) + `integration` (`tests/integration/`, `mongodb-memory-server`) · scripts: `test` / `test:integration` / `test:all` / `typecheck:test` · **unit 171 / integration 132** (ล่าสุด) · ✅ **CI** `.github/workflows/ci.yml` (PR #13) รัน `typecheck → typecheck:test → lint → test → test:integration → build` ทุก push+PR · `tests/` exclude จาก `tsconfig.json` หลัก → `tsconfig.test.json` · → [`infra-tooling.md`](infra-tooling.md) §3 · integration `cartService.test.ts`/`createTransaction.test.ts`/`deliveryQuoteForCart.test.ts`/`deliveryService.test.ts` เพิ่มครบแล้วในรอบ 4c/4d (ยืนยัน `ls tests/integration/` มีไฟล์จริง) |
+| 3.5 | ~~audit log แทบว่าง~~ | ✅ แก้แล้ว — `src/lib/audit.ts` (`audit(req, {...})` fire-and-forget) · wire เข้า mutation สำคัญแล้ว: **ออเดอร์** (สร้าง/เปลี่ยนสถานะ/จัดส่ง/ลบ/ลูกค้ายกเลิก) · **payment** (verify/refund/ลบ/**สร้าง+แนบสลิปฝั่งลูกค้า — เพิ่ม 2026-09-13**) · **สต็อก** (ingredient transaction สร้าง/void, product stock PUT/PATCH) · **สิทธิ์** (permission สร้าง/แก้/ถอน/กู้คืน, role CRUD, user สร้าง/ลบ/กู้คืน/ปลดล็อก/ตั้งรหัสผ่าน/เปลี่ยน role) · **การผลิต** (start/complete/cancel, consume/reverse stock) · **แคตตาล็อก** (product CRUD + อัปโหลดรูป, recipe/component/ingredient/promotion/expense/**unit/product-category/ingredient-category/component-category/banner/product-variant/product-option/aspect/semantic-term — เพิ่ม 2026-09-13** CRUD ผ่าน `crudRoutes` option `audit: { entity }`) · **ยังไม่ครอบ:** before/after snapshot (ตอนนี้ log แค่ action + entity_id + details ย่อ) — ตั้งใจปล่อยไว้ (effort/ผลกระทบไม่คุ้มตอนนี้) |
 | 3.6 | ~~ไม่มี eslint config~~ | ✅ แก้แล้ว (2026-09-10) + lint gate (รอบ 4a PR #14) — `eslint.config.mjs` (ESLint 9 flat) · **ลบ `eslint.ignoreDuringBuilds` แล้ว** (lint = 0 error) · `no-explicit-any` = `warn` ทั้ง repo + `error` บน `src/schemas`+`tests` · เหลือ **13 warning** (`no-explicit-any` ใน `src/app/api/**/route.ts` + `crudRoutes.ts`) → เก็บใน **รอบ 4b** พร้อมยก `src/lib` เป็น `error` · → [`infra-tooling.md`](infra-tooling.md) §1 |
 | 3.7 | ~~response envelope ไม่คงที่~~ | ✅ แก้แล้ว (2026-09-11) — มาตรฐาน `data = { items, meta \| null }` ทุก list endpoint · `apiResponse.okList(items, meta?)` + `PageMeta` type · แก้ 7 endpoint ที่ไม่ conform (5 ตัวคืน array เปล่า, `getProducts` key `pagination`→`meta`) + `crudRoutes` GET · **⚠️ BREAKING** ต่อ frontend — ตาราง 7 endpoint ใน [`api-conventions.md`](api-conventions.md) §2 · รายละเอียดเต็ม → [`api-conventions.md`](api-conventions.md) (envelope / status code / validation issues / auth / query params) |
-| 3.8 | สมุดที่อยู่ไม่เชื่อม checkout | `shop/orders` รับ `delivery_address` เป็น object ดิบ ไม่รองรับ `address_id` จาก `addressService` |
+| 3.8 | ~~สมุดที่อยู่ไม่เชื่อม checkout~~ | ✅ **แก้แล้ว** (2026-09-12, ตรวจซ้ำ 2026-09-13 — แถวนี้เดิมไม่ได้อัปเดตตามจริง) รายละเอียดเต็ม → รอบ 4c ข้อ 7 ด้านบน · `schemas/order.ts` รองรับ `address_id` + `.refine()` บังคับ oneOf กับ `delivery_address` แล้ว · **gap ที่เคยเหลือ (`/api/shop/preorders` ไม่รองรับ `address_id`) ปิดแล้ว** (2026-09-15) → [`BACKLOG2.md` §8](BACKLOG2.md) — เพิ่ม `schemas/preorder.ts` + reuse `addressService.resolveDeliverySnapshot()` |
 | 3.9 | ~~Google login = ID token flow เท่านั้น (env บอกใบ้ code flow)~~ | ✅ แก้แล้ว (2026-09-11) — `loginWithGoogle` ใช้ ID-token flow + `jose.jwtVerify` ตรวจ sig/iss/aud/exp ครบอยู่แล้ว · ลบ `GOOGLE_CLIENT_SECRET`/`GOOGLE_CALLBACK_URL` ออกจาก `.env.example` (เหลือ `GOOGLE_CLIENT_ID` + คอมเมนต์) · เพิ่มเช็ค `email_verified === false` → reject (กันสวมสิทธิ์ผ่าน link-by-email) · `docs/env.md` อัปเดต · รายละเอียด → [`security-hardening.md`](security-hardening.md) §2 |
 | 3.10 | 🟡 CORS / CSRF — เพิ่ม defense-in-depth (same-origin) | ✅ (2026-09-11) — `src/lib/csrf.ts` `isCsrfSafe(method, origin, host)` + `middleware.ts` block mutation ที่ Origin ข้ามโดเมน → `403 CROSS_ORIGIN` (เสริม cookie `SameSite=Lax` เดิม) · CORS: ยืนยัน API เป็น **same-origin** (ไม่ส่ง `Access-Control-Allow-*`) · รายละเอียด → [`security-hardening.md`](security-hardening.md) §3 · **ยังเปิดค้าง:** ถ้า frontend แยก origin → ต้องเพิ่ม CORS allowlist + preflight + cookie `SameSite=None` + CSRF token จริง |
-| 3.11 | เงินเก็บเป็น float | `subtotal` / `discount_amount` / `total_amount` ฯลฯ เป็น JS number มี `round2` ช่วยแสดงผล แต่สะสม error ได้ · พิจารณาเก็บเป็นสตางค์ (integer) |
-| 3.12 | จุดต่อ LINE (`src/lib/notify.ts`) | ยังไม่สร้าง — ทำ no-op ไว้ก่อน แล้วเรียก `notify("order.paid", {...})` ที่ paymentService.verify / orderService.status / ingredient low-stock เพื่อให้ต่อ LINE ทีหลังแก้ที่เดียว |
-| 3.13 | อัปโหลดเขียนลง `public/uploads/` (`src/lib/upload.ts`) | ใช้ได้เฉพาะ **self-host** · บน serverless (Vercel ฯลฯ) `public/` read-only ตอน runtime → เปลี่ยนเป็น object storage (S3 / Cloudflare R2 / GCS) แก้ที่ `upload.ts` ที่เดียว · `multer` ใน `package.json` ไม่ได้ใช้ (route ใช้ `req.formData()`) — ถอนออกได้ |
-| 3.14 | ลบรูปสินค้าที่ไม่ใช้ | ไม่มี endpoint ลบไฟล์ใน `public/uploads/products/` เมื่อแก้ `product_img` หรือลบสินค้า → ไฟล์ค้างสะสม |
-| 3.15 | ค่าส่ง = config + env ยังไม่ใช่ DB (`src/services/deliveryService.ts`) | รองรับแค่ 2 โซน (กทม./ต่างจังหวัด) แยกตามชื่อจังหวัดตรง ๆ · อัปเกรด: model `deliveryZone` + admin CRUD (โซนตามรหัสไปรษณีย์/อำเภอ, ค่าส่งตามน้ำหนัก, ส่งฟรีต่อโซน) — แก้เฉพาะ `deliveryService.ts` + เพิ่ม routes |
-| 3.16 | ไม่มี "ต้นทุนซื้อมา" สำหรับสินค้าซื้อมาขายต่อ (`productModel`) | `cost_per_unit` มาจากสูตรเท่านั้น · สินค้าที่ไม่ได้ผลิตเอง (น้ำดื่ม, ของฝาก) ไม่มีต้นทุน → COGS/กำไรใน dashboard ต่ำกว่าจริง · เพิ่ม field `purchase_cost` ใน productModel + ให้ `getUnitCostByProduct` fallback ไปใช้ค่านี้เมื่อไม่มีสูตร · ต้นทุนระดับ variant ก็ยังไม่มี |
+| 3.11 | ~~เงินเก็บเป็น float~~ | ✅ **เสร็จสมบูรณ์ทั้งหมด (2026-09-12) — 18/18 model เป็นสตางค์แล้ว:** `orderModel`/`orderItemModel`/`preorderModel`/`preorderItemModel`/`paymentModel`/`promotionUsagesModel`/`expenseModel`/`deliveryZoneModel`/`recipeModel`/`componentModel`/`ingredientModel`/`promotionModel`/`productModel`(`product_price`/`sale_price`/`purchase_cost`)/`productVariantModel`/`productOptionModel`/`cartItemModel`/`preorderRoundItemModel` — API ทุก endpoint ยังรับ-ส่งบาททศนิยมเหมือนเดิม (ดู `src/lib/money.ts`) · แบ่งทำ 6 เฟสย่อย (1/2/3/4/5a/5b) ตาม domain ที่ผูกกันจริงทางโค้ด — รายละเอียด/บทเรียนทั้งหมด → [`hardening-5-money-phase1.md`](hardening-5-money-phase1.md) §8 |
+| 3.12 | ~~จุดต่อ LINE (`src/lib/notify.ts`)~~ | ✅ **ล้าสมัยแล้ว ไม่ต้องทำ** (ยืนยันซ้ำ 2026-09-13 — `src/lib/notify.ts` ไม่มีอยู่จริง, แถวนี้เดิมไม่ได้อัปเดตตามจริง) — ระบบแจ้งเตือนตัวจริงสร้างเสร็จแล้ว: `src/services/notificationService.ts` + `src/lib/line.ts` (LINE push) + `/api/admin/notifications` ผูกเข้า order/payment/stock จริง รายละเอียด → รอบ 4c ข้อ 8 ด้านบน |
+| 3.13 | ~~อัปโหลดเขียนลง `public/uploads/` ตรงๆ (`src/lib/upload.ts`)~~ | ✅ แก้แล้ว (2026-09-12) — เป็น `UploadDriver` interface แล้ว รายละเอียด → รอบ 4d ข้อ 11 ด้านบน |
+| 3.14 | ~~ลบรูปสินค้าที่ไม่ใช้~~ | ✅ แก้แล้ว (2026-09-12) — รายละเอียด → รอบ 4d ข้อ 12 ด้านบน |
+| 3.15 | ~~ค่าส่ง = config + env ยังไม่ใช่ DB~~ | ✅ แก้แล้ว (2026-09-12) — รายละเอียด → รอบ 4d ข้อ 13 ด้านบน · **ยังไม่ทำ:** โซนตามรหัสไปรษณีย์/อำเภอละเอียดกว่าจังหวัด, ค่าส่งตามน้ำหนัก |
+| 3.16 | ~~ไม่มี "ต้นทุนซื้อมา" สำหรับสินค้าซื้อมาขายต่อ (`productModel`)~~ | ✅ แก้แล้ว (2026-09-12) — เพิ่ม field `purchase_cost` ใน `productModel` + `getUnitCostByProduct` fallback ไปใช้ค่านี้เมื่อไม่มีสูตร (รายละเอียด → รอบ 4c ข้อ 9 ด้านบน) · ต้นทุนระดับ variant ยังไม่มี |
+| 3.17 | ~~`crudRoutes.ts` — `createInject` ไม่มีคู่ `updateInject` ฝั่ง PATCH~~ | ✅ แก้แล้ว (2026-09-13) — เพิ่ม `updateInject?: (session: SessionUser) => Record<string, unknown>` ใน `ItemRoutesOptions` ใช้แบบเดียวกับ `createInject` เดิม (`PATCH` handler inject ก่อนเรียก `service.update`) · ยังไม่มี entity ไหนใช้จริง (เตรียมไว้ก่อนเจอ requirement) |
+| 3.18 | ~~Checkout N+1 — `resolveLine` วน `await` ทีละบรรทัดในตะกร้า~~ | ✅ แก้แล้ว (2026-09-13) — เปลี่ยนเป็น `resolveLines()` batch query ด้วย `$in` ครั้งเดียวต่อ collection (product/variant/option) แล้ว join ใน memory แทนวน `await` ทีละรายการ — `createOrderFromCart`/`createOrder` เรียกครั้งเดียวจบทั้งชุด · เทสยืนยันทั้ง correctness (join ไม่ปนกันข้ามรายการ, cross-product variant/option ยัง reject ถูก) และจำนวน query คงที่ไม่โตตามจำนวนรายการ (`tests/integration/persistOrder.test.ts` +7 เคส) |
 
 ---
 
@@ -161,12 +294,16 @@ enum = `["inStore", "online", "preorder"]` (เดิม `"ready"` → `"inStore
 ```
 [x] เปลี่ยน JWT_SECRET / SESSION_SECRET / NEXTAUTH_SECRET ใน .env.local (dev)  — 2026-09-02
 [ ] production: สุ่ม secret ใหม่อีกครั้ง ตั้งผ่าน env ของ host (อย่า commit)
-[ ] npm run seed
-[ ] npm run backfill:product-codes           # เติม product_id (pos-/pre-) ให้สินค้าเก่า
-[ ] MongoDB: อัปเดต product_type ของสินค้าเดิมจาก "ready" → "inStore" (ถ้ามีข้อมูลเก่า)
-[ ] MongoDB: ลบ payment "pending" ซ้ำ (order_id/preorder_id เดียวกันมีหลายใบ) ให้เหลือใบเดียว — §2.10
-[ ] npm run sync-indexes                      # ตรวจข้อมูลซ้ำ + syncIndexes ทุก model
-[ ] npm run sync-indexes -- --fix             # ถ้าขั้นบนรายงานว่ามี attendance/review ซ้ำ
+[x] npm run seed                              — ยืนยันแล้ว 2026-09-13: role owner/staff/customer + user ครบ
+                                                 (⚠️ DB มี role ขยะจาก manual test ปนอยู่เพียบ — ไม่ใช่ปัญหาระบบ แค่ควรเคลียร์)
+[x] npm run backfill:product-codes           — ยืนยันแล้ว 2026-09-13: products 40/40 มี product_id ครบ
+[x] MongoDB: อัปเดต product_type ของสินค้าเดิมจาก "ready" → "inStore"
+    — ✅ รันแล้ว 2026-09-13 ({ready:30}→{inStore:30}, matched/modified 30, preorder:10 ไม่แตะ) — ดู §2d.1
+[x] MongoDB: ลบ payment "pending" ซ้ำ           — ยืนยันแล้ว 2026-09-13: ไม่มีข้อมูลซ้ำอยู่แล้ว (0 กลุ่ม) — §2.10
+[x] npm run sync-indexes                      — รันจริงแล้ว 2026-09-13: สำเร็จ 38/38 model (ครบทุกตัว)
+                                                 (permissions/attendances/reviews/payments/products/units ยืนยัน index ถูกต้องแล้ว)
+                                                 Units เคย fail รอบแรก (37/38) แก้ schema แล้วรันซ้ำผ่านครบ — ดู §2d.2
+[x] npm run sync-indexes -- --fix             # ไม่จำเป็น — ไม่มี attendance/review/unit ซ้ำเหลืออยู่เลย
 ```
 
 **`npm run sync-indexes` ทำอะไรให้ครบในคำสั่งเดียว:**
@@ -179,6 +316,7 @@ enum = `["inStore", "online", "preorder"]` (เดิม `"ready"` → `"inStore
     — ถ้ามี pending ซ้ำอยู่ก่อน index นี้จะสร้าง **ไม่ผ่าน** (❌) ต้องลบซ้ำด้วยมือก่อน (`--fix` ยังไม่ครอบ payments)
   - สร้าง unique sparse ของ `products.product_id`
 - model ไหน sync ไม่ผ่าน (เช่นยังมีข้อมูลซ้ำ) จะขึ้น ❌ พร้อมเหตุผล
+- สร้าง partial unique ของ `units` (`unit_name`/`unit_abbr`) — แก้แล้ว 2026-09-13 ดู §2d.2 (`--fix` ไม่ครอบ `units` เหมือนกัน แต่ไม่จำเป็นเพราะ partial index ไม่ชนกับข้อมูลเก่าที่ soft-delete ไปแล้ว)
 
 ---
 
@@ -213,7 +351,8 @@ enum = `["inStore", "online", "preorder"]` (เดิม `"ready"` → `"inStore
 
 **ยังไม่ทำ (ต่อยอด):**
 - ผูก `discountEngine`/โปรโมชันกับพรีออเดอร์ (ตอนนี้รองรับเฉพาะ `discount_amount` กรอกมือของแอดมิน)
-- `paymentService` — รับ `preorder_id` ได้แล้ว แต่ยังไม่ได้เรียก `preorderService.setPaymentStatus()` (มี hook `setPaymentStatus` รออยู่)
+- ~~`paymentService` — รับ `preorder_id` ได้แล้ว แต่ยังไม่ได้เรียก `preorderService.setPaymentStatus()`~~ →
+  **แก้แล้ว** พร้อมอีก 3 บั๊กที่เกี่ยวข้อง (ownership/amount check, ยกเลิกไม่คืนเงิน) → ดูหมวด **§2b** ด้านบน (ก่อน §3)
 - `productionOrderService` — `source_type: "preorder"` ยัง reject ไว้ ยังไม่สร้างใบสั่งผลิตจาก `round_id`
 - ไม่เลื่อน `round_status` อัตโนมัติตามเวลา (แอดมินกด open/close เอง)
 - seed permission ให้ role `staff` เข้าเมนู `preorder` (owner ผ่านอยู่แล้ว)

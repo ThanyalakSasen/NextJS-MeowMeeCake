@@ -29,6 +29,11 @@ const orderItemSchema = new mongoose.Schema(
     selected_options: { type: [selectedOptionSchema], default: [] },
     special_request: { type: String, default: null },
     quantity: { type: Number, required: true, min: 1 },
+    // BACKLOG §3.11 — unit_price/total_price/selected_options[].extra_price เก็บเป็น "สตางค์" (integer)
+    // ตั้งแต่ 2026-09-12 (ดู src/lib/money.ts) · cost_per_unit ก็เป็นสตางค์เช่นกันตั้งแต่เฟส 4
+    // (2026-09-12) — มาจาก recipeService.getUnitCostByProduct() ซึ่งตอนนี้เป็นสตางค์ล้วนแล้ว
+    // (ทั้งฝั่งสูตรและฝั่ง purchase_cost fallback) ใช้คำนวณ COGS ใน dashboard เท่านั้น ไม่เคยถูก
+    // บวก/ลบรวมกับ subtotal/total_amount ของออเดอร์โดยตรง
     unit_price: { type: Number, required: true, min: 0 },
     total_price: { type: Number, required: true, min: 0 },
     cost_per_unit: { type: Number, default: null },

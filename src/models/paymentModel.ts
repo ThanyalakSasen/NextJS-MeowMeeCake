@@ -5,6 +5,8 @@ const paymentSchema = new mongoose.Schema(
     order_id: { type: mongoose.Schema.Types.ObjectId, ref: "Orders", default: null },
     preorder_id: { type: mongoose.Schema.Types.ObjectId, ref: "Preorders", default: null },
     user_id: { type: mongoose.Schema.Types.ObjectId, ref: "Users", required: true },
+    // BACKLOG §3.11 — สตางค์ (integer) ตั้งแต่ 2026-09-12 ไม่ว่าจะผูกกับ order หรือ preorder
+    // (ทั้งสองฝั่งแปลงเป็นสตางค์พร้อมกันในเฟสนี้ เพราะ payment เป็น model กลางที่ใช้ร่วมกัน)
     amount: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
     promptpay_ref: { type: String, default: null },

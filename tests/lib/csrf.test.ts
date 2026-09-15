@@ -29,4 +29,13 @@ describe("isCsrfSafe", () => {
     expect(isCsrfSafe("POST", "null", HOST)).toBe(false);
     expect(isCsrfSafe("POST", "not a url", HOST)).toBe(false);
   });
+
+  it("mutation cross-origin แต่อยู่ใน ALLOWED_ORIGINS → ผ่าน", () => {
+    const original = process.env.ALLOWED_ORIGINS;
+    process.env.ALLOWED_ORIGINS = "http://localhost:3000";
+    expect(isCsrfSafe("POST", "http://localhost:3000", HOST)).toBe(true);
+    expect(isCsrfSafe("POST", "https://evil.com", HOST)).toBe(false);
+    if (original === undefined) delete process.env.ALLOWED_ORIGINS;
+    else process.env.ALLOWED_ORIGINS = original;
+  });
 });

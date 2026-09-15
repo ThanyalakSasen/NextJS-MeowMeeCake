@@ -13,6 +13,8 @@ import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
+import { Saga } from "../lib/compensation";
+import { generateDocNo } from "../lib/productCode";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import productionOrderModel from "../models/productionOrderModel";
 import productionItemModel from "../models/productionItemModel";
@@ -51,16 +53,6 @@ export interface ListProductionOrderQuery {
   includeDeleted?: boolean;
 }
 
-// ── helper ─────────────────────────────────────────────────
-function randomProductionNo(now = new Date()): string {
-  const ymd =
-    now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0");
-  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `PRD-${ymd}-${rand}`;
-}
-
 // ── CREATE ─────────────────────────────────────────────────
 export async function createProductionOrder(input: CreateProductionOrderInput) {
   await dbConnect();
@@ -77,7 +69,7 @@ export async function createProductionOrder(input: CreateProductionOrderInput) {
   for (let attempt = 0; attempt < 5 && !order; attempt++) {
     try {
       order = await productionOrderModel.create({
-        production_no: randomProductionNo(),
+        production_no: generateDocNo("PRD", 5),
         production_date: new Date(input.production_date),
         source_type: "manual",
         production_status: "planned",
@@ -91,8 +83,25 @@ export async function createProductionOrder(input: CreateProductionOrderInput) {
   }
 
   if (Array.isArray(input.items) && input.items.length) {
-    for (const raw of input.items) {
-      await productionItemService.addItem(String(order._id), raw);
+    // BACKLOG2 §2.2 — เดิมวน await addItem() ทีละรายการ (แต่ละครั้ง fetch order ซ้ำ + query
+    // product/recipe แยก) เปลี่ยนมา addItems() (พหูพจน์) แบบ batch ครั้งเดียว
+    //
+    // BACKLOG2 §10 — ไล่เทียบกับ orderService.persistOrder()/preorderService.createPreorder() (ทั้งคู่
+    // ห่อขั้น "สร้าง header แล้วค่อยสร้าง child items" ด้วย Saga) พบว่าที่นี่ไม่มี — ถ้า addItems()
+    // throw (เช่น recipe_id ที่ระบุไม่ตรงกับ product_id ของรายการนั้น เป็น validation ที่เกิด*หลัง*
+    // สร้าง header ไปแล้ว ต่างจาก preorderRoundService.createRound() ที่ validate items ให้ครบ*ก่อน*
+    // สร้าง header) จะเหลือใบสั่งผลิต "planned" ที่ไม่มีรายการค้างอยู่ใน DB ตลอดไป ไม่มีทาง rollback —
+    // ใช้ Saga แบบเดียวกับ order/preorder ปิดช่องนี้
+    const saga = new Saga();
+    saga.onRollback("delete-production-order", () =>
+      productionOrderModel.deleteOne({ _id: order._id })
+    );
+    try {
+      await productionItemService.addItems(String(order._id), input.items);
+      saga.commit();
+    } catch (err) {
+      await saga.rollback();
+      throw err;
     }
   }
 

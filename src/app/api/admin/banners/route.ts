@@ -9,5 +9,6 @@ export const { GET, POST } = collectionRoutes(bannerService, {
   defaultSort: "sort_order",
   filterFromQuery: (sp) => ({ is_active: parseBool(sp.get("is_active")) }),
   auth: { menu: "products" },
+  audit: { entity: "Banner" },
   validate: { create: bannerCreate },
 });

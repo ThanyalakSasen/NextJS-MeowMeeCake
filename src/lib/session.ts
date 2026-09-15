@@ -42,26 +42,35 @@ function cookieMaxAgeSeconds(): number {
   return days * 24 * 60 * 60;
 }
 
+/**
+ * true = ตั้งค่า ALLOWED_ORIGINS ไว้ (frontend แยก origin จริง — src/lib/cors.ts)
+ * โหมดนี้ cookie ต้องเป็น SameSite=None (ไม่งั้นเบราว์เซอร์ไม่ส่ง cookie ข้าม origin มาด้วย)
+ * ซึ่งสเปกบังคับว่าต้องมี Secure คู่กันเสมอ (ไม่ใช่แค่ production — localhost ก็นับเป็น
+ * secure context ได้ในเบราว์เซอร์สมัยใหม่ จึงยังทดสอบ cross-origin บนเครื่องได้ผ่าน http)
+ */
+function crossOriginMode(): boolean {
+  return (process.env.ALLOWED_ORIGINS ?? "").trim().length > 0;
+}
+
+function cookieOptions(maxAge: number) {
+  const cross = crossOriginMode();
+  return {
+    httpOnly: true,
+    sameSite: (cross ? "none" : "lax") as "none" | "lax",
+    secure: cross || process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge,
+  };
+}
+
 /** เซ็ต session cookie ลงบน response */
 export function attachSession(res: NextResponse, token: string): NextResponse {
-  res.cookies.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: cookieMaxAgeSeconds(),
-  });
+  res.cookies.set(SESSION_COOKIE, token, cookieOptions(cookieMaxAgeSeconds()));
   return res;
 }
 
 /** ล้าง session cookie (ตอน logout / token เสีย) */
 export function clearSession(res: NextResponse): NextResponse {
-  res.cookies.set(SESSION_COOKIE, "", {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 0,
-  });
+  res.cookies.set(SESSION_COOKIE, "", cookieOptions(0));
   return res;
 }

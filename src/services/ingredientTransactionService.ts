@@ -17,6 +17,9 @@ import ingredientTransactionModel from "../models/ingredientTransactionModel";
 import ingredientModel from "../models/ingredientModel";
 import unitModel from "../models/unitModel";
 import userModel from "../models/userModel";
+import productionItemModel from "../models/productionItemModel";
+import { notificationService } from "./notificationService";
+import { log } from "../lib/logger";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -34,6 +37,9 @@ export interface CreateTransactionInput {
   transaction_date?: string | Date | null;
   expiry_date?: string | Date | null;
   allowNegative?: boolean;
+  /** BACKLOG §2c.3 — internal only: productionItemService ใส่ให้เพื่อผูกธุรกรรมกับรายการผลิต
+   *  ที่สร้างมัน กัน voidTransaction() ย้อนรายการนี้แบบไม่รู้ตัว (ต้องยกเลิกผ่าน reverse-stock แทน) */
+  production_item_id?: string | null;
 }
 
 export interface ListTransactionQuery {
@@ -71,6 +77,10 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   const unitId = input.unit_id || String(ingredient.unit_id);
   await assertRefExists(unitModel, unitId, "หน่วยนับ", "unit_id");
+
+  if (input.production_item_id) {
+    await assertRefExists(productionItemModel, input.production_item_id, "รายการผลิต", "production_item_id");
+  }
 
   const before = ingredient.current_stock ?? 0;
   let after: number;
@@ -111,7 +121,23 @@ export async function createTransaction(input: CreateTransactionInput) {
       transaction_date: input.transaction_date ? new Date(input.transaction_date) : new Date(),
       expiry_date: input.expiry_date ? new Date(input.expiry_date) : null,
       performed_by: input.performed_by,
+      production_item_id: input.production_item_id ?? null,
     });
+
+    // แจ้งเตือนตอนสต็อกเพิ่งข้ามจุดสั่งซื้อลงมา (before > reorder_point, after <= reorder_point)
+    // เช็คแค่ตอน "เพิ่งข้าม" กัน spam แจ้งเตือนซ้ำทุกครั้งที่เบิกตอนสต็อกต่ำอยู่แล้ว
+    const reorderPoint = ingredient.reorder_point ?? 0;
+    if (before > reorderPoint && after <= reorderPoint) {
+      notificationService
+        .notify({
+          title: `วัตถุดิบใกล้หมด: ${ingredient.ingredient_name}`,
+          message: `คงเหลือ ${after} (จุดสั่งซื้อ ${reorderPoint})`,
+          module: "ingredient",
+          type: "warning",
+          link: "/owner/ingredients",
+        })
+        .catch((err) => log.error("ingredient.notify_failed", { ingredient_id: String(ingredient._id), err }));
+    }
 
     return {
       transaction: txn.toObject(),
@@ -190,12 +216,32 @@ export async function voidTransaction(id: string) {
   if (txn.type === "adjust") {
     throw badRequest("รายการชนิด adjust ยกเลิกไม่ได้ (ไม่มียอดก่อนหน้าให้ย้อน) — ให้ทำ adjust ใหม่แทน");
   }
+  // BACKLOG §2c.3 — รายการที่เกิดจากการผลิต (consumeStock/reverseStock) ห้าม void ผ่านทางนี้:
+  // ธุรกรรมกลุ่มนี้ผูกกับ productionItem.stock_impact/stock_updated_at ของรายการผลิตต้นทาง — ถ้า void
+  // ตรงนี้แล้วภายหลังมีคนกด reverse-stock ที่หน้ารายการผลิตอีกที (เพราะ stock_updated_at ยังไม่ถูกเคลียร์
+  // ไม่รู้ว่ามีคนย้อนไปแล้ว) จะสร้างรายการ "receive" ชดเชยซ้ำอีกรอบ = เครดิตสต็อกสองครั้งจากการเบิกครั้งเดียว
+  if (txn.production_item_id) {
+    throw conflict(
+      "รายการนี้เกิดจากการผลิต — ยกเลิกผ่านทางนี้ไม่ได้ (จะทำให้เครดิตสต็อกซ้ำถ้ามีคนกดคืนสต็อกที่หน้า" +
+        "รายการผลิตอีกที) ให้ไปที่รายการผลิตนี้แล้วกด \"คืนสต็อกวัตถุดิบ\" (reverse-stock) แทน"
+    );
+  }
 
   const inc = txn.type === "receive" ? -txn.qty : txn.qty; // receive→ลบออก, use→คืนกลับ
-  await ingredientModel.updateOne(
-    { _id: txn.ingredient_id },
-    { $inc: { current_stock: inc } }
-  );
+
+  // BACKLOG 2c.2: ย้อนรายการ "receive" คือการลบสต็อกออก (inc < 0) — ต้องกันติดลบแบบเดียวกับ
+  // createTransaction ฝั่ง "use" (:89) ไม่งั้น void รายการรับที่ของถูกเบิกใช้ไปแล้วบางส่วนจะทำให้
+  // current_stock ติดลบเงียบ ๆ ไม่มี error (การย้อน "use" คืนกลับเข้าสต็อกไม่มีทางติดลบ ไม่ต้องกัน)
+  const filter: Record<string, any> = { _id: txn.ingredient_id, deleted_at: null };
+  if (inc < 0) filter.current_stock = { $gte: -inc };
+  const res = await ingredientModel.updateOne(filter, { $inc: { current_stock: inc } });
+  if (res.modifiedCount === 0) {
+    const current = await ingredientModel.findById(txn.ingredient_id).lean<any>();
+    throw conflict(
+      `สต็อกไม่พอให้ย้อนรายการนี้ (คงเหลือ ${current?.current_stock ?? 0}, ต้องย้อนออก ${-inc}) — ` +
+        `อาจมีการเบิกใช้ไปแล้วหลังรายการนี้ ให้ทำ adjust ปรับยอดแทน`
+    );
+  }
 
   txn.deleted_at = new Date();
   txn.note = `${txn.note ?? ""} [ยกเลิกรายการ]`.trim();

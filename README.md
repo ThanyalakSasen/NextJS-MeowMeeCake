@@ -23,10 +23,14 @@
 - **โปรโมชัน FreeShipping กับออเดอร์ไม่มีค่าส่ง (บั๊ก 2.6) → [`docs/promo-freeshipping.md`](docs/promo-freeshipping.md)**
 - **ขอบเขตการยกเลิกออเดอร์ของลูกค้า (บั๊ก 2.7) → [`docs/order-cancel.md`](docs/order-cancel.md)**
 - **กัน race: โปรโมชัน usage + payment ซ้ำ (บั๊ก 2.9–2.10) → [`docs/concurrency-guards.md`](docs/concurrency-guards.md)**
+- **preorder payment/cancellation hardening (บั๊ก 2b.1–2b.4) → [`docs/preorder-payment-hardening.md`](docs/preorder-payment-hardening.md)**
+- **clearCart error handling + voidTransaction floor guard (บั๊ก 2c.1–2c.2) → [`docs/order-cart-inventory-robustness.md`](docs/order-cart-inventory-robustness.md)**
 - **สรุปรวมการแก้บั๊กความถูกต้องข้อมูล 2.8–2.11 → [`docs/data-integrity-fixes.md`](docs/data-integrity-fixes.md)**
 - **บันทึกกิจกรรมผู้ใช้ (audit log) → [`docs/auditLog.md`](docs/auditLog.md)**
 - **ระบบพรีออเดอร์ (รอบ / โควตา / API) → [`docs/preorder.md`](docs/preorder.md)**
 - **สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก + Migration checklist → [`docs/BACKLOG.md`](docs/BACKLOG.md)**
+- **บั๊ก/ความเสี่ยงชุดใหม่ที่พบหลังปิด BACKLOG.md (แก้แล้ว) → [`docs/BACKLOG2.md`](docs/BACKLOG2.md)**
+- **Clean code: reuse/simplification/efficiency (ไม่ใช่บั๊ก) → [`docs/BACKLOG3.md`](docs/BACKLOG3.md)**
 - **สรุปงาน hardening §2 + §3 (พร้อม PR / ดัชนีเอกสาร) → [`docs/hardening-summary.md`](docs/hardening-summary.md)**
 - **มาตรฐาน API (envelope / status / list / auth) → [`docs/api-conventions.md`](docs/api-conventions.md)**
 - **แผนงานคุณภาพ / hardening (§3 ชั้น D) → [`docs/hardening-plan.md`](docs/hardening-plan.md)** · D3 → [`docs/hardening-d3-plan.md`](docs/hardening-d3-plan.md) · รอบ 4a → [`docs/hardening-4a-plan.md`](docs/hardening-4a-plan.md)

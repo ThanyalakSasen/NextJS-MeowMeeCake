@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 const userSchema = new mongoose.Schema(
   {
     user_fullname: { type: String, required: true, trim: true },
-    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    email: { type: String, required: true, lowercase: true, trim: true },
     password: { type: String, default: null },
     googleId: { type: String, default: null },
     auth_provider: { type: String, enum: ["local", "google"], required: true },
@@ -30,6 +30,13 @@ const userSchema = new mongoose.Schema(
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }
+);
+
+// email ห้ามซ้ำ แต่เฉพาะบัญชีที่ยังไม่ถูกลบ (partial unique) — BACKLOG2 §1: เดิมเป็น unique ธรรมดา
+// ลบ user ทิ้ง (soft, เช่น ไล่พนักงานออก/ลบบัญชีลูกค้า) แล้วอีเมลนั้นสมัคร/สร้างใหม่ไม่ได้อีกเลย
+userSchema.index(
+  { email: 1 },
+  { unique: true, partialFilterExpression: { deleted_at: null } }
 );
 
 const User = mongoose.models.Users || mongoose.model("Users", userSchema);

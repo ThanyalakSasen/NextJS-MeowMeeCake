@@ -5,5 +5,6 @@ import { bannerService } from "@/services/bannerService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(bannerService, {
   auth: { menu: "products" },
+  audit: { entity: "Banner" },
   validate: { update: bannerUpdate },
 });

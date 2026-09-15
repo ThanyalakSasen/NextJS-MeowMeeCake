@@ -20,12 +20,18 @@ import dbConnect from "../lib/dbConnect";
 import { log } from "../lib/logger";
 import { Saga } from "../lib/compensation";
 import { badRequest, conflict, notFound, isHttpError } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import {
+  registerAutoRefundOnCancel,
+  assertCustomerCancelAllowed,
+  setEntityPaymentStatus,
+  applyEntityDeliveryUpdate,
+  softDeleteEntityWithItems,
+} from "../lib/orderLifecycle";
 import orderModel from "../models/orderModel";
 import orderItemModel from "../models/orderItemModel";
-import paymentModel from "../models/paymentModel";
 import productModel from "../models/productModel";
 import productVariantModel from "../models/productVariantModel";
 import productOptionModel from "../models/productOptionModel";
@@ -36,6 +42,14 @@ import * as promotionUsageService from "./promotionUsageService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import * as productService from "./productService";
+import { resolveSelectedOptions } from "./productOptionService";
+import { notificationService } from "./notificationService";
+import { toSatang, toBaht, toBahtFields } from "../lib/money";
+import { generateDocNo } from "../lib/productCode";
+import type { z } from "zod";
+import type { updateDeliveryBody } from "../schemas/order";
+
+type UpdateDeliveryInput = z.infer<typeof updateDeliveryBody>;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -141,94 +155,104 @@ interface PricedLine {
   cost_per_unit: number | null;
 }
 
-// ── helper: ออกเลขออเดอร์ ────────────────────────────────────
-function randomOrderNo(now = new Date()): string {
-  const ymd =
-    now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0");
-  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `OP-${ymd}-${rand}`;
-}
+// ── helper: resolve รายการสั่งซื้อทั้งชุดจาก input ดิบ (ใช้ตอนสั่งเองไม่ผ่านตะกร้า และตอน re-price
+// จากตะกร้า) — BACKLOG §3.18: เดิมเป็น resolveLine() ตัวเดียว วน await ทีละรายการ (ตะกร้า/ออเดอร์ N
+// ชิ้น = query แยก ~3N ครั้ง ทยอยทีละรายการ) เปลี่ยนมา batch query ด้วย `$in` ครั้งเดียวต่อ collection
+// (product/variant/option) ก่อน แล้ว join ใน memory ทีหลัง — ยังคง validate/error message เดิมทุก
+// ประการต่อรายการ มีต่างแค่ "ลำดับ" ของ error เมื่อมีหลายรายการผิดพร้อมกัน (เช็ค quantity/รูปแบบ id
+// ของทุกรายการก่อน แล้วค่อยเช็คสิ่งที่ต้องรู้ผลจาก DB ทีละรายการตามลำดับเดิม — ไม่มีเทสไหนอิงลำดับ error
+// ข้ามรายการอยู่แล้ว)
+async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
+  // 1) validate รูปแบบ (sync, ไม่ต้องรอ DB) ให้ครบทุกรายการก่อน
+  const quantities = inputs.map((input) => {
+    const quantity = Number(input.quantity);
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      throw badRequest("quantity ของแต่ละรายการต้องเป็นจำนวนเต็มตั้งแต่ 1");
+    }
+    assertObjectId(input.product_id, "product_id");
+    if (input.variant_id) assertObjectId(input.variant_id, "variant_id");
+    for (const sel of input.selected_options ?? []) assertObjectId(sel.option_id, "option_id");
+    return quantity;
+  });
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+  // 2) รวบรวม id ที่ต้องใช้ทั้งหมดจากทุกรายการ แล้ว query แบบ `$in` ครั้งเดียวต่อ collection
+  const productIds = [...new Set(inputs.map((i) => i.product_id))];
+  const variantIds = [...new Set(inputs.map((i) => i.variant_id).filter((v): v is string => !!v))];
+  const optionIds = [
+    ...new Set(inputs.flatMap((i) => (i.selected_options ?? []).map((s) => s.option_id))),
+  ];
 
-// ── helper: resolve รายการสั่งซื้อจาก input ดิบ (ใช้ตอนสั่งเองไม่ผ่านตะกร้า) ──
-async function resolveLine(input: OrderLineInput): Promise<PricedLine> {
-  const quantity = Number(input.quantity);
-  if (!Number.isInteger(quantity) || quantity < 1) {
-    throw badRequest("quantity ของแต่ละรายการต้องเป็นจำนวนเต็มตั้งแต่ 1");
-  }
-  assertObjectId(input.product_id, "product_id");
+  const [products, variants, options] = await Promise.all([
+    productModel.find({ _id: { $in: productIds }, deleted_at: null }).lean<any[]>(),
+    variantIds.length
+      ? productVariantModel.find({ _id: { $in: variantIds }, deleted_at: null }).lean<any[]>()
+      : Promise.resolve([]),
+    optionIds.length
+      ? productOptionModel.find({ _id: { $in: optionIds }, deleted_at: null }).lean<any[]>()
+      : Promise.resolve([]),
+  ]);
+  const productById = new Map(products.map((p) => [String(p._id), p]));
+  const variantById = new Map(variants.map((v) => [String(v._id), v]));
+  const optionById = new Map(options.map((o) => [String(o._id), o]));
 
-  const product = await productModel
-    .findOne({ _id: input.product_id, deleted_at: null })
-    .lean<any>();
-  if (!product) throw notFound(`ไม่พบสินค้า ${input.product_id}`);
-  if (product.product_type === "preorder") {
-    throw badRequest(
-      `สินค้า "${product.product_name_th}" เป็นสินค้าพรีออเดอร์ ต้องสั่งผ่านระบบพรีออเดอร์ (Preorders) ไม่ใช่ออเดอร์ปกติ`
+  // 3) join ใน memory ทีละรายการ ตามลำดับเดิม — logic การ validate/error message เดิมทุกจุด
+  return inputs.map((input, idx) => {
+    const quantity = quantities[idx];
+
+    const product = productById.get(String(input.product_id));
+    if (!product) throw notFound(`ไม่พบสินค้า ${input.product_id}`);
+    if (product.product_type === "preorder") {
+      throw badRequest(
+        `สินค้า "${product.product_name_th}" เป็นสินค้าพรีออเดอร์ ต้องสั่งผ่านระบบพรีออเดอร์ (Preorders) ไม่ใช่ออเดอร์ปกติ`
+      );
+    }
+
+    let variant: any = null;
+    if (input.variant_id) {
+      const v = variantById.get(String(input.variant_id));
+      // ต้องเป็น variant ของ product_id นี้จริง (query เดิมกรอง product_id ไว้ในตัว — ที่นี่ query
+      // ด้วย _id ล้วนแล้วเช็คทีหลัง เพราะ $in ข้าม product_id ของแต่ละรายการไม่ได้ในคำสั่งเดียว)
+      variant = v && String(v.product_id) === String(input.product_id) ? v : null;
+      if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
+    }
+
+    // BACKLOG3 §6 — logic ตรวจ/คิดราคา option ย้ายไป productOptionService.resolveSelectedOptions()
+    // แล้ว (ใช้ร่วมกับ cartService.resolveOptions()) — ที่นี่ยังคง batch query optionById ไว้เหมือนเดิม
+    // (BACKLOG §3.18 กัน N+1) แค่ไม่ต้องเขียน validate logic ซ้ำเอง
+    const selected = input.selected_options ?? [];
+    const resolvedOptions: PricedLine["selected_options"] = resolveSelectedOptions(
+      String(input.product_id),
+      selected,
+      optionById
     );
-  }
 
-  let variant: any = null;
-  if (input.variant_id) {
-    assertObjectId(input.variant_id, "variant_id");
-    variant = await productVariantModel
-      .findOne({ _id: input.variant_id, product_id: input.product_id, deleted_at: null })
-      .lean<any>();
-    if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
-  }
+    // BACKLOG §3.11 เฟส 5b — basePrice/variant_price/extra_price ทั้งหมดมาจาก productModel/
+    // productVariantModel/productOptionModel ซึ่งเป็นสตางค์แล้วทั้งหมดตั้งแต่เฟส 5b (เดิมเฟส 1-4a เป็น
+    // บาท ต้องแปลงเป็นสตางค์ตอนจบด้วย toSatang() ตรงนี้ — "จุดข้ามโดเมน" นั้นไม่มีอยู่แล้วตอนนี้ เพราะ
+    // ทั้งฝั่งสินค้าและฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด unit_price ที่คำนวณตรงนี้จึงเป็นสตางค์อยู่แล้ว
+    // โดยอัตโนมัติ ไม่ต้องแปลงอะไรเพิ่ม)
+    const basePrice = product.sale_price ?? product.product_price;
+    const unit_price =
+      basePrice +
+      (variant?.variant_price ?? 0) +
+      resolvedOptions.reduce((s, o) => s + o.extra_price, 0);
 
-  const selected = input.selected_options ?? [];
-  let options: PricedLine["selected_options"] = [];
-  if (selected.length) {
-    const ids = selected.map((s) => {
-      assertObjectId(s.option_id, "option_id");
-      return s.option_id;
-    });
-    const found = await productOptionModel
-      .find({ _id: { $in: ids }, product_id: input.product_id, deleted_at: null })
-      .lean<any[]>();
-    const byId = new Map(found.map((o) => [String(o._id), o]));
-    options = selected.map((sel) => {
-      const opt = byId.get(String(sel.option_id));
-      if (!opt) throw badRequest(`ไม่พบตัวเลือกเสริม ${sel.option_id} ของสินค้านี้`);
-      let text: string | null = null;
-      if (opt.is_text_input) {
-        text = (sel.text_value ?? "").trim() || null;
-        if (opt.is_required && !text) throw badRequest(`ตัวเลือก "${opt.option_name}" ต้องกรอกข้อความ`);
-        if (text && opt.max_text_length && text.length > opt.max_text_length) {
-          throw badRequest(`ข้อความของ "${opt.option_name}" ยาวเกิน ${opt.max_text_length} ตัวอักษร`);
-        }
-      }
-      return {
-        option_id: opt._id,
-        option_name: opt.option_name,
-        extra_price: opt.extra_price ?? 0,
-        text_value: text,
-      };
-    });
-  }
-
-  const basePrice = product.sale_price ?? product.product_price;
-  const unit_price =
-    basePrice + (variant?.variant_price ?? 0) + options.reduce((s, o) => s + o.extra_price, 0);
-
-  return {
-    product_id: product._id,
-    variant_id: variant?._id ?? null,
-    product_snapshot: {
-      product_name_th: product.product_name_th,
-      product_name_eng: product.product_name_eng,
-      variant_name: variant?.variant_name ?? null,
-    },
-    selected_options: options,
-    special_request: input.special_request?.trim() || null,
-    quantity,
-    unit_price,
-    cost_per_unit: null,
-  };
+    return {
+      product_id: product._id,
+      variant_id: variant?._id ?? null,
+      product_snapshot: {
+        product_name_th: product.product_name_th,
+        product_name_eng: product.product_name_eng,
+        variant_name: variant?.variant_name ?? null,
+      },
+      // extra_price เป็นสตางค์อยู่แล้ว (มาจาก productOptionModel) เก็บลง orderItem.selected_options ตรง ๆ
+      selected_options: resolvedOptions.map((o) => ({ ...o })),
+      special_request: input.special_request?.trim() || null,
+      quantity,
+      unit_price,
+      cost_per_unit: null,
+    };
+  });
 }
 
 // ── helper: บันทึกออเดอร์ + รายการ + ตัดสต็อก (best-effort) ──
@@ -251,27 +275,39 @@ async function persistOrder(
     lines.map((l) => String(l.product_id))
   );
 
+  // unit_price/total_price เป็นสตางค์แล้วตั้งแต่ resolveLine() — บวก/คูณ integer ตรงนี้ไม่มี
+  // rounding error เลย ต่างจากตอนเป็นบาท (float) ที่ต้อง round2() ปิดท้ายทุกจุด (BACKLOG §3.11)
   const itemsPayload = lines.map((l) => ({
     ...l,
     total_price: l.unit_price * l.quantity,
     cost_per_unit: costByProduct.get(String(l.product_id)) ?? l.cost_per_unit ?? null,
   }));
-  const subtotal = round2(itemsPayload.reduce((s, it) => s + it.total_price, 0));
+  const subtotal = itemsPayload.reduce((s, it) => s + it.total_price, 0);
 
   // ── ค่าส่ง: คิดฝั่ง server เสมอ (เว้นแต่แอดมินสั่ง override) ──
+  // deliveryService ยังทำงานเป็น "บาท" (ยังไม่แปลงในเฟสนี้) — แปลง subtotal เป็นบาทตอนส่งออก แล้ว
+  // แปลงผลลัพธ์ (บาท) กลับเป็นสตางค์ทันทีที่ได้รับ (ข้ามโดเมนแค่จุดเดียว ไม่ผสมหน่วยไปไกลกว่านี้)
   let delivery_fee = 0;
   if (opts.order_type === "delivery") {
     if (opts.delivery_fee_override && opts.delivery_fee != null) {
-      delivery_fee = Math.max(0, Number(opts.delivery_fee) || 0);
+      delivery_fee = toSatang(Math.max(0, Number(opts.delivery_fee) || 0));
     } else {
-      delivery_fee = deliveryService.calcDeliveryFee({
-        province: opts.delivery_address?.province ?? null,
-        subtotal,
-      }).fee;
+      delivery_fee = toSatang(
+        (
+          await deliveryService.calcDeliveryFee({
+            province: opts.delivery_address?.province ?? null,
+            subtotal: toBaht(subtotal),
+          })
+        ).fee
+      );
     }
   }
 
   // ── ส่วนลด: ใช้โปรโมชัน (ระบบคิดเอง) หรือส่วนลดกรอกมือ ──
+  // promotionService.validateForOrder()/discountEngine.ts ยังรับ-คืนเป็น "บาท" เหมือนเดิมทุกประการ
+  // แม้ promotionModel เองจะถูกแปลงเป็นสตางค์แล้วตั้งแต่เฟส 5a ก็ตาม (promotionService แปลงกลับเป็น
+  // บาทให้เองก่อนส่งเข้า discountEngine — ดู presentPromotion() ที่นั่น) — จุดนี้จึงไม่ต้องแก้อะไรเลย
+  // แปลงอินพุตเป็นบาทตอนเรียก แล้วแปลงผลลัพธ์ (บาท) กลับเป็นสตางค์ทันที
   let discount_amount = 0;
   let appliedPromotion: { promotion_id: string; discount_amount: number } | null = null;
 
@@ -288,7 +324,7 @@ async function persistOrder(
       product_id: String(l.product_id),
       category_id: catByProduct.get(String(l.product_id)) ?? null,
       quantity: l.quantity,
-      line_total: round2(l.unit_price * l.quantity),
+      line_total: toBaht(l.unit_price * l.quantity),
     }));
 
     const result = await promotionService.validateForOrder({
@@ -296,20 +332,20 @@ async function persistOrder(
       promotion_id: opts.promotion_id ?? undefined,
       user_id: userId,
       lines: discountLines,
-      subtotal,
-      delivery_fee,
+      subtotal: toBaht(subtotal),
+      delivery_fee: toBaht(delivery_fee),
       channel: opts.channel ?? "online",
     });
-    discount_amount = result.discount_amount;
+    discount_amount = toSatang(result.discount_amount);
     appliedPromotion = { promotion_id: result.promotion_id, discount_amount };
   } else {
-    discount_amount = Math.max(0, Number(opts.discount_amount) || 0);
+    discount_amount = toSatang(Math.max(0, Number(opts.discount_amount) || 0));
   }
 
   if (discount_amount > subtotal + delivery_fee) {
     throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
   }
-  const total_amount = round2(subtotal - discount_amount + delivery_fee);
+  const total_amount = subtotal - discount_amount + delivery_fee;
 
   const stockItems = lines.map((l) => ({
     product_id: String(l.product_id),
@@ -319,6 +355,7 @@ async function persistOrder(
   // ── สร้างออเดอร์แบบ best-effort + ชดเชยผ่าน Saga (MongoDB standalone ไม่มี transaction) ──
   const saga = new Saga();
   let order: any = null;
+  let insertedItems: any[] = [];
   try {
     // 1) ตัดสต็อก (productService ข้าม preorder ให้เอง, คืนสต็อกอัตโนมัติถ้ารายการใดไม่พอ)
     await productService.deductStockForOrder(stockItems);
@@ -328,7 +365,7 @@ async function persistOrder(
     for (let attempt = 0; attempt < 5 && !order; attempt++) {
       try {
         order = await orderModel.create({
-          order_no: randomOrderNo(),
+          order_no: generateDocNo("OP"),
           user_id: userId,
           order_type: opts.order_type,
           delivery_address: opts.order_type === "delivery" ? opts.delivery_address : null,
@@ -345,8 +382,8 @@ async function persistOrder(
     }
     saga.onRollback("delete-order", () => orderModel.deleteOne({ _id: order._id }));
 
-    // 3) สร้าง order items
-    await orderItemModel.insertMany(
+    // 3) สร้าง order items — เก็บผลลัพธ์ไว้ใช้ตอน return ท้ายฟังก์ชันเลย (BACKLOG3 §5, กัน query ซ้ำ)
+    insertedItems = await orderItemModel.insertMany(
       itemsPayload.map((it) => ({ ...it, order_id: order._id }))
     );
     saga.onRollback("delete-order-items", () => orderItemModel.deleteMany({ order_id: order._id }));
@@ -376,7 +413,21 @@ async function persistOrder(
     throw err;
   }
 
-  return getOrderById(String(order._id));
+  // แจ้งเตือนออเดอร์ใหม่ (DB + LINE) — best-effort ไม่ทำให้สร้างออเดอร์ล้มเหลวถ้าแจ้งเตือนพัง
+  notificationService
+    .notify({
+      title: `ออเดอร์ใหม่ ${order.order_no}`,
+      message: `ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
+      module: "order",
+      type: "info",
+      link: `/owner/orders/manageOrders?id=${order._id}`,
+    })
+    .catch((err) => log.error("order.notify_failed", { order_id: String(order._id), err }));
+
+  return presentOrderWithItems(
+    order,
+    insertedItems.map((it: any) => it.toObject())
+  );
 }
 
 // ── CREATE จากตะกร้า ────────────────────────────────────────
@@ -402,30 +453,34 @@ export async function createOrderFromCart(
   }
 
   // re-price ทุกบรรทัดจากราคาปัจจุบัน — ไม่เชื่อ price_snapshot ที่แช่ไว้ตอนหยิบใส่ตะกร้า
-  // ใช้ resolveLine ตัวเดียวกับ path สั่งเอง (POS): ได้ราคา/ชื่อสินค้าสด + re-validate ว่าสินค้า/variant/option ยังมีอยู่
+  // ใช้ resolveLines() ตัวเดียวกับ path สั่งเอง (POS): ได้ราคา/ชื่อสินค้าสด + re-validate ว่าสินค้า/
+  // variant/option ยังมีอยู่ — batch query ครั้งเดียวทั้งตะกร้า ไม่ใช่ทีละรายการ (BACKLOG §3.18)
   const notes = input.item_notes ?? {};
-  const lines: PricedLine[] = [];
-  for (const it of detail.items as any[]) {
+  const lineInputs: OrderLineInput[] = (detail.items as any[]).map((it) => {
     const product = it.product_id ?? {};
     const variant = it.variant_id ?? null;
-    lines.push(
-      await resolveLine({
-        product_id: String(product._id ?? it.product_id),
-        variant_id: variant?._id ? String(variant._id) : null,
-        selected_options: (it.selected_options ?? [])
-          .filter((o: any) => o?.option_id != null)
-          .map((o: any) => ({
-            option_id: String(o.option_id),
-            text_value: o.text_value ?? null,
-          })),
-        special_request: notes[String(it._id)] ?? null,
-        quantity: it.quantity,
-      })
-    );
-  }
+    return {
+      product_id: String(product._id ?? it.product_id),
+      variant_id: variant?._id ? String(variant._id) : null,
+      selected_options: (it.selected_options ?? [])
+        .filter((o: any) => o?.option_id != null)
+        .map((o: any) => ({
+          option_id: String(o.option_id),
+          text_value: o.text_value ?? null,
+        })),
+      special_request: notes[String(it._id)] ?? null,
+      quantity: it.quantity,
+    };
+  });
+  const lines = await resolveLines(lineInputs);
 
   const order = await persistOrder(userId, lines, input);
-  await cartService.clearCart(userId);
+  // เคลียร์ตะกร้า — best-effort เหมือน notify ด้านบน: ออเดอร์ commit สำเร็จไปแล้ว (persistOrder
+  // saga.commit() แล้ว) ถ้า clearCart พังไม่ควรทำให้ client เห็น 500 ทั้งที่ออเดอร์สร้างสำเร็จจริง
+  // (BACKLOG 2c.1 — เดิมไม่มี .catch() จุดเดียวในไฟล์นี้ที่รันหลัง commit แล้วไม่กันพัง)
+  await cartService
+    .clearCart(userId)
+    .catch((err) => log.error("order.clear_cart_failed", { user_id: userId, order_id: String(order._id), err }));
   return order;
 }
 
@@ -437,13 +492,48 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
   if (!Array.isArray(input.items) || input.items.length === 0) {
     throw badRequest("ต้องระบุ items อย่างน้อย 1 รายการ");
   }
-  const lines: PricedLine[] = [];
-  for (const raw of input.items) lines.push(await resolveLine(raw));
+  const lines = await resolveLines(input.items);
 
   return persistOrder(userId, lines, input);
 }
 
 // ── READ ────────────────────────────────────────────────────
+// BACKLOG §3.11 — DB เก็บเงินเป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม (ตัดสินใจร่วมกับผู้ใช้
+// 2026-09-12 ไม่ให้เป็น breaking change) — แปลงกลับตรงนี้ที่เดียวก่อนส่งออกทุกจุดที่ query ตรง ๆ
+// (ฟังก์ชันที่ return ผ่าน getOrderById/getOrderByNo อยู่แล้วไม่ต้องแปลงซ้ำ)
+const ORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount"] as const;
+// cost_per_unit เป็นสตางค์เช่นกันตั้งแต่เฟส 4 (มาจาก recipeService.getUnitCostByProduct() ซึ่งคืน
+// สตางค์ล้วนแล้ว — ดู comment ที่นั่น) toBahtFields ข้าม key ที่เป็น null ไว้เฉย ๆ อยู่แล้ว จึงปลอดภัย
+const ORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price", "cost_per_unit"] as const;
+
+function presentOrder<T extends Record<string, unknown>>(order: T): T {
+  return toBahtFields(order, ORDER_MONEY_FIELDS);
+}
+
+function presentOrderItem(item: any): any {
+  return {
+    ...toBahtFields(item, ORDER_ITEM_MONEY_FIELDS),
+    selected_options: (item.selected_options ?? []).map((o: any) => ({
+      ...o,
+      extra_price: toBaht(o.extra_price),
+    })),
+  };
+}
+
+/**
+ * BACKLOG3 §5 — persistOrder()/updateOrderStatus() เดิม `return getOrderById(String(order._id))`
+ * หลัง save เอกสารที่มีอยู่ในมือแล้ว (re-query orderModel.findOne() + orderItemModel.find() ทั้งคู่
+ * ทั้งที่ไม่จำเป็น) — helper นี้ populate user_id บน document ที่มีอยู่แล้วตรง ๆ (`Document#populate()`
+ * ต่างจาก getOrderById ที่ populate ผ่าน query builder ก่อน lean() เพราะเริ่มจากแค่ id ไม่มี document
+ * อยู่ในมือ) รับ `items` ที่มีอยู่แล้วได้ (เลี่ยง query ซ้ำ) ไม่ระบุ = query ให้เหมือน getOrderById เดิม
+ */
+async function presentOrderWithItems(order: any, items?: any[]): Promise<any> {
+  await order.populate("user_id", "user_fullname email user_phone");
+  const orderItems =
+    items ?? (await orderItemModel.find({ order_id: order._id, deleted_at: null }).lean());
+  return { ...presentOrder(order.toObject()), items: orderItems.map(presentOrderItem) };
+}
+
 export async function listOrders(query: ListOrderQuery) {
   await dbConnect();
 
@@ -476,7 +566,7 @@ export async function listOrders(query: ListOrderQuery) {
     orderModel.countDocuments(filter),
   ]);
 
-  return { items, meta: buildMeta(total, query.pagination) };
+  return { items: items.map(presentOrder), meta: buildMeta(total, query.pagination) };
 }
 
 export async function getOrderById(id: string, opts: { includeDeleted?: boolean } = {}) {
@@ -495,7 +585,7 @@ export async function getOrderById(id: string, opts: { includeDeleted?: boolean 
   const items = await orderItemModel
     .find({ order_id: order._id, deleted_at: null })
     .lean();
-  return { ...order, items };
+  return { ...presentOrder(order), items: items.map(presentOrderItem) };
 }
 
 export async function getOrderByNo(orderNo: string) {
@@ -506,7 +596,7 @@ export async function getOrderByNo(orderNo: string) {
     .lean<any>();
   if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
   const items = await orderItemModel.find({ order_id: order._id, deleted_at: null }).lean();
-  return { ...order, items };
+  return { ...presentOrder(order), items: items.map(presentOrderItem) };
 }
 
 // ── เปลี่ยนสถานะออเดอร์ (state machine) ─────────────────────
@@ -525,17 +615,22 @@ export async function updateOrderStatus(
   if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
 
   const current = order.order_status as OrderStatus;
-  if (current === next) return getOrderById(id);
+  // BACKLOG3 §5 — เดิม getOrderById(id) ทุกจุด (re-query ทั้ง header + items ทั้งที่มี document อยู่
+  // ในมือแล้ว) เปลี่ยนมา populate user_id บน document นี้ตรง ๆ แทน — ประหยัด query header ได้เสมอ
+  // ส่วนสาขา cancelled ประหยัด query items ได้ด้วย (มี items อยู่ในมือแล้วจากตอนคำนวณ stockItems)
+  if (current === next) return presentOrderWithItems(order);
   if (!NEXT_STATUS[current].includes(next)) {
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
 
+  let cancelledItems: any[] | undefined;
   if (next === "cancelled") {
     // cleanup ตอนยกเลิก — best-effort ทั้งหมด (step ที่ fail จะ log ผ่าน logger ไม่ล้มการยกเลิก)
     // ใช้ Saga เพื่อ log สม่ำเสมอ แทน .catch(() => undefined) ที่กลืน error เงียบ
     const cleanup = new Saga();
 
     const items = await orderItemModel.find({ order_id: order._id, deleted_at: null }).lean<any[]>();
+    cancelledItems = items;
     const stockItems = items.map((it) => ({
       product_id: String(it.product_id),
       quantity: it.quantity,
@@ -547,25 +642,18 @@ export async function updateOrderStatus(
       promotionUsageService.revokeUsage({ order_id: String(order._id) })
     );
 
-    // ออเดอร์ที่จ่ายเงินแล้ว → คืนเงินอัตโนมัติ · ป้องกัน "order = cancelled แต่ payment ยัง paid" (BACKLOG 2.8)
-    if (order.payment_status === "paid") {
-      const paidPayment = await paymentModel
-        .findOne({ order_id: order._id, status: "paid", deleted_at: null })
-        .lean<{ _id: unknown } | null>();
-      if (paidPayment && opts.cancelled_by) {
-        const verifiedBy = opts.cancelled_by;
-        cleanup.onRollback("auto-refund", async () => {
-          // dynamic import — เลี่ยง circular import (paymentService → orderService)
-          const { refundPayment } = await import("./paymentService");
-          await refundPayment(String(paidPayment._id), { verified_by: verifiedBy });
-        });
-      } else {
-        log.warn("order.auto_refund_skipped", {
-          order_id: String(order._id),
-          reason: "ไม่พบ payment ที่ paid หรือไม่มี cancelled_by",
-        });
-      }
-    }
+    // ออเดอร์ที่จ่ายเงินแล้ว → คืนเงินอัตโนมัติ · ป้องกัน "order = cancelled แต่ payment ยัง paid"
+    // (BACKLOG 2.8) — BACKLOG3 §10: logic เหมือน preorderService เป๊ะ ย้ายไปใช้ร่วมกันที่
+    // lib/orderLifecycle.ts แล้ว (คืนสต็อก/revoke-promo ด้านบนยังคงแยกเขียนเอง เพราะ cleanup
+    // ตอนยกเลิกของ order/preorder ต่างกันจริง — preorder คืนโควตาต่อรายการแทน)
+    await registerAutoRefundOnCancel({
+      saga: cleanup,
+      entityKind: "order",
+      paymentFilter: { order_id: order._id },
+      currentPaymentStatus: order.payment_status,
+      cancelledBy: opts.cancelled_by,
+      entityId: order._id,
+    });
 
     await cleanup.rollback();
 
@@ -579,7 +667,7 @@ export async function updateOrderStatus(
 
   order.order_status = next;
   await order.save();
-  return getOrderById(id);
+  return presentOrderWithItems(order, cancelledItems);
 }
 
 /** สถานะที่ "ลูกค้า" ยกเลิกออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน */
@@ -595,105 +683,49 @@ export async function cancelOrder(
   } = {}
 ) {
   const { allowedFrom, ...rest } = opts;
+  // BACKLOG3 §10 — logic เหมือน preorderService.cancelPreorder เป๊ะ ย้ายไปใช้ร่วมกัน
   if (allowedFrom) {
-    await dbConnect();
-    assertObjectId(id);
-    const order = await orderModel
-      .findOne({ _id: id, deleted_at: null })
-      .select("order_status payment_status")
-      .lean<{ order_status: OrderStatus; payment_status?: PaymentStatus } | null>();
-    if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
-    if (!allowedFrom.includes(order.order_status)) {
-      throw conflict(
-        `ยกเลิกออเดอร์เองได้เฉพาะตอนสถานะ ${allowedFrom.join(" / ")} เท่านั้น ` +
-          `(สถานะปัจจุบัน: "${order.order_status}") — หากต้องการยกเลิกกรุณาติดต่อร้าน`
-      );
-    }
-    // ออเดอร์ที่ชำระเงินแล้ว: ลูกค้ายกเลิกเองไม่ได้ — ต้องให้แอดมินยกเลิก + คืนเงิน (refundPayment)
-    // ไม่งั้นจะได้ order_status = cancelled แต่ payment_status ยัง paid โดยไม่มี refund record
-    if (order.payment_status === "paid") {
-      throw conflict(
-        "ออเดอร์นี้ชำระเงินแล้ว ยกเลิกเองไม่ได้ — กรุณาติดต่อร้านเพื่อขอยกเลิกและคืนเงิน"
-      );
-    }
+    await assertCustomerCancelAllowed({ model: orderModel, id, allowedFrom, entityLabel: "ออเดอร์" });
   }
   return updateOrderStatus(id, "cancelled", rest);
 }
 
 // ── อัปเดตสถานะการชำระเงิน (เรียกจาก paymentService) ────────
+// BACKLOG3 §10 — logic เหมือน preorderService.setPaymentStatus เป๊ะ ย้ายไปใช้ร่วมกัน
 export async function setPaymentStatus(orderId: string, status: PaymentStatus, paymentId?: string) {
-  await dbConnect();
-  assertObjectId(orderId, "order_id");
-  if (!PAYMENT_STATUSES.includes(status)) {
-    throw badRequest(`payment_status ต้องเป็นหนึ่งใน: ${PAYMENT_STATUSES.join(", ")}`);
-  }
-  const set: Record<string, any> = { payment_status: status };
-  if (paymentId) set.payment_id = paymentId;
-
-  const order = await orderModel
-    .findOneAndUpdate({ _id: orderId, deleted_at: null }, { $set: set }, { new: true })
-    .lean<any>();
-  if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
-
-  // จ่ายเงินสำเร็จ + ออเดอร์ยัง pending → ยืนยันออเดอร์อัตโนมัติ
-  if (status === "paid" && order.order_status === "pending") {
-    await orderModel.updateOne({ _id: orderId }, { $set: { order_status: "confirmed" } });
-  }
-  return order;
+  const order = await setEntityPaymentStatus({
+    model: orderModel,
+    id: orderId,
+    idField: "order_id",
+    status,
+    statuses: PAYMENT_STATUSES,
+    paymentId,
+    entityLabel: "ออเดอร์",
+  });
+  return presentOrder(order);
 }
 
 // ── อัปเดตข้อมูลการจัดส่ง ───────────────────────────────────
-export async function updateDelivery(id: string, input: Record<string, any>) {
-  await dbConnect();
-  assertObjectId(id);
-
-  const order = await orderModel.findOne({ _id: id, deleted_at: null });
-  if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
-  if (order.order_type !== "delivery") {
-    throw badRequest("ออเดอร์นี้ไม่ใช่ประเภทจัดส่ง (delivery)");
-  }
-
-  if (
-    input.delivery_status !== undefined &&
-    !DELIVERY_STATUSES.includes(input.delivery_status)
-  ) {
-    throw badRequest(`delivery_status ต้องเป็นหนึ่งใน: ${DELIVERY_STATUSES.join(", ")}`);
-  }
-
-  const payload = pick(input, [
-    "delivery_status",
-    "tracking_no",
-    "shipped_at",
-    "delivered_at",
-    "delivered_note",
-  ]);
-  if (payload.delivery_status === "shipping" && !order.shipped_at && !payload.shipped_at) {
-    payload.shipped_at = new Date();
-  }
-  if (payload.delivery_status === "delivered" && !payload.delivered_at) {
-    payload.delivered_at = new Date();
-  }
-
-  const updated = await orderModel
-    .findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true })
-    .lean();
-  return updated;
+// delivery_status enum validate ที่ route ผ่าน schemas/order.ts updateDeliveryBody แล้ว
+// BACKLOG3 §10 — logic เหมือน preorderService.updateDelivery เป๊ะ ย้ายไปใช้ร่วมกัน
+export async function updateDelivery(id: string, input: UpdateDeliveryInput) {
+  const updated = await applyEntityDeliveryUpdate({
+    model: orderModel,
+    id,
+    input,
+    entityLabel: "ออเดอร์",
+  });
+  return updated ? presentOrder(updated) : updated;
 }
 
 // ── DELETE (soft) ───────────────────────────────────────────
+// BACKLOG3 §10 — logic เหมือน preorderService.deletePreorder เป๊ะ ย้ายไปใช้ร่วมกัน
 export async function deleteOrder(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const order = await orderModel.findOne({ _id: id, deleted_at: null });
-  if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ หรือถูกลบไปแล้ว");
-  if (!["completed", "cancelled"].includes(order.order_status)) {
-    throw conflict("ลบได้เฉพาะออเดอร์ที่เสร็จสิ้นหรือถูกยกเลิกแล้วเท่านั้น");
-  }
-  order.deleted_at = new Date();
-  await order.save();
-  await orderItemModel.updateMany(
-    { order_id: order._id, deleted_at: null },
-    { $set: { deleted_at: new Date() } }
-  );
-  return { deleted: true, _id: order._id };
+  return softDeleteEntityWithItems({
+    model: orderModel,
+    itemModel: orderItemModel,
+    itemForeignKey: "order_id",
+    id,
+    entityLabel: "ออเดอร์",
+  });
 }

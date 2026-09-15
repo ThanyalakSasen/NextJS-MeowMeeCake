@@ -8,7 +8,9 @@
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
+import { parseBody } from "@/lib/validate";
 import { parseBool, parsePagination, parseSort } from "@/lib/queryParams";
+import { createRoundBody } from "@/schemas/preorderRound";
 import * as preorderRoundService from "@/services/preorderRoundService";
 import type { RoundStatus } from "@/services/preorderRoundService";
 
@@ -26,18 +28,8 @@ export const GET = withPermission("preorder", "view", async (_s, req) => {
 });
 
 export const POST = withPermission("preorder", "create", async (session, req) => {
-  const body = await req.json();
-  const round: any = await preorderRoundService.createRound(
-    {
-      round_name: body.round_name,
-      open_date: body.open_date,
-      close_date: body.close_date,
-      pickup_date: body.pickup_date,
-      round_status: body.round_status,
-      items: body.items ?? undefined,
-    },
-    session.user_id
-  );
+  const body = await parseBody(req, createRoundBody);
+  const round = await preorderRoundService.createRound(body, session.user_id);
   audit(req, {
     action: `สร้างรอบพรีออเดอร์ "${round?.round_name ?? ""}"`,
     action_type: "CREATE",

@@ -7,7 +7,9 @@
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
+import { parseBody } from "@/lib/validate";
 import { parseBool, parsePagination } from "@/lib/queryParams";
+import { permissionCreate } from "@/schemas/rbac";
 import * as permissionService from "@/services/permissionService";
 import type { MenuKey } from "@/services/permissionService";
 
@@ -23,8 +25,8 @@ export const GET = withPermission("employees", "view", async (_s, req) => {
 });
 
 export const POST = withPermission("employees", "create", async (session, req) => {
-  const body = await req.json();
-  const result: any = await permissionService.createPermission({
+  const body = await parseBody(req, permissionCreate);
+  const result = await permissionService.createPermission({
     ...body,
     granted_by: session.user_id,
   });

@@ -19,6 +19,10 @@
  * validate (ไม่ใส่ = รับ body ดิบเหมือนเดิม, service ตรวจเอง):
  *   - validate.create → parse body ของ POST ด้วย zod schema (บาด JSON / schema ผิด → 400 + issues)
  *   - validate.update → parse body ของ PATCH (ปกติเป็น createSchema.partial())
+ *
+ * createInject/updateInject: ฟิลด์ที่ derive จาก session แล้วยัดเข้า body ก่อนส่งเข้า service (กัน
+ * client ตั้งเองผ่าน request body ตรง ๆ) — `createInject` ใช้กับ POST (`collectionRoutes`),
+ * `updateInject` ใช้กับ PATCH (`itemRoutes`, BACKLOG §3.17) ทั้งคู่ต้องตั้ง `auth` ด้วยเพื่อให้มี session
  */
 import type { NextRequest } from "next/server";
 import type { z } from "zod";
@@ -46,11 +50,14 @@ export interface CrudValidate {
 }
 
 /** อ่าน body: มี schema → parseBody (throw 400 ถ้าไม่ผ่าน) · ไม่มี → req.json() แบบ tolerant เดิม
- *  (คืน any เพื่อคง behavior เดิม — service.create/update รับ Doc generic) */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function readBody(req: NextRequest, schema: z.ZodType | undefined): Promise<any> {
-  if (schema) return parseBody(req, schema);
-  return req.json().catch(() => ({}));
+ *  (คืน Record<string, unknown> — ตรงกับ Doc ของ CrudService.create/update) */
+async function readBody(
+  req: NextRequest,
+  schema: z.ZodType | undefined
+): Promise<Record<string, unknown>> {
+  // z.infer<z.ZodType> (base class, ไม่ใช่ schema เฉพาะ) resolve เป็น unknown — cast ให้ตรง signature
+  if (schema) return (await parseBody(req, schema)) as Record<string, unknown>;
+  return req.json().catch(() => ({})) as Promise<Record<string, unknown>>;
 }
 
 /** บันทึก audit log สำหรับ mutation ของ crud factory (ถ้าตั้ง opts.audit) */
@@ -82,7 +89,7 @@ function logMutation(
   req: NextRequest,
   cfg: CrudAudit | undefined,
   op: "create" | "update" | "delete" | "restore",
-  doc: any
+  doc: { _id?: unknown } | null | undefined
 ): void {
   if (!cfg) return;
   audit(req, {
@@ -144,6 +151,10 @@ export interface ItemRoutesOptions {
   auth?: CrudAuth;
   audit?: CrudAudit;
   validate?: CrudValidate;
+  /** ฟิลด์ที่ inject จาก session ตอน PATCH (เช่น { updated_by: s.user_id }) — merge ทับ body
+   *  กัน client ตั้งค่าเอง (mass-assign) · คู่กับ `createInject` ของ `CollectionRoutesOptions`
+   *  (BACKLOG §3.17 — เดิมไม่มีจุดเทียบเท่านี้ฝั่ง PATCH เลย) · ต้องตั้ง `auth` ด้วยเพื่อให้มี session */
+  updateInject?: (session: SessionUser) => Record<string, unknown>;
 }
 
 export function itemRoutes(
@@ -161,7 +172,8 @@ export function itemRoutes(
     await guard(req, opts.auth, "update");
     const { id } = await ctx.params;
     const body = await readBody(req, opts.validate?.update);
-    const doc = await service.update(id, body);
+    const injected = opts.updateInject ? opts.updateInject(requireAuth(req)) : undefined;
+    const doc = await service.update(id, injected ? { ...body, ...injected } : body);
     logMutation(req, opts.audit, "update", doc ?? { _id: id });
     return ok(doc);
   });

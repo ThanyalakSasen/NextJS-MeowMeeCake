@@ -11,5 +11,6 @@ export const { GET, POST } = collectionRoutes(unitService, {
     usage_context: sp.get("usage_context") ?? undefined,
   }),
   auth: { menu: "products" },
+  audit: { entity: "Unit" },
   validate: { create: unitCreate },
 });

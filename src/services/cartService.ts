@@ -19,6 +19,8 @@ import productModel from "../models/productModel";
 import productVariantModel from "../models/productVariantModel";
 import productOptionModel from "../models/productOptionModel";
 import userModel from "../models/userModel";
+import { toBaht, toBahtFields } from "../lib/money";
+import { resolveSelectedOptions } from "./productOptionService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -39,6 +41,21 @@ interface ResolvedOption {
   option_name: string;
   extra_price: number;
   text_value: string | null;
+}
+
+// BACKLOG §3.11 เฟส 5b — price_snapshot/selected_options[].extra_price เก็บเป็นสตางค์ (คำนวณจาก
+// product_price/sale_price/variant_price/extra_price ที่เป็นสตางค์ทั้งหมดแล้ว) แต่ API ยังรับ-ส่ง
+// บาททศนิยมเหมือนเดิม — ไม่มีจุด "รับ input เป็นบาท" ในไฟล์นี้เลย (price_snapshot คำนวณจาก DB ล้วน ๆ
+// ไม่เคยรับราคาจาก client ตรง ๆ) จึงมีแค่ presenter ฝั่งคืนค่า ไม่มีฝั่งแปลงเข้า
+function presentCartItem(it: Record<string, any>): any {
+  const presented = toBahtFields(it, ["price_snapshot"] as const);
+  return {
+    ...presented,
+    selected_options: (presented.selected_options ?? []).map((o: any) => ({
+      ...o,
+      extra_price: toBaht(o.extra_price),
+    })),
+  };
 }
 
 // ── ตะกร้า ───────────────────────────────────────────────────
@@ -63,11 +80,27 @@ export async function getCartDetail(userId: string) {
     .populate("variant_id", "variant_name variant_price")
     .lean();
 
-  const line = (items as any[]).map((it) => ({
-    ...it,
-    line_total: (it.price_snapshot ?? 0) * (it.quantity ?? 0),
-  }));
-  const subtotal = line.reduce((s, it) => s + it.line_total, 0);
+  // คำนวณ line_total เป็นสตางค์ (integer) ก่อนเสมอ แล้วค่อยแปลงเป็นบาทตอนสุดท้าย (กันปัดเศษสะสมจาก
+  // การคูณ/บวกเลขทศนิยม — BACKLOG §3.11) price_snapshot ที่นี่ยังเป็นสตางค์ดิบจาก DB (ยังไม่ผ่าน
+  // presentCartItem) ส่วน .populate("variant_id", "... variant_price") ก็ติดสตางค์ดิบมาด้วยเช่นกัน
+  // ต้องแปลงซ้อนอีกชั้นเหมือน componentService/recipeService.getExpanded() ในเฟส 4
+  const line = (items as any[]).map((it) => {
+    const lineTotalSatang = (it.price_snapshot ?? 0) * (it.quantity ?? 0);
+    const presented = presentCartItem(it);
+    return {
+      ...presented,
+      variant_id:
+        presented.variant_id && typeof presented.variant_id === "object"
+          ? toBahtFields(presented.variant_id, ["variant_price"] as const)
+          : presented.variant_id,
+      line_total: toBaht(lineTotalSatang),
+    };
+  });
+  const subtotalSatang = (items as any[]).reduce(
+    (s, it) => s + (it.price_snapshot ?? 0) * (it.quantity ?? 0),
+    0
+  );
+  const subtotal = toBaht(subtotalSatang);
 
   return {
     cart: { _id: cart._id, user_id: cart.user_id },
@@ -81,6 +114,9 @@ export async function getCartDetail(userId: string) {
 }
 
 // ── helper: ตรวจ + คิดราคา option ที่เลือก ───────────────────
+// BACKLOG3 §6 — logic ตรวจ/คิดราคา option ย้ายไป productOptionService.resolveSelectedOptions() แล้ว
+// (ใช้ร่วมกับ orderService.resolveLines()) ที่นี่เหลือแค่ query + สร้าง Map ส่งเข้าไป (เป็น "หนึ่ง
+// รายการต่อครั้ง" ไม่ต้อง batch เหมือน order ที่มีหลายบรรทัดพร้อมกัน)
 async function resolveOptions(
   productId: string,
   selected: SelectedOptionInput[] = []
@@ -95,33 +131,9 @@ async function resolveOptions(
   const options = await productOptionModel
     .find({ _id: { $in: ids }, product_id: productId, deleted_at: null })
     .lean<any[]>();
-  const byId = new Map(options.map((o) => [String(o._id), o]));
+  const optionById = new Map(options.map((o) => [String(o._id), o]));
 
-  return selected.map((sel) => {
-    const opt = byId.get(String(sel.option_id));
-    if (!opt) throw badRequest(`ไม่พบตัวเลือกเสริม ${sel.option_id} ของสินค้านี้`);
-
-    let text: string | null = null;
-    if (opt.is_text_input) {
-      text = (sel.text_value ?? "").trim();
-      if (opt.is_required && !text) {
-        throw badRequest(`ตัวเลือก "${opt.option_name}" ต้องกรอกข้อความ`);
-      }
-      if (opt.max_text_length && text.length > opt.max_text_length) {
-        throw badRequest(
-          `ข้อความของ "${opt.option_name}" ยาวเกิน ${opt.max_text_length} ตัวอักษร`
-        );
-      }
-      if (!text) text = null;
-    }
-
-    return {
-      option_id: opt._id,
-      option_name: opt.option_name,
-      extra_price: opt.extra_price ?? 0,
-      text_value: text,
-    };
-  });
+  return resolveSelectedOptions(productId, selected, optionById);
 }
 
 function sameOptionSet(a: ResolvedOption[], b: any[]): boolean {
@@ -162,6 +174,10 @@ export async function addItem(userId: string, input: AddCartItemInput) {
 
   const options = await resolveOptions(input.product_id, input.selected_options);
 
+  // BACKLOG §3.11 เฟส 5b — product/variant/option ทั้ง 3 แหล่งเป็นสตางค์แล้วทั้งหมด (query ตรงจาก
+  // model ข้าม service ที่มี presenter) price_snapshot ที่คำนวณตรงนี้จึงเป็นสตางค์โดยอัตโนมัติ ไม่ต้อง
+  // toSatang() เองเลย (ต่างจาก resolveLine() ของ orderService สมัยเฟส 1 ที่ยังต้องแปลงตอนจบ เพราะตอน
+  // นั้น product ยังเป็นบาทอยู่ — ตอนนี้ไม่มี "จุดข้ามโดเมน" แบบนั้นให้ต้องแปลงอีกแล้ว)
   const basePrice = product.sale_price ?? product.product_price;
   const variantPrice = variant?.variant_price ?? 0;
   const optionsPrice = options.reduce((s, o) => s + o.extra_price, 0);
@@ -182,7 +198,7 @@ export async function addItem(userId: string, input: AddCartItemInput) {
     dup.quantity += quantity;
     dup.price_snapshot = price_snapshot; // อัปเดตให้เป็นราคาปัจจุบัน
     await dup.save();
-    return dup.toObject();
+    return presentCartItem(dup.toObject());
   }
 
   const doc = await cartItemModel.create({
@@ -193,7 +209,7 @@ export async function addItem(userId: string, input: AddCartItemInput) {
     quantity,
     price_snapshot,
   });
-  return doc.toObject();
+  return presentCartItem(doc.toObject());
 }
 
 // ── แก้จำนวนของรายการในตะกร้า (0 = ลบ) ──────────────────────
@@ -226,7 +242,7 @@ export async function updateItemQuantity(
 
   item.quantity = qty;
   await item.save();
-  return item.toObject();
+  return presentCartItem(item.toObject());
 }
 
 // ── ลบรายการออกจากตะกร้า ────────────────────────────────────

@@ -22,6 +22,9 @@ const promotionUsagesSchema = new mongoose.Schema({
         ref: "Preorders",
         required: false,
     },
+    // BACKLOG §3.11 — สตางค์ (integer) ตั้งแต่ 2026-09-12 (promotionModel.discount_value เอง**ยังเป็นบาท**
+    // — ไม่ได้แปลงในเฟสนี้ ไม่ใช่ปัญหาเพราะ field นี้เก็บ "ผลลัพธ์สุดท้าย" ที่คิดจาก order/preorder subtotal
+    // (สตางค์) ไปแล้ว ไม่เคยถูกอ่านกลับไปเทียบกับ promotionModel.discount_value ตรง ๆ ที่ไหนเลย)
     discount_applied: { //จำนวนเงินส่วนลดที่ถูกใช้จริงในการสั่งซื้อครั้งนี้ (อาจจะไม่เท่ากับ discount_value ใน Promotion ถ้า min_order_amount ไม่ถึง หรือ max_discount_amount ถูกจำกัด)
         type: Number,
         required: true,

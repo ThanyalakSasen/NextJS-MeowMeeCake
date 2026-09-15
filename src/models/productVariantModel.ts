@@ -12,6 +12,8 @@ const productVariantSchema = new mongoose.Schema({
     required: true,
     trim: true,
   },
+  // BACKLOG §3.11 เฟส 5b — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (ดู src/lib/money.ts)
+  // API (productVariantService) ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม
   variant_price: {
     //ราคาที่เพิ่มขึ้นจากราคาสินค้าหลัก
     type: Number,

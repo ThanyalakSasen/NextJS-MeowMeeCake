@@ -47,7 +47,9 @@ export default [
 
   {
     // dir ที่เป็นโค้ดใหม่/สะอาด — บังคับห้าม any เพื่อกันถอยหลัง
-    files: ["src/schemas/**/*.ts", "tests/**/*.ts"],
+    // src/lib เพิ่มเข้ามา รอบ 4b ข้อ C (2026-09-12) — 4 ไฟล์ที่เคยมี eslint-disable
+    // เหมาทั้งไฟล์ (bom/crudService/discountEngine/refs) แก้ type ให้หมด any จริงแล้ว
+    files: ["src/schemas/**/*.ts", "tests/**/*.ts", "src/lib/**/*.ts"],
     rules: { "@typescript-eslint/no-explicit-any": "error" },
   },
 

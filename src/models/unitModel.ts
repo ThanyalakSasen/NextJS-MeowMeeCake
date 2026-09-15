@@ -4,12 +4,10 @@ const unitSchema = new mongoose.Schema({
   unit_name: {
     type: String,
     required: true,
-    unique: true,
   },
   unit_abbr: { //ตัวย่อหน่วย
     type: String,
     required: true,
-    unique: true,
   },
   unit_type: { //ลิสต์สินค้าที่สามารถใช้หน่วยได้ เช่น หน่วยปริมาณของสูตรขนม หรือหน่วยนับของสินค้า
     type: String,
@@ -44,7 +42,19 @@ const unitSchema = new mongoose.Schema({
   }
 );
 
-const UnitModel = 
+// unit_name / unit_abbr ห้ามซ้ำ แต่เฉพาะเอกสารที่ยังไม่ถูกลบ (partial unique) — เหมือน
+// attendanceModel/reviewModel/permissionModel: soft-deleted แล้วไม่บล็อกการสร้างใหม่ด้วยชื่อ/ตัวย่อเดิม
+// (BACKLOG §2d.2 — เดิมเป็น unique ธรรมดา สร้าง index ไม่ผ่านเพราะมีแถว soft-deleted ซ้ำอยู่ก่อน)
+unitSchema.index(
+  { unit_name: 1 },
+  { unique: true, partialFilterExpression: { deleted_at: null } }
+);
+unitSchema.index(
+  { unit_abbr: 1 },
+  { unique: true, partialFilterExpression: { deleted_at: null } }
+);
+
+const UnitModel =
    mongoose.models.Units || mongoose.model("Units", unitSchema);
 
 export default UnitModel;

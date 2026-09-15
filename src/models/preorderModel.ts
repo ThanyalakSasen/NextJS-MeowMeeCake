@@ -23,6 +23,7 @@ const preorderSchema = new mongoose.Schema(
     order_status: { type: String, enum: ["pending", "confirmed", "preparing", "ready", "completed", "cancelled"], default: "pending" },
     payment_status: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
     delivery_address: { type: deliveryAddressSchema, default: null },
+    // BACKLOG §3.11 — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (เหมือน orderModel — ดู src/lib/money.ts)
     subtotal: { type: Number, required: true, min: 0 },
     discount_amount: { type: Number, default: 0 },
     delivery_fee: { type: Number, default: 0 },

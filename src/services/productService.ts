@@ -3,6 +3,9 @@ import { Types } from "mongoose";
 type Filter = Record<string, unknown>;
 import dbConnect from "../lib/dbConnect";
 import { HttpError } from "../lib/httpError";
+import { assertObjectId } from "../lib/objectId";
+import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import {
   generateProductCode,
   isProductCode,
@@ -14,6 +17,20 @@ import productModel from "../models/productModel";
 import productCategoryModel from "../models/productCategoryModel";
 import productVariantModel from "../models/productVariantModel";
 import unitModel from "../models/unitModel";
+import { notificationService } from "./notificationService";
+import { log } from "../lib/logger";
+import { deleteImages } from "../lib/upload";
+import { toSatang, toBahtFields } from "../lib/money";
+
+/** เกณฑ์ "สต็อกเหลือน้อย" ของสินค้า (ตรงกับดีฟอลต์ของ getLowStockProducts) */
+const LOW_STOCK_THRESHOLD = 5;
+
+// BACKLOG §3.11 — purchase_cost เก็บเป็นสตางค์ตั้งแต่เฟส 4 (ดู recipeService.getUnitCostByProduct
+// comment สำหรับเหตุผลที่ต้องแปลงก่อน product_price/sale_price อื่น) ส่วน product_price/sale_price
+// เก็บเป็นสตางค์ตั้งแต่เฟส 5b — API ยังรับ-ส่งบาททศนิยมเหมือนเดิมทั้งหมด
+function presentProduct<T extends Record<string, unknown>>(product: T): T {
+  return toBahtFields(product, ["purchase_cost", "product_price", "sale_price"] as const);
+}
 
 /**
  * productService — CRUD + จัดการสต็อกของสินค้า (Products)
@@ -43,6 +60,8 @@ export interface CreateProductInput {
   product_description?: string | null;
   preparation_heating?: string | null;
   yield_per_batch?: number | null;
+  /** ต้นทุนต่อหน่วยกรอกมือ (BACKLOG §3.16) — ใช้เฉพาะสินค้าที่ไม่มีสูตรการผลิต ดู recipeService.getUnitCostByProduct */
+  purchase_cost?: number | null;
   product_stock_quantity?: number | null;
   preorder_config?: PreorderConfigInput | null;
 }
@@ -50,8 +69,7 @@ export interface CreateProductInput {
 export type UpdateProductInput = Partial<CreateProductInput>;
 
 export interface ListProductQuery {
-  page?: number;
-  limit?: number;
+  pagination: Pagination;
   search?: string;
   category_id?: string;
   product_type?: ProductType;
@@ -69,13 +87,6 @@ export class ProductError extends HttpError {
       status === 404 ? "NOT_FOUND" : status === 409 ? "CONFLICT" : "BAD_REQUEST";
     super(message, status, code);
     this.name = "ProductError";
-  }
-}
-
-// ── Helpers ───────────────────────────────────────────────────
-function assertObjectId(id: string, field = "id"): void {
-  if (!Types.ObjectId.isValid(id)) {
-    throw new ProductError(`รูปแบบ ${field} ไม่ถูกต้อง`, 400);
   }
 }
 
@@ -179,6 +190,9 @@ export async function createProduct(input: CreateProductInput) {
   if (input.sale_price != null && input.sale_price < 0) {
     throw new ProductError("sale_price ต้องไม่ติดลบ", 400);
   }
+  if (input.purchase_cost != null && input.purchase_cost < 0) {
+    throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
+  }
   if (!PRODUCT_TYPES.includes(input.product_type)) {
     throw new ProductError(
       `product_type ต้องเป็นหนึ่งใน: ${PRODUCT_TYPES.join(", ")}`,
@@ -194,13 +208,15 @@ export async function createProduct(input: CreateProductInput) {
     product_name_th: input.product_name_th,
     product_name_eng: input.product_name_eng,
     category_id: input.category_id,
-    product_price: input.product_price,
-    sale_price: input.sale_price ?? null,
+    // BACKLOG §3.11 เฟส 5b — input.product_price/sale_price เป็นบาทจาก request เสมอ (API contract)
+    product_price: toSatang(Number(input.product_price)),
+    sale_price: input.sale_price != null ? toSatang(Number(input.sale_price)) : null,
     is_visible: input.is_visible ?? true,
     product_img: input.product_img ?? [],
     product_description: input.product_description ?? null,
     preparation_heating: input.preparation_heating ?? null,
     yield_per_batch: input.yield_per_batch ?? null,
+    purchase_cost: input.purchase_cost != null ? toSatang(Number(input.purchase_cost)) : null,
     unit_id: input.unit_id,
     product_type: input.product_type,
     product_stock_quantity: isStockProductType(input.product_type)
@@ -229,7 +245,7 @@ export async function createProduct(input: CreateProductInput) {
     }
   }
 
-  return doc.toObject();
+  return presentProduct(doc.toObject());
 }
 
 // ── READ by รหัสสินค้า (product_id เช่น "pos-0126487") ────────
@@ -247,7 +263,7 @@ export async function getProductByCode(
     .populate("unit_id", "unit_name unit_abbr")
     .lean();
   if (!product) throw new ProductError("ไม่พบสินค้าตามรหัสที่ระบุ", 404);
-  return product;
+  return presentProduct(product);
 }
 
 /**
@@ -282,12 +298,8 @@ export async function resolveScan(code: string) {
 }
 
 // ── READ (list) ───────────────────────────────────────────────
-export async function getProducts(query: ListProductQuery = {}) {
+export async function getProducts(query: ListProductQuery) {
   await dbConnect();
-
-  const page = Math.max(1, Number(query.page) || 1);
-  const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
-  const skip = (page - 1) * limit;
 
   const filter: Filter = {};
 
@@ -320,25 +332,17 @@ export async function getProducts(query: ListProductQuery = {}) {
     productModel
       .find(filter)
       .sort({ [sortField]: sortDir })
-      .skip(skip)
-      .limit(limit)
+      .skip(query.pagination.skip)
+      .limit(query.pagination.limit)
       .populate("category_id", "product_category_name")
       .populate("unit_id", "unit_name unit_abbr")
       .lean(),
     productModel.countDocuments(filter),
   ]);
 
-  // key `meta` (เดิม `pagination`) — โครงมาตรฐานเดียวของ list endpoint · ดู docs/api-conventions.md
   return {
-    items,
-    meta: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit) || 1,
-      hasNextPage: page * limit < total,
-      hasPrevPage: page > 1,
-    },
+    items: items.map(presentProduct),
+    meta: buildMeta(total, query.pagination),
   };
 }
 
@@ -364,7 +368,7 @@ export async function getProductById(
   if (!product) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
-  return product;
+  return presentProduct(product);
 }
 
 // ── UPDATE ────────────────────────────────────────────────────
@@ -382,6 +386,20 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   }
   if (input.sale_price != null && input.sale_price < 0) {
     throw new ProductError("sale_price ต้องไม่ติดลบ", 400);
+  }
+  if (input.purchase_cost != null && input.purchase_cost < 0) {
+    throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
+  }
+  // BACKLOG §3.11 — input.purchase_cost/product_price/sale_price เป็นบาทจาก request เสมอ (API
+  // contract) แปลงเป็นสตางค์ก่อนให้ loop `updatable` ด้านล่างเขียนลง existing.* (ซึ่งเป็นสตางค์ใน DB แล้ว)
+  if (input.purchase_cost != null) {
+    input.purchase_cost = toSatang(Number(input.purchase_cost));
+  }
+  if (input.product_price != null) {
+    input.product_price = toSatang(Number(input.product_price));
+  }
+  if (input.sale_price != null) {
+    input.sale_price = toSatang(Number(input.sale_price));
   }
   if (input.category_id) {
     await assertCategoryExists(input.category_id);
@@ -407,6 +425,9 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     });
   }
 
+  // BACKLOG §3.14 — จำรูปเดิมไว้ก่อนเขียนทับ เผื่อต้องลบไฟล์ที่ไม่ใช้แล้วหลัง save สำเร็จ
+  const oldImages: string[] = input.product_img !== undefined ? [...(existing.product_img ?? [])] : [];
+
   const updatable: (keyof UpdateProductInput)[] = [
     "product_name_th",
     "product_name_eng",
@@ -418,6 +439,7 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     "product_description",
     "preparation_heating",
     "yield_per_batch",
+    "purchase_cost",
     "unit_id",
     "product_type",
   ];
@@ -443,41 +465,34 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   }
 
   await existing.save();
-  return existing.toObject();
+  const result = existing.toObject();
+
+  // BACKLOG §3.14 — ลบไฟล์รูปเดิมที่ไม่อยู่ในชุดใหม่แล้ว (best-effort, ไม่ทำให้ update พังถ้าลบไม่สำเร็จ —
+  // deleteImages() ดักจับ error ของตัวเองทุกไฟล์ ไม่ throw ต่อ)
+  if (oldImages.length > 0) {
+    const kept = new Set<string>(result.product_img ?? []);
+    const removed = oldImages.filter((url) => !kept.has(url));
+    if (removed.length > 0) await deleteImages(removed);
+  }
+
+  return presentProduct(result);
 }
 
+// BACKLOG3 §9 — soft-delete/restore เป็น pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน
+// (notFound() ของ primitive กับ ProductError(msg,404) เดิม คืน response shape เดียวกันเป๊ะ —
+// {status:404, code:"NOT_FOUND"} ทั้งคู่ — ยืนยันแล้วว่าไม่มี instanceof ProductError check ที่ไหนเลย)
 // ── DELETE (soft) ─────────────────────────────────────────────
 export async function deleteProduct(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-
-  const product = await productModel.findOneAndUpdate(
-    { _id: id, deleted_at: null },
-    { $set: { deleted_at: new Date() } },
-    { new: true }
-  ).lean();
-
-  if (!product) {
-    throw new ProductError("ไม่พบสินค้าที่ระบุ หรือถูกลบไปแล้ว", 404);
-  }
-  return product;
+  const product = await softDeleteDoc(productModel, id, {
+    notFoundMsg: "ไม่พบสินค้าที่ระบุ หรือถูกลบไปแล้ว",
+  });
+  return presentProduct(product);
 }
 
 // ── RESTORE (กู้คืนจาก soft delete) ───────────────────────────
 export async function restoreProduct(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-
-  const product = await productModel.findOneAndUpdate(
-    { _id: id, deleted_at: { $ne: null } },
-    { $set: { deleted_at: null } },
-    { new: true }
-  ).lean();
-
-  if (!product) {
-    throw new ProductError("ไม่พบสินค้าที่ถูกลบไว้", 404);
-  }
-  return product;
+  const product = await restoreDoc(productModel, id, { notFoundMsg: "ไม่พบสินค้าที่ถูกลบไว้" });
+  return presentProduct(product);
 }
 
 // ── DELETE (ถาวร) ────────────────────────────────────────────
@@ -485,11 +500,17 @@ export async function hardDeleteProduct(id: string) {
   await dbConnect();
   assertObjectId(id);
 
-  const product = await productModel.findByIdAndDelete(id).lean();
+  const product = await productModel
+    .findByIdAndDelete(id)
+    .lean<{ product_img?: string[]; purchase_cost?: number | null } | null>();
   if (!product) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
-  return product;
+
+  // BACKLOG §3.14 — ลบถาวรแล้ว ไม่มีทาง restore กลับมาแสดงรูปเดิมได้อีก เก็บไฟล์ไว้ไม่มีประโยชน์
+  if (product.product_img?.length) await deleteImages(product.product_img);
+
+  return presentProduct(product);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -716,6 +737,22 @@ export async function deductStockForOrder(items: StockItemInput[]) {
         );
       }
       applied.push({ product_id, quantity });
+
+      // แจ้งเตือนตอนสต็อกเพิ่งข้าม LOW_STOCK_THRESHOLD ลงมา (กัน spam ทุกครั้งที่ต่ำอยู่แล้ว)
+      const before = product.product_stock_quantity ?? 0;
+      const after = updated.product_stock_quantity ?? 0;
+      if (before > LOW_STOCK_THRESHOLD && after <= LOW_STOCK_THRESHOLD) {
+        // หมายเหตุ: enum module ไม่มีหมวด "product" แยก — ใช้ "ingredient" ร่วมกัน (หมวดสต็อกสินค้าคงคลัง)
+        notificationService
+          .notify({
+            title: `สินค้าใกล้หมด: ${product.product_name_th}`,
+            message: `คงเหลือ ${after} ชิ้น`,
+            module: "ingredient",
+            type: "warning",
+            link: "/owner/products",
+          })
+          .catch((err) => log.error("product.notify_failed", { product_id, err }));
+      }
     }
   } catch (err) {
     // ชดเชย: คืนสต็อกทุกตัวที่ตัดไปแล้ว
@@ -787,11 +824,6 @@ export async function getLowStockProducts(
     .lean();
 
   return { threshold, count: items.length, items };
-}
-
-// ── utils ────────────────────────────────────────────────────
-function escapeRegExp(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 const productService = {

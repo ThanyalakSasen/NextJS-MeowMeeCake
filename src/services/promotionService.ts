@@ -7,9 +7,10 @@
  */
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound, unprocessable } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import {
   computeDiscount,
   type DiscountLine,
@@ -21,48 +22,57 @@ import productModel from "../models/productModel";
 import userModel from "../models/userModel";
 import * as promotionUsageService from "./promotionUsageService";
 import * as cartService from "./cartService";
+import { toSatang, toBaht, toBahtFields } from "../lib/money";
+import type { z } from "zod";
+import type { promotionCreate, promotionUpdate } from "../schemas/promotion";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 export const DISCOUNT_TYPES = ["Percentage", "Amount", "FreeShipping"] as const;
 
-const WRITABLE = [
-  "promotion_code",
-  "promotion_name",
-  "promotion_desc",
-  "discount_type",
-  "discount_value",
-  "is_active",
-  "applicable_channels",
-  "min_order_amount",
-  "applicable_products",
-  "applicable_categories",
-  "min_quantity",
-  "max_discount_amount",
-  "usage_limit",
-  "max_user_per_user",
-  "start_date",
-  "end_date",
-] as const;
+// BACKLOG §3.11 เฟส 5a — promotionModel เก็บเงินเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// discount_value เป็นเงินเฉพาะตอน discount_type === "Amount" เท่านั้น (ดู comment ที่ promotionModel.ts)
+const MONEY_FIELDS = ["min_order_amount", "max_discount_amount"] as const;
+
+/** แปลง field เงินของ promotion doc เป็นบาท — ใช้ทั้งตอนคืน API และตอนส่งเข้า discountEngine
+ *  (discountEngine.ts ทำงานเป็นบาทล้วน ไม่เคยถูกแก้ในเฟสนี้ ตามรูปแบบ "แปลงข้ามโดเมนตรงจุดที่ข้าม") */
+function presentPromotion<T extends Record<string, unknown>>(promo: T): T {
+  const out = toBahtFields(promo, MONEY_FIELDS);
+  if (out.discount_type === "Amount" && typeof out.discount_value === "number") {
+    (out as Record<string, unknown>).discount_value = toBaht(out.discount_value as number);
+  }
+  return out;
+}
+
+type CreatePromotionInput = z.infer<typeof promotionCreate>;
+type UpdatePromotionInput = z.infer<typeof promotionUpdate>;
 
 // ── CRUD ────────────────────────────────────────────────────
-export async function createPromotion(input: Record<string, any>, createdBy: string) {
+// required field / discount_type enum / end_date≥start_date / Percentage≤100 validate ที่ route
+// ผ่าน schemas/promotion.ts แล้ว (ไม่ต้องเช็คซ้ำที่นี่)
+export async function createPromotion(input: CreatePromotionInput, createdBy: string) {
   await dbConnect();
-  for (const f of ["promotion_code", "promotion_name", "discount_type", "discount_value", "start_date", "end_date"] as const) {
-    if (input[f] == null || input[f] === "") throw badRequest(`กรุณาระบุ ${f}`);
-  }
-  if (!DISCOUNT_TYPES.includes(input.discount_type)) {
-    throw badRequest(`discount_type ต้องเป็นหนึ่งใน: ${DISCOUNT_TYPES.join(", ")}`);
-  }
   await assertRefExists(userModel, createdBy, "ผู้สร้าง", "created_by");
 
+  // input.discount_value/min_order_amount/max_discount_amount เป็นบาทจาก request (API contract)
+  // แปลงเป็นสตางค์ก่อนเก็บ — discount_value แปลงเฉพาะตอน Amount (ดู comment ที่ promotionModel.ts)
+  const payload: Record<string, unknown> = {
+    ...input,
+    promotion_code: input.promotion_code.trim().toUpperCase(),
+    discount_value:
+      input.discount_type === "Amount" ? toSatang(Number(input.discount_value)) : input.discount_value,
+    min_order_amount:
+      input.min_order_amount != null ? toSatang(Number(input.min_order_amount)) : input.min_order_amount,
+    max_discount_amount:
+      input.max_discount_amount != null
+        ? toSatang(Number(input.max_discount_amount))
+        : input.max_discount_amount,
+    created_by: createdBy,
+  };
+
   try {
-    const doc = await promotionModel.create({
-      ...pick(input, WRITABLE),
-      promotion_code: String(input.promotion_code).trim().toUpperCase(),
-      created_by: createdBy,
-    });
-    return doc.toObject();
+    const doc = await promotionModel.create(payload);
+    return presentPromotion(doc.toObject());
   } catch (err: any) {
     if (err?.code === 11000) throw conflict("รหัสโปรโมชันนี้ถูกใช้แล้ว");
     throw err;
@@ -104,7 +114,7 @@ export async function listPromotions(query: ListPromotionQuery) {
       .lean(),
     promotionModel.countDocuments(filter),
   ]);
-  return { items, meta: buildMeta(total, query.pagination) };
+  return { items: items.map(presentPromotion), meta: buildMeta(total, query.pagination) };
 }
 
 export async function getPromotionById(id: string, opts: { includeDeleted?: boolean } = {}) {
@@ -114,19 +124,41 @@ export async function getPromotionById(id: string, opts: { includeDeleted?: bool
   if (!opts.includeDeleted) filter.deleted_at = null;
   const doc = await promotionModel.findOne(filter).lean();
   if (!doc) throw notFound("ไม่พบโปรโมชันที่ระบุ");
-  return doc;
+  return presentPromotion(doc);
 }
 
-export async function updatePromotion(id: string, input: Record<string, any>) {
+export async function updatePromotion(id: string, input: UpdatePromotionInput) {
   await dbConnect();
   assertObjectId(id);
-  const payload = pick(input, WRITABLE) as Record<string, any>;
+  const payload: Record<string, any> = { ...input };
   if (payload.promotion_code) {
     payload.promotion_code = String(payload.promotion_code).trim().toUpperCase();
   }
-  if (payload.discount_type && !DISCOUNT_TYPES.includes(payload.discount_type)) {
-    throw badRequest(`discount_type ต้องเป็นหนึ่งใน: ${DISCOUNT_TYPES.join(", ")}`);
+
+  // discount_value เป็นเงินเฉพาะตอน discount_type === "Amount" — ถ้าไม่ได้ส่ง discount_type มาด้วย
+  // ต้องอ่านค่าปัจจุบันจาก DB มาดูก่อนว่าประเภทที่ "จะเป็นหลังอัปเดต" คืออะไร (ไม่ใช่เดาจาก payload
+  // อย่างเดียว) — ถ้าไม่ได้แก้ discount_value เลยในรอบนี้ ไม่ต้องอ่านอะไรเพิ่ม ปล่อยผ่านเหมือนเดิม
+  if (payload.discount_value !== undefined) {
+    let effectiveType = payload.discount_type;
+    if (effectiveType === undefined) {
+      const existing = await promotionModel
+        .findOne({ _id: id, deleted_at: null })
+        .select("discount_type")
+        .lean<{ discount_type: string } | null>();
+      if (!existing) throw notFound("ไม่พบโปรโมชันที่ระบุ");
+      effectiveType = existing.discount_type;
+    }
+    if (effectiveType === "Amount") {
+      payload.discount_value = toSatang(Number(payload.discount_value));
+    }
   }
+  if (payload.min_order_amount != null) {
+    payload.min_order_amount = toSatang(Number(payload.min_order_amount));
+  }
+  if (payload.max_discount_amount != null) {
+    payload.max_discount_amount = toSatang(Number(payload.max_discount_amount));
+  }
+
   try {
     const doc = await promotionModel
       .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: payload }, {
@@ -135,39 +167,24 @@ export async function updatePromotion(id: string, input: Record<string, any>) {
       })
       .lean();
     if (!doc) throw notFound("ไม่พบโปรโมชันที่ระบุ");
-    return doc;
+    return presentPromotion(doc);
   } catch (err: any) {
     if (err?.code === 11000) throw conflict("รหัสโปรโมชันนี้ถูกใช้แล้ว");
     throw err;
   }
 }
 
+// BACKLOG3 §9 — soft-delete/restore เป็น pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน
 export async function deletePromotion(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const doc = await promotionModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: null },
-      { $set: { deleted_at: new Date() } },
-      { new: true }
-    )
-    .lean();
-  if (!doc) throw notFound("ไม่พบโปรโมชันที่ระบุ หรือถูกลบไปแล้ว");
-  return doc;
+  const doc = await softDeleteDoc(promotionModel, id, {
+    notFoundMsg: "ไม่พบโปรโมชันที่ระบุ หรือถูกลบไปแล้ว",
+  });
+  return presentPromotion(doc);
 }
 
 export async function restorePromotion(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const doc = await promotionModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: { $ne: null } },
-      { $set: { deleted_at: null } },
-      { new: true }
-    )
-    .lean();
-  if (!doc) throw notFound("ไม่พบโปรโมชันที่ถูกลบไว้");
-  return doc;
+  const doc = await restoreDoc(promotionModel, id, { notFoundMsg: "ไม่พบโปรโมชันที่ถูกลบไว้" });
+  return presentPromotion(doc);
 }
 
 // ── ตรวจ + คิดส่วนลดสำหรับออเดอร์ ────────────────────────────
@@ -222,7 +239,11 @@ export async function validateForOrder(input: ValidateForOrderInput): Promise<Di
     }
   }
 
-  return computeDiscount(promo, {
+  // promo จาก DB เป็นสตางค์ (min_order_amount/max_discount_amount เสมอ, discount_value เฉพาะ Amount)
+  // แต่ discountEngine.ts ทำงานเป็นบาทล้วน (ไม่เคยถูกแก้ในเฟสนี้) — แปลงตรงจุดข้ามนี้ทันที เหมือน
+  // deliveryService/recipeService ในเฟสก่อนหน้า — presentPromotion() ทำหน้าที่นี้ให้พอดี (แปลง field
+  // เดียวกับที่ API คืนกลับ)
+  return computeDiscount(presentPromotion(promo), {
     lines: input.lines,
     subtotal: input.subtotal,
     delivery_fee: input.delivery_fee,

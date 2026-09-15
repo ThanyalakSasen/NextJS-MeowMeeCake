@@ -30,7 +30,7 @@ eslint-config-next ^15  — preset ของ Next 15 (ตรงกับ next ^1
 - rules ที่ปรับ:
   | rule | ค่า | เหตุผล |
   |---|---|---|
-  | `@typescript-eslint/no-explicit-any` | `off` | โค้ด backend ใช้ `any` เยอะ (`mongoose .lean<any>()`) — เปิดเป็น pass แยกตอนใส่ type ให้ครบ |
+  | `@typescript-eslint/no-explicit-any` | `off` → `warn` ทั้ง repo (4a) → `error` บน `src/schemas`/`tests`/`src/lib` (4a+4b) | เริ่มจาก `off` เพราะโค้ด backend ใช้ `any` เยอะตอนนั้น — ไล่ยกเป็น `error` ทีละ dir ที่สะอาดแล้ว |
   | `@typescript-eslint/no-unused-vars` | `warn` (ignore `^_`) | ไม่บล็อก build · จับ dead import |
   | `no-console` | `warn` (allow `warn`/`error`) | ใช้ `src/lib/logger.ts` แทน (§3.3) |
   | `prefer-const` / `no-var` | `error` | พื้นฐาน |
@@ -49,14 +49,30 @@ eslint-config-next ^15  — preset ของ Next 15 (ตรงกับ next ^1
 - ลบ dead `import type { Model }` ใน `src/services/productionOrderService.ts`
 - `--fix`: `let round_status` → `const` ใน `preorderRoundService.ts`
 
-### สถานะหลังทำ (อัปเดต รอบ 4a — PR B, 2026-09-11)
+### สถานะหลังทำ (อัปเดต รอบ 4b ข้อ C, 2026-09-12)
 ```
-npm run lint  → 0 errors, 13 warnings (@typescript-eslint/no-explicit-any)
-  └ 12 × src/app/api/**/route.ts  (const result: any = await service(...) เพื่ออ่าน ._id ตอน audit())
-  └  1 × src/lib/crudRoutes.ts:84 (readBody() → doc: any)
-  ทั้งหมดจะหายเมื่อ service คืน type จริง (รอบ 4a ข้อ 3 / PR C–D)
-npm run typecheck · typecheck:test · npm test (91) · npm run build → ผ่าน
+npm run lint  → 0 errors, 11 warnings (@typescript-eslint/no-explicit-any)
+  └ ทั้งหมดอยู่ใน src/app/api/**/route.ts (const result: any = await service(...) เพื่ออ่าน
+    ._id ตอน audit()) — จะหายเมื่อ service คืน type จริง (ยังไม่ทำในรอบนี้)
+npm run typecheck · typecheck:test · npm test (137) · test:integration (13) · npm run build → ผ่าน
 ```
+
+**รอบ 4b ข้อ C (2026-09-12):** ยก `src/lib/**` เป็น `error` แล้ว — **ไม่เหลือ `any` เลยสักจุดใน
+`src/lib/`** (ดีกว่าที่วางแผนไว้ตอนแรกที่คิดว่าต้องมี disable-next-line เหลือบางจุด):
+- `refs.ts` (3 จุด) — `assertRefExists`/`assertRefExistsHard` เปลี่ยนเป็น generic `<T>(model: Model<T>, ...)`
+- `discountEngine.ts` (3 จุด) — เพิ่ม interface `PromotionLike` แทน `promo: any` + `idIn()` ใช้ `unknown[]`
+- `crudService.ts` (5 จุด) — `AnyModel`/`Doc` เปลี่ยนจาก `Model<any>`/`Record<string,any>` เป็น
+  `Model<unknown>`/`Record<string,unknown>` — พอเปลี่ยนแล้ว 2 จุดที่เคย `as any` (query chaining
+  กับ mongoose) **ไม่ต้อง cast อะไรเลย** คอมไพล์ผ่านตรง ๆ
+- `bom.ts` (16 จุด — เยอะสุด) — ใช้ interface `IngredientItem`/`ComponentItem` ที่มีอยู่แล้ว (แต่ไม่เคย
+  เอามาใช้จริง!) แทน `any[]` ในฟังก์ชันคิดต้นทุน + `RawItem = Record<string,unknown>` สำหรับ
+  ฟังก์ชัน validate (ที่ยังไม่รู้ shape จนกว่าจะเช็คผ่าน) + type ผลลัพธ์ `.lean<T>()` ให้ตรง query จริง
+- `crudRoutes.ts` (2 จุด: `readBody()` return type + `logMutation()` `doc: any`) — `readBody` คืน
+  `Record<string,unknown>` (cast `z.infer<z.ZodType>` ที่ resolve เป็น `unknown` เพราะเป็น base
+  class) · `logMutation` รับ `{ _id?: unknown } | null | undefined` (ใช้แค่ `doc?._id`)
+
+ทุกไฟล์ตรวจด้วย `npm run typecheck` + `npx eslint <file>` + `npm test`/`test:integration`/`build`
+ทีละไฟล์ก่อนไปไฟล์ถัดไป — ไม่มี behavior change (pure type-level refactor)
 
 **สิ่งที่ทำใน PR B:**
 - `productService` `export default { ... }` → ตั้งชื่อ `const productService` ก่อน export (เก็บ warning `no-anonymous-default-export`)
@@ -66,9 +82,10 @@ npm run typecheck · typecheck:test · npm test (91) · npm run build → ผ่
 - ลบ dead directive ใน `deliveryService.ts` (ไม่มี `any` ในไฟล์แล้ว)
 
 ### งานต่อ (pass แยก)
-1. เก็บ 13 warning `no-explicit-any` — ให้ service คืน type จริง (`ReturnType<...>` / `.lean<T>()`) แล้ว route ไม่ต้อง `: any` — ทำคู่กับ **รอบ 4a ข้อ 3** (adopt zod + รื้อ `pick()`)
-2. ยก `src/lib/**` → `no-explicit-any` = `error` (หลังลบ `/* eslint-disable */` header 5 ไฟล์: `crudRoutes`, `crudService`, `discountEngine`, `refs`, `bom`)
-3. ยก `src/services/**` → `error` ทีละไฟล์ (36 ไฟล์ที่มี disable header) — ratchet
+1. เก็บ 11 warning `no-explicit-any` ที่เหลือใน `src/app/api/**/route.ts` — ให้ service คืน type จริง
+   (`ReturnType<...>` / `.lean<T>()`) แล้ว route ไม่ต้อง `: any`
+2. ✅ ยก `src/lib/**` → `no-explicit-any` = `error` (รอบ 4b ข้อ C, 2026-09-12)
+3. ยก `src/services/**` → `error` ทีละไฟล์ (ไฟล์ที่มี disable header) — ratchet
 4. type-aware `@typescript-eslint/no-floating-promises` — ตั้ง `parserOptions.projectService` · จับ fire-and-forget (`audit()`, `notify()`, best-effort `.catch()` ที่ลืม) · lint ช้าลง → เปิดเป็น `warn`
 
 ---

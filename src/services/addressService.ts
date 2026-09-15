@@ -4,19 +4,14 @@
  * มีที่อยู่ default ได้ 1 อันต่อผู้ใช้ (ตั้งใหม่ = ยกเลิกอันเดิม)
  */
 import dbConnect from "../lib/dbConnect";
-import { badRequest, notFound } from "../lib/httpError";
-import { assertObjectId, pick } from "../lib/objectId";
+import { notFound } from "../lib/httpError";
+import { assertObjectId } from "../lib/objectId";
 import addressModel from "../models/addressModel";
+import type { z } from "zod";
+import type { addressCreate, addressUpdate } from "../schemas/address";
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
-const FIELDS = [
-  "house_no",
-  "sub_district",
-  "district",
-  "province",
-  "zip_code",
-] as const;
+type CreateAddressInput = z.infer<typeof addressCreate>;
+type UpdateAddressInput = z.infer<typeof addressUpdate>;
 
 export async function listByUser(userId: string) {
   await dbConnect();
@@ -37,12 +32,11 @@ export async function getById(userId: string, id: string) {
   return doc;
 }
 
-export async function create(userId: string, input: Record<string, any>) {
+export async function create(userId: string, input: CreateAddressInput) {
   await dbConnect();
   assertObjectId(userId, "user_id");
-  for (const f of FIELDS) {
-    if (!input[f]) throw badRequest(`กรุณาระบุ ${f}`);
-  }
+  // required field ทั้งหมด (house_no/sub_district/district/province/zip_code) validate ที่
+  // route ผ่าน schemas/address.ts addressCreate แล้ว (ไม่ .optional()) — ไม่ต้องเช็คซ้ำที่นี่
 
   const count = await addressModel.countDocuments({ user_id: userId, deleted_at: null });
   const makeDefault = input.is_default === true || count === 0;
@@ -55,23 +49,26 @@ export async function create(userId: string, input: Record<string, any>) {
   }
 
   const doc = await addressModel.create({
-    ...pick(input, FIELDS),
+    ...input,
     user_id: userId,
-    is_default: makeDefault,
+    is_default: makeDefault, // เขียนทับ input.is_default เสมอ — คำนวณเองข้างบนแล้ว
   });
   return doc.toObject();
 }
 
-export async function update(userId: string, id: string, input: Record<string, any>) {
+export async function update(userId: string, id: string, input: UpdateAddressInput) {
   await dbConnect();
   assertObjectId(id);
 
   const addr = await addressModel.findOne({ _id: id, user_id: userId, deleted_at: null });
   if (!addr) throw notFound("ไม่พบที่อยู่ที่ระบุ");
 
-  Object.assign(addr, pick(input, FIELDS));
+  // is_default แยกจัดการเอง (ด้านล่าง) — ไม่ assign ตรงจาก input เพื่อไม่ให้ client
+  // ส่ง is_default: false มาปลดธงเองได้ (ต้องผ่าน setDefault ของที่อยู่อื่นแทนเท่านั้น)
+  const { is_default, ...rest } = input;
+  Object.assign(addr, rest);
 
-  if (input.is_default === true && !addr.is_default) {
+  if (is_default === true && !addr.is_default) {
     await addressModel.updateMany(
       { user_id: userId, deleted_at: null, _id: { $ne: id } },
       { $set: { is_default: false } }
@@ -97,6 +94,34 @@ export async function setDefault(userId: string, id: string) {
     .findByIdAndUpdate(id, { $set: { is_default: true } }, { new: true })
     .lean();
   return doc;
+}
+
+/** สแนปช็อตที่อยู่ลง order (BACKLOG §3.8) — รับ address_id (จากสมุดที่อยู่) หรือ delivery_address
+ *  (กรอกใหม่ทั้งก้อน) อย่างใดอย่างหนึ่ง (route validate oneOf ไว้แล้วผ่าน zod) แล้วคืนเป็น flat record
+ *  รูปแบบเดียวกับที่ orderService.persistOrder คาดหวัง (ADDRESS_FIELDS: recipient_name/recipient_phone/
+ *  house_no/sub_district/district/province/zip_code) — สมุดที่อยู่เก็บแค่ตำแหน่ง ไม่เก็บชื่อ/เบอร์ผู้รับ
+ *  (สั่งให้คนอื่นได้) เลยต้องรับ recipient_name/recipient_phone แยกมาต่างหากเมื่อใช้ address_id */
+export async function resolveDeliverySnapshot(
+  userId: string,
+  input: {
+    address_id?: string | null;
+    recipient_name?: string | null;
+    recipient_phone?: string | null;
+    delivery_address?: Record<string, string> | null;
+  }
+): Promise<Record<string, string> | null> {
+  if (!input.address_id) return input.delivery_address ?? null;
+
+  const addr = await getById(userId, input.address_id);
+  return {
+    recipient_name: input.recipient_name ?? "",
+    recipient_phone: input.recipient_phone ?? "",
+    house_no: addr.house_no,
+    sub_district: addr.sub_district,
+    district: addr.district,
+    province: addr.province,
+    zip_code: addr.zip_code,
+  };
 }
 
 export async function remove(userId: string, id: string) {

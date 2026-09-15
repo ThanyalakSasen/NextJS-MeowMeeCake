@@ -5,6 +5,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withAuth, requireOwner } from "@/lib/authGuard";
+import { audit } from "@/lib/audit";
 import { parseBody, parse } from "@/lib/validate";
 import { submitSlipBody } from "@/schemas/payment";
 import { objectId } from "@/schemas/common";
@@ -18,10 +19,16 @@ export const PATCH = withAuth(async (session, req, ctx: Ctx) => {
   requireOwner(session, (payment as { user_id?: unknown }).user_id);
 
   const body = await parseBody(req, submitSlipBody);
-  return ok(
-    await paymentService.submitSlip(id, {
-      slip_image_url: body.slip_image_url,
-      promptpay_ref: body.promptpay_ref ?? undefined,
-    })
-  );
+  const result = await paymentService.submitSlip(id, {
+    slip_image_url: body.slip_image_url,
+    promptpay_ref: body.promptpay_ref ?? undefined,
+  });
+  // BACKLOG §3.5 — เดิมไม่มี audit ฝั่งลูกค้าแนบสลิปเลย
+  audit(req, {
+    action: "แนบสลิปโอนเงิน",
+    action_type: "UPDATE",
+    entity: "Payment",
+    entity_id: id,
+  });
+  return ok(result);
 });
