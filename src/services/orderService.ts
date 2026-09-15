@@ -362,6 +362,7 @@ async function persistOrder(
   // ── สร้างออเดอร์แบบ best-effort + ชดเชยผ่าน Saga (MongoDB standalone ไม่มี transaction) ──
   const saga = new Saga();
   let order: any = null;
+  let insertedItems: any[] = [];
   try {
     // 1) ตัดสต็อก (productService ข้าม preorder ให้เอง, คืนสต็อกอัตโนมัติถ้ารายการใดไม่พอ)
     await productService.deductStockForOrder(stockItems);
@@ -388,8 +389,8 @@ async function persistOrder(
     }
     saga.onRollback("delete-order", () => orderModel.deleteOne({ _id: order._id }));
 
-    // 3) สร้าง order items
-    await orderItemModel.insertMany(
+    // 3) สร้าง order items — เก็บผลลัพธ์ไว้ใช้ตอน return ท้ายฟังก์ชันเลย (BACKLOG3 §5, กัน query ซ้ำ)
+    insertedItems = await orderItemModel.insertMany(
       itemsPayload.map((it) => ({ ...it, order_id: order._id }))
     );
     saga.onRollback("delete-order-items", () => orderItemModel.deleteMany({ order_id: order._id }));
@@ -430,7 +431,10 @@ async function persistOrder(
     })
     .catch((err) => log.error("order.notify_failed", { order_id: String(order._id), err }));
 
-  return getOrderById(String(order._id));
+  return presentOrderWithItems(
+    order,
+    insertedItems.map((it: any) => it.toObject())
+  );
 }
 
 // ── CREATE จากตะกร้า ────────────────────────────────────────
@@ -523,6 +527,20 @@ function presentOrderItem(item: any): any {
   };
 }
 
+/**
+ * BACKLOG3 §5 — persistOrder()/updateOrderStatus() เดิม `return getOrderById(String(order._id))`
+ * หลัง save เอกสารที่มีอยู่ในมือแล้ว (re-query orderModel.findOne() + orderItemModel.find() ทั้งคู่
+ * ทั้งที่ไม่จำเป็น) — helper นี้ populate user_id บน document ที่มีอยู่แล้วตรง ๆ (`Document#populate()`
+ * ต่างจาก getOrderById ที่ populate ผ่าน query builder ก่อน lean() เพราะเริ่มจากแค่ id ไม่มี document
+ * อยู่ในมือ) รับ `items` ที่มีอยู่แล้วได้ (เลี่ยง query ซ้ำ) ไม่ระบุ = query ให้เหมือน getOrderById เดิม
+ */
+async function presentOrderWithItems(order: any, items?: any[]): Promise<any> {
+  await order.populate("user_id", "user_fullname email user_phone");
+  const orderItems =
+    items ?? (await orderItemModel.find({ order_id: order._id, deleted_at: null }).lean());
+  return { ...presentOrder(order.toObject()), items: orderItems.map(presentOrderItem) };
+}
+
 export async function listOrders(query: ListOrderQuery) {
   await dbConnect();
 
@@ -604,17 +622,22 @@ export async function updateOrderStatus(
   if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
 
   const current = order.order_status as OrderStatus;
-  if (current === next) return getOrderById(id);
+  // BACKLOG3 §5 — เดิม getOrderById(id) ทุกจุด (re-query ทั้ง header + items ทั้งที่มี document อยู่
+  // ในมือแล้ว) เปลี่ยนมา populate user_id บน document นี้ตรง ๆ แทน — ประหยัด query header ได้เสมอ
+  // ส่วนสาขา cancelled ประหยัด query items ได้ด้วย (มี items อยู่ในมือแล้วจากตอนคำนวณ stockItems)
+  if (current === next) return presentOrderWithItems(order);
   if (!NEXT_STATUS[current].includes(next)) {
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
 
+  let cancelledItems: any[] | undefined;
   if (next === "cancelled") {
     // cleanup ตอนยกเลิก — best-effort ทั้งหมด (step ที่ fail จะ log ผ่าน logger ไม่ล้มการยกเลิก)
     // ใช้ Saga เพื่อ log สม่ำเสมอ แทน .catch(() => undefined) ที่กลืน error เงียบ
     const cleanup = new Saga();
 
     const items = await orderItemModel.find({ order_id: order._id, deleted_at: null }).lean<any[]>();
+    cancelledItems = items;
     const stockItems = items.map((it) => ({
       product_id: String(it.product_id),
       quantity: it.quantity,
@@ -658,7 +681,7 @@ export async function updateOrderStatus(
 
   order.order_status = next;
   await order.save();
-  return getOrderById(id);
+  return presentOrderWithItems(order, cancelledItems);
 }
 
 /** สถานะที่ "ลูกค้า" ยกเลิกออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน */
