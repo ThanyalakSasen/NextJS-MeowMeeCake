@@ -280,7 +280,9 @@ describe("productService.purchase_cost — เก็บสตางค์ คื
     expect((byId as { purchase_cost: number | null }).purchase_cost).toBeNull();
 
     const withCost = await makeProduct({ purchase_cost: 4200 }); // เขียนตรง (satang) ข้าม service
-    const { items } = await productService.getProducts({ limit: 100 });
+    const { items } = await productService.getProducts({
+      pagination: { page: 1, limit: 100, skip: 0 },
+    });
     const found = items.find((it) => String((it as { _id: unknown })._id) === String(withCost._id));
     expect((found as { purchase_cost: number | null } | undefined)?.purchase_cost).toBe(42);
   });

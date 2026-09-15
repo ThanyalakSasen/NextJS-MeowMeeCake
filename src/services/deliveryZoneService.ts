@@ -22,6 +22,7 @@ const base = createCrudService(deliveryZoneModel as Model<unknown>, {
   label: "โซนค่าจัดส่ง",
   searchFields: ["zone_name"],
   createFields: WRITABLE,
+  present: presentZone, // BACKLOG3 §8 — ครอบ list/getById/create/update/remove/restore ให้เองในตัว
 });
 
 export interface DeliveryZoneRow {
@@ -76,24 +77,18 @@ function presentZone<T extends Record<string, unknown>>(zone: T): T {
   return toBahtFields(zone, ["fee"] as const);
 }
 
+// BACKLOG3 §8 — list/getById ไม่ต้อง override เองแล้ว (base.present ทำให้แล้ว) เหลือแค่ create/update/
+// remove/restore ที่ยังต้อง override เพราะมี side-effect เพิ่มเติม (is_catch_all exclusivity +
+// invalidateCache) present() ใน base จัดการแปลงหน่วยเงินให้ทุกจุดแล้ว ไม่ต้องเรียก presentZone() เอง
 export const deliveryZoneService = {
   ...base,
-
-  async list(args: Parameters<typeof base.list>[0]) {
-    const result = await base.list(args);
-    return { ...result, items: result.items.map(presentZone) };
-  },
-
-  async getById(id: string, includeDeleted?: boolean) {
-    return presentZone(await base.getById(id, includeDeleted));
-  },
 
   async create(input: Record<string, unknown>) {
     if (input.is_catch_all === true) await unsetOtherCatchAll();
     const payload = input.fee != null ? { ...input, fee: toSatang(Number(input.fee)) } : input;
     const doc = await base.create(payload);
     invalidateCache();
-    return presentZone(doc);
+    return doc;
   },
 
   async update(id: string, input: Record<string, unknown>) {
@@ -101,19 +96,19 @@ export const deliveryZoneService = {
     const payload = input.fee != null ? { ...input, fee: toSatang(Number(input.fee)) } : input;
     const doc = await base.update(id, payload);
     invalidateCache();
-    return presentZone(doc);
+    return doc;
   },
 
   async remove(id: string) {
     const doc = await base.remove(id);
     invalidateCache();
-    return presentZone(doc);
+    return doc;
   },
 
   async restore(id: string) {
     const doc = await base.restore(id);
     invalidateCache();
-    return presentZone(doc);
+    return doc;
   },
 };
 

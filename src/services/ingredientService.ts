@@ -19,6 +19,11 @@ import { toSatang, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+// BACKLOG §3.11 เฟส 4 — cost_per_unit เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentIngredient<T extends Record<string, unknown>>(doc: T): T {
+  return toBahtFields(doc, ["cost_per_unit"] as const);
+}
+
 const base = createCrudService(ingredientModel as Model<any>, {
   label: "วัตถุดิบ",
   searchFields: ["ingredient_name", "supplier"],
@@ -46,6 +51,7 @@ const base = createCrudService(ingredientModel as Model<any>, {
     { path: "ingredient_category_id", select: "ingredient_category_name" },
     { path: "unit_id", select: "unit_name unit_abbr" },
   ],
+  present: presentIngredient, // BACKLOG3 §8 — ครอบ list/getById/create/update/remove/restore ให้เองในตัว
 });
 
 async function assertRefs(input: Record<string, any>): Promise<void> {
@@ -67,22 +73,10 @@ async function assertRefs(input: Record<string, any>): Promise<void> {
   }
 }
 
-// BACKLOG §3.11 เฟส 4 — cost_per_unit เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
-function presentIngredient<T extends Record<string, unknown>>(doc: T): T {
-  return toBahtFields(doc, ["cost_per_unit"] as const);
-}
-
+// BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
+// override เพราะมี validation เพิ่มเติม + แปลง cost_per_unit บาท→สตางค์ก่อนเขียน
 export const ingredientService = {
   ...base,
-
-  async list(args: Parameters<typeof base.list>[0]) {
-    const result = await base.list(args);
-    return { ...result, items: result.items.map(presentIngredient) };
-  },
-
-  async getById(id: string, includeDeleted?: boolean) {
-    return presentIngredient(await base.getById(id, includeDeleted));
-  },
 
   async create(input: Record<string, any>) {
     if (!input.ingredient_name) throw badRequest("กรุณาระบุ ingredient_name");
@@ -92,7 +86,7 @@ export const ingredientService = {
     if (input.reorder_point == null) throw badRequest("กรุณาระบุ reorder_point");
     await assertRefs(input);
     const payload = { ...input, cost_per_unit: toSatang(Number(input.cost_per_unit)) };
-    return presentIngredient(await base.create(payload));
+    return base.create(payload);
   },
 
   async update(id: string, input: Record<string, any>) {
@@ -101,15 +95,7 @@ export const ingredientService = {
       input.cost_per_unit != null
         ? { ...input, cost_per_unit: toSatang(Number(input.cost_per_unit)) }
         : input;
-    return presentIngredient(await base.update(id, payload));
-  },
-
-  async remove(id: string) {
-    return presentIngredient(await base.remove(id));
-  },
-
-  async restore(id: string) {
-    return presentIngredient(await base.restore(id));
+    return base.update(id, payload);
   },
 
   /** วัตถุดิบที่ current_stock <= reorder_point (เรียงจากขาดหนักสุด) */

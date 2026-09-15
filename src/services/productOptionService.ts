@@ -23,6 +23,11 @@ const WRITABLE = [
   "is_required",
 ] as const;
 
+// BACKLOG §3.11 เฟส 5b — extra_price เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentOption<T extends Record<string, unknown>>(o: T): T {
+  return toBahtFields(o, ["extra_price"] as const);
+}
+
 const base = createCrudService(productOptionModel as Model<any>, {
   label: "ตัวเลือกเสริมสินค้า",
   searchFields: ["option_name"],
@@ -34,6 +39,7 @@ const base = createCrudService(productOptionModel as Model<any>, {
     "extra_price",
     "is_required",
   ],
+  present: presentOption, // BACKLOG3 §8 — ครอบ list/getById/create/update/remove/restore ให้เองในตัว
 });
 
 function validateShape(input: Record<string, any>): void {
@@ -50,22 +56,63 @@ function validateShape(input: Record<string, any>): void {
   }
 }
 
-// BACKLOG §3.11 เฟส 5b — extra_price เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
-function presentOption<T extends Record<string, unknown>>(o: T): T {
-  return toBahtFields(o, ["extra_price"] as const);
+export interface SelectedOptionInput {
+  option_id: string;
+  text_value?: string | null;
 }
 
+export interface ResolvedOption {
+  option_id: unknown;
+  option_name: string;
+  extra_price: number;
+  text_value: string | null;
+}
+
+/**
+ * BACKLOG3 §6 — ตรวจ + คิดราคา option ที่ลูกค้าเลือก เทียบกับ option doc จริง เดิม cartService
+ * (`resolveOptions`) กับ orderService (`resolveLines`) ต่างเขียน logic เดียวกันซ้ำ (is_text_input/
+ * is_required/max_text_length + ข้อความ error) แยกกัน — รวมมาไว้ที่นี่
+ *
+ * **รับ `optionById` เป็น Map ที่ผู้เรียกเตรียมมาเอง ไม่ query เองในนี้** — เพราะ orderService.
+ * resolveLines() ต้อง batch query option ของ**ทุกรายการในออเดอร์พร้อมกัน**ครั้งเดียว (BACKLOG §3.18
+ * กัน N+1) ถ้าฟังก์ชันนี้ query เองต่อ 1 เรียก จะทำให้ resolveLines() กลับไปเป็น N+1 เหมือนก่อนแก้
+ * §3.18 ทันที — ส่วน cartService (เพิ่ม/แก้ทีละ 1 รายการ ไม่มี "หลายรายการพร้อมกัน" ให้ batch) ยัง query
+ * เองแบบเดิมแล้วสร้าง Map เล็ก ๆ ส่งเข้ามา
+ */
+export function resolveSelectedOptions(
+  productId: string,
+  selected: SelectedOptionInput[] = [],
+  optionById: Map<string, Record<string, any>>
+): ResolvedOption[] {
+  if (!Array.isArray(selected) || selected.length === 0) return [];
+
+  return selected.map((sel) => {
+    const opt = optionById.get(String(sel.option_id));
+    const belongsToProduct = opt && String(opt.product_id) === String(productId);
+    if (!belongsToProduct) throw badRequest(`ไม่พบตัวเลือกเสริม ${sel.option_id} ของสินค้านี้`);
+
+    let text: string | null = null;
+    if (opt.is_text_input) {
+      text = (sel.text_value ?? "").trim() || null;
+      if (opt.is_required && !text) throw badRequest(`ตัวเลือก "${opt.option_name}" ต้องกรอกข้อความ`);
+      if (text && opt.max_text_length && text.length > opt.max_text_length) {
+        throw badRequest(`ข้อความของ "${opt.option_name}" ยาวเกิน ${opt.max_text_length} ตัวอักษร`);
+      }
+    }
+
+    return {
+      option_id: opt._id,
+      option_name: opt.option_name,
+      extra_price: opt.extra_price ?? 0,
+      text_value: text,
+    };
+  });
+}
+
+// BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว (base.present ทำให้แล้ว) เหลือแค่
+// create/update ที่ยังต้อง override เพราะมี validation เพิ่มเติม
 export const productOptionService = {
   ...base,
-
-  async list(args: Parameters<typeof base.list>[0]) {
-    const result = await base.list(args);
-    return { ...result, items: result.items.map(presentOption) };
-  },
-
-  async getById(id: string, includeDeleted?: boolean) {
-    return presentOption(await base.getById(id, includeDeleted));
-  },
 
   async create(input: Record<string, any>) {
     if (!input.product_id) throw badRequest("กรุณาระบุ product_id");
@@ -74,22 +121,14 @@ export const productOptionService = {
     validateShape(input);
     const payload =
       input.extra_price != null ? { ...input, extra_price: toSatang(Number(input.extra_price)) } : input;
-    return presentOption(await base.create(payload));
+    return base.create(payload);
   },
 
   async update(id: string, input: Record<string, any>) {
     validateShape(input);
     const payload =
       input.extra_price != null ? { ...input, extra_price: toSatang(Number(input.extra_price)) } : input;
-    return presentOption(await base.update(id, payload));
-  },
-
-  async remove(id: string) {
-    return presentOption(await base.remove(id));
-  },
-
-  async restore(id: string) {
-    return presentOption(await base.restore(id));
+    return base.update(id, payload);
   },
 };
 

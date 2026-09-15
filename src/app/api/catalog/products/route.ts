@@ -7,14 +7,14 @@
  */
 import type { NextRequest } from "next/server";
 import { okList, route } from "@/lib/apiResponse";
+import { parsePagination } from "@/lib/queryParams";
 import * as productService from "@/services/productService";
 import type { ProductType } from "@/lib/productCode";
 
 export const GET = route(async (req: NextRequest) => {
   const sp = req.nextUrl.searchParams;
   const result = await productService.getProducts({
-    page: Number(sp.get("page")) || undefined,
-    limit: Number(sp.get("limit")) || undefined,
+    pagination: parsePagination(sp),
     search: sp.get("search") ?? undefined,
     category_id: sp.get("category_id") ?? undefined,
     product_type: (sp.get("product_type") as ProductType | null) ?? undefined,

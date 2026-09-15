@@ -13,6 +13,7 @@ import { badRequest, forbidden, notFound, unauthorized, HttpError } from "../lib
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
 import type { z } from "zod";
@@ -59,7 +60,9 @@ export interface ListUserQuery {
 }
 
 // ── Helpers ──────────────────────────────────────────────────
-function stripSecrets<T extends Record<string, any>>(doc: T): Partial<T> {
+/** ลบฟิลด์ลับ (password/token ต่าง ๆ) ออกจาก doc ก่อนส่งกลับ — export ให้ authService ใช้ร่วม
+ *  (BACKLOG3 §4 — กันต้อง query ซ้ำแค่เพื่อได้ doc ที่ strip secrets แล้ว) */
+export function stripSecrets<T extends Record<string, any>>(doc: T): Partial<T> {
   const clone: Record<string, any> = { ...doc };
   for (const f of SECRET_FIELDS) delete clone[f];
   return clone as Partial<T>;
@@ -254,35 +257,24 @@ export async function adminSetPassword(id: string, newPassword: string) {
   return user;
 }
 
+// BACKLOG3 §9 — soft-delete/restore เป็น pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน
+// (primitive ไม่รองรับ .select() projection ระดับ DB เหมือนเดิม — strip secrets เองใน JS แทนด้วย
+// stripSecrets() ที่มีอยู่แล้ว ผลลัพธ์ท้ายสุดฟิลด์เหมือนเดิมทุกประการ)
 // ── DELETE (soft) / RESTORE ──────────────────────────────────
 export async function deleteUser(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const user = await userModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: null },
-      { $set: { deleted_at: new Date(), is_active: false } },
-      { new: true }
-    )
-    .select(SELECT_PUBLIC)
-    .lean();
-  if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ หรือถูกลบไปแล้ว");
-  return user;
+  const user = await softDeleteDoc(userModel, id, {
+    notFoundMsg: "ไม่พบผู้ใช้ที่ระบุ หรือถูกลบไปแล้ว",
+    extraSet: { is_active: false },
+  });
+  return stripSecrets(user);
 }
 
 export async function restoreUser(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const user = await userModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: { $ne: null } },
-      { $set: { deleted_at: null, is_active: true } },
-      { new: true }
-    )
-    .select(SELECT_PUBLIC)
-    .lean();
-  if (!user) throw notFound("ไม่พบผู้ใช้ที่ถูกลบไว้");
-  return user;
+  const user = await restoreDoc(userModel, id, {
+    notFoundMsg: "ไม่พบผู้ใช้ที่ถูกลบไว้",
+    extraSet: { is_active: true },
+  });
+  return stripSecrets(user);
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -303,9 +295,12 @@ export async function verifyCredentials(email: string, password: string) {
 
   if (!email || !password) throw badRequest("กรุณากรอกอีเมลและรหัสผ่าน");
 
+  // BACKLOG3 §4 — populate role_id ที่นี่เลย (แทนที่ authService.toSessionUser() จะต้อง
+  // roleModel.findById() แยกอีกรอบเมื่อ role_id ไม่ได้ populate มา)
   const user = await userModel
     .findOne({ email: String(email).toLowerCase().trim(), deleted_at: null })
-    .select("+password");
+    .select("+password")
+    .populate("role_id", "role_name role_type");
 
   // ข้อความเดียวกันทุกกรณีที่หา user ไม่เจอ/รหัสผิด กัน user enumeration
   if (!user) throw unauthorized("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
@@ -333,10 +328,16 @@ export async function verifyCredentials(email: string, password: string) {
     throw unauthorized("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
   }
 
+  // BACKLOG3 §4 — sync ค่าที่เพิ่ง update ลง doc ในหน่วยความจำด้วย (ไม่ใช่แค่ DB) เพื่อให้
+  // authService.login() คืน user object นี้ตรงต่อผู้เรียกได้เลย โดยไม่ต้อง getUserById() ซ้ำ
+  const now = new Date();
   await userModel.updateOne(
     { _id: user._id },
-    { $set: { failed_login_attempts: 0, lockout_until: null, last_login_at: new Date() } }
+    { $set: { failed_login_attempts: 0, lockout_until: null, last_login_at: now } }
   );
+  user.failed_login_attempts = 0;
+  user.lockout_until = null;
+  user.last_login_at = now;
 
   const obj = user.toObject();
   return stripSecrets(obj);

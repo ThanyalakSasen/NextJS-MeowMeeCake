@@ -3,6 +3,21 @@ import preorderModel from "@/models/preorderModel";
 import * as preorderService from "@/services/preorderService";
 import { makeUser, makePreorder, oid } from "./helpers";
 
+// BACKLOG3 §10 — updateDelivery() คืน Record<string, unknown> | null (เดิม any) — cast ให้ property
+// access ในเทสไม่ต้องเช็ค null ทุกจุด (รู้อยู่แล้วว่าไม่ null ในทุกเคสที่ไม่ได้เช็ค .rejects)
+type DeliveryResult = {
+  delivery_status: string;
+  tracking_no: string | null;
+  shipped_at: string | null;
+  delivered_at: string | null;
+};
+async function updateDelivery(
+  id: string,
+  input: Parameters<typeof preorderService.updateDelivery>[1]
+): Promise<DeliveryResult> {
+  return (await preorderService.updateDelivery(id, input)) as unknown as DeliveryResult;
+}
+
 /**
  * BACKLOG2 §4 — preorderService ไม่เคยมี updateDelivery() เหมือน orderService เลย ทั้งที่
  * preorderModel มีฟิลด์ delivery_status/shipped_at/delivered_at/tracking_no/delivered_note
@@ -13,7 +28,7 @@ describe("preorderService.updateDelivery (BACKLOG2 §4)", () => {
     const customer = await makeUser();
     const preorder = await makePreorder(String(customer._id), { order_type: "delivery" });
 
-    const updated = await preorderService.updateDelivery(String(preorder._id), {
+    const updated = await updateDelivery(String(preorder._id), {
       delivery_status: "shipping",
       tracking_no: "TH1234567890",
     });
@@ -28,7 +43,7 @@ describe("preorderService.updateDelivery (BACKLOG2 §4)", () => {
     const customer = await makeUser();
     const preorder = await makePreorder(String(customer._id), { order_type: "delivery" });
 
-    const updated = await preorderService.updateDelivery(String(preorder._id), {
+    const updated = await updateDelivery(String(preorder._id), {
       delivery_status: "delivered",
     });
 
@@ -45,12 +60,12 @@ describe("preorderService.updateDelivery (BACKLOG2 §4)", () => {
       shipped_at: already,
     });
 
-    const updated = await preorderService.updateDelivery(String(preorder._id), {
+    const updated = await updateDelivery(String(preorder._id), {
       delivery_status: "shipping",
       tracking_no: "TH999",
     });
 
-    expect(new Date(updated.shipped_at).getTime()).toBe(already.getTime());
+    expect(new Date(updated.shipped_at!).getTime()).toBe(already.getTime());
   });
 
   it("พรีออเดอร์ order_type = takeaway → ปฏิเสธ (ไม่ใช่ประเภทจัดส่ง)", async () => {

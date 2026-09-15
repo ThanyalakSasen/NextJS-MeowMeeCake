@@ -17,6 +17,7 @@ import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { restoreDoc } from "../lib/crudService";
 import preorderRoundModel from "../models/preorderRoundModel";
 import preorderRoundItemModel from "../models/preorderRoundItemModel";
 import preorderModel from "../models/preorderModel";
@@ -341,18 +342,10 @@ export async function deleteRound(id: string) {
   return { deleted: true, _id: round._id };
 }
 
+// BACKLOG3 §9 — pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน (deleteRound ด้านบนมี
+// pre-check + cascade ที่ไม่เข้ากับ primitive แบบง่าย ๆ เลยยังคงเขียนเองต่อไป)
 export async function restoreRound(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const round = await preorderRoundModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: { $ne: null } },
-      { $set: { deleted_at: null } },
-      { new: true }
-    )
-    .lean<any>();
-  if (!round) throw notFound("ไม่พบรอบพรีออเดอร์ที่ถูกลบไว้");
-  return round;
+  return restoreDoc(preorderRoundModel, id, { notFoundMsg: "ไม่พบรอบพรีออเดอร์ที่ถูกลบไว้" });
 }
 
 // ── ROUND ITEMS ────────────────────────────────────────────
