@@ -25,9 +25,16 @@ export default defineConfig({
           include: ["tests/integration/**/*.test.ts"],
           // DELIVERY_ZONE_CACHE_TTL_MS=0 ปิด cache ของ deliveryZoneService — กัน test ที่ afterEach
           // ล้าง DB ตรง ๆ (bypass service) แล้วเทสถัดไปยังเห็นโซนเก่าที่ cache ค้างไว้
+          // PERMISSION_CACHE_TTL_MS=0 ปิด cache ของ permissionService.getEffectivePermissions() ด้วย
+          // เหตุผลเดียวกัน (BACKLOG3 §7)
           // JWT_SECRET: src/lib/jwt.ts throw ตั้งแต่ตอน import module ถ้าไม่ตั้ง — ต้องมีให้ authService
           // (BACKLOG3 §4 เทสใหม่) import ได้ ไม่ใช่ค่าจริง ใช้แค่ในเทสเท่านั้น
-          env: { NODE_ENV: "test", DELIVERY_ZONE_CACHE_TTL_MS: "0", JWT_SECRET: "test-jwt-secret-integration-only" },
+          env: {
+            NODE_ENV: "test",
+            DELIVERY_ZONE_CACHE_TTL_MS: "0",
+            PERMISSION_CACHE_TTL_MS: "0",
+            JWT_SECRET: "test-jwt-secret-integration-only",
+          },
           setupFiles: ["tests/integration/setup.ts"], // เริ่ม mongodb-memory-server + ตั้ง MONGODB_URI
           testTimeout: 30_000,
           hookTimeout: 60_000, // ครั้งแรก mongodb-memory-server ต้องโหลด binary

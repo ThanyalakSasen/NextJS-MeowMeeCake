@@ -64,6 +64,30 @@ export interface ListPermissionQuery {
   includeDeleted?: boolean;
 }
 
+export interface EffectivePermissions {
+  role_id: string;
+  permissions: Record<string, Record<string, boolean>>;
+}
+
+// ── cache: สิทธิ์ที่ใช้ได้จริงต่อ role (BACKLOG3 §7) ────────────
+// getEffectivePermissions() ถูกเรียกทุก request ที่ผ่าน authGuard.requirePermission()/withPermission()
+// (แทบทุก mutation ของ /api/admin/*) — เดิมไม่มี cache เลย ยิง query ทุกครั้ง เพิ่ม TTL cache แบบเดียว
+// กับ deliveryZoneService.ts แต่ keyed ด้วย role_id (แต่ละ role มีสิทธิ์ไม่เหมือนกัน) · invalidate ทันที
+// ทุกจุดที่เขียน permission (create/update/delete/restore) — ล้างทั้ง cache ไม่ track เจาะจงว่า role
+// ไหนถูกกระทบ (เขียน permission ไม่ใช่ path ที่ถี่ เทียบกับ read ที่ถี่กว่ามาก ล้างทั้งหมดไม่แพง)
+// TTL ตั้งสั้นกว่า deliveryZoneService (30s ไม่ใช่ 60s) เพราะเป็น access-control ไม่ใช่แค่ตัวเลขค่าส่ง —
+// ตั้ง PERMISSION_CACHE_TTL_MS=0 ปิด cache ได้ (เช่นตอนเทส) เหมือน DELIVERY_ZONE_CACHE_TTL_MS
+// ⚠️ in-memory ต่อ instance เหมือน rateLimit.ts/deliveryZoneService.ts — deploy หลาย instance พร้อมกัน
+// ต้องเปลี่ยนเป็น Redis (หรือ pub/sub invalidate ข้าม instance) ไม่งั้น instance อื่นเห็นสิทธิ์เก่าค้างได้
+// จนกว่า TTL หมดอายุ
+const envTtl = Number(process.env.PERMISSION_CACHE_TTL_MS);
+const CACHE_TTL_MS = Number.isFinite(envTtl) && envTtl >= 0 ? envTtl : 30_000;
+const permissionCache = new Map<string, { data: EffectivePermissions; expiresAt: number }>();
+
+function invalidatePermissionCache(): void {
+  permissionCache.clear();
+}
+
 // ── CREATE ───────────────────────────────────────────────────
 export async function createPermission(input: CreatePermissionInput) {
   await dbConnect();
@@ -98,6 +122,7 @@ export async function createPermission(input: CreatePermissionInput) {
       can_delete: input.can_delete,
       can_approve: input.can_approve,
     });
+    invalidatePermissionCache();
     return doc.toObject();
   } catch (err: any) {
     if (err?.code === 11000) {
@@ -168,6 +193,7 @@ export async function updatePermission(id: string, input: UpdatePermissionInput)
     )
     .lean();
   if (!doc) throw notFound("ไม่พบสิทธิ์ที่ระบุ");
+  invalidatePermissionCache();
   return doc;
 }
 
@@ -183,6 +209,7 @@ export async function deletePermission(id: string) {
     )
     .lean();
   if (!doc) throw notFound("ไม่พบสิทธิ์ที่ระบุ หรือถูกลบไปแล้ว");
+  invalidatePermissionCache();
   return doc;
 }
 
@@ -199,6 +226,7 @@ export async function restorePermission(id: string) {
       )
       .lean();
     if (!doc) throw notFound("ไม่พบสิทธิ์ที่ถูกลบไว้");
+    invalidatePermissionCache();
     return doc;
   } catch (err: any) {
     if (err?.code === 11000) {
@@ -209,9 +237,16 @@ export async function restorePermission(id: string) {
 }
 
 // ── สิทธิ์ที่ใช้ได้จริงของบทบาทหนึ่ง (ตัดที่หมดอายุออก) ──────
-export async function getEffectivePermissions(roleId: string) {
+// ⚠️ cache TTL หมายความว่า permission ที่ตั้ง expires_at ไว้ อาจยังถูกนับว่า "ใช้ได้" เกินเวลาจริงไป
+// ได้สูงสุด CACHE_TTL_MS (ผลลัพธ์ query ถูก bake ไว้ตอน cache-write ไม่ได้ประเมิน expires_at ใหม่ทุก
+// ครั้งที่อ่านจาก cache) — ยอมรับได้เพราะ TTL สั้น (30s) และเป็นเคสที่พบไม่บ่อย (permission ชั่วคราว) ต่าง
+// จากการถอนสิทธิ์ผ่านแอดมินโดยตรง (delete/update) ที่ invalidate ทันทีเสมอ ไม่มี grace period เลย
+export async function getEffectivePermissions(roleId: string): Promise<EffectivePermissions> {
   await dbConnect();
   assertObjectId(roleId, "role_id");
+
+  const cached = permissionCache.get(roleId);
+  if (cached && cached.expiresAt > Date.now()) return cached.data;
 
   const now = new Date();
   const rows = await permissionModel
@@ -229,5 +264,7 @@ export async function getEffectivePermissions(roleId: string) {
       FLAG_FIELDS.map((f) => [f, !!row[f]])
     );
   }
-  return { role_id: roleId, permissions: byMenu };
+  const result = { role_id: roleId, permissions: byMenu };
+  permissionCache.set(roleId, { data: result, expiresAt: Date.now() + CACHE_TTL_MS });
+  return result;
 }

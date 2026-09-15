@@ -26,6 +26,7 @@ Next.js โหลด `.env.local` ให้อัตโนมัติตอน 
 | `DELIVERY_FEE_METRO` | ไม่ | `40` | `src/services/deliveryService.ts` | **fallback เท่านั้น** (BACKLOG §3.15) — ใช้ต่อเมื่อยังไม่มีโซนไหนตั้งไว้ใน `/api/admin/delivery-zones` เลย ปกติแอดมินแก้ค่าส่งผ่านหน้านั้นแทน ไม่ต้องแก้ env+redeploy แล้ว · ค่าส่ง กรุงเทพฯ + ปริมณฑล (นนทบุรี/ปทุมธานี/สมุทรปราการ/สมุทรสาคร/นครปฐม) |
 | `DELIVERY_FEE_UPCOUNTRY` | ไม่ | `80` | `src/services/deliveryService.ts` | **fallback เท่านั้น** เช่นเดียวกับข้างบน — ค่าส่งต่างจังหวัด (จังหวัดอื่นทั้งหมด) |
 | `DELIVERY_ZONE_CACHE_TTL_MS` | ไม่ | `60000` | `src/services/deliveryZoneService.ts` | อายุ cache ของโซนค่าจัดส่งจาก DB (มิลลิวินาที) — ตั้งเป็น `0` ปิด cache ได้ (ใช้ตอนเทส) |
+| `PERMISSION_CACHE_TTL_MS` | ไม่ | `30000` | `src/services/permissionService.ts` | อายุ cache ของ `getEffectivePermissions()` ต่อ role (มิลลิวินาที, BACKLOG3 §7) — invalidate ทันทีทุกจุดที่เขียน permission อยู่แล้ว TTL เป็นแค่ backstop · ตั้งเป็น `0` ปิด cache ได้ (ใช้ตอนเทส) · หลาย instance พร้อมกันต้องเปลี่ยนเป็น Redis เหมือน `rateLimit.ts` |
 | `UPLOAD_DRIVER` | ไม่ | `localDisk` | `src/lib/upload.ts` | `localDisk` (เขียนลง `public/uploads/` — self-host เท่านั้น) หรือ `s3` (S3-compatible: AWS S3 / Cloudflare R2 / GCS interop — จำเป็นถ้า deploy serverless) |
 | `S3_BUCKET` | เฉพาะ `UPLOAD_DRIVER=s3` | — | `src/lib/upload.ts` | ชื่อ bucket ปลายทาง |
 | `S3_REGION` | ไม่ | `auto` | `src/lib/upload.ts` | region ของ bucket (R2 ใช้ `auto` ได้) |
