@@ -5,6 +5,7 @@ import dbConnect from "../lib/dbConnect";
 import { HttpError } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import {
   generateProductCode,
   isProductCode,
@@ -477,37 +478,20 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   return presentProduct(result);
 }
 
+// BACKLOG3 §9 — soft-delete/restore เป็น pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน
+// (notFound() ของ primitive กับ ProductError(msg,404) เดิม คืน response shape เดียวกันเป๊ะ —
+// {status:404, code:"NOT_FOUND"} ทั้งคู่ — ยืนยันแล้วว่าไม่มี instanceof ProductError check ที่ไหนเลย)
 // ── DELETE (soft) ─────────────────────────────────────────────
 export async function deleteProduct(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-
-  const product = await productModel.findOneAndUpdate(
-    { _id: id, deleted_at: null },
-    { $set: { deleted_at: new Date() } },
-    { new: true }
-  ).lean();
-
-  if (!product) {
-    throw new ProductError("ไม่พบสินค้าที่ระบุ หรือถูกลบไปแล้ว", 404);
-  }
+  const product = await softDeleteDoc(productModel, id, {
+    notFoundMsg: "ไม่พบสินค้าที่ระบุ หรือถูกลบไปแล้ว",
+  });
   return presentProduct(product);
 }
 
 // ── RESTORE (กู้คืนจาก soft delete) ───────────────────────────
 export async function restoreProduct(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-
-  const product = await productModel.findOneAndUpdate(
-    { _id: id, deleted_at: { $ne: null } },
-    { $set: { deleted_at: null } },
-    { new: true }
-  ).lean();
-
-  if (!product) {
-    throw new ProductError("ไม่พบสินค้าที่ถูกลบไว้", 404);
-  }
+  const product = await restoreDoc(productModel, id, { notFoundMsg: "ไม่พบสินค้าที่ถูกลบไว้" });
   return presentProduct(product);
 }
 

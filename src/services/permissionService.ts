@@ -11,6 +11,7 @@ import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, type Pagination } from "../lib/queryParams";
+import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import permissionModel from "../models/permissionModel";
 import roleModel from "../models/roleModel";
 import userModel from "../models/userModel";
@@ -197,35 +198,20 @@ export async function updatePermission(id: string, input: UpdatePermissionInput)
   return doc;
 }
 
+// BACKLOG3 §9 — soft-delete/restore เป็น pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน
 // ── DELETE (soft) ───────────────────────────────────────────
 export async function deletePermission(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const doc = await permissionModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: null },
-      { $set: { deleted_at: new Date() } },
-      { new: true }
-    )
-    .lean();
-  if (!doc) throw notFound("ไม่พบสิทธิ์ที่ระบุ หรือถูกลบไปแล้ว");
+  const doc = await softDeleteDoc(permissionModel, id, {
+    notFoundMsg: "ไม่พบสิทธิ์ที่ระบุ หรือถูกลบไปแล้ว",
+  });
   invalidatePermissionCache();
   return doc;
 }
 
 // ── RESTORE ─────────────────────────────────────────────────
 export async function restorePermission(id: string) {
-  await dbConnect();
-  assertObjectId(id);
   try {
-    const doc = await permissionModel
-      .findOneAndUpdate(
-        { _id: id, deleted_at: { $ne: null } },
-        { $set: { deleted_at: null } },
-        { new: true }
-      )
-      .lean();
-    if (!doc) throw notFound("ไม่พบสิทธิ์ที่ถูกลบไว้");
+    const doc = await restoreDoc(permissionModel, id, { notFoundMsg: "ไม่พบสิทธิ์ที่ถูกลบไว้" });
     invalidatePermissionCache();
     return doc;
   } catch (err: any) {

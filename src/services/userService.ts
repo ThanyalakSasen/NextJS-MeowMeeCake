@@ -13,6 +13,7 @@ import { badRequest, forbidden, notFound, unauthorized, HttpError } from "../lib
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
 import type { z } from "zod";
@@ -256,35 +257,24 @@ export async function adminSetPassword(id: string, newPassword: string) {
   return user;
 }
 
+// BACKLOG3 §9 — soft-delete/restore เป็น pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน
+// (primitive ไม่รองรับ .select() projection ระดับ DB เหมือนเดิม — strip secrets เองใน JS แทนด้วย
+// stripSecrets() ที่มีอยู่แล้ว ผลลัพธ์ท้ายสุดฟิลด์เหมือนเดิมทุกประการ)
 // ── DELETE (soft) / RESTORE ──────────────────────────────────
 export async function deleteUser(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const user = await userModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: null },
-      { $set: { deleted_at: new Date(), is_active: false } },
-      { new: true }
-    )
-    .select(SELECT_PUBLIC)
-    .lean();
-  if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ หรือถูกลบไปแล้ว");
-  return user;
+  const user = await softDeleteDoc(userModel, id, {
+    notFoundMsg: "ไม่พบผู้ใช้ที่ระบุ หรือถูกลบไปแล้ว",
+    extraSet: { is_active: false },
+  });
+  return stripSecrets(user);
 }
 
 export async function restoreUser(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const user = await userModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: { $ne: null } },
-      { $set: { deleted_at: null, is_active: true } },
-      { new: true }
-    )
-    .select(SELECT_PUBLIC)
-    .lean();
-  if (!user) throw notFound("ไม่พบผู้ใช้ที่ถูกลบไว้");
-  return user;
+  const user = await restoreDoc(userModel, id, {
+    notFoundMsg: "ไม่พบผู้ใช้ที่ถูกลบไว้",
+    extraSet: { is_active: true },
+  });
+  return stripSecrets(user);
 }
 
 // ─────────────────────────────────────────────────────────────

@@ -10,6 +10,7 @@ import { badRequest, conflict, notFound, unprocessable } from "../lib/httpError"
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import {
   computeDiscount,
   type DiscountLine,
@@ -173,31 +174,16 @@ export async function updatePromotion(id: string, input: UpdatePromotionInput) {
   }
 }
 
+// BACKLOG3 §9 — soft-delete/restore เป็น pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน
 export async function deletePromotion(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const doc = await promotionModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: null },
-      { $set: { deleted_at: new Date() } },
-      { new: true }
-    )
-    .lean();
-  if (!doc) throw notFound("ไม่พบโปรโมชันที่ระบุ หรือถูกลบไปแล้ว");
+  const doc = await softDeleteDoc(promotionModel, id, {
+    notFoundMsg: "ไม่พบโปรโมชันที่ระบุ หรือถูกลบไปแล้ว",
+  });
   return presentPromotion(doc);
 }
 
 export async function restorePromotion(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const doc = await promotionModel
-    .findOneAndUpdate(
-      { _id: id, deleted_at: { $ne: null } },
-      { $set: { deleted_at: null } },
-      { new: true }
-    )
-    .lean();
-  if (!doc) throw notFound("ไม่พบโปรโมชันที่ถูกลบไว้");
+  const doc = await restoreDoc(promotionModel, id, { notFoundMsg: "ไม่พบโปรโมชันที่ถูกลบไว้" });
   return presentPromotion(doc);
 }
 

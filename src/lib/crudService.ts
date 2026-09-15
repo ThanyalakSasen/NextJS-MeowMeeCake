@@ -190,3 +190,51 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
 
   return { model, list, getById, create, update, remove, restore, activeFilter };
 }
+
+// ── primitives แยก — ใช้ตรงจากบาง service ที่ต้องมี logic เพิ่ม (pre-check/cascade/cache) ก่อน/หลัง
+// เลย full factory ข้างบนไม่พอ แต่ส่วน soft-delete/restore เองยังเป็น shape เดียวกันทุกที่ (BACKLOG3 §9)
+// ────────────────────────────────────────────────────────────────────────────────────────────────
+export interface SoftDeleteRestoreOptions {
+  /** ข้อความ error เมื่อไม่พบเอกสาร (delete: ยังไม่เคยลบมาก่อน / restore: ยังไม่เคยถูกลบไว้) */
+  notFoundMsg: string;
+  /** field เพิ่มเติมที่ $set พร้อม deleted_at เสมอ (เช่น is_active: false ตอน delete / true ตอน restore) */
+  extraSet?: Record<string, unknown>;
+}
+
+/** soft-delete มาตรฐาน: findOneAndUpdate({_id, deleted_at:null}, {$set:{deleted_at:now, ...extraSet}}) */
+export async function softDeleteDoc(
+  model: AnyModel,
+  id: string,
+  opts: SoftDeleteRestoreOptions
+): Promise<Doc> {
+  await dbConnect();
+  assertObjectId(id);
+  const doc = await model
+    .findOneAndUpdate(
+      { _id: id, deleted_at: null },
+      { $set: { deleted_at: new Date(), ...(opts.extraSet ?? {}) } },
+      { new: true }
+    )
+    .lean();
+  if (!doc) throw notFound(opts.notFoundMsg);
+  return doc as Doc;
+}
+
+/** restore มาตรฐาน: findOneAndUpdate({_id, deleted_at:{$ne:null}}, {$set:{deleted_at:null, ...extraSet}}) */
+export async function restoreDoc(
+  model: AnyModel,
+  id: string,
+  opts: SoftDeleteRestoreOptions
+): Promise<Doc> {
+  await dbConnect();
+  assertObjectId(id);
+  const doc = await model
+    .findOneAndUpdate(
+      { _id: id, deleted_at: { $ne: null } },
+      { $set: { deleted_at: null, ...(opts.extraSet ?? {}) } },
+      { new: true }
+    )
+    .lean();
+  if (!doc) throw notFound(opts.notFoundMsg);
+  return doc as Doc;
+}
