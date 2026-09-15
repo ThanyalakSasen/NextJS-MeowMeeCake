@@ -21,6 +21,11 @@ export const EXPENSE_CATEGORIES = [
   "อื่นๆ",
 ] as const;
 
+// BACKLOG §3.11 เฟส 2 — amount เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentExpense<T extends Record<string, unknown>>(doc: T): T {
+  return toBahtFields(doc, ["amount"] as const);
+}
+
 const base = createCrudService(expenseModel as any, {
   label: "ค่าใช้จ่าย",
   searchFields: ["description", "vendor", "note"],
@@ -35,43 +40,24 @@ const base = createCrudService(expenseModel as any, {
     "receipt_url",
     "is_recurring",
   ],
+  present: presentExpense, // BACKLOG3 §8 — ครอบ list/getById/create/update/remove/restore ให้เองในตัว
 });
 
-// BACKLOG §3.11 เฟส 2 — amount เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
-function presentExpense<T extends Record<string, unknown>>(doc: T): T {
-  return toBahtFields(doc, ["amount"] as const);
-}
-
+// BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
+// override เพราะต้องแปลง amount บาท→สตางค์ก่อนเขียน (present() แปลงแค่ตอน "คืนค่า" ไม่ใช่ตอนรับ input)
 export const expenseService = {
   ...base,
-
-  async list(args: Parameters<typeof base.list>[0]) {
-    const result = await base.list(args);
-    return { ...result, items: result.items.map(presentExpense) };
-  },
-
-  async getById(id: string, includeDeleted?: boolean) {
-    return presentExpense(await base.getById(id, includeDeleted));
-  },
 
   async create(input: Record<string, unknown>) {
     const payload =
       input.amount != null ? { ...input, amount: toSatang(Number(input.amount)) } : input;
-    return presentExpense(await base.create(payload));
+    return base.create(payload);
   },
 
   async update(id: string, input: Record<string, unknown>) {
     const payload =
       input.amount != null ? { ...input, amount: toSatang(Number(input.amount)) } : input;
-    return presentExpense(await base.update(id, payload));
-  },
-
-  async remove(id: string) {
-    return presentExpense(await base.remove(id));
-  },
-
-  async restore(id: string) {
-    return presentExpense(await base.restore(id));
+    return base.update(id, payload);
   },
 };
 

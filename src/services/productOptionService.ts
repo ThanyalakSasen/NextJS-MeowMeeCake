@@ -23,6 +23,11 @@ const WRITABLE = [
   "is_required",
 ] as const;
 
+// BACKLOG §3.11 เฟส 5b — extra_price เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentOption<T extends Record<string, unknown>>(o: T): T {
+  return toBahtFields(o, ["extra_price"] as const);
+}
+
 const base = createCrudService(productOptionModel as Model<any>, {
   label: "ตัวเลือกเสริมสินค้า",
   searchFields: ["option_name"],
@@ -34,6 +39,7 @@ const base = createCrudService(productOptionModel as Model<any>, {
     "extra_price",
     "is_required",
   ],
+  present: presentOption, // BACKLOG3 §8 — ครอบ list/getById/create/update/remove/restore ให้เองในตัว
 });
 
 function validateShape(input: Record<string, any>): void {
@@ -48,11 +54,6 @@ function validateShape(input: Record<string, any>): void {
   } else if (input.is_text_input === false) {
     input.max_text_length = null;
   }
-}
-
-// BACKLOG §3.11 เฟส 5b — extra_price เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
-function presentOption<T extends Record<string, unknown>>(o: T): T {
-  return toBahtFields(o, ["extra_price"] as const);
 }
 
 export interface SelectedOptionInput {
@@ -108,17 +109,10 @@ export function resolveSelectedOptions(
   });
 }
 
+// BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว (base.present ทำให้แล้ว) เหลือแค่
+// create/update ที่ยังต้อง override เพราะมี validation เพิ่มเติม
 export const productOptionService = {
   ...base,
-
-  async list(args: Parameters<typeof base.list>[0]) {
-    const result = await base.list(args);
-    return { ...result, items: result.items.map(presentOption) };
-  },
-
-  async getById(id: string, includeDeleted?: boolean) {
-    return presentOption(await base.getById(id, includeDeleted));
-  },
 
   async create(input: Record<string, any>) {
     if (!input.product_id) throw badRequest("กรุณาระบุ product_id");
@@ -127,22 +121,14 @@ export const productOptionService = {
     validateShape(input);
     const payload =
       input.extra_price != null ? { ...input, extra_price: toSatang(Number(input.extra_price)) } : input;
-    return presentOption(await base.create(payload));
+    return base.create(payload);
   },
 
   async update(id: string, input: Record<string, any>) {
     validateShape(input);
     const payload =
       input.extra_price != null ? { ...input, extra_price: toSatang(Number(input.extra_price)) } : input;
-    return presentOption(await base.update(id, payload));
-  },
-
-  async remove(id: string) {
-    return presentOption(await base.remove(id));
-  },
-
-  async restore(id: string) {
-    return presentOption(await base.restore(id));
+    return base.update(id, payload);
   },
 };
 

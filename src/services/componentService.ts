@@ -34,6 +34,11 @@ const WRITABLE = [
   "ingredients",
 ] as const;
 
+// BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentComponent<T extends Record<string, unknown>>(doc: T): T {
+  return toBahtFields(doc, ["estimated_cost_per_batch"] as const);
+}
+
 const base = createCrudService(componentModel as Model<any>, {
   label: "ส่วนประกอบ",
   searchFields: ["component_name"],
@@ -48,6 +53,9 @@ const base = createCrudService(componentModel as Model<any>, {
     "ingredients",
   ],
   populate: [{ path: "yield_unit_id", select: "unit_name unit_abbr" }],
+  present: presentComponent, // BACKLOG3 §8 — ครอบ list/getById/update/remove/restore ให้เองในตัว
+  // (create() ของ service นี้เรียก componentModel.create() ตรง ๆ ไม่ผ่าน base.create() เลย — ต้อง
+  // presentComponent() เองต่อไป ดูเหตุผลที่ create() override ด้านล่าง)
 });
 
 async function prepare(input: Record<string, any>, isCreate: boolean): Promise<void> {
@@ -90,11 +98,6 @@ function pickWritable(input: Record<string, any>): Record<string, any> {
   return out;
 }
 
-// BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
-function presentComponent<T extends Record<string, unknown>>(doc: T): T {
-  return toBahtFields(doc, ["estimated_cost_per_batch"] as const);
-}
-
 /** getExpanded() populate ingredients.ingredient_id เป็น object เต็ม (ติด cost_per_unit ของวัตถุดิบ
  *  นั้นมาด้วย) — เส้นทาง populate ตรงนี้ไม่ผ่าน ingredientService.presentIngredient() เลย ต้องแปลง
  *  ซ้อนเองตรงนี้ ไม่งั้นหน้าจอที่ใช้ getExpanded (วางแผนผลิต) จะเห็น cost_per_unit เป็นสตางค์ดิบปนอยู่
@@ -113,17 +116,12 @@ function presentExpandedComponent(doc: Record<string, any>): Record<string, any>
   };
 }
 
+// BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
+// override เพราะมี validation เพิ่มเติม (create() เรียก componentModel.create() ตรง ๆ ไม่ผ่าน
+// base.create() เลย ตั้งใจตั้งแต่เดิม เพื่อ inject created_by เอง ไม่ผ่าน createFields whitelist —
+// ยังต้อง presentComponent() เองที่นี่เพราะไม่ได้ผ่าน base)
 export const componentService = {
   ...base,
-
-  async list(args: Parameters<typeof base.list>[0]) {
-    const result = await base.list(args);
-    return { ...result, items: result.items.map(presentComponent) };
-  },
-
-  async getById(id: string, includeDeleted?: boolean) {
-    return presentComponent(await base.getById(id, includeDeleted));
-  },
 
   async create(input: Record<string, any>) {
     for (const f of ["component_name", "componentcategory_id", "yield_qty", "yield_unit_id", "created_by"] as const) {
@@ -140,15 +138,7 @@ export const componentService = {
 
   async update(id: string, input: Record<string, any>) {
     await prepare(input, false);
-    return presentComponent(await base.update(id, input));
-  },
-
-  async remove(id: string) {
-    return presentComponent(await base.remove(id));
-  },
-
-  async restore(id: string) {
-    return presentComponent(await base.restore(id));
+    return base.update(id, input);
   },
 
   async getExpanded(id: string) {

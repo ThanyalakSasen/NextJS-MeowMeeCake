@@ -40,6 +40,11 @@ const WRITABLE = [
   "components",
 ] as const;
 
+// BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+function presentRecipe<T extends Record<string, unknown>>(doc: T): T {
+  return toBahtFields(doc, ["estimated_cost_per_batch"] as const);
+}
+
 const base = createCrudService(recipeModel as Model<any>, {
   label: "สูตรการผลิต",
   searchFields: ["recipe_name"],
@@ -59,6 +64,8 @@ const base = createCrudService(recipeModel as Model<any>, {
     { path: "product_id", select: "product_name_th product_name_eng" },
     { path: "yield_unit_id", select: "unit_name unit_abbr" },
   ],
+  present: presentRecipe, // BACKLOG3 §8 — ครอบ list/getById/update/remove/restore ให้เองในตัว
+  // (create() เรียก recipeModel.create() ตรง ๆ ไม่ผ่าน base.create() — ดูเหตุผลที่ create() ด้านล่าง)
 });
 
 async function prepare(input: Record<string, any>, isCreate: boolean): Promise<void> {
@@ -91,11 +98,6 @@ async function prepare(input: Record<string, any>, isCreate: boolean): Promise<v
   }
 }
 
-// BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
-function presentRecipe<T extends Record<string, unknown>>(doc: T): T {
-  return toBahtFields(doc, ["estimated_cost_per_batch"] as const);
-}
-
 /** getExpanded() populate ทั้ง ingredients.ingredient_id (cost_per_unit) และ components.component_id
  *  (estimated_cost_per_batch) เป็น object เต็ม — เส้นทาง populate ไม่ผ่าน presenter ของ service เจ้าของ
  *  เลย ต้องแปลงซ้อนเองทั้งสองจุด เหมือน componentService.presentExpandedComponent() */
@@ -120,17 +122,12 @@ function presentExpandedRecipe(doc: Record<string, any>): Record<string, any> {
   };
 }
 
+// BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
+// override เพราะมี validation เพิ่มเติม (create() เรียก recipeModel.create() ตรง ๆ ไม่ผ่าน
+// base.create() ตั้งใจตั้งแต่เดิม เพื่อ inject created_by เอง ไม่ผ่าน createFields whitelist — ยังต้อง
+// presentRecipe() เองที่นี่เพราะไม่ได้ผ่าน base)
 export const recipeService = {
   ...base,
-
-  async list(args: Parameters<typeof base.list>[0]) {
-    const result = await base.list(args);
-    return { ...result, items: result.items.map(presentRecipe) };
-  },
-
-  async getById(id: string, includeDeleted?: boolean) {
-    return presentRecipe(await base.getById(id, includeDeleted));
-  },
 
   async create(input: Record<string, any>) {
     for (const f of ["recipe_name", "product_id", "yield_qty", "yield_unit_id", "created_by"] as const) {
@@ -146,15 +143,7 @@ export const recipeService = {
 
   async update(id: string, input: Record<string, any>) {
     await prepare(input, false);
-    return presentRecipe(await base.update(id, input));
-  },
-
-  async remove(id: string) {
-    return presentRecipe(await base.remove(id));
-  },
-
-  async restore(id: string) {
-    return presentRecipe(await base.restore(id));
+    return base.update(id, input);
   },
 
   /** สูตรทั้งหมดของสินค้าตัวหนึ่ง */

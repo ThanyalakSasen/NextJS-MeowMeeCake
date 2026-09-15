@@ -38,6 +38,14 @@ export interface CrudOptions {
   softDelete?: boolean;
   /** populate ทุกครั้งที่อ่านข้อมูล */
   populate?: PopulateSpec[];
+  /**
+   * แปลง doc ก่อนคืนทุกจุดที่อ่าน/เขียนสำเร็จ (list/getById/create/update/remove/restore) — BACKLOG3
+   * §8: เดิม service ที่มีแค่เรื่องหน่วยเงิน (toBahtFields) ต้อง wrap base ทั้ง 6 method เองซ้ำกันทุกตัว
+   * (ingredient/component/recipe/expense/productVariant/productOption/deliveryZone) ทั้งที่ทำสิ่งเดียวกัน
+   * ทุกที่ — ระบุที่นี่ทีเดียวแทน ถ้า service ต้องการ side-effect อื่นนอกจากแปลง output (validate เพิ่ม,
+   * เช็ค reference ก่อนลบ ฯลฯ) ยัง wrap เพิ่มเองได้ตามปกติ (present ทำแค่ "แปลงค่า" ไม่ใช่ทดแทนทุกกรณี)
+   */
+  present?: (doc: Doc) => Doc;
 }
 
 export interface ListArgs {
@@ -68,6 +76,8 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
 
   const activeFilter = (): Record<string, unknown> =>
     softDelete ? { deleted_at: null } : {};
+
+  const present = (doc: Doc): Doc => (opts.present ? opts.present(doc) : doc);
 
   function applyPopulate<Q extends { populate: (path: string, select?: string) => Q }>(q: Q): Q {
     let out = q;
@@ -101,7 +111,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
       model.countDocuments(filter),
     ]);
 
-    return { items: items as Doc[], meta: buildMeta(total, args.pagination) };
+    return { items: (items as Doc[]).map(present), meta: buildMeta(total, args.pagination) };
   }
 
   async function getById(id: string, includeDeleted = false) {
@@ -113,14 +123,14 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
 
     const doc = await applyPopulate(model.findOne(filter)).lean();
     if (!doc) throw notFound(`ไม่พบ${opts.label}ที่ระบุ`);
-    return doc as Doc;
+    return present(doc as Doc);
   }
 
   async function create(input: Doc) {
     await dbConnect();
     const payload = pick(input, createFields);
     const doc = await model.create(payload);
-    return doc.toObject() as Doc;
+    return present(doc.toObject() as Doc);
   }
 
   async function update(id: string, input: Doc) {
@@ -137,7 +147,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
       .lean();
 
     if (!doc) throw notFound(`ไม่พบ${opts.label}ที่ระบุ`);
-    return doc as Doc;
+    return present(doc as Doc);
   }
 
   async function remove(id: string) {
@@ -153,12 +163,12 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
         )
         .lean();
       if (!doc) throw notFound(`ไม่พบ${opts.label}ที่ระบุ หรือถูกลบไปแล้ว`);
-      return doc as Doc;
+      return present(doc as Doc);
     }
 
     const doc = await model.findByIdAndDelete(id).lean();
     if (!doc) throw notFound(`ไม่พบ${opts.label}ที่ระบุ`);
-    return doc as Doc;
+    return present(doc as Doc);
   }
 
   async function restore(id: string) {
@@ -175,7 +185,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
       )
       .lean();
     if (!doc) throw notFound(`ไม่พบ${opts.label}ที่ถูกลบไว้`);
-    return doc as Doc;
+    return present(doc as Doc);
   }
 
   return { model, list, getById, create, update, remove, restore, activeFilter };
