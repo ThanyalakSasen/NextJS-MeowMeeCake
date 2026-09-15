@@ -83,7 +83,9 @@ describe("productService — product_price/sale_price เก็บสตาง�
     };
     expect(byId.product_price).toBe(35);
 
-    const { items } = await productService.getProducts({ limit: 100 });
+    const { items } = await productService.getProducts({
+      pagination: { page: 1, limit: 100, skip: 0 },
+    });
     const found = items.find((it) => String((it as { _id: unknown })._id) === String(created._id));
     expect((found as { product_price: number } | undefined)?.product_price).toBe(35);
   });

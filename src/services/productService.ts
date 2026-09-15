@@ -3,6 +3,8 @@ import { Types } from "mongoose";
 type Filter = Record<string, unknown>;
 import dbConnect from "../lib/dbConnect";
 import { HttpError } from "../lib/httpError";
+import { assertObjectId } from "../lib/objectId";
+import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import {
   generateProductCode,
   isProductCode,
@@ -66,8 +68,7 @@ export interface CreateProductInput {
 export type UpdateProductInput = Partial<CreateProductInput>;
 
 export interface ListProductQuery {
-  page?: number;
-  limit?: number;
+  pagination: Pagination;
   search?: string;
   category_id?: string;
   product_type?: ProductType;
@@ -85,13 +86,6 @@ export class ProductError extends HttpError {
       status === 404 ? "NOT_FOUND" : status === 409 ? "CONFLICT" : "BAD_REQUEST";
     super(message, status, code);
     this.name = "ProductError";
-  }
-}
-
-// ── Helpers ───────────────────────────────────────────────────
-function assertObjectId(id: string, field = "id"): void {
-  if (!Types.ObjectId.isValid(id)) {
-    throw new ProductError(`รูปแบบ ${field} ไม่ถูกต้อง`, 400);
   }
 }
 
@@ -303,12 +297,8 @@ export async function resolveScan(code: string) {
 }
 
 // ── READ (list) ───────────────────────────────────────────────
-export async function getProducts(query: ListProductQuery = {}) {
+export async function getProducts(query: ListProductQuery) {
   await dbConnect();
-
-  const page = Math.max(1, Number(query.page) || 1);
-  const limit = Math.min(100, Math.max(1, Number(query.limit) || 20));
-  const skip = (page - 1) * limit;
 
   const filter: Filter = {};
 
@@ -341,25 +331,17 @@ export async function getProducts(query: ListProductQuery = {}) {
     productModel
       .find(filter)
       .sort({ [sortField]: sortDir })
-      .skip(skip)
-      .limit(limit)
+      .skip(query.pagination.skip)
+      .limit(query.pagination.limit)
       .populate("category_id", "product_category_name")
       .populate("unit_id", "unit_name unit_abbr")
       .lean(),
     productModel.countDocuments(filter),
   ]);
 
-  // key `meta` (เดิม `pagination`) — โครงมาตรฐานเดียวของ list endpoint · ดู docs/api-conventions.md
   return {
     items: items.map(presentProduct),
-    meta: {
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit) || 1,
-      hasNextPage: page * limit < total,
-      hasPrevPage: page > 1,
-    },
+    meta: buildMeta(total, query.pagination),
   };
 }
 
@@ -858,11 +840,6 @@ export async function getLowStockProducts(
     .lean();
 
   return { threshold, count: items.length, items };
-}
-
-// ── utils ────────────────────────────────────────────────────
-function escapeRegExp(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 const productService = {
