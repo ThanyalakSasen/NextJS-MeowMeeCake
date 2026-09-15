@@ -33,6 +33,11 @@ rateLimit(clientIp(req), "auth:login", { limit: 10, windowMs: 60_000 });
 | `POST /api/auth/register` | `auth:register` | 5 / นาที |
 | `POST /api/auth/google` | `auth:google` | 10 / นาที |
 | `PATCH /api/shop/me/password` | `me:password` | 5 / นาที |
+| `POST /api/shop/promotions/validate` | `promotions:validate` | 20 / นาที — กันเดารหัสโปรโมชัน (BACKLOG2 §7, เพิ่ม 2026-09-15) |
+
+**ที่ตรวจแล้วไม่ต้อง wire เพิ่ม (BACKLOG2 §7):** `orders/delivery-quote` (ไม่มีค่าลับให้เดา คำนวณเบา) ·
+`orders/by-no/[orderNo]` (เดาถูกได้แค่ 403, keyspace ใหญ่เกิน brute-force) · `catalog/**` ทั้งหมด
+(read-only, ความเสี่ยง scraping/DoS ทั่วไปเหมือน GET endpoint อื่น ไม่ใช่ของเฉพาะกลุ่มนี้)
 
 **เทส:** `tests/lib/rateLimit.test.ts` — ถึง limit → 429, `ip=null` ไม่จำกัด, แยก bucket ตาม ip+scope, sliding window นับใหม่หลังพ้น window
 

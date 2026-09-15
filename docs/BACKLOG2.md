@@ -1,7 +1,7 @@
 # MeowMeeCake Backend — BACKLOG 2: บั๊ก/ความเสี่ยงชุดใหม่
 
-> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-15 (§1/§2/§4/§5 แก้ครบแล้ว · §3 เพิ่ม upload.ts audit
-> ไม่พบ path traversal, แก้ 1 จุด S3 config gap · เหลือ §6 บางข้อยังไม่ได้ตรวจ)
+> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-15 (§1/§2/§4/§5/§7 แก้ครบแล้ว · §3 เพิ่ม upload.ts audit
+> ไม่พบ path traversal, แก้ 1 จุด S3 config gap · เหลือ §8 บางข้อยังไม่ได้ตรวจ)
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
@@ -17,6 +17,7 @@
 | ownership/IDOR ของ shop routes (`addresses`, `cart/items`, `reviews`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — ทุกจุด scope ด้วย `user_id` ที่ service layer ถูกต้อง (เทียบกับ `2b.1` ที่เคยพลาด) |
 | duplicate-key error handling ทั่วไป (`crudService`/`apiResponse`) | ✅ ตรวจแล้ว **ไม่พบปัญหา** — `toErrorResponse()` แปลง Mongo `11000` เป็น response ที่มีโครงสร้างอยู่แล้ว ไม่ใช่ 500 ดิบ |
 | path traversal / file validation (`src/lib/upload.ts`) | ✅ ตรวจแล้ว **ไม่พบ path traversal ที่ใช้ได้จริง** (2026-09-15) — แก้ 1 จุดที่เกี่ยวข้อง: `createS3Driver` ไม่เคยเช็ค `S3_PUBLIC_URL_BASE` (ลบไฟล์ไม่ได้เงียบ ๆ ถ้าลืมตั้ง) |
+| **§7 rate-limit coverage ของ public endpoint อื่น** | ✅ **แก้ 1/2** (2026-09-15) — เพิ่ม rate-limit ที่ `/shop/promotions/validate` (กันเดารหัสโปรโมชัน) · `delivery-quote`/`orders/by-no`/`catalog/**` ตรวจแล้วไม่ต้องแก้ |
 | **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | ✅ **แก้แล้ว** (2026-09-13) — เพิ่ม `preorderService.updateDelivery()` + `PATCH /api/admin/preorders/[id]/delivery` คู่กับของ order + เทส 6 เคสใหม่ |
 | **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | ✅ **แก้แล้ว** (2026-09-15) — `createFields` เปลี่ยนจาก optional เป็น required ใน `CrudOptions` — compiler เจอ **1 จุดจริง** ที่ยังไม่ระบุ (`notificationService.ts`, ดู §5 ด้านล่าง) |
 
@@ -233,13 +234,30 @@ service และ route บอกตรงกันว่า "สร้างไ
 
 ---
 
-## 6. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
+## 7. ✅ rate-limit coverage ของ endpoint สาธารณะอื่นนอกจาก auth (พบ + แก้ 1/2, 2026-09-15)
+
+> เดิมตั้งใจครอบแค่ 4 endpoint กลุ่ม auth (`login`/`register`/`google`/`me/password` — ดู
+> [`security-hardening.md`](security-hardening.md) §3.2) ยังไม่เคยประเมินว่า endpoint อื่นที่ไม่ผ่าน
+> middleware แบบ public (หรือ authenticated แต่เปิดให้ทุกคนที่ล็อกอินยิงได้) ควรมี rate-limit เพิ่มไหม —
+> ไล่เช็คทุก route ใน `src/app/api/shop/**` + `src/app/api/catalog/**` (33 ไฟล์) แบ่งเป็น 2 กลุ่มความเสี่ยง
+
+| Endpoint | ความเสี่ยง | ผล |
+|---|---|---|
+| `POST /api/shop/promotions/validate` | **enumeration/brute-force** — รับ `code` เป็น string อิสระ ตรวจว่าโค้ดใช้ได้ไหม ไม่มี rate-limit เดิมเลย ลูกค้าที่ล็อกอินแล้ว (สมัครฟรี) เขียนสคริปต์ลองโค้ดเป็นพัน ๆ ครั้งเพื่อเดาโค้ดโปรโมชันที่ยังไม่เปิดเผย/เฉพาะกลุ่มได้ — pattern เดียวกับที่กันไว้แล้วที่ `/auth/login` (เดารหัสผ่าน) | ✅ **แก้แล้ว** — เพิ่ม `rateLimit(clientIp(req), "promotions:validate", { limit: 20, windowMs: 60_000 })` |
+| `POST /api/shop/orders/delivery-quote` | คำนวณค่าส่งจาก province + cart subtotal — ไม่มี "ค่าลับ" ให้เดา (province เป็นข้อมูลสาธารณะ) และคำนวณเบา (`cartService.getCartDetail` + `calcDeliveryFee` ที่มี cache zone อยู่แล้ว) — ความเสี่ยงเท่า endpoint authenticated ทั่วไปอื่น ๆ ในระบบที่ไม่ได้ rate-limit เช่นกัน ไม่ใช่ brute-force target | ✅ ตรวจแล้ว **ไม่ต้องแก้** |
+| `GET /api/shop/orders/by-no/[orderNo]` | สุ่ม order_no ได้ (`OP-YYYYMMDD-XXXXXX`, `XXXXXX` = 6 ตัวอักษร base36 = 36⁶ ≈ 2.18 พันล้านค่าต่อวัน) แต่ route เช็ค `requireOwner(session, order.user_id)` เสมอ — เดาถูกได้แค่ 403 (ไม่ใช่เจ้าของ) ไม่มีข้อมูลรั่ว ไม่ใช่ endpoint ที่ "สำเร็จ = ได้ของมีค่า" แบบโปรโมชัน + keyspace ใหญ่เกินจะ brute-force จริงด้วย rate-limit ระดับ IP | ✅ ตรวจแล้ว **ไม่ต้องแก้** |
+| `src/app/api/catalog/**` (12 route) | อ่านอย่างเดียวทั้งหมด (public, ไม่ต้องล็อกอิน) ไม่มี secret ให้เดา — ความเสี่ยงเป็น scraping/DoS ทั่วไปเหมือน GET endpoint อื่นทุกตัวในระบบ ไม่ใช่ของเฉพาะกลุ่มนี้ | ✅ ตรวจแล้ว **ไม่ต้องแก้** (นอกขอบเขต — ต้องเป็นนโยบายระดับระบบ เช่น CDN/WAF ไม่ใช่แก้ทีละ route) |
+
+ยืนยันด้วย `typecheck`/`typecheck:test`/`lint`(0 error)/`test`(171)/`test:integration`(138)/`build` ผ่านหมด
+— ไม่มี unit/integration test เดิมยิงเข้า route นี้ซ้ำ ๆ จนชน limit ใหม่ (เทสที่มีเรียก
+`promotionService.previewForCart` ตรง ไม่ผ่าน route)
+
+---
+
+## 8. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
 
 - ไล่เทียบ `productionOrderService`/`preorderRoundService` กับฟังก์ชันคู่ขนานอื่น (ไม่มี "ต้นแบบ" ที่
   ชัดเจนเท่า order/preorder จึงยังไม่ได้ทำแบบเดียวกับ §4)
 - ตรวจ race condition อื่นนอกจาก quota/usage ที่มีการ์ดแล้ว (เช่น stock ระดับ variant)
 - ตรวจ validation coverage ของ `/api/shop/preorders` (POST) ที่ [BACKLOG.md §3.8](BACKLOG.md) บันทึกไว้
   แล้วว่ายังไม่ zod-adopt เต็ม — เป็น gap ที่รู้ตัวอยู่แล้ว ไม่ใช่ของใหม่
-- ตรวจ rate-limit coverage ของ endpoint สาธารณะอื่นนอกจาก auth (เช่น `/api/shop/promotions/validate`,
-  `/api/shop/orders/delivery-quote`) — ตอนนี้ตั้งใจครอบแค่ 4 endpoint ตาม [BACKLOG.md §3.2](BACKLOG.md)
-  ยังไม่ได้ประเมินว่าควรขยายไหม
