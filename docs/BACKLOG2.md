@@ -1,7 +1,8 @@
 # MeowMeeCake Backend — BACKLOG 2: บั๊ก/ความเสี่ยงชุดใหม่
 
 > สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-15 (§1/§2/§4/§5/§7/§8 แก้ครบแล้ว · §3 เพิ่ม upload.ts audit
-> ไม่พบ path traversal, แก้ 1 จุด S3 config gap · เหลือ §9 บางข้อยังไม่ได้ตรวจ)
+> ไม่พบ path traversal, แก้ 1 จุด S3 config gap · §9 พบ `variant_stock` ไม่เคยถูกบังคับใช้ — บันทึกเป็น
+> ความเสี่ยงไว้ก่อนตามที่ผู้ใช้เลือก (DB จริงมี 0 active variant) · เหลือ §10 บางข้อยังไม่ได้ตรวจ)
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
@@ -19,6 +20,7 @@
 | path traversal / file validation (`src/lib/upload.ts`) | ✅ ตรวจแล้ว **ไม่พบ path traversal ที่ใช้ได้จริง** (2026-09-15) — แก้ 1 จุดที่เกี่ยวข้อง: `createS3Driver` ไม่เคยเช็ค `S3_PUBLIC_URL_BASE` (ลบไฟล์ไม่ได้เงียบ ๆ ถ้าลืมตั้ง) |
 | **§7 rate-limit coverage ของ public endpoint อื่น** | ✅ **แก้ 1/2** (2026-09-15) — เพิ่ม rate-limit ที่ `/shop/promotions/validate` (กันเดารหัสโปรโมชัน) · `delivery-quote`/`orders/by-no`/`catalog/**` ตรวจแล้วไม่ต้องแก้ |
 | **§8 validation coverage ของ `POST /api/shop/preorders`** | ✅ **แก้แล้ว** (2026-09-15) — เพิ่ม `schemas/preorder.ts` (zod) + รองรับ `address_id` (ปิด gap เดิมของ [BACKLOG.md §3.8](BACKLOG.md) ไปพร้อมกัน) |
+| **§9 `variant_stock` ไม่เคยถูกเช็ค/ตัดสต็อกเลย** | 🟡 **พบจริง ไม่ใช่ race condition แต่ไม่มีการเช็คเลย** (2026-09-15) — DB จริงมี 0 active variant ตอนนี้ (ผลกระทบ = 0) ผู้ใช้เลือกบันทึกเป็นความเสี่ยงไว้ก่อน ไม่แก้โค้ดตอนนี้ |
 | **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | ✅ **แก้แล้ว** (2026-09-13) — เพิ่ม `preorderService.updateDelivery()` + `PATCH /api/admin/preorders/[id]/delivery` คู่กับของ order + เทส 6 เคสใหม่ |
 | **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | ✅ **แก้แล้ว** (2026-09-15) — `createFields` เปลี่ยนจาก optional เป็น required ใน `CrudOptions` — compiler เจอ **1 จุดจริง** ที่ยังไม่ระบุ (`notificationService.ts`, ดู §5 ด้านล่าง) |
 
@@ -306,8 +308,51 @@ unit test)/`build` ผ่านหมด
 
 ---
 
-## 9. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
+## 9. 🟡 `variant_stock` ไม่เคยถูกเช็ค/ตัดสต็อกเลยทั้งระบบ — ความเสี่ยงเชิงออกแบบ ไม่ใช่บั๊กที่เกิดจริง (พบ 2026-09-15)
+
+> เดิมโจทย์คือ "ตรวจ race condition อื่นนอกจาก quota/usage ที่มีการ์ดแล้ว (เช่น stock ระดับ variant)"
+> — ไล่โค้ดจริงแล้วพบว่า**ไม่ใช่ race condition** (ซึ่งหมายถึงมีการเช็คแต่ atomicity รั่ว) แต่เป็นกรณีที่
+> **ไม่มีการเช็ค/บังคับใช้เลยสักจุดในทุก code path** — ร้ายแรงกว่า race condition เปล่า ๆ แต่ยืนยัน DB
+> จริง (read-only) แล้วพบว่า **ผลกระทบปัจจุบัน = 0** เพราะไม่มี active variant อยู่เลยสักตัวในระบบตอนนี้
+
+**ยืนยันด้วยการอ่านโค้ดจริงครบทุกจุดที่เกี่ยวข้อง:**
+- `productVariantModel.ts` มีฟิลด์ `variant_stock` (`min: 0`) — แก้ไขได้ผ่าน
+  `productVariantService`/`/api/admin/product-variants` ปกติ และถูก `select()` มาแสดงใน
+  `productService.resolveScan()` (คอมเมนต์ในโค้ด: "คืนสินค้า + ราคาปัจจุบัน + สต็อก + variants (ถ้ามี
+  ให้ POS เลือกก่อนเพิ่มลงบิล)") — ยืนยันว่าฟิลด์นี้ตั้งใจให้พนักงาน POS ดูประกอบการตัดสินใจจริง ไม่ใช่
+  ฟิลด์ขยะที่หลงเหลือ
+- **แต่** `productService.StockItemInput` (type ที่ `checkStockAvailability()`/`deductStockForOrder()`/
+  `restockForOrder()` ทั้ง 3 ตัวรับ) มีแค่ `{ product_id, quantity }` — **ไม่มี `variant_id` เลย**
+  ตรวจทั้ง 3 ฟังก์ชันแล้วยืนยันว่าทำงานที่ระดับ `product_stock_quantity` (aggregate ต่อสินค้า) ล้วน ๆ
+- `orderService.ts` — `resolveLines()` (บรรทัด ~200-219) หา `variant` มาใช้คำนวณราคา
+  (`variant.variant_price`) เท่านั้น **ไม่เคยอ่านหรือเช็ค `variant.variant_stock` เลย** และตอนสร้าง
+  `stockItems` ก่อนเรียก `deductStockForOrder()` (บรรทัด ~366-369) ก็ map จาก `{ product_id, quantity }`
+  ทิ้ง `variant_id` ของ line ไปเฉย ๆ ทั้งที่ตัวแปรมีอยู่แล้ว
+- ผลคือ: สินค้าที่มี variant (เช่น ไซส์ S/M/L แยกจำนวน) — ทุก variant ของสินค้าเดียวกัน**ใช้ pool สต็อก
+  เดียวกัน**คือ `product_stock_quantity` ตอน checkout ไม่ว่าลูกค้าจะเลือก variant ไหน แปลว่าถ้าตั้งใจให้
+  แต่ละ variant มีสต็อกแยกกันจริง (เช่น ไซส์ S เหลือ 0 แต่ M เหลือ 5) ระบบจะยัง**ยอมให้สั่งไซส์ S ได้ถ้า
+  `product_stock_quantity` รวมยังเหลือ** — ไม่มีทาง reject รายการที่ variant เฉพาะหมดสต็อกแล้ว
+
+**ยืนยันผลกระทบจริงด้วย DB จริง (read-only aggregate, 2026-09-15):** query หา active product variant
+(`deleted_at: null`) ทั้งหมดในฐานจริง → **พบ 0 รายการ** ไม่มีสินค้าไหนใช้ระบบ variant อยู่เลยตอนนี้ —
+แปลว่าช่องว่างนี้**ยังไม่เคยถูกกระตุ้นให้เกิดผลจริงกับลูกค้าเลยสักครั้ง**
+
+**การตัดสินใจ (ถามผู้ใช้ก่อนแก้ ตามธรรมเนียมของโปรเจกต์นี้เวลาเจอทางเลือกเชิงสถาปัตยกรรม — ไม่เดาเอง):**
+เสนอ 3 ทาง (เก็บเป็นความเสี่ยงไว้ก่อน / แก้ให้ตัดสต็อกตาม variant จริง / ลบฟิลด์ทิ้งถ้าไม่มีแผนใช้) —
+**ผู้ใช้เลือก "บันทึกเป็นความเสี่ยงเชิงออกแบบไว้ก่อน"** เหตุผล: ผลกระทบปัจจุบัน = 0 (ไม่มี variant ใช้
+งานจริง) การแก้ให้ตัดสต็อกตาม variant เป็นงานใหญ่ที่แตะ `orderService`/`cartService`/POS create-order +
+เทสหลายเคส ควรรอจนกว่าจะมีความต้องการใช้งาน variant จริงแล้วค่อยออกแบบให้ตรงกับ requirement ตอนนั้น
+(อาจไม่ใช่แค่ "แก้ atomic guard" แต่ต้องตัดสินใจเรื่อง business logic ก่อน เช่น `product_stock_quantity`
+ควรเป็นผลรวมของ `variant_stock` ทุกตัวไหม หรือเป็นคนละ pool กัน)
+
+**สถานะ:** 🟡 ไม่แก้โค้ดรอบนี้ — บันทึกไว้เป็น known risk เดียวกับรูปแบบ §5 ก่อนแก้ (ตอนยังไม่มีจุดพังจริง)
+**เงื่อนไขที่ควรกลับมาทำ:** ก่อนเปิดใช้ product variant จริงครั้งแรก (เพิ่มแถวใน `product-variants` ผ่าน
+หน้าแอดมินสำหรับสินค้าที่ขายจริง) ต้องตัดสินใจ + แก้เรื่องนี้ก่อน ไม่งั้นลูกค้าจะสั่ง variant ที่หมดสต็อก
+แล้วได้
+
+---
+
+## 10. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
 
 - ไล่เทียบ `productionOrderService`/`preorderRoundService` กับฟังก์ชันคู่ขนานอื่น (ไม่มี "ต้นแบบ" ที่
   ชัดเจนเท่า order/preorder จึงยังไม่ได้ทำแบบเดียวกับ §4)
-- ตรวจ race condition อื่นนอกจาก quota/usage ที่มีการ์ดแล้ว (เช่น stock ระดับ variant)
