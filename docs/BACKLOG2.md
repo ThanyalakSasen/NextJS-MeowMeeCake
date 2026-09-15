@@ -1,8 +1,8 @@
 # MeowMeeCake Backend — BACKLOG 2: บั๊ก/ความเสี่ยงชุดใหม่
 
-> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-15 (§1/§2/§4/§5/§7/§8 แก้ครบแล้ว · §3 เพิ่ม upload.ts audit
-> ไม่พบ path traversal, แก้ 1 จุด S3 config gap · §9 พบ `variant_stock` ไม่เคยถูกบังคับใช้ — บันทึกเป็น
-> ความเสี่ยงไว้ก่อนตามที่ผู้ใช้เลือก (DB จริงมี 0 active variant) · เหลือ §10 บางข้อยังไม่ได้ตรวจ)
+> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-15 (§1/§2/§4/§5/§7/§8/§10 แก้ครบแล้ว · §3 เพิ่ม upload.ts
+> audit ไม่พบ path traversal, แก้ 1 จุด S3 config gap · §9 พบ `variant_stock` ไม่เคยถูกบังคับใช้ —
+> บันทึกเป็นความเสี่ยงไว้ก่อนตามที่ผู้ใช้เลือก (DB จริงมี 0 active variant) · **ทุกข้อที่ตั้งไว้ตรวจครบแล้ว**)
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
@@ -21,6 +21,7 @@
 | **§7 rate-limit coverage ของ public endpoint อื่น** | ✅ **แก้ 1/2** (2026-09-15) — เพิ่ม rate-limit ที่ `/shop/promotions/validate` (กันเดารหัสโปรโมชัน) · `delivery-quote`/`orders/by-no`/`catalog/**` ตรวจแล้วไม่ต้องแก้ |
 | **§8 validation coverage ของ `POST /api/shop/preorders`** | ✅ **แก้แล้ว** (2026-09-15) — เพิ่ม `schemas/preorder.ts` (zod) + รองรับ `address_id` (ปิด gap เดิมของ [BACKLOG.md §3.8](BACKLOG.md) ไปพร้อมกัน) |
 | **§9 `variant_stock` ไม่เคยถูกเช็ค/ตัดสต็อกเลย** | 🟡 **พบจริง ไม่ใช่ race condition แต่ไม่มีการเช็คเลย** (2026-09-15) — DB จริงมี 0 active variant ตอนนี้ (ผลกระทบ = 0) ผู้ใช้เลือกบันทึกเป็นความเสี่ยงไว้ก่อน ไม่แก้โค้ดตอนนี้ |
+| **§10 `createProductionOrder` ไม่มี Saga — header ค้างถ้า items ผิด** | ✅ **แก้แล้ว** (2026-09-15) — เพิ่ม `Saga` rollback header เมื่อ `addItems()` throw (เทียบ `orderService`/`preorderService` ที่มี, `preorderRoundService.createRound()` validate ก่อนสร้างอยู่แล้วจึงไม่ต้องแก้) |
 | **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | ✅ **แก้แล้ว** (2026-09-13) — เพิ่ม `preorderService.updateDelivery()` + `PATCH /api/admin/preorders/[id]/delivery` คู่กับของ order + เทส 6 เคสใหม่ |
 | **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | ✅ **แก้แล้ว** (2026-09-15) — `createFields` เปลี่ยนจาก optional เป็น required ใน `CrudOptions` — compiler เจอ **1 จุดจริง** ที่ยังไม่ระบุ (`notificationService.ts`, ดู §5 ด้านล่าง) |
 
@@ -352,7 +353,48 @@ unit test)/`build` ผ่านหมด
 
 ---
 
-## 10. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
+## 10. ✅ `createProductionOrder` ไม่มี Saga rollback — เหลือ header ค้างถ้า items ผิดหลังสร้างแล้ว (พบ + แก้ 2026-09-15)
 
-- ไล่เทียบ `productionOrderService`/`preorderRoundService` กับฟังก์ชันคู่ขนานอื่น (ไม่มี "ต้นแบบ" ที่
-  ชัดเจนเท่า order/preorder จึงยังไม่ได้ทำแบบเดียวกับ §4)
+> โจทย์เดิม: "ไล่เทียบ `productionOrderService`/`preorderRoundService` กับฟังก์ชันคู่ขนานอื่น (ไม่มี
+> \"ต้นแบบ\" ที่ชัดเจนเท่า order/preorder)" — เปลี่ยนวิธีตรวจ: แทนที่จะเทียบสองไฟล์นี้กันเอง (โดเมนต่างกัน
+> เกินจะเทียบตรง ๆ) ไล่เทียบ**แต่ละไฟล์**กับ pattern "สร้าง header + child items" ที่ established แล้วใน
+> `orderService.persistOrder()`/`preorderService.createPreorder()` (ทั้งคู่ห่อด้วย `Saga` — ดู
+> `hardening-d3-plan.md` §3.3b) แทน — พบว่า `preorderRoundService.createRound()` ทำถูกอยู่แล้ว (validate
+> items ทุกตัวให้ผ่าน**ก่อน**สร้าง header — ดูโค้ดจริงบรรทัด ~133-170 คอมเมนต์ในไฟล์เองก็บอกตรงว่า "ตรวจ
+> items ก่อนสร้างรอบ (กันสร้างรอบค้างโดยไม่มีสินค้า)") แต่ `productionOrderService.createProductionOrder()`
+> **ไม่ทำแบบนั้นและไม่มี Saga ด้วย** — เจอ gap จริง
+
+**ยืนยันด้วยการอ่านโค้ดจริง:** `createProductionOrder()` (เดิม) สร้าง `productionOrderModel` (header,
+สถานะ `"planned"`) ก่อน แล้ว**ค่อย**เรียก `productionItemService.addItems()` — ฟังก์ชันนี้ validate
+`recipe_id` ↔ `product_id` ตรงกันไหม (`recipe.product_id !== input.product_id` → `badRequest`) **ข้างใน
+ตัวเอง หลังจาก** header ถูกสร้างไปแล้ว ต่างจาก `preorderRoundService.createRound()` ที่ validate
+`product_type === "preorder"` ของทุก item ให้ผ่าน**ก่อน**เรียก `preorderRoundModel.create()` — ผลคือถ้า
+แอดมินสร้างใบสั่งผลิตหลายรายการพร้อมกันแล้วพิมพ์ `recipe_id`/`product_id` ไม่ตรงกันแม้แต่รายการเดียว (เช่น
+สูตรของสินค้า A แต่ระบุ product_id เป็นสินค้า B — เกิดได้ง่ายเวลาสร้างใบสั่งผลิตหลายรายการพร้อมกันจริง
+ผ่าน `POST /api/admin/production-orders`, permission `production.create`) จะเหลือใบสั่งผลิต `"planned"`
+ที่**ไม่มีรายการเลยสักตัว**ค้างอยู่ใน DB ตลอดไป ไม่มีทาง rollback อัตโนมัติ (ต้องให้แอดมินมาลบเองด้วยมือ
+ถ้าสังเกตเจอ)
+
+**วิธีแก้ที่ใช้จริง (2026-09-15):** ห่อขั้น `addItems()` ด้วย `Saga` (`onRollback` ลบ header ถ้า
+`addItems()` throw) — เลือกวิธีนี้แทนการ restructure `addItems()` ให้ validate-then-insert แบบ
+`createRound()` เพราะ `addItems()` เป็นฟังก์ชันร่วมที่ `POST /admin/production-orders/[id]/items` ก็เรียก
+ใช้ (เพิ่มรายการเข้าใบที่มีอยู่แล้ว ไม่มี header ให้ rollback) — Saga ที่จุดเรียกใน `createProductionOrder()`
+เท่านั้นตรงเป้ากว่า ไม่ต้องแตะ `addItems()`/`addItem()` เลย · เทสใหม่
+`tests/integration/createProductionOrderRollback.test.ts` (3 เคส: `recipe_id`/`product_id` ไม่ตรงกัน →
+header ไม่เหลือค้าง, items ถูกต้องสร้างสำเร็จปกติไม่ rollback, รายการที่ 2 ผิดในชุดหลายรายการ → rollback
+ทั้งชุดไม่เหลือรายการค้างแม้แต่รายการเดียว)
+
+ยืนยันด้วย `typecheck`/`typecheck:test`/`lint`(0 error, 4 warning ไม่เปลี่ยน)/`test`(181,
+ไม่เปลี่ยน — เทสใหม่เป็น integration)/`test:integration`(138→**141**, +3)/`build` ผ่านหมด
+
+**preorderRoundService — ตรวจเพิ่มเติมแล้วไม่พบ gap อื่น:** `commitQty`/`releaseQty` ใช้ atomic `$inc` +
+`$expr` guard แบบเดียวกับ `promotionUsage.recordUsage` ที่แก้ไปแล้วใน §2.9 (ของเดิมถูกอยู่แล้ว) ·
+`removeRoundItem`/`updateRoundItem`(`max_qty_total`)/`deleteRound` มี guard กันแก้/ลบข้อมูลที่ถูกจองไป
+แล้วครบทุกจุด — ไม่มีอะไรต้องแก้เพิ่ม
+
+---
+
+## 11. ยังไม่ได้ตรวจ (ขอบเขตที่ยังไม่ครอบในรอบนี้)
+
+ไม่มีรายการเหลือจากรอบตรวจนี้ — BACKLOG2 §1–§10 ครบทุกข้อที่ตั้งไว้แล้ว (§9 บันทึกเป็นความเสี่ยงไว้ก่อน
+ตามที่ผู้ใช้เลือก ไม่ใช่ปิดด้วยการแก้โค้ด) รายการที่ยังเปิดค้างจริง = สิ่งที่บันทึกไว้ใน §9 เท่านั้น
