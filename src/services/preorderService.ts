@@ -25,6 +25,7 @@ import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
+import { generateDocNo } from "../lib/productCode";
 import type { z } from "zod";
 // BACKLOG2 §4 — schema เดียวกับ orderService.updateDelivery() ทุกฟิลด์ (generic ไม่มีอะไรเฉพาะ order)
 // ใช้ร่วมกันได้เลย ไม่ต้องสร้างซ้ำ
@@ -93,16 +94,6 @@ export interface ListPreorderQuery {
   date_to?: string;
   includeDeleted?: boolean;
   sort?: Record<string, 1 | -1>;
-}
-
-// ── helper: ออกเลขพรีออเดอร์ PRE-YYYYMMDD-XXXXXX ────────────
-function randomPreorderNo(now = new Date()): string {
-  const ymd =
-    now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0");
-  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `PRE-${ymd}-${rand}`;
 }
 
 // ── CREATE ───────────────────────────────────────────────────
@@ -235,7 +226,7 @@ export async function createPreorder(
     for (let attempt = 0; attempt < 5 && !preorder; attempt++) {
       try {
         preorder = await preorderModel.create({
-          preorder_no: randomPreorderNo(),
+          preorder_no: generateDocNo("PRE"),
           user_id: userId,
           round_id: round._id,
           order_type: input.order_type,

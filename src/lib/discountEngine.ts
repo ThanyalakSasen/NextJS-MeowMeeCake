@@ -8,6 +8,7 @@
  * ⚠️ ไม่เช็ค is_active / ช่วงวันที่ / usage_limit / max_user_per_user — เป็นหน้าที่ของ promotionService
  */
 import { badRequest, unprocessable } from "./httpError";
+import { round2 } from "./money";
 
 export type DiscountType = "Percentage" | "Amount" | "FreeShipping";
 export type PromotionChannel = "online" | "instore";
@@ -50,8 +51,6 @@ export interface PromotionLike {
   min_quantity?: number | null;
   max_discount_amount?: number | null;
 }
-
-const round2 = (n: number) => Math.round(n * 100) / 100;
 
 function idIn(list: unknown[] | undefined, id: string | null | undefined): boolean {
   if (!list?.length || !id) return false;

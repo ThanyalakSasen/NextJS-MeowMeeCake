@@ -3,6 +3,7 @@ import {
   generateProductCode,
   isProductCode,
   isStockProductType,
+  generateDocNo,
 } from "@/lib/productCode";
 
 describe("generateProductCode", () => {
@@ -35,6 +36,23 @@ describe("isProductCode", () => {
     expect(isProductCode("0526123")).toBe(false);
     expect(isProductCode(12345)).toBe(false);
     expect(isProductCode(null)).toBe(false);
+  });
+});
+
+describe("generateDocNo (BACKLOG3 — ตัวสร้างเลขที่เอกสารกลาง แทน randomOrderNo/randomPreorderNo/randomProductionNo เดิมที่ซ้ำกัน 3 จุด)", () => {
+  it("รูปแบบ <prefix>-YYYYMMDD-<random ตัวพิมพ์ใหญ่> ความยาวสุ่มตามที่ระบุ (default 6)", () => {
+    expect(generateDocNo("OP")).toMatch(/^OP-\d{8}-[A-Z0-9]{6}$/);
+    expect(generateDocNo("PRD", 5)).toMatch(/^PRD-\d{8}-[A-Z0-9]{5}$/);
+  });
+
+  it("YYYYMMDD มาจากวันที่ที่ส่งเข้า (5 ม.ค. 2026 → 20260105)", () => {
+    const no = generateDocNo("PRE", 6, new Date(2026, 0, 5));
+    expect(no.startsWith("PRE-20260105-")).toBe(true);
+  });
+
+  it("สุ่มไม่ซ้ำกันในทางปฏิบัติ (เรียกซ้ำ ๆ ไม่ควรได้ค่าเดิม)", () => {
+    const values = new Set(Array.from({ length: 20 }, () => generateDocNo("OP")));
+    expect(values.size).toBeGreaterThan(1);
   });
 });
 

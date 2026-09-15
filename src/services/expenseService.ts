@@ -6,7 +6,7 @@ import dbConnect from "../lib/dbConnect";
 import { badRequest } from "../lib/httpError";
 import { createCrudService } from "../lib/crudService";
 import expenseModel from "../models/expenseModel";
-import { toSatang, toBaht, toBahtFields } from "../lib/money";
+import { toSatang, toBaht, toBahtFields, round2 } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -94,11 +94,11 @@ export async function summary(opts: { date_from?: string; date_to?: string } = {
 
   const totalBaht = rows.reduce((s, r) => s + toBaht(r.total), 0);
   return {
-    total: Math.round(totalBaht * 100) / 100,
+    total: round2(totalBaht),
     count: rows.reduce((s, r) => s + r.count, 0),
     by_category: rows.map((r) => ({
       category: r._id,
-      total: Math.round(toBaht(r.total) * 100) / 100,
+      total: round2(toBaht(r.total)),
       count: r.count,
     })),
   };

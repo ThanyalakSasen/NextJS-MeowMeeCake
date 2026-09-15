@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toSatang, toBaht, percentOfSatang, toSatangFields, toBahtFields } from "@/lib/money";
+import { toSatang, toBaht, percentOfSatang, toSatangFields, toBahtFields, round2 } from "@/lib/money";
 
 /**
  * BACKLOG §3.11 — เก็บเงินเป็นสตางค์ (integer) แทนบาท (float) กันปัญหา floating-point สะสม error
@@ -45,6 +45,15 @@ describe("money.percentOfSatang", () => {
   it("คิดเปอร์เซ็นต์ของยอดสตางค์แล้วปัดเป็น integer เสมอ", () => {
     expect(percentOfSatang(10000, 15)).toBe(1500); // 15% ของ 100 บาท = 15 บาท = 1500 สตางค์
     expect(percentOfSatang(9999, 10)).toBe(1000); // 999.9 ปัดเป็น 1000
+  });
+});
+
+describe("money.round2", () => {
+  it("ปัดบาททศนิยมให้เหลือ 2 ตำแหน่งเสมอ (BACKLOG3 — เดิมแต่ละไฟล์ inline Math.round(x*100)/100 เอง)", () => {
+    expect(round2(19.999)).toBe(20);
+    expect(round2(1 / 3)).toBe(0.33);
+    expect(round2(100)).toBe(100);
+    expect(round2(0)).toBe(0);
   });
 });
 

@@ -31,6 +31,15 @@ export function percentOfSatang(satang: number, percent: number): number {
 }
 
 /**
+ * ปัดค่า "บาท" (float) ให้เหลือทศนิยม 2 ตำแหน่งเสมอ — ใช้กับค่าที่เป็นบาทอยู่แล้วตอนคำนวณ/แสดงผล
+ * (เช่นผลลัพธ์ที่ผ่าน `toBaht()` มาแล้ว, `avg_rating`) **ไม่ใช่** สำหรับปัดสตางค์ดิบ (สตางค์เป็น
+ * integer อยู่แล้วไม่ต้องปัด — ใช้ `toBaht()`/`toSatang()` แทน)
+ */
+export function round2(baht: number): number {
+  return Math.round(baht * 100) / 100;
+}
+
+/**
  * แปลงทุก key ที่ระบุของ object จากบาท → สตางค์ (ใช้ที่ route/service boundary ตอนรับ input)
  * ข้าม key ที่ค่าเป็น `null`/`undefined` ไว้เฉย ๆ (ไม่แปลง 0 → 0 เพราะ 0 ไม่มีปัญหา แปลงตรง ๆ ได้)
  */
