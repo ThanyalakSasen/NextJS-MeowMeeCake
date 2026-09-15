@@ -38,6 +38,7 @@ import * as recipeService from "./recipeService";
 import * as productService from "./productService";
 import { notificationService } from "./notificationService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
+import { generateDocNo } from "../lib/productCode";
 import type { z } from "zod";
 import type { updateDeliveryBody } from "../schemas/order";
 
@@ -145,16 +146,6 @@ interface PricedLine {
   quantity: number;
   unit_price: number;
   cost_per_unit: number | null;
-}
-
-// ── helper: ออกเลขออเดอร์ ────────────────────────────────────
-function randomOrderNo(now = new Date()): string {
-  const ymd =
-    now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0");
-  const rand = Math.random().toString(36).slice(2, 8).toUpperCase();
-  return `OP-${ymd}-${rand}`;
 }
 
 // ── helper: resolve รายการสั่งซื้อทั้งชุดจาก input ดิบ (ใช้ตอนสั่งเองไม่ผ่านตะกร้า และตอน re-price
@@ -380,7 +371,7 @@ async function persistOrder(
     for (let attempt = 0; attempt < 5 && !order; attempt++) {
       try {
         order = await orderModel.create({
-          order_no: randomOrderNo(),
+          order_no: generateDocNo("OP"),
           user_id: userId,
           order_type: opts.order_type,
           delivery_address: opts.order_type === "delivery" ? opts.delivery_address : null,

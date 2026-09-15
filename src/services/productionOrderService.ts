@@ -14,6 +14,7 @@ import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { Saga } from "../lib/compensation";
+import { generateDocNo } from "../lib/productCode";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import productionOrderModel from "../models/productionOrderModel";
 import productionItemModel from "../models/productionItemModel";
@@ -52,16 +53,6 @@ export interface ListProductionOrderQuery {
   includeDeleted?: boolean;
 }
 
-// ── helper ─────────────────────────────────────────────────
-function randomProductionNo(now = new Date()): string {
-  const ymd =
-    now.getFullYear().toString() +
-    String(now.getMonth() + 1).padStart(2, "0") +
-    String(now.getDate()).padStart(2, "0");
-  const rand = Math.random().toString(36).slice(2, 7).toUpperCase();
-  return `PRD-${ymd}-${rand}`;
-}
-
 // ── CREATE ─────────────────────────────────────────────────
 export async function createProductionOrder(input: CreateProductionOrderInput) {
   await dbConnect();
@@ -78,7 +69,7 @@ export async function createProductionOrder(input: CreateProductionOrderInput) {
   for (let attempt = 0; attempt < 5 && !order; attempt++) {
     try {
       order = await productionOrderModel.create({
-        production_no: randomProductionNo(),
+        production_no: generateDocNo("PRD", 5),
         production_date: new Date(input.production_date),
         source_type: "manual",
         production_status: "planned",
