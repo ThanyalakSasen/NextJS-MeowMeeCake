@@ -55,6 +55,59 @@ function presentOption<T extends Record<string, unknown>>(o: T): T {
   return toBahtFields(o, ["extra_price"] as const);
 }
 
+export interface SelectedOptionInput {
+  option_id: string;
+  text_value?: string | null;
+}
+
+export interface ResolvedOption {
+  option_id: unknown;
+  option_name: string;
+  extra_price: number;
+  text_value: string | null;
+}
+
+/**
+ * BACKLOG3 §6 — ตรวจ + คิดราคา option ที่ลูกค้าเลือก เทียบกับ option doc จริง เดิม cartService
+ * (`resolveOptions`) กับ orderService (`resolveLines`) ต่างเขียน logic เดียวกันซ้ำ (is_text_input/
+ * is_required/max_text_length + ข้อความ error) แยกกัน — รวมมาไว้ที่นี่
+ *
+ * **รับ `optionById` เป็น Map ที่ผู้เรียกเตรียมมาเอง ไม่ query เองในนี้** — เพราะ orderService.
+ * resolveLines() ต้อง batch query option ของ**ทุกรายการในออเดอร์พร้อมกัน**ครั้งเดียว (BACKLOG §3.18
+ * กัน N+1) ถ้าฟังก์ชันนี้ query เองต่อ 1 เรียก จะทำให้ resolveLines() กลับไปเป็น N+1 เหมือนก่อนแก้
+ * §3.18 ทันที — ส่วน cartService (เพิ่ม/แก้ทีละ 1 รายการ ไม่มี "หลายรายการพร้อมกัน" ให้ batch) ยัง query
+ * เองแบบเดิมแล้วสร้าง Map เล็ก ๆ ส่งเข้ามา
+ */
+export function resolveSelectedOptions(
+  productId: string,
+  selected: SelectedOptionInput[] = [],
+  optionById: Map<string, Record<string, any>>
+): ResolvedOption[] {
+  if (!Array.isArray(selected) || selected.length === 0) return [];
+
+  return selected.map((sel) => {
+    const opt = optionById.get(String(sel.option_id));
+    const belongsToProduct = opt && String(opt.product_id) === String(productId);
+    if (!belongsToProduct) throw badRequest(`ไม่พบตัวเลือกเสริม ${sel.option_id} ของสินค้านี้`);
+
+    let text: string | null = null;
+    if (opt.is_text_input) {
+      text = (sel.text_value ?? "").trim() || null;
+      if (opt.is_required && !text) throw badRequest(`ตัวเลือก "${opt.option_name}" ต้องกรอกข้อความ`);
+      if (text && opt.max_text_length && text.length > opt.max_text_length) {
+        throw badRequest(`ข้อความของ "${opt.option_name}" ยาวเกิน ${opt.max_text_length} ตัวอักษร`);
+      }
+    }
+
+    return {
+      option_id: opt._id,
+      option_name: opt.option_name,
+      extra_price: opt.extra_price ?? 0,
+      text_value: text,
+    };
+  });
+}
+
 export const productOptionService = {
   ...base,
 

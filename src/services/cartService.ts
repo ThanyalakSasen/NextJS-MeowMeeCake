@@ -20,6 +20,7 @@ import productVariantModel from "../models/productVariantModel";
 import productOptionModel from "../models/productOptionModel";
 import userModel from "../models/userModel";
 import { toBaht, toBahtFields } from "../lib/money";
+import { resolveSelectedOptions } from "./productOptionService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -113,6 +114,9 @@ export async function getCartDetail(userId: string) {
 }
 
 // ── helper: ตรวจ + คิดราคา option ที่เลือก ───────────────────
+// BACKLOG3 §6 — logic ตรวจ/คิดราคา option ย้ายไป productOptionService.resolveSelectedOptions() แล้ว
+// (ใช้ร่วมกับ orderService.resolveLines()) ที่นี่เหลือแค่ query + สร้าง Map ส่งเข้าไป (เป็น "หนึ่ง
+// รายการต่อครั้ง" ไม่ต้อง batch เหมือน order ที่มีหลายบรรทัดพร้อมกัน)
 async function resolveOptions(
   productId: string,
   selected: SelectedOptionInput[] = []
@@ -127,33 +131,9 @@ async function resolveOptions(
   const options = await productOptionModel
     .find({ _id: { $in: ids }, product_id: productId, deleted_at: null })
     .lean<any[]>();
-  const byId = new Map(options.map((o) => [String(o._id), o]));
+  const optionById = new Map(options.map((o) => [String(o._id), o]));
 
-  return selected.map((sel) => {
-    const opt = byId.get(String(sel.option_id));
-    if (!opt) throw badRequest(`ไม่พบตัวเลือกเสริม ${sel.option_id} ของสินค้านี้`);
-
-    let text: string | null = null;
-    if (opt.is_text_input) {
-      text = (sel.text_value ?? "").trim();
-      if (opt.is_required && !text) {
-        throw badRequest(`ตัวเลือก "${opt.option_name}" ต้องกรอกข้อความ`);
-      }
-      if (opt.max_text_length && text.length > opt.max_text_length) {
-        throw badRequest(
-          `ข้อความของ "${opt.option_name}" ยาวเกิน ${opt.max_text_length} ตัวอักษร`
-        );
-      }
-      if (!text) text = null;
-    }
-
-    return {
-      option_id: opt._id,
-      option_name: opt.option_name,
-      extra_price: opt.extra_price ?? 0,
-      text_value: text,
-    };
-  });
+  return resolveSelectedOptions(productId, selected, optionById);
 }
 
 function sameOptionSet(a: ResolvedOption[], b: any[]): boolean {

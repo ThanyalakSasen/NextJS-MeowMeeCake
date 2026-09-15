@@ -36,6 +36,7 @@ import * as promotionUsageService from "./promotionUsageService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import * as productService from "./productService";
+import { resolveSelectedOptions } from "./productOptionService";
 import { notificationService } from "./notificationService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { generateDocNo } from "../lib/productCode";
@@ -209,29 +210,15 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
       if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
     }
 
+    // BACKLOG3 §6 — logic ตรวจ/คิดราคา option ย้ายไป productOptionService.resolveSelectedOptions()
+    // แล้ว (ใช้ร่วมกับ cartService.resolveOptions()) — ที่นี่ยังคง batch query optionById ไว้เหมือนเดิม
+    // (BACKLOG §3.18 กัน N+1) แค่ไม่ต้องเขียน validate logic ซ้ำเอง
     const selected = input.selected_options ?? [];
-    let resolvedOptions: PricedLine["selected_options"] = [];
-    if (selected.length) {
-      resolvedOptions = selected.map((sel) => {
-        const opt = optionById.get(String(sel.option_id));
-        const belongsToProduct = opt && String(opt.product_id) === String(input.product_id);
-        if (!belongsToProduct) throw badRequest(`ไม่พบตัวเลือกเสริม ${sel.option_id} ของสินค้านี้`);
-        let text: string | null = null;
-        if (opt.is_text_input) {
-          text = (sel.text_value ?? "").trim() || null;
-          if (opt.is_required && !text) throw badRequest(`ตัวเลือก "${opt.option_name}" ต้องกรอกข้อความ`);
-          if (text && opt.max_text_length && text.length > opt.max_text_length) {
-            throw badRequest(`ข้อความของ "${opt.option_name}" ยาวเกิน ${opt.max_text_length} ตัวอักษร`);
-          }
-        }
-        return {
-          option_id: opt._id,
-          option_name: opt.option_name,
-          extra_price: opt.extra_price ?? 0,
-          text_value: text,
-        };
-      });
-    }
+    const resolvedOptions: PricedLine["selected_options"] = resolveSelectedOptions(
+      String(input.product_id),
+      selected,
+      optionById
+    );
 
     // BACKLOG §3.11 เฟส 5b — basePrice/variant_price/extra_price ทั้งหมดมาจาก productModel/
     // productVariantModel/productOptionModel ซึ่งเป็นสตางค์แล้วทั้งหมดตั้งแต่เฟส 5b (เดิมเฟส 1-4a เป็น
