@@ -16,10 +16,15 @@ import { Saga } from "../lib/compensation";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
-import { log } from "../lib/logger";
+import {
+  registerAutoRefundOnCancel,
+  assertCustomerCancelAllowed,
+  setEntityPaymentStatus,
+  applyEntityDeliveryUpdate,
+  softDeleteEntityWithItems,
+} from "../lib/orderLifecycle";
 import preorderModel from "../models/preorderModel";
 import preorderItemModel from "../models/preorderItemModel";
-import paymentModel from "../models/paymentModel";
 import userModel from "../models/userModel";
 import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
@@ -284,6 +289,18 @@ function presentPreorderItem(item: any): any {
   return toBahtFields(item, PREORDER_ITEM_MONEY_FIELDS);
 }
 
+/**
+ * BACKLOG3 §5/§10 — เทียบ orderService.presentOrderWithItems(): populate user_id/round_id บน document
+ * ที่มีอยู่แล้วตรง ๆ แทน getPreorderById(id) ที่ต้อง re-query ทั้ง header + items ใหม่ทั้งที่ไม่จำเป็น
+ */
+async function presentPreorderWithItems(preorder: any, items?: any[]): Promise<any> {
+  await preorder.populate("user_id", "user_fullname email user_phone");
+  await preorder.populate("round_id", "round_name open_date close_date pickup_date round_status");
+  const preorderItems =
+    items ?? (await preorderItemModel.find({ preorder_id: preorder._id, deleted_at: null }).lean());
+  return { ...presentPreorder(preorder.toObject()), items: preorderItems.map(presentPreorderItem) };
+}
+
 export async function listPreorders(query: ListPreorderQuery) {
   await dbConnect();
 
@@ -368,11 +385,13 @@ export async function updatePreorderStatus(
   if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
 
   const current = preorder.order_status as PreorderStatus;
-  if (current === next) return getPreorderById(id);
+  // BACKLOG3 §5 — เทียบ orderService.updateOrderStatus: populate แทน re-query ทั้ง header+items
+  if (current === next) return presentPreorderWithItems(preorder);
   if (!NEXT_STATUS[current].includes(next)) {
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
 
+  let cancelledItems: any[] | undefined;
   if (next === "cancelled") {
     // cleanup ตอนยกเลิก — best-effort ทั้งหมด (step ที่ fail จะ log ผ่าน logger ไม่ล้มการยกเลิก)
     // ใช้ Saga เพื่อ log สม่ำเสมอ แทน .catch(() => undefined) ที่กลืน error เงียบ (เทียบ orderService)
@@ -381,6 +400,7 @@ export async function updatePreorderStatus(
     const items = await preorderItemModel
       .find({ preorder_id: preorder._id, deleted_at: null })
       .lean<any[]>();
+    cancelledItems = items;
     for (const it of items) {
       cleanup.onRollback(`release-qty-${it._id}`, () =>
         preorderRoundService.releaseQty(String(it.round_item_id), it.quantity)
@@ -388,25 +408,17 @@ export async function updatePreorderStatus(
     }
 
     // พรีออเดอร์ที่จ่ายเงินแล้ว → คืนเงินอัตโนมัติ · กัน "preorder = cancelled แต่ payment ยัง paid"
-    // (BACKLOG 2b.3 — คู่ขนานกับ orderService.updateOrderStatus §2.8)
-    if (preorder.payment_status === "paid") {
-      const paidPayment = await paymentModel
-        .findOne({ preorder_id: preorder._id, status: "paid", deleted_at: null })
-        .lean<{ _id: unknown } | null>();
-      if (paidPayment && opts.cancelled_by) {
-        const verifiedBy = opts.cancelled_by;
-        cleanup.onRollback("auto-refund", async () => {
-          // dynamic import — เลี่ยง circular import (paymentService → preorderService)
-          const { refundPayment } = await import("./paymentService");
-          await refundPayment(String(paidPayment._id), { verified_by: verifiedBy });
-        });
-      } else {
-        log.warn("preorder.auto_refund_skipped", {
-          preorder_id: String(preorder._id),
-          reason: "ไม่พบ payment ที่ paid หรือไม่มี cancelled_by",
-        });
-      }
-    }
+    // (BACKLOG 2b.3 — คู่ขนานกับ orderService.updateOrderStatus §2.8) — BACKLOG3 §10: ย้ายไปใช้ร่วม
+    // กับ orderService ที่ lib/orderLifecycle.ts แล้ว (คืนโควตาต่อรายการด้านบนยังคงแยกเขียนเอง เพราะ
+    // เป็นคนละกลไกกับที่ order คืนสต็อก+ส่วนลด)
+    await registerAutoRefundOnCancel({
+      saga: cleanup,
+      entityKind: "preorder",
+      paymentFilter: { preorder_id: preorder._id },
+      currentPaymentStatus: preorder.payment_status,
+      cancelledBy: opts.cancelled_by,
+      entityId: preorder._id,
+    });
 
     await cleanup.rollback();
 
@@ -420,7 +432,7 @@ export async function updatePreorderStatus(
 
   preorder.order_status = next;
   await preorder.save();
-  return getPreorderById(id);
+  return presentPreorderWithItems(preorder, cancelledItems);
 }
 
 /** สถานะที่ "ลูกค้า" ยกเลิกพรีออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน
@@ -437,99 +449,61 @@ export async function cancelPreorder(
   } = {}
 ) {
   const { allowedFrom, ...rest } = opts;
+  // BACKLOG3 §10 — logic เหมือน orderService.cancelOrder เป๊ะ ย้ายไปใช้ร่วมกัน
   if (allowedFrom) {
-    await dbConnect();
-    assertObjectId(id);
-    const preorder = await preorderModel
-      .findOne({ _id: id, deleted_at: null })
-      .select("order_status payment_status")
-      .lean<{ order_status: PreorderStatus; payment_status?: PaymentStatus } | null>();
-    if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
-    if (!allowedFrom.includes(preorder.order_status)) {
-      throw conflict(
-        `ยกเลิกพรีออเดอร์เองได้เฉพาะตอนสถานะ ${allowedFrom.join(" / ")} เท่านั้น ` +
-          `(สถานะปัจจุบัน: "${preorder.order_status}") — หากต้องการยกเลิกกรุณาติดต่อร้าน`
-      );
-    }
-    // พรีออเดอร์ที่ชำระเงินแล้ว: ลูกค้ายกเลิกเองไม่ได้ — ต้องให้แอดมินยกเลิก + คืนเงิน (refundPayment)
-    // ไม่งั้นจะได้ order_status = cancelled แต่ payment_status ยัง paid โดยไม่มี refund record
-    if (preorder.payment_status === "paid") {
-      throw conflict(
-        "พรีออเดอร์นี้ชำระเงินแล้ว ยกเลิกเองไม่ได้ — กรุณาติดต่อร้านเพื่อขอยกเลิกและคืนเงิน"
-      );
-    }
+    await assertCustomerCancelAllowed({
+      model: preorderModel,
+      id,
+      allowedFrom,
+      entityLabel: "พรีออเดอร์",
+    });
   }
   return updatePreorderStatus(id, "cancelled", rest);
 }
 
 // ── payment status (เรียกจาก paymentService ภายหลัง) ────────
+// BACKLOG3 §10 — logic เหมือน orderService.setPaymentStatus เป๊ะ ย้ายไปใช้ร่วมกัน
 export async function setPaymentStatus(
   preorderId: string,
   status: PaymentStatus,
   paymentId?: string
 ) {
-  await dbConnect();
-  assertObjectId(preorderId, "preorder_id");
-  if (!PAYMENT_STATUSES.includes(status)) {
-    throw badRequest(`payment_status ต้องเป็นหนึ่งใน: ${PAYMENT_STATUSES.join(", ")}`);
-  }
-  const set: Record<string, any> = { payment_status: status };
-  if (paymentId) set.payment_id = paymentId;
-
-  const preorder = await preorderModel
-    .findOneAndUpdate({ _id: preorderId, deleted_at: null }, { $set: set }, { new: true })
-    .lean<any>();
-  if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
-
-  if (status === "paid" && preorder.order_status === "pending") {
-    await preorderModel.updateOne({ _id: preorderId }, { $set: { order_status: "confirmed" } });
-  }
+  const preorder = await setEntityPaymentStatus({
+    model: preorderModel,
+    id: preorderId,
+    idField: "preorder_id",
+    status,
+    statuses: PAYMENT_STATUSES,
+    paymentId,
+    entityLabel: "พรีออเดอร์",
+  });
   return presentPreorder(preorder);
 }
 
 // BACKLOG2 §4 — คู่ขนานกับ orderService.updateDelivery() เป๊ะ (เดิมพรีออเดอร์ไม่มีฟังก์ชันนี้เลย
 // ทั้งที่ preorderModel มีฟิลด์ delivery_status/shipped_at/delivered_at/tracking_no/delivered_note
 // ครบเหมือน orderModel ทุกประการ — แอดมินเลยไม่มีทางบันทึกว่าพรีออเดอร์ถูกจัดส่งไปแล้วเลย)
+// BACKLOG3 §10 — implementation ย้ายไปใช้ร่วมกับ orderService ที่ lib/orderLifecycle.ts แล้ว
 type UpdateDeliveryInput = z.infer<typeof updateDeliveryBody>;
 
 export async function updateDelivery(id: string, input: UpdateDeliveryInput) {
-  await dbConnect();
-  assertObjectId(id);
-
-  const preorder = await preorderModel.findOne({ _id: id, deleted_at: null });
-  if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
-  if (preorder.order_type !== "delivery") {
-    throw badRequest("พรีออเดอร์นี้ไม่ใช่ประเภทจัดส่ง (delivery)");
-  }
-
-  const payload: Record<string, any> = { ...input };
-  if (payload.delivery_status === "shipping" && !preorder.shipped_at && !payload.shipped_at) {
-    payload.shipped_at = new Date();
-  }
-  if (payload.delivery_status === "delivered" && !payload.delivered_at) {
-    payload.delivered_at = new Date();
-  }
-
-  const updated = await preorderModel
-    .findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true })
-    .lean<any>();
+  const updated = await applyEntityDeliveryUpdate({
+    model: preorderModel,
+    id,
+    input,
+    entityLabel: "พรีออเดอร์",
+  });
   return updated ? presentPreorder(updated) : updated;
 }
 
 // ── DELETE (soft) ───────────────────────────────────────────
+// BACKLOG3 §10 — logic เหมือน orderService.deleteOrder เป๊ะ ย้ายไปใช้ร่วมกัน
 export async function deletePreorder(id: string) {
-  await dbConnect();
-  assertObjectId(id);
-  const preorder = await preorderModel.findOne({ _id: id, deleted_at: null });
-  if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ หรือถูกลบไปแล้ว");
-  if (!["completed", "cancelled"].includes(preorder.order_status)) {
-    throw conflict("ลบได้เฉพาะพรีออเดอร์ที่เสร็จสิ้นหรือถูกยกเลิกแล้วเท่านั้น");
-  }
-  preorder.deleted_at = new Date();
-  await preorder.save();
-  await preorderItemModel.updateMany(
-    { preorder_id: preorder._id, deleted_at: null },
-    { $set: { deleted_at: new Date() } }
-  );
-  return { deleted: true, _id: preorder._id };
+  return softDeleteEntityWithItems({
+    model: preorderModel,
+    itemModel: preorderItemModel,
+    itemForeignKey: "preorder_id",
+    id,
+    entityLabel: "พรีออเดอร์",
+  });
 }
