@@ -4,8 +4,8 @@
 > ขอบเขต: `src/services/` + `src/lib/` เท่านั้น (ตามที่ผู้ใช้เลือก) — **ไม่ใช่บั๊ก** ทุกข้อผ่านการตรวจสอบ
 > ความถูกต้องมาแล้วอย่างละเอียดใน [`BACKLOG.md`](BACKLOG.md)/[`BACKLOG2.md`](BACKLOG2.md) — เอกสารนี้คุม
 > เฉพาะงาน "โค้ดซ้ำ/เขียนได้กระชับกว่า/มี query เกินจำเป็น" ที่พบจาก `/code-review` (2026-09-15)
-> **สถานะ: กลุ่มเสี่ยงต่ำ 2/2 + §3 แก้แล้ว** — เหลือกลุ่มปานกลาง (3 ข้อ) + กลุ่มเสี่ยงสูง/งานใหญ่ (4 ข้อ)
-> รอตัดสินใจว่าจะทำต่อไหม
+> **สถานะ: กลุ่มเสี่ยงต่ำ 2/2 + §3 + §4 แก้แล้ว** — เหลือกลุ่มปานกลาง (2 ข้อ) + กลุ่มเสี่ยงสูง/งานใหญ่
+> (4 ข้อ) รอตัดสินใจว่าจะทำต่อไหม
 
 ## สถานะโดยรวม
 
@@ -14,7 +14,7 @@
 | **§1 `round2()` ปัดบาท ซ้ำ 4 ไฟล์** | ✅ **แก้แล้ว** (2026-09-15) — ย้ายมาไว้ที่ `src/lib/money.ts` ที่เดียว |
 | **§2 ตัวสร้างเลขที่เอกสาร (order/preorder/production) ซ้ำ 3 จุด** | ✅ **แก้แล้ว** (2026-09-15) — รวมเป็น `generateDocNo()` ใน `src/lib/productCode.ts` |
 | **§3 `productService.ts` ไม่ใช้ shared helper (`assertObjectId`/`escapeRegExp`/pagination)** | ✅ **แก้แล้ว** (2026-09-15) — เปลี่ยนมาใช้ `src/lib/objectId.ts` + `src/lib/queryParams.ts` เหมือน service อื่นทุกตัว |
-| §4 `authService.login()` fetch user ซ้ำ 3 รอบ | 🟡 ยังไม่ทำ — ปานกลาง |
+| **§4 `authService.login()`/`loginWithGoogle()` fetch user ซ้ำ 3 รอบ** | ✅ **แก้แล้ว** (2026-09-15) — populate role + sync ค่าที่ update ในหน่วยความจำ ตัดการ query ซ้ำทั้งคู่ |
 | §5 `orderService.persistOrder`/`updateOrderStatus` เรียก `getOrderById` ซ้ำหลัง save | 🟡 ยังไม่ทำ — ปานกลาง (hot path) |
 | §6 `cartService.resolveOptions` vs `orderService.resolveLines` validate option ซ้ำ | 🟡 ยังไม่ทำ — ปานกลาง |
 | §7 `permissionService.getEffectivePermissions()` ไม่มี cache | 🟡 ยังไม่ทำ — เสี่ยงสูง (auth hot path, ต้องระวัง stale permission) |
@@ -115,15 +115,42 @@ field name อะไรก็ได้ไม่เช็ค allowlist — สล
 
 ---
 
-## 4. 🟡 `authService.login()` fetch user ซ้ำ 3 รอบ — ยังไม่ทำ
+## 4. ✅ `authService.login()`/`loginWithGoogle()` fetch user ซ้ำ 3 รอบ — แก้แล้ว (2026-09-15)
 
-`userService.verifyCredentials` ไม่ populate `role_id` → `authService.issue()`→`toSessionUser()` query
-`roleModel.findById` แยกอีกรอบ → `login()` เรียก `userService.getUserById()` อีกรอบสุดท้าย — รวม 3 query
-ต่อการ login 1 ครั้ง (`loginWithGoogle` มี pattern เดียวกัน)
+**พบ:** `userService.verifyCredentials` ไม่ populate `role_id` → `authService.issue()`→`toSessionUser()`
+query `roleModel.findById` แยกอีกรอบ → `login()` เรียก `userService.getUserById()` อีกรอบสุดท้าย — รวม 3
+query ต่อการ login 1 ครั้ง · `loginWithGoogle` มี pattern เดียวกัน (findOne ไม่ populate → toSessionUser
+query role แยก → getUserById ท้ายสุด) บวกอีกจุด: กรณีผูก googleId ให้ user เดิมครั้งแรก `updateOne` เขียน
+DB แล้วแต่ตัวแปร `user` ในหน่วยความจำไม่ sync ตาม — เดิมกลบปัญหานี้ไว้ด้วยการ query `getUserById()` สดท้าย
+สุดอยู่แล้ว (ซึ่งเป็นเหตุผลจริงที่ query ที่ 3 มีอยู่ ไม่ใช่แค่ซ้ำเฉย ๆ)
 
-**ทำไมยังไม่แก้:** แตะ auth flow ตรง ๆ (login/Google login) — ต้องตรวจให้แน่ใจว่า field ที่คืนจาก
-`getUserById()` (ที่ query สุดท้ายให้) กับ response shape ที่ประกอบเองจาก doc ที่ populate ไว้ตรงกันทุก field
-ก่อนเปลี่ยน เสี่ยงถ้าพลาด field ใน response `POST /api/auth/login`/`POST /api/auth/google`
+**วิธีแก้ที่ใช้จริง:**
+- `userService.verifyCredentials()` เพิ่ม `.populate("role_id", "role_name role_type")` ในการ query user
+  + sync `failed_login_attempts`/`lockout_until`/`last_login_at` ลง doc ในหน่วยความจำหลัง `updateOne`
+  (เดิม update DB อย่างเดียว ไม่ sync กลับ — ถ้าตัดการ query ซ้ำท้ายสุดออกโดยไม่ sync ตรงนี้ response จะ
+  ได้ค่าค้างก่อน login เช่น `failed_login_attempts` เก่า) — export `stripSecrets()` ให้ `authService`
+  เรียกใช้ร่วมได้ (เดิม private เฉพาะไฟล์)
+- `authService.login()` คืน `user` ที่ได้จาก `verifyCredentials()` ตรง ๆ (populate + sync ครบแล้ว) ตัดการ
+  เรียก `getUserById()` ท้ายสุดทิ้ง
+- `authService.loginWithGoogle()` — เพิ่ม populate ในการ query `userModel.findOne()` เริ่มต้น, sync
+  `googleId`/`is_email_verified` ลงหน่วยความจำหลัง `updateOne` (จุดที่เคยพึ่ง query ซ้ำท้ายสุดบังตาไว้),
+  `stripSecrets()` เอง (query ตรงผ่าน `userModel` ไม่ผ่าน `userService` เลยไม่เคยถูก strip มาก่อน), และ
+  branch "ผู้ใช้ใหม่" (`userService.createUser`) ผูก `role_id` ด้วย `{_id, role_name, role_type}` ที่มีอยู่
+  แล้วจากการ query หา role `"customer"` ก่อนหน้า (narrow เฉพาะ 3 field ให้ shape ตรงกับที่ populate ข้าง
+  บนจะให้ ไม่หลุด field อื่นของ role เช่น `is_active`/timestamps เข้ามา) — ตัด `getUserById()` ท้ายสุดทิ้ง
+  ทั้ง 2 branch
+
+**เทสใหม่:** `tests/integration/authLogin.test.ts` (6 เคส) — ยืนยันทั้ง `login()` และ `loginWithGoogle()`
+คืน `role_id` populate ครบ, ไม่มี secret field รั่ว (`password`/`*_token`/`*_token_expiry`), และที่สำคัญ
+ที่สุด **ค่าที่เพิ่ง update สดจริงในหน่วยความจำ ไม่ใช่ค่าค้างก่อน update** (`failed_login_attempts`→0,
+`last_login_at` ตั้งค่าแล้ว, `googleId`/`is_email_verified` เป็นค่าใหม่หลังผูกบัญชี) — เทียบกับ DB จริง
+ด้วยทุกเคสไม่ใช่เชื่อแค่ object ในหน่วยความจำ · mock `jose.jwtVerify` กัน `loginWithGoogle` ยิง network จริง
+ไปหา Google JWKS ตอนเทส (`vi.mock("jose", ...)`) · เพิ่ม `JWT_SECRET` (ค่าเทสเท่านั้น ไม่ใช่ค่าจริง) เข้า
+`env` ของ vitest integration project ใน `vitest.config.mts` เพราะ `src/lib/jwt.ts` throw ตั้งแต่ตอน
+import module ถ้าไม่ตั้ง — เป็นเทส integration ไฟล์แรกที่ import `authService`
+
+ยืนยันด้วย `typecheck`/`typecheck:test`/`lint`(0 error, 4 warning ไม่เปลี่ยน)/`test`(185)/
+`test:integration`(141→**147**, +6)/`build` ผ่านหมด
 
 ---
 
