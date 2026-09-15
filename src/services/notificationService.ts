@@ -25,6 +25,9 @@ export interface NotifyInput {
 const base = createCrudService(notificationModel, {
   label: "การแจ้งเตือน",
   searchFields: ["title", "message"],
+  // ไม่มี route ไหนเรียก base.create() จริง (ดูคอมเมนต์บนไฟล์ — สร้างผ่าน notify() เท่านั้น ซึ่งเขียนตรง
+  // ผ่าน notificationModel.create() ไม่ผ่าน base) แต่ต้องระบุไว้กัน mass-assignment ถ้ามีจุดเรียกในอนาคต
+  createFields: ["title", "message", "module", "type", "link", "is_read"],
   updateFields: ["is_read"], // client แก้ได้แค่ mark read/unread — เนื้อหาแก้ไม่ได้
   softDelete: true,
 });

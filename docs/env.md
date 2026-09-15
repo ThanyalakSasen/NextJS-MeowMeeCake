@@ -31,7 +31,7 @@ Next.js โหลด `.env.local` ให้อัตโนมัติตอน 
 | `S3_REGION` | ไม่ | `auto` | `src/lib/upload.ts` | region ของ bucket (R2 ใช้ `auto` ได้) |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | เฉพาะ `UPLOAD_DRIVER=s3` | — | `src/lib/upload.ts` | credential เข้าถึง bucket |
 | `S3_ENDPOINT` | เฉพาะ R2/GCS | — | `src/lib/upload.ts` | ใส่เมื่อไม่ได้ใช้ AWS S3 ตรงๆ (เช่น `https://<account>.r2.cloudflarestorage.com`) |
-| `S3_PUBLIC_URL_BASE` | เฉพาะ `UPLOAD_DRIVER=s3` | — | `src/lib/upload.ts` | โดเมนอ่านไฟล์กลับ (CDN หรือ bucket public url) — ใช้ประกอบ url ที่คืนให้ client และแกะกลับเป็น key ตอนลบไฟล์ |
+| `S3_PUBLIC_URL_BASE` | เฉพาะ `UPLOAD_DRIVER=s3` **(บังคับ — `save()` throw ถ้าไม่ตั้ง)** | — | `src/lib/upload.ts` | โดเมนอ่านไฟล์กลับ (CDN หรือ bucket public url) — ใช้ประกอบ url ที่คืนให้ client และแกะกลับเป็น key ตอนลบไฟล์ (ไม่ตั้ง = ลบไฟล์จริงไม่ได้เลยเงียบ ๆ ตลอดไป ดู [`BACKLOG2.md`](BACKLOG2.md) §6) |
 
 ### ตัวอย่างค่า (`.env.local`)
 
