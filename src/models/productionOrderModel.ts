@@ -20,6 +20,7 @@ const productionOrderSchema = new mongoose.Schema(
 productionOrderSchema.index({ production_status: 1 });
 productionOrderSchema.index({ production_date: 1 });
 productionOrderSchema.index({ source_type: 1 });
+productionOrderSchema.index({ round_id: 1 });
 
 const ProductionOrder = mongoose.models.ProductionOrders || mongoose.model("ProductionOrders", productionOrderSchema);
 export default ProductionOrder;
