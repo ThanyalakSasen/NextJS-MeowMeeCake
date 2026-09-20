@@ -169,3 +169,7 @@ vite.config.ts.timestamp-*
 
 # typescript
 *.tsbuildinfo
+
+# ข้อมูลจริงของร้านจากสคริปต์ตรวจ/แก้ข้อมูล (scripts/audit-*, fix-*, recompute-*) — ห้าม commit
+scripts/backups/
+scripts/*.report.json
