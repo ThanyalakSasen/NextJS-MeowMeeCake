@@ -254,3 +254,22 @@ export async function getEffectivePermissions(roleId: string): Promise<Effective
   permissionCache.set(roleId, { data: result, expiresAt: Date.now() + CACHE_TTL_MS });
   return result;
 }
+
+// ── สิทธิ์เมนูของ "ตัวเอง" (ให้ frontend ซ่อน/แสดงเมนู) ──────────
+// เดิม frontend ไม่มีทางรู้สิทธิ์ละเอียดของ staff ที่ login อยู่ เพราะ GET /api/admin/permissions ต้องมี
+// employees.view ก่อน (ไก่กับไข่) จึงต้องเดาจาก role_type อย่างเดียว = staff ถูกปิดทุกเมนู — คืนไปกับ /api/auth/me แทน
+// (อ่านสิทธิ์ของ role ตัวเองเท่านั้น จึงไม่ต้องเช็คสิทธิ์เพิ่ม) ตรรกะเดียวกับ authGuard.requirePermission:
+//   owner → ผ่านหมดทุกเมนู · role อื่น → ตามแถวใน permissions (ไม่มีแถว/หมดอายุ = false ทุก action)
+export type MenuAccess = Record<MenuKey, Record<(typeof FLAG_FIELDS)[number], boolean>>;
+
+export async function getMenuAccess(session: { role_id: string; role_type: string }): Promise<MenuAccess> {
+  const isOwner = session.role_type === "owner";
+  const effective = isOwner ? null : await getEffectivePermissions(session.role_id);
+
+  return Object.fromEntries(
+    MENU_KEYS.map((menu) => [
+      menu,
+      Object.fromEntries(FLAG_FIELDS.map((f) => [f, isOwner ? true : !!effective?.permissions[menu]?.[f]])),
+    ])
+  ) as MenuAccess;
+}

@@ -52,14 +52,30 @@ function crossOriginMode(): boolean {
   return (process.env.ALLOWED_ORIGINS ?? "").trim().length > 0;
 }
 
+/**
+ * COOKIE_DOMAIN (เช่น ".meowmeecake.com") = frontend กับ backend เป็น subdomain ของ site เดียวกัน
+ * (app.meowmeecake.com ↔ api.meowmeecake.com) — ตั้ง Domain ให้ cookie ทั้ง site เห็นได้ (frontend เช็คว่า
+ * "มี cookie ไหม" ใน proxy.ts ได้) และเป็น same-site จึงใช้ SameSite=Lax ได้ ไม่ต้องพึ่ง SameSite=None ซึ่ง
+ * ถูกบล็อกเป็น third-party cookie ในเบราว์เซอร์หลายตัว (Safari/Firefox/Chrome โหมดเข้มงวด)
+ * ไม่ตั้ง = ไม่มี Domain attribute (host-only) เหมือนเดิม
+ */
+function cookieDomain(): string | undefined {
+  const d = (process.env.COOKIE_DOMAIN ?? "").trim();
+  return d.length > 0 ? d : undefined;
+}
+
 function cookieOptions(maxAge: number) {
   const cross = crossOriginMode();
+  const domain = cookieDomain();
   return {
     httpOnly: true,
-    sameSite: (cross ? "none" : "lax") as "none" | "lax",
-    secure: cross || process.env.NODE_ENV === "production",
+    // same-site (COOKIE_DOMAIN) → lax · คนละ site แต่ข้าม origin (ALLOWED_ORIGINS อย่างเดียว) → none · ไม่งั้น lax
+    sameSite: (domain ? "lax" : cross ? "none" : "lax") as "none" | "lax",
+    secure: cross || domain !== undefined || process.env.NODE_ENV === "production",
     path: "/",
     maxAge,
+    // Domain เป็นส่วนของตัวตน cookie — ตอนล้าง (maxAge 0) ต้องส่งค่าเดียวกันเป๊ะ ไม่งั้นลบไม่ออก
+    ...(domain ? { domain } : {}),
   };
 }
 

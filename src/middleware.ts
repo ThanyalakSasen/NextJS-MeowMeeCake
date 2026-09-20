@@ -21,7 +21,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { verifySession } from "@/lib/jwt";
 import { isCsrfSafe } from "@/lib/csrf";
 import { corsHeaders, isAllowedOrigin } from "@/lib/cors";
-import { SESSION_COOKIE, USER_HEADER, type SessionUser } from "@/lib/session";
+import { SESSION_COOKIE, USER_HEADER, clearSession, type SessionUser } from "@/lib/session";
 
 const PUBLIC_PREFIXES = ["/api/auth/", "/api/health", "/api/catalog/"];
 
@@ -34,8 +34,8 @@ function deny(code: string, message: string, status: number, clearCookie = false
     { success: false, error: { code, message, details: null } },
     { status }
   );
-  if (clearCookie) res.cookies.delete(SESSION_COOKIE);
-  return res;
+  // ใช้ clearSession (ไม่ใช่ res.cookies.delete) — ต้องส่ง Domain/Path เดียวกับตอนตั้ง ไม่งั้น cookie ที่มี COOKIE_DOMAIN ไม่ถูกลบ
+  return clearCookie ? clearSession(res) : res;
 }
 
 export async function middleware(req: NextRequest) {
