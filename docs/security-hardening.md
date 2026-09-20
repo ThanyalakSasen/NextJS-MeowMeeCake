@@ -113,6 +113,24 @@ Google Identity Services ฝั่ง frontend) — `jwtVerify(credential, GOOGL
   (`next dev -p 3001` — ตั้งไว้ใน `package.json` script `"dev"` ของ frontend แล้ว กัน dev ลืมใส่ `-p`
   แล้วชนกับ backend ที่ใช้ 3000 เหมือนกัน)
 
+### ตั้งค่าตอน deploy (frontend กับ backend คนละโดเมน)
+ปัญหา: cookie `session` ถูกตั้งโดย backend จึงผูกกับโดเมนของ backend — ถ้า frontend อยู่คนละ **site**
+(คนละ registrable domain) เบราว์เซอร์จะไม่ส่ง cookie นี้ไปให้ frontend เลย (และ `SameSite=None` ก็ถูกบล็อกเป็น
+third-party cookie ในหลายเบราว์เซอร์) จึงต้องเลือกโครงสร้างให้ถูก:
+
+| โครงสร้าง | backend | frontend |
+|---|---|---|
+| **A. subdomain ของ site เดียวกัน (แนะนำ)** เช่น `app.x.com` ↔ `api.x.com` | `COOKIE_DOMAIN=.x.com` + `ALLOWED_ORIGINS=https://app.x.com` → cookie เป็น `Lax; Secure; Domain=.x.com` | ดีฟอลต์ (`NEXT_PUBLIC_AUTH_GATE` ไม่ตั้ง) — `proxy.ts` เห็น cookie และกั้น `/owner` ก่อน render ได้ |
+| **B. คนละ site** เช่น `shop.com` ↔ `api.app` | `ALLOWED_ORIGINS=https://shop.com` (ไม่ตั้ง `COOKIE_DOMAIN`) → cookie เป็น `None; Secure` ซึ่งเสี่ยงโดนบล็อกเป็น third-party cookie | `NEXT_PUBLIC_AUTH_GATE=client` — `proxy.ts` เลิกเช็ค cookie (มองไม่เห็นอยู่แล้ว) เหลือด่านฝั่ง client (`OwnerLayout` → `/auth/me`) |
+| **C. same-origin** (reverse proxy รวมทั้งสองไว้โดเมนเดียว เช่น `/api/*` → backend) | ไม่ต้องตั้ง `ALLOWED_ORIGINS`/`COOKIE_DOMAIN` (`Lax`, host-only) | ดีฟอลต์ · `NEXT_PUBLIC_API_BASE_URL=/api` |
+
+- `COOKIE_DOMAIN` ต้องขึ้นต้นด้วยจุดและเป็น domain ที่ครอบทั้งสอง host (`.x.com` ครอบ `app.x.com` และ `api.x.com`)
+- `Domain` เป็นส่วนของตัวตน cookie: ตอนล้าง (logout / session เสีย) ต้องส่ง `Domain` เดียวกัน — `clearSession()` ทำให้แล้ว
+  และ `middleware.ts` ใช้ `clearSession()` (เดิมใช้ `res.cookies.delete()` ซึ่งลบ cookie ที่มี `Domain` ไม่ออก)
+- เปลี่ยน `COOKIE_DOMAIN`/`ALLOWED_ORIGINS` ต้อง restart backend เต็ม ๆ (Edge middleware ไม่ hot-reload env)
+- ผู้ใช้ที่มี cookie เดิมแบบ host-only ค้างอยู่ตอนเปลี่ยนโครงสร้าง: cookie เก่ากับใหม่ชื่อเดียวกันแต่ Domain ต่างกัน
+  จะอยู่คู่กันได้ → ถ้า login แล้ววนกลับหน้า login ให้ล้าง cookie ของเว็บนั้นในเบราว์เซอร์หนึ่งครั้ง
+
 ### ยังเปิดค้าง / ถ้าต้องเปลี่ยน
 - production: ต้องตั้ง `ALLOWED_ORIGINS` เป็น origin จริงของ frontend ที่ deploy (ไม่ใช่ localhost) —
   `secure: true` บังคับ HTTPS จริงตอนนั้น (ไม่มี localhost exception)
