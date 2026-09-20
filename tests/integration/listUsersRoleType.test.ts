@@ -9,6 +9,10 @@ import { makeUser } from "./helpers";
  */
 describe("userService.listUsers — กรองตาม role_type", () => {
   const pagination = { page: 1, limit: 100, skip: 0 };
+  // items ของ listUsers เป็น lean doc (populate role_id) — ระบุ shape เท่าที่เทสใช้แทน any
+  type Listed = { _id: unknown; role_id: { role_type: string } };
+  const rows = (r: { items: unknown[] }) => r.items as Listed[];
+  const idsOf = (r: { items: unknown[] }) => rows(r).map((u) => String(u._id));
   const mk = (role_type: "owner" | "staff" | "customer", extra: Record<string, unknown> = {}) =>
     roleModel.create({ role_name: `${role_type}-${Date.now()}-${Math.random()}`, role_type, ...extra });
 
@@ -19,13 +23,13 @@ describe("userService.listUsers — กรองตาม role_type", () => {
     const uCustomer = await makeUser({ role_id: customer._id, user_fullname: "RT-customer" });
 
     const r = await listUsers({ pagination, role_type: ["owner", "staff"], search: "RT-" });
-    const ids = r.items.map((u: any) => String(u._id));
+    const ids = idsOf(r);
 
     expect(ids).toContain(String(uOwner._id));
     expect(ids).toContain(String(uStaff._id));
     expect(ids).not.toContain(String(uCustomer._id));
     expect(r.meta.total).toBe(2);
-    expect(r.items.every((u: any) => ["owner", "staff"].includes(u.role_id.role_type))).toBe(true);
+    expect(rows(r).every((u) => ["owner", "staff"].includes(u.role_id.role_type))).toBe(true);
   });
 
   it("กรองก่อน paginate: ลูกค้าจำนวนมากไม่ดันพนักงานตกหน้า (limit 2 ยังได้พนักงานครบ)", async () => {
@@ -35,7 +39,7 @@ describe("userService.listUsers — กรองตาม role_type", () => {
 
     const r = await listUsers({ pagination: { page: 1, limit: 2, skip: 0 }, role_type: ["owner", "staff"], search: "PG-", sort: { created_at: 1 } });
 
-    expect(r.items.map((u: any) => String(u._id))).toEqual([String(s._id)]);
+    expect(idsOf(r)).toEqual([String(s._id)]);
     expect(r.meta.total).toBe(1);
   });
 
@@ -49,20 +53,20 @@ describe("userService.listUsers — กรองตาม role_type", () => {
     expect(wrong.meta.total).toBe(0);
 
     const right = await listUsers({ pagination, role_id: String(staff._id), role_type: ["staff"] });
-    expect(right.items.map((u: any) => String(u._id))).toEqual([String(s._id)]);
+    expect(idsOf(right)).toEqual([String(s._id)]);
   });
 
   it("บทบาทที่ถูกลบแบบ soft delete: ผู้ใช้ของบทบาทนั้นยังอยู่ในรายการ (ไม่หายเงียบ ๆ)", async () => {
     const staff = await mk("staff", { deleted_at: new Date() });
     const u = await makeUser({ role_id: staff._id, user_fullname: "SD-staff" });
     const r = await listUsers({ pagination, role_type: ["staff"], search: "SD-" });
-    expect(r.items.map((x: any) => String(x._id))).toEqual([String(u._id)]);
+    expect(idsOf(r)).toEqual([String(u._id)]);
   });
 
   it("ไม่ส่ง role_type → พฤติกรรมเดิม (ได้ทุกประเภท รวมลูกค้า)", async () => {
     const customer = await mk("customer");
     const u = await makeUser({ role_id: customer._id, user_fullname: "ALL-cust" });
     const r = await listUsers({ pagination, search: "ALL-" });
-    expect(r.items.map((x: any) => String(x._id))).toEqual([String(u._id)]);
+    expect(idsOf(r)).toEqual([String(u._id)]);
   });
 });
