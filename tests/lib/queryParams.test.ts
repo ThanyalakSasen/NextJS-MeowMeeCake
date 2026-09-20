@@ -37,6 +37,10 @@ describe("parseSort", () => {
     expect(parseSort(sp(""), ["name", "created_at"], "created_at")).toEqual({ created_at: -1 });
   });
 
+  it("กำหนด default order เป็น asc ได้", () => {
+    expect(parseSort(sp(""), ["name", "created_at"], "created_at", "asc")).toEqual({ created_at: 1 });
+  });
+
   it("sortBy นอกลิสต์ → throw", () => {
     expect(() => parseSort(sp("sortBy=evil"), ["name"], "name")).toThrowError(/sortBy/);
   });

@@ -28,13 +28,20 @@ export function parsePagination(
 export function parseSort(
   sp: URLSearchParams,
   allowed: string[],
-  fallback: string
+  fallback: string,
+  defaultOrder: "asc" | "desc" = "desc"
 ): Record<string, 1 | -1> {
   const by = sp.get("sortBy") || fallback;
   if (!allowed.includes(by)) {
     throw badRequest(`sortBy ต้องเป็นหนึ่งใน: ${allowed.join(", ")}`);
   }
-  const order: 1 | -1 = sp.get("sortOrder") === "asc" ? 1 : -1;
+  const order: 1 | -1 = sp.get("sortOrder")
+    ? sp.get("sortOrder") === "asc"
+      ? 1
+      : -1
+    : defaultOrder === "asc"
+      ? 1
+      : -1;
   return { [by]: order };
 }
 
