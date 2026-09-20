@@ -206,3 +206,78 @@ export async function topProducts(opts: {
     })),
   };
 }
+
+// ── รายรับแยกตามประเภทสินค้า (หน้าสรุปกำไร-ขาดทุน) ────────────────
+export type ProductTypeKey = "inStore" | "online" | "preorder";
+
+/**
+ * รายรับ (ออเดอร์ที่ชำระแล้ว ไม่ถูกลบ ในช่วงวันที่) แยกตาม product_type ของสินค้าในออเดอร์
+ *
+ * - ประเภทสินค้าไม่ได้เก็บไว้กับรายการในออเดอร์ (product_snapshot มีแค่ชื่อ) จึงอ้างจาก product_type "ปัจจุบัน"
+ *   ของสินค้า — ถ้าเปลี่ยนประเภทสินค้าภายหลัง ออเดอร์เก่าจะย้ายกลุ่มตามไปด้วย
+ * - ผลรวมทุกกลุ่ม = ผลรวม total_amount ของออเดอร์ตรงเป๊ะ: ส่วนที่นอกเหนือจากราคาสินค้า (ค่าส่ง − ส่วนลดระดับออเดอร์)
+ *   กระจายตามสัดส่วนยอดสินค้าของแต่ละประเภทในออเดอร์นั้น (คิดเป็นสตางค์ integer เศษปัดเข้ากลุ่มที่ใหญ่สุด)
+ * - รายการที่หาสินค้าไม่เจอ (ถูกลบ/ไม่มีข้อมูล) หรือออเดอร์ที่ไม่มีรายการเลย → "unclassified"
+ * คืนเป็นบาท (แปลงจากสตางค์ตอนท้ายสุด)
+ */
+export async function revenueByProductType(opts: { date_from?: string; date_to?: string } = {}) {
+  await dbConnect();
+  const orders = await orderModel
+    .find({ ...rangeMatch(opts.date_from, opts.date_to), payment_status: "paid" })
+    .select("total_amount")
+    .lean<Array<{ _id: any; total_amount: number }>>();
+
+  const KEYS = ["inStore", "online", "preorder", "unclassified"] as const;
+  type Bucket = (typeof KEYS)[number];
+  const sums: Record<Bucket, number> = { inStore: 0, online: 0, preorder: 0, unclassified: 0 };
+
+  if (orders.length > 0) {
+    const items = await orderItemModel
+      .find({ order_id: { $in: orders.map((o) => o._id) }, deleted_at: null })
+      .select("order_id product_id total_price")
+      .lean<Array<{ order_id: any; product_id: any; total_price: number }>>();
+    const productIds = [...new Set(items.map((i) => String(i.product_id)))];
+    const products = productIds.length
+      ? await productModel
+          .find({ _id: { $in: productIds } })
+          .select("product_type")
+          .lean<Array<{ _id: any; product_type?: string }>>()
+      : [];
+    const typeOf = new Map(products.map((p) => [String(p._id), p.product_type]));
+
+    const byOrder = new Map<string, Record<Bucket, number>>();
+    for (const it of items) {
+      const type = typeOf.get(String(it.product_id));
+      const bucket: Bucket = type === "inStore" || type === "online" || type === "preorder" ? type : "unclassified";
+      const row = byOrder.get(String(it.order_id)) ?? { inStore: 0, online: 0, preorder: 0, unclassified: 0 };
+      row[bucket] += it.total_price;
+      byOrder.set(String(it.order_id), row);
+    }
+
+    for (const o of orders) {
+      const parts = byOrder.get(String(o._id));
+      const itemsSum = parts ? KEYS.reduce((s, k) => s + parts[k], 0) : 0;
+      if (!parts || itemsSum <= 0) {
+        sums.unclassified += o.total_amount;
+        continue;
+      }
+      // กระจาย total_amount ตามสัดส่วนยอดสินค้า — เศษที่ปัดแล้วไม่ลงตัวให้กลุ่มที่ใหญ่สุด รวมแล้วตรง total_amount เสมอ
+      const alloc = Object.fromEntries(KEYS.map((k) => [k, Math.round((o.total_amount * parts[k]) / itemsSum)])) as Record<Bucket, number>;
+      const drift = o.total_amount - KEYS.reduce((s, k) => s + alloc[k], 0);
+      if (drift !== 0) {
+        const largest = KEYS.reduce((a, b) => (parts[b] > parts[a] ? b : a));
+        alloc[largest] += drift;
+      }
+      for (const k of KEYS) sums[k] += alloc[k];
+    }
+  }
+
+  return {
+    in_store: toBaht(sums.inStore),
+    online: toBaht(sums.online),
+    preorder: toBaht(sums.preorder),
+    unclassified: toBaht(sums.unclassified),
+    total: toBaht(KEYS.reduce((s, k) => s + sums[k], 0)),
+    orders: orders.length,
+  };
+}

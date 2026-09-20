@@ -53,6 +53,8 @@ export interface ListUserQuery {
   pagination: Pagination;
   search?: string;
   role_id?: string;
+  /** กรองตามประเภทของบทบาท (roleModel.role_type) — ผู้ใช้ไม่ได้เก็บประเภทไว้เอง ต้องอ้างผ่าน role_id (เช่น หน้าพนักงาน = owner + staff) */
+  role_type?: ("owner" | "staff" | "customer")[];
   is_active?: boolean;
   employment_type?: "full_time" | "part_time";
   includeDeleted?: boolean;
@@ -118,6 +120,13 @@ export async function listUsers(query: ListUserQuery) {
   if (query.role_id) {
     assertObjectId(query.role_id, "role_id");
     filter.role_id = query.role_id;
+  }
+  if (query.role_type?.length) {
+    // บทบาทที่ถูกลบแบบ soft delete ก็นับ — ผู้ใช้ที่ยังผูกอยู่ต้องไม่หายจากรายการเพราะบทบาทถูกลบ
+    const roleIds = (await roleModel.find({ role_type: { $in: query.role_type } }).select("_id").lean()).map((r) => String(r._id));
+    // ระบุทั้ง role_id และ role_type = ต้องเข้าเงื่อนไขทั้งคู่ (role_id ที่ไม่อยู่ในประเภทที่ขอ → ไม่มีผลลัพธ์)
+    const allowed = query.role_id ? roleIds.filter((id) => id === String(query.role_id)) : roleIds;
+    filter.role_id = { $in: allowed };
   }
   if (typeof query.is_active === "boolean") filter.is_active = query.is_active;
   if (query.employment_type) filter.employment_type = query.employment_type;
