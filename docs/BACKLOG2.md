@@ -3,10 +3,10 @@
 > สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-22 (§12.1 — รีเซ็ตรหัสผ่านบัญชี owner จริงแล้ว ยืนยันด้วย
 > API จริง (login รหัสใหม่ 200 / รหัส seed เดิม 401) ส่วนรหัสผ่าน Atlas DB user ยังค้าง ต้องทำที่ Atlas
 > console เอง · §12.2 แก้แล้ว — เพิ่ม sort ให้ query หาสูตรตอนสร้างใบสั่งผลิตจากรอบพรีออเดอร์ deterministic
-> (created_at + _id tie-breaker) · §13 — พบ created_at/updated_at เก็บเป็น BSON Timestamp
-> แทน Date ใน 6 collection/27 เอกสาร ทำให้รหัสสินค้า (product_id) มีคำว่า "NaN" ปน สแกน POS ไม่เจอ —
-> **แก้แล้วเฉพาะ products (6/6)** ส่วนอีก 21 เอกสารใน roles/banners/ingredients/ingredientcategories/
-> units **ยังไม่แก้** — §1–§11 ปิดครบเหมือนเดิม)
+> (created_at + _id tie-breaker) · §13 แก้ครบแล้ว — created_at/updated_at ที่เก็บเป็น BSON Timestamp
+> แทน Date ใน 6 collection/27 เอกสารทั้งหมด (products 6/6 + roles/banners/ingredients/
+> ingredientcategories/units 21/21) ไม่มีเอกสารไหนเหลือในระบบอีกแล้ว (ยืนยันด้วย audit สแกนครบ 47
+> collection) — §1–§11 ปิดครบเหมือนเดิม)
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
@@ -495,7 +495,7 @@ Mongo ไม่การันตีลำดับถ้าไม่ระบ�
 
 ---
 
-## 13. 🟠 `created_at`/`updated_at` เก็บเป็น BSON `Timestamp` แทน `Date` — 6 collection/27 เอกสาร, แก้แล้วเฉพาะ products (2026-09-22)
+## 13. ✅ `created_at`/`updated_at` เก็บเป็น BSON `Timestamp` แทน `Date` — 6 collection/27 เอกสาร, แก้ครบแล้ว (2026-09-22)
 
 > พบระหว่างทดสอบหน้าจอจริง (agent อื่นเปิดเบราว์เซอร์ทดสอบ frontend) — เจ้าของโปรเจกต์สังเกตเห็นรหัสสินค้า
 > (`product_id`) มีคำว่า "NaN" ปนอยู่ (เช่น `pos-NaNNaN796`) ระหว่างดูหน้าจอจริง ไม่ใช่รอบตรวจโค้ดแบบ §1–§10
@@ -558,19 +558,24 @@ BSON `Timestamp` เก็บเป็น (t, i) แต่ตีความ `t`
   `pos-0100074` เดิม ก็เปลี่ยนเป็นรหัสใหม่ด้วย เพราะวันที่ในรหัสเดิมเป็นค่าปลอม) — ถ้าเคยพิมพ์บาร์โค้ด/
   ป้ายราคาด้วยรหัสเดิมไปแล้ว ต้องพิมพ์ใหม่
 
-### ยังไม่ได้แก้ — เปิดค้างไว้
+### ส่วนที่ทำแล้ว (21 เอกสารที่เหลือ, 2026-09-22)
 
-**21 เอกสารใน `roles`/`banners`/`ingredients`/`ingredientcategories`/`units` ยังเป็น BSON Timestamp
-เหมือนเดิม** — จำกัดขอบเขตรอบนี้ไว้แค่ products ตามที่ผู้ใช้เลือก (คอลเลกชันอื่นไม่มี field ที่พึ่งพา
-`created_at` มาสร้างรหัสเหมือน `product_id` จึงยังไม่พบผลกระทบที่มองเห็นได้เหมือน products แต่ยังเป็นข้อมูล
-เสียในรูปแบบเดียวกัน ฟีเจอร์ไหนในอนาคตที่ใช้ `created_at`/`updated_at` ของ collection พวกนี้ในการคำนวณ/
-เรียงลำดับ/แสดงผลอาจได้ผลลัพธ์ผิดโดยไม่รู้ตัว)
+- `scripts/fix-bson-timestamp-other-collections.ts` (ใหม่) — เดียวกับ `fix-bson-timestamp-products.ts`
+  ทุกจุดด้านความปลอดภัย (dry-run เป็นค่าเริ่มต้น, ปฏิเสธ report เก่ากว่า 24 ชม., ตรวจกับ DB จริงก่อนเขียน
+  ทุกแถว, สำรองค่าเดิมลง `scripts/backups/`, marker กันรันซ้ำ) แต่ต่างจาก products ตรงที่ **ไม่ต้องสร้าง
+  รหัสใหม่** (5 collection นี้ไม่มี field รหัสที่พึ่งพา `created_at` เหมือน `product_id`) แก้แค่
+  `created_at`/`updated_at` ให้เป็น `Date` ที่กู้จาก `ObjectId.getTimestamp()`
+- **`updated_at` ที่เสียด้วย (4 แถว: roles 2, ingredientcategories 2):** ไม่มีแหล่งข้อมูลอื่นที่เชื่อถือได้
+  กว่าในการกู้ "เวลาแก้ไขล่าสุดจริง" (ต่างจาก `created_at` ที่กู้จาก ObjectId ได้ตรง ๆ) จึงตั้งเป็นค่า
+  เดียวกับ `created_at` ที่กู้ได้ (สมมติว่ายังไม่เคยถูกแก้ไขหลังสร้าง — สมมติฐานที่ระมัดระวังที่สุดเท่าที่
+  ทำได้ ไม่มีข้อมูลอื่นชี้ว่าเคยมีการแก้ไขจริงเมื่อไหร่)
+- รัน `--apply` แล้วกับ DB จริง (2026-09-22) — **21/21 สำเร็จ ไม่มีรายการล้มเหลว** ยืนยันด้วยการรัน
+  `audit-bson-timestamp-fields.ts` ซ้ำ: **0 เอกสารเสียเหลือในทั้ง 47 collection ของระบบ** (ปิดครบทุก
+  collection แล้ว ไม่ใช่แค่ 5 ที่ตั้งใจแก้รอบนี้)
 
-**เงื่อนไขที่ควรกลับมาทำ:** ก่อนใช้ `created_at`/`updated_at` ของ 5 collection ที่เหลือในทางที่มีผลต่อ
-ผู้ใช้จริง (เรียงลำดับ, แสดง "สร้างเมื่อ", คำนวณอายุข้อมูล ฯลฯ) ควรรัน
-`scripts/audit-bson-timestamp-fields.ts` ใหม่ยืนยันตัวเลขอีกครั้ง แล้วเขียนสคริปต์แก้แบบเดียวกับ
-`fix-bson-timestamp-products.ts` (ไม่ต้องสร้างรหัสใหม่เหมือน products เพราะ 5 collection นี้ไม่มี field
-รหัสที่พึ่งวันที่ — แก้แค่ `created_at`/`updated_at` ให้เป็น `Date` ที่กู้จาก ObjectId พอ)
+ยืนยันด้วย `typecheck`/`lint` (0 error, warning เท่าเดิม 5 จุด ไม่เกี่ยวกับไฟล์ที่แก้) ผ่านหมด — สคริปต์นี้
+เป็น one-off migration เหมือน `fix-bson-timestamp-products.ts` ไม่มี vitest ประกบ (ยืนยันผลผ่าน dry-run +
+DB จริงแทน ตามแพทเทิร์นเดียวกับสคริปต์แก้ข้อมูลตัวอื่นในโปรเจกต์นี้)
 
-**สถานะ:** 🟠 แก้แล้วบางส่วน — products (6/6) เสร็จสมบูรณ์และยืนยันผลจริงแล้ว · roles/banners/
-ingredients/ingredientcategories/units (21 เอกสาร) ยังเปิดค้าง
+**สถานะ:** ✅ แก้ครบทั้งหมดแล้ว — products (6/6) + roles/banners/ingredients/ingredientcategories/units
+(21/21) รวม 27/27 เอกสารที่เจอตอน audit ครั้งแรก ไม่มีเอกสารไหนเหลือ BSON Timestamp ในระบบอีกแล้ว
