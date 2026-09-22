@@ -182,8 +182,14 @@ export async function createProductionFromRound(input: CreateProductionFromRound
   if (!grouped.length) throw badRequest("รอบนี้ยังไม่มีพรีออเดอร์ที่ต้องผลิต (ไม่นับรายการที่ยกเลิกแล้ว)");
 
   const productIds = grouped.map((g) => String(g._id));
+  // เรียงใหม่→เก่า แล้วเอาตัวแรก (ล่าสุด) ต่อสินค้า — คล้าย recipeService.getUnitCostByProduct() แต่เพิ่ม
+  // _id เป็น tie-breaker ด้วย (created_at ละเอียดแค่ระดับมิลลิวินาที ถ้าสร้าง 2 สูตรในมิลลิวินาทีเดียวกัน
+  // Mongo ไม่การันตีลำดับผลลัพธ์ที่ค่าเท่ากัน — ยืนยันจริงจากเทสที่เพิ่มใหม่ ObjectId มีตัวนับเพิ่มขึ้นเสมอ
+  // ต่อการสร้างในโปรเซสเดียวกัน จึงเรียงได้ deterministic เสมอ) กันกรณีสินค้าหนึ่งมีสูตรที่ยังไม่ถูกลบ
+  // มากกว่า 1 สูตร (เดิมไม่มี .sort() เลย ทำให้ผลลัพธ์ไม่แน่นอนขึ้นกับ Mongo ไม่ใช่เจตนา — docs/BACKLOG2.md §12.2)
   const recipes = await recipeModel
     .find({ product_id: { $in: productIds }, deleted_at: null })
+    .sort({ created_at: -1, _id: -1 })
     .lean<any[]>();
   const recipeByProduct = new Map<string, any>();
   for (const r of recipes) {

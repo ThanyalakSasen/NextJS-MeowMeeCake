@@ -156,4 +156,41 @@ describe("productionOrderService.createProductionFromRound", () => {
     ).rejects.toThrow(/ยังไม่มีสูตรผูกไว้/);
     expect(await productionOrderModel.countDocuments({})).toBe(countBefore);
   });
+
+  it("สินค้ามีสูตรที่ยังไม่ถูกลบมากกว่า 1 สูตร → ใช้สูตรล่าสุด (created_at ใหม่สุด, docs/BACKLOG2.md §12.2)", async () => {
+    const admin = await makeUser();
+    const customer = await makeUser();
+    const product = await makeProduct({ product_type: "preorder" });
+    const oldRecipe = await makeRecipe(String(product._id)); // สร้างก่อน
+    const newRecipe = await makeRecipe(String(product._id)); // สร้างทีหลัง — ต้องถูกเลือก
+
+    const now = Date.now();
+    const round = await preorderRoundService.createRound(
+      {
+        round_name: "รอบมีสูตรซ้ำ",
+        open_date: new Date(now - 60_000),
+        close_date: new Date(now + 60_000),
+        pickup_date: new Date(now + 2 * 24 * 3600 * 1000),
+        round_status: "open",
+        items: [{ product_id: String(product._id), max_qty_total: 10 }],
+      },
+      String(admin._id)
+    );
+    const roundItemId = String(round.items[0]._id);
+    await preorderService.createPreorder(String(customer._id), {
+      round_id: String(round._id),
+      order_type: "takeaway",
+      items: [{ round_item_id: roundItemId, quantity: 4 }],
+    });
+    await preorderRoundService.updateRoundStatus(String(round._id), "closed");
+
+    const order = await productionOrderService.createProductionFromRound({
+      round_id: String(round._id),
+      production_date: new Date(),
+    });
+
+    const item = order.items[0];
+    expect(String(item.recipe_id._id ?? item.recipe_id)).toBe(String(newRecipe._id));
+    expect(String(item.recipe_id._id ?? item.recipe_id)).not.toBe(String(oldRecipe._id));
+  });
 });
