@@ -1,8 +1,11 @@
 /**
  * productionOrderService — ใบสั่งผลิต (ProductionOrders) + รายการผลิต (ผ่าน productionItemService)
  *
- * เฟสนี้รองรับ source_type = "manual" เท่านั้น
- * ("preorder" — สร้างใบสั่งผลิตจากรอบพรีออเดอร์ — เป็นงานเฟส 5)
+ * สร้างได้ 2 ทาง:
+ *  - createProductionOrder    : สร้างเอง (source_type บังคับเป็น "manual" เสมอ ไม่ผูก round_id)
+ *  - createProductionFromRound: สร้างจากรอบพรีออเดอร์ที่ "ปิดรับแล้ว" (source_type = "preorder",
+ *    round_id ผูกไว้) — รวมยอดสั่งจริงต่อสินค้าจากพรีออเดอร์ที่ยังไม่ยกเลิกในรอบนั้นให้อัตโนมัติ
+ *    สร้างได้แค่ 1 ใบต่อรอบ (ยกเลิกใบเดิมก่อนถ้าต้องการสร้างใหม่)
  *
  * flow: planned → in_progress → done   (ยกเลิกได้ทุกสถานะที่ยังไม่ done → cancelled)
  *  - startProduction   : planned → in_progress, เซ็ต started_at
@@ -19,6 +22,10 @@ import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import productionOrderModel from "../models/productionOrderModel";
 import productionItemModel from "../models/productionItemModel";
 import userModel from "../models/userModel";
+import preorderRoundModel from "../models/preorderRoundModel";
+import preorderModel from "../models/preorderModel";
+import preorderItemModel from "../models/preorderItemModel";
+import recipeModel from "../models/recipeModel";
 import * as productionItemService from "./productionItemService";
 import type { AddItemInput } from "./productionItemService";
 
@@ -46,11 +53,19 @@ export interface ListProductionOrderQuery {
   pagination: Pagination;
   production_status?: ProductionStatus;
   source_type?: "manual" | "preorder";
+  round_id?: string;
   assigned_to?: string;
   search?: string;
   date_from?: string;
   date_to?: string;
   includeDeleted?: boolean;
+}
+
+export interface CreateProductionFromRoundInput {
+  round_id: string;
+  production_date: string | Date;
+  assigned_to?: string | null;
+  production_note?: string | null;
 }
 
 // ── CREATE ─────────────────────────────────────────────────
@@ -108,6 +123,114 @@ export async function createProductionOrder(input: CreateProductionOrderInput) {
   return getProductionOrderById(String(order._id));
 }
 
+/**
+ * สร้างใบสั่งผลิตจาก "รอบพรีออเดอร์" ที่ปิดรับแล้ว — รวมยอดสั่งจริงต่อสินค้าจากพรีออเดอร์ที่ยังไม่
+ * ยกเลิกทั้งหมดในรอบนั้น (join preorderItems → preorders ด้วย round_id) แล้วสร้างเป็น production
+ * item 1 แถวต่อสินค้า (planned_qty = ผลรวมจำนวนที่ลูกค้าสั่ง) ผูก round_item_id ไว้ด้วยเพื่อย้อนดูที่มา
+ *
+ * บังคับ round_status = "closed" เท่านั้น (ยอดสั่งยังไม่นิ่งตอน scheduled/open) และให้สร้างได้แค่ 1 ใบ
+ * ต่อรอบ (กันสร้างซ้ำ/สับสนว่าใบไหนคือของจริง) — ยกเลิกใบเดิมได้ถ้าต้องการสร้างใหม่
+ */
+export async function createProductionFromRound(input: CreateProductionFromRoundInput) {
+  await dbConnect();
+  assertObjectId(input.round_id, "round_id");
+  if (!input.production_date) throw badRequest("กรุณาระบุ production_date");
+
+  const round = await preorderRoundModel.findOne({ _id: input.round_id, deleted_at: null }).lean<any>();
+  if (!round) throw notFound("ไม่พบรอบพรีออเดอร์ที่ระบุ");
+  if (round.round_status !== "closed") {
+    throw conflict('สร้างใบสั่งผลิตได้เฉพาะรอบที่สถานะ "ปิดรับแล้ว" เท่านั้น (ยอดสั่งของรอบที่ยังไม่ปิดยังไม่นิ่ง)');
+  }
+
+  const existing = await productionOrderModel.countDocuments({
+    round_id: round._id,
+    deleted_at: null,
+    production_status: { $ne: "cancelled" },
+  });
+  if (existing > 0) throw conflict("มีใบสั่งผลิตสำหรับรอบนี้อยู่แล้ว (ยกเลิกใบเดิมก่อนถ้าต้องการสร้างใหม่)");
+
+  if (input.assigned_to) {
+    await assertRefExists(userModel, input.assigned_to, "ผู้รับผิดชอบ", "assigned_to");
+  }
+
+  // รวมยอดสั่งจริงต่อสินค้า — เฉพาะพรีออเดอร์ที่ยังไม่ถูกลบ/ยกเลิกในรอบนี้เท่านั้น
+  const grouped = await preorderItemModel.aggregate([
+    {
+      $lookup: {
+        from: preorderModel.collection.name,
+        localField: "preorder_id",
+        foreignField: "_id",
+        as: "preorder",
+      },
+    },
+    { $unwind: "$preorder" },
+    {
+      $match: {
+        "preorder.round_id": round._id,
+        "preorder.deleted_at": null,
+        "preorder.order_status": { $ne: "cancelled" },
+      },
+    },
+    {
+      $group: {
+        _id: "$product_id",
+        round_item_id: { $first: "$round_item_id" },
+        qty: { $sum: "$quantity" },
+      },
+    },
+  ]);
+  if (!grouped.length) throw badRequest("รอบนี้ยังไม่มีพรีออเดอร์ที่ต้องผลิต (ไม่นับรายการที่ยกเลิกแล้ว)");
+
+  const productIds = grouped.map((g) => String(g._id));
+  const recipes = await recipeModel
+    .find({ product_id: { $in: productIds }, deleted_at: null })
+    .lean<any[]>();
+  const recipeByProduct = new Map<string, any>();
+  for (const r of recipes) {
+    if (!recipeByProduct.has(String(r.product_id))) recipeByProduct.set(String(r.product_id), r);
+  }
+  const missing = productIds.filter((id) => !recipeByProduct.has(id));
+  if (missing.length) {
+    throw badRequest(`มีสินค้า ${missing.length} รายการในรอบนี้ที่ยังไม่มีสูตรผูกไว้ — ผูกสูตรให้ครบก่อนสร้างใบสั่งผลิต`);
+  }
+
+  let order: any = null;
+  for (let attempt = 0; attempt < 5 && !order; attempt++) {
+    try {
+      order = await productionOrderModel.create({
+        production_no: generateDocNo("PRD", 5),
+        production_date: new Date(input.production_date),
+        source_type: "preorder",
+        round_id: round._id,
+        production_status: "planned",
+        assigned_to: input.assigned_to ?? null,
+        production_note: input.production_note ?? null,
+      });
+    } catch (err: any) {
+      if (err?.code === 11000 && attempt < 4) continue;
+      throw err;
+    }
+  }
+
+  const saga = new Saga();
+  saga.onRollback("delete-production-order", () => productionOrderModel.deleteOne({ _id: order._id }));
+  try {
+    const inputs: AddItemInput[] = grouped.map((g) => ({
+      product_id: String(g._id),
+      recipe_id: String(recipeByProduct.get(String(g._id))._id),
+      planned_qty: g.qty,
+      round_item_id: g.round_item_id ? String(g.round_item_id) : null,
+    }));
+    await productionItemService.addItems(String(order._id), inputs);
+    saga.commit();
+  } catch (err) {
+    await saga.rollback();
+    throw err;
+  }
+
+  return getProductionOrderById(String(order._id));
+}
+
 // ── READ ───────────────────────────────────────────────────
 export async function listProductionOrders(query: ListProductionOrderQuery) {
   await dbConnect();
@@ -116,6 +239,10 @@ export async function listProductionOrders(query: ListProductionOrderQuery) {
   if (!query.includeDeleted) filter.deleted_at = null;
   if (query.production_status) filter.production_status = query.production_status;
   if (query.source_type) filter.source_type = query.source_type;
+  if (query.round_id) {
+    assertObjectId(query.round_id, "round_id");
+    filter.round_id = query.round_id;
+  }
   if (query.assigned_to) {
     assertObjectId(query.assigned_to, "assigned_to");
     filter.assigned_to = query.assigned_to;
@@ -134,6 +261,7 @@ export async function listProductionOrders(query: ListProductionOrderQuery) {
       .skip(query.pagination.skip)
       .limit(query.pagination.limit)
       .populate("assigned_to", "user_fullname email")
+      .populate("round_id", "round_name pickup_date round_status")
       .lean(),
     productionOrderModel.countDocuments(filter),
   ]);
@@ -151,6 +279,7 @@ export async function getProductionOrderById(id: string, opts: { includeDeleted?
   const order = await productionOrderModel
     .findOne(filter)
     .populate("assigned_to", "user_fullname email")
+    .populate("round_id", "round_name pickup_date round_status")
     .lean<any>();
   if (!order) throw notFound("ไม่พบใบสั่งผลิตที่ระบุ");
 

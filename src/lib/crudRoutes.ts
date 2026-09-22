@@ -103,6 +103,7 @@ function logMutation(
 export interface CollectionRoutesOptions {
   sortable: string[];
   defaultSort: string;
+  defaultSortOrder?: "asc" | "desc";
   filterFromQuery?: (sp: URLSearchParams) => Record<string, unknown>;
   defaultLimit?: number;
   auth?: CrudAuth;
@@ -128,7 +129,7 @@ export function collectionRoutes(
     const result = await service.list({
       pagination: parsePagination(sp, opts.defaultLimit),
       search: sp.get("search") ?? undefined,
-      sort: parseSort(sp, opts.sortable, opts.defaultSort),
+      sort: parseSort(sp, opts.sortable, opts.defaultSort, opts.defaultSortOrder),
       includeDeleted: parseBool(sp.get("includeDeleted")) ?? false,
       filter,
     });
