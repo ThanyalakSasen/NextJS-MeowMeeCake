@@ -1,10 +1,11 @@
 # MeowMeeCake Backend — BACKLOG 2: บั๊ก/ความเสี่ยงชุดใหม่
 
-> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-22 (§13 ใหม่ — พบ created_at/updated_at เก็บเป็น BSON
-> Timestamp แทน Date ใน 6 collection/27 เอกสาร ทำให้รหัสสินค้า (product_id) มีคำว่า "NaN" ปน สแกน POS
-> ไม่เจอ — **แก้แล้วเฉพาะ products (6/6)** ส่วนอีก 21 เอกสารใน roles/banners/ingredients/
-> ingredientcategories/units **ยังไม่แก้** · §12 (2 ข้อก่อนหน้า: รหัสผ่าน seed เปิดเผย + การเลือกสูตร
-> กำกวมใน createProductionFromRound) ยังเปิดค้างเหมือนเดิม ไม่มีอะไรเปลี่ยน — §1–§11 ปิดครบเหมือนเดิม)
+> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-22 (§12.1 — รีเซ็ตรหัสผ่านบัญชี owner จริงแล้ว ยืนยันด้วย
+> API จริง (login รหัสใหม่ 200 / รหัส seed เดิม 401) ส่วนรหัสผ่าน Atlas DB user ยังค้าง ต้องทำที่ Atlas
+> console เอง · §12.2 ยังเปิดค้างเหมือนเดิม · §13 — พบ created_at/updated_at เก็บเป็น BSON Timestamp
+> แทน Date ใน 6 collection/27 เอกสาร ทำให้รหัสสินค้า (product_id) มีคำว่า "NaN" ปน สแกน POS ไม่เจอ —
+> **แก้แล้วเฉพาะ products (6/6)** ส่วนอีก 21 เอกสารใน roles/banners/ingredients/ingredientcategories/
+> units **ยังไม่แก้** — §1–§11 ปิดครบเหมือนเดิม)
 > ขอบเขต: ฝั่ง Backend (`src/**`, `scripts/**`) — ยังไม่รวม frontend เหมือน [`BACKLOG.md`](BACKLOG.md)
 > วิธีตรวจ: อ่านโค้ดจริง + grep หา pattern ที่เคยเป็นบั๊กมาก่อนซ้ำที่อื่น + ตรวจ DB จริง (read-only) เพื่อ
 > ยืนยันผลกระทบ — **ไม่ใช่รายงานดิบจาก agent** (ตามธรรมเนียมเดิมของ [`BACKLOG.md`](BACKLOG.md) §2b/§2c/§2d)
@@ -434,9 +435,20 @@ commit ลง git (`.env.local` อยู่ใน `.gitignore`) จึงไม
 **วิธีแก้:** เปลี่ยนรหัสผ่านบัญชี owner จริงด้วย `npm run reset-owner-password -- <email> <new-password>`
 (เวอร์ชันล่าสุดปลดล็อกบัญชีให้ด้วยแล้ว ดู `scripts/reset-owner-password.ts`) และเปลี่ยนรหัสผ่าน DB user
 `bakery_app` ที่ตัว MongoDB Atlas เอง (นอกเหนือขอบเขตโค้ด ต้องทำที่ Atlas console) แล้วอัปเดต `MONGODB_URI`
-ใน `.env.local` ที่ deploy จริงตาม — **ยังไม่ได้ทำทั้งสองอย่าง ณ วันที่บันทึกนี้**
+ใน `.env.local` ที่ deploy จริงตาม
 
-**สถานะ:** 🔴 ยังไม่แก้ — เป็น action จริงที่ต้องทำก่อนเปิดระบบให้คนนอกทีมเข้าถึงได้ ไม่ใช่แค่ไฟล์เอกสาร
+**ส่วนที่ทำแล้ว (2026-09-22):** รันสคริปต์ `reset-owner-password.ts` เปลี่ยนรหัสผ่านบัญชี owner จริง
+(`thanyalak.sas@kkumail.com`) จาก seed เดิม (`MeowMee@1234`) เป็นรหัสผ่านใหม่ที่ผู้ใช้กำหนดเอง (ไม่บันทึก
+ค่าจริงไว้ในเอกสารนี้) — **ยืนยันด้วย API จริง:** login ด้วยรหัสใหม่ → `200 OK` (คืน user จริง), login
+ด้วยรหัส seed เดิม → `401` (ใช้ไม่ได้แล้ว) ปิดช่องโหว่ "รหัสผ่านเปิดเผยใน repo สาธารณะใช้ล็อกอินได้จริง"
+เรียบร้อยสำหรับส่วนบัญชี owner
+
+**ส่วนที่ยังไม่ทำ:** รหัสผ่าน MongoDB Atlas DB user `bakery_app` ยังเป็นค่าเดิม (`bakery_app:bakery_app`)
+— ต้องเปลี่ยนที่ Atlas console เอง (นอกเหนือขอบเขตที่ agent ทำได้จากในนี้ ไม่มี credential/API access ไป
+Atlas) แล้วอัปเดต `MONGODB_URI` ใน `.env.local` จริงตาม ก่อนเปิดระบบให้คนนอกทีมเข้าถึงได้เต็มรูปแบบ
+
+**สถานะ:** 🟠 แก้บางส่วน — รหัสผ่านบัญชี owner เปลี่ยนแล้ว/ยืนยันแล้ว · รหัสผ่าน Atlas DB user ยังค้าง
+(ต้องทำที่ Atlas console)
 
 ### 12.2 🟡 `createProductionFromRound` เลือกสูตรกำกวมถ้าสินค้ามีหลายสูตรที่ยังไม่ถูกลบ (ยังไม่มีผลกระทบจริง)
 
