@@ -46,7 +46,10 @@ export const componentCategoryUpdate = componentCategoryCreate.partial();
 export const bannerCreate = z.object({
   banner_name: z.string().trim().min(1).max(120),
   banner_description: z.string().trim().max(500).optional(),
-  banner_img: z.string().trim().min(1).max(1000),
+  // เป็น URL จริงจาก POST /api/admin/banners/images เสมอ (เช่น "/uploads/banners/xxx.jpg") ไม่ใช่
+  // base64 แล้ว (แก้จากเดิมที่ frontend เก็บ base64 ตรง ๆ ผ่าน UploadImageBox — ทำให้ค่า max เดิม
+  // (1000) เตี้ยเกินไปสำหรับ base64 จริง แต่พอสำหรับ URL path ปกติ)
+  banner_img: z.string().trim().min(1).max(500),
   banner_link: z.string().trim().max(1000).optional(),
   start_date: z.coerce.date().optional(),
   end_date: z.coerce.date().optional(),
