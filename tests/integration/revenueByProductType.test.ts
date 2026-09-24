@@ -42,9 +42,9 @@ describe("revenueByProductType", () => {
   }
 
   it("แยกยอดตาม product_type: หน้าร้าน / ออนไลน์ / พรีออเดอร์", async () => {
-    const a = await makeProduct({ product_type: "inStore" });
-    const b = await makeProduct({ product_type: "online" });
-    const c = await makeProduct({ product_type: "preorder" });
+    const a = await makeProduct({ product_types: ["inStore"] });
+    const b = await makeProduct({ product_types: ["online"] });
+    const c = await makeProduct({ product_types: ["preorder"] });
     await order(1, 10000, [{ product: a, total: 10000 }]);
     await order(1, 25050, [{ product: b, total: 25050 }]);
     await order(1, 7000, [{ product: c, total: 7000 }]);
@@ -55,8 +55,8 @@ describe("revenueByProductType", () => {
   });
 
   it("ออเดอร์ที่ปนหลายประเภท + ค่าส่ง − ส่วนลด: กระจายตามสัดส่วนและผลรวมตรง total_amount เป๊ะ", async () => {
-    const a = await makeProduct({ product_type: "inStore" });
-    const b = await makeProduct({ product_type: "online" });
+    const a = await makeProduct({ product_types: ["inStore"] });
+    const b = await makeProduct({ product_types: ["online"] });
     // สินค้า 100 บาท (หน้าร้าน) + 200 บาท (ออนไลน์) = 300 · ค่าส่ง 50 · ส่วนลด 20 → total 330 บาท
     // ส่วนเกิน +30 บาท กระจาย 1:2 → หน้าร้าน 100+10=110, ออนไลน์ 200+20=220
     await order(2, 33000, [{ product: a, total: 10000 }, { product: b, total: 20000 }], { delivery_fee: 5000, discount_amount: 2000 });
@@ -70,9 +70,9 @@ describe("revenueByProductType", () => {
   });
 
   it("เศษสตางค์จากการหารสัดส่วนไม่ทำให้ยอดรวมเพี้ยน (3 ประเภท เศษไม่ลงตัว)", async () => {
-    const a = await makeProduct({ product_type: "inStore" });
-    const b = await makeProduct({ product_type: "online" });
-    const c = await makeProduct({ product_type: "preorder" });
+    const a = await makeProduct({ product_types: ["inStore"] });
+    const b = await makeProduct({ product_types: ["online"] });
+    const c = await makeProduct({ product_types: ["preorder"] });
     // สินค้ารวม 3 สตางค์ต่อประเภท ค่าส่ง 1 สตางค์ → ส่วนเกินหารสามไม่ลงตัว
     await order(3, 1000 + 1000 + 1000 + 1, [{ product: a, total: 1000 }, { product: b, total: 1000 }, { product: c, total: 1000 }], { delivery_fee: 1 });
 
@@ -83,7 +83,7 @@ describe("revenueByProductType", () => {
   });
 
   it("ไม่นับออเดอร์ที่ยังไม่ชำระ / ถูกลบ / อยู่นอกช่วงวันที่", async () => {
-    const b = await makeProduct({ product_type: "online" });
+    const b = await makeProduct({ product_types: ["online"] });
     await order(4, 10000, [{ product: b, total: 10000 }]); // นับ
     await order(4, 99900, [{ product: b, total: 99900 }], { payment_status: "pending" });
     await order(4, 88800, [{ product: b, total: 88800 }], { deleted_at: new Date() });

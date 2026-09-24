@@ -38,6 +38,21 @@ describe("orderService.createOrder → persistOrder (integration)", () => {
     expect(byProduct.get(String(p2._id))!.unit_price).toBe(6000);
   });
 
+  it("เลขออเดอร์ตามช่องทาง: เว็บไซต์ (online / ไม่ระบุ) = ORD- , หน้าร้าน (instore) = POS-", async () => {
+    const user = await makeUser();
+    const p = await makeProduct({ product_stock_quantity: 10 });
+    const make = (channel?: "online" | "instore") =>
+      orderService.createOrder(String(user._id), {
+        order_type: "takeaway",
+        channel,
+        items: [{ product_id: String(p._id), quantity: 1 }],
+      });
+
+    expect((await make("online")).order_no).toMatch(/^ORD-\d{8}-[A-Z0-9]{6}$/);
+    expect((await make(undefined)).order_no).toMatch(/^ORD-/);
+    expect((await make("instore")).order_no).toMatch(/^POS-\d{8}-[A-Z0-9]{6}$/);
+  });
+
   it("re-price: ราคาสินค้าเปลี่ยนหลังสร้าง product → ออเดอร์ใหม่ใช้ราคาปัจจุบัน", async () => {
     const user = await makeUser();
     const p = await makeProduct({ product_price: 100, product_stock_quantity: 20 });
@@ -105,7 +120,7 @@ describe("orderService.createOrder → persistOrder (integration)", () => {
 
   it("preorder product → reject (ต้องสั่งผ่านระบบ preorder)", async () => {
     const user = await makeUser();
-    const pre = await makeProduct({ product_type: "preorder", product_stock_quantity: null });
+    const pre = await makeProduct({ product_types: ["preorder"], product_stock_quantity: null });
     await expect(
       orderService.createOrder(String(user._id), {
         order_type: "takeaway",

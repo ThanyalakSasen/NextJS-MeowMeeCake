@@ -43,7 +43,7 @@ describe("productService — product_price/sale_price เก็บสตาง�
       product_price: 99.5,
       sale_price: 79.25,
       unit_id: String(unit._id),
-      product_type: "inStore",
+      product_types: ["inStore"],
     })) as { _id: unknown; product_price: number; sale_price: number | null };
     expect(created.product_price).toBe(99.5);
     expect(created.sale_price).toBe(79.25);
@@ -75,7 +75,7 @@ describe("productService — product_price/sale_price เก็บสตาง�
       category_id: String(cat._id),
       product_price: 35,
       unit_id: String(unit._id),
-      product_type: "inStore",
+      product_types: ["inStore"],
     })) as { _id: unknown };
 
     const byId = (await productService.getProductById(String(created._id))) as {
@@ -216,7 +216,7 @@ describe("orderService.resolveLine — ไม่มี \"จุดข้าม�
 describe("preorderRoundService — price_override เก็บสตางค์ คืนบาท", () => {
   async function makePreorderProduct() {
     return makeProduct({
-      product_type: "preorder",
+      product_types: ["preorder"],
       product_stock_quantity: null,
       product_price: 40,
       preorder_config: { min_order_qty: 1, max_order_qty: 10, lead_time_days: 1 },

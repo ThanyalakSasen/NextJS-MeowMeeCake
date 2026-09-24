@@ -19,7 +19,7 @@ describe("productionOrderService.createProductionFromRound", () => {
     const admin = await makeUser();
     const customerA = await makeUser();
     const customerB = await makeUser();
-    const product = await makeProduct({ product_type: "preorder", product_price: 100 });
+    const product = await makeProduct({ product_types: ["preorder"], product_price: 100 });
     const recipe = await makeRecipe(String(product._id));
 
     const now = Date.now();
@@ -98,7 +98,7 @@ describe("productionOrderService.createProductionFromRound", () => {
 
   it("รอบยังไม่ปิดรับ (open) → 409 ปฏิเสธ ไม่สร้างใบสั่งผลิต", async () => {
     const admin = await makeUser();
-    const product = await makeProduct({ product_type: "preorder" });
+    const product = await makeProduct({ product_types: ["preorder"] });
     await makeRecipe(String(product._id));
     const now = Date.now();
     const round = await preorderRoundService.createRound(
@@ -126,7 +126,7 @@ describe("productionOrderService.createProductionFromRound", () => {
   it("มีสินค้าที่สั่งแล้วยังไม่มีสูตรผูก → 400 ปฏิเสธ ไม่เหลือใบสั่งผลิตค้าง", async () => {
     const admin = await makeUser();
     const customer = await makeUser();
-    const product = await makeProduct({ product_type: "preorder" }); // ตั้งใจไม่สร้างสูตรให้
+    const product = await makeProduct({ product_types: ["preorder"] }); // ตั้งใจไม่สร้างสูตรให้
     const now = Date.now();
     const round = await preorderRoundService.createRound(
       {
@@ -160,7 +160,7 @@ describe("productionOrderService.createProductionFromRound", () => {
   it("สินค้ามีสูตรที่ยังไม่ถูกลบมากกว่า 1 สูตร → ใช้สูตรล่าสุด (created_at ใหม่สุด, docs/BACKLOG2.md §12.2)", async () => {
     const admin = await makeUser();
     const customer = await makeUser();
-    const product = await makeProduct({ product_type: "preorder" });
+    const product = await makeProduct({ product_types: ["preorder"] });
     const oldRecipe = await makeRecipe(String(product._id)); // สร้างก่อน
     const newRecipe = await makeRecipe(String(product._id)); // สร้างทีหลัง — ต้องถูกเลือก
 

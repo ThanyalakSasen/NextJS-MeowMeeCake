@@ -102,15 +102,21 @@ const productSchema = new mongoose.Schema(
       ref: "Units",
       required: true,
     },
-    product_type: {
-      type: String,
+    product_types: {
       // inStore = สินค้าหน้าร้าน , online = สินค้าออนไลน์ , preorder = สินค้าพรีออเดอร์
-      enum: ["inStore", "online", "preorder"],
+      // 1 สินค้าเลือกได้มากกว่า 1 ประเภทถ้าเป็นกลุ่ม "มีสต็อก" ด้วยกัน (inStore+online ได้) แต่ preorder
+      // ห้ามผสมกับตัวอื่นเลย (ต้องเป็น ["preorder"] เดี่ยว ๆ เท่านั้น) — validateTypeConsistency() ฝั่ง
+      // productService.ts บังคับกฎนี้ตอน create/update, schema ชั้นนี้เช็คแค่ไม่ว่างเปล่า
+      type: [{ type: String, enum: ["inStore", "online", "preorder"] }],
       required: true,
+      validate: {
+        validator: (v: string[]) => Array.isArray(v) && v.length > 0,
+        message: "product_types ต้องมีอย่างน้อย 1 ค่า",
+      },
     },
     product_stock_quantity: {
-      // มีค่าเมื่อ product_type = "inStore" หรือ "online"
-      // product_type = "preorder" → null
+      // มีค่าเมื่อ product_types มี "inStore" หรือ "online" (อย่างใดอย่างหนึ่งหรือทั้งคู่)
+      // product_types = ["preorder"] → null
       type: Number,
       min: 0,
       default: 0,
@@ -127,7 +133,7 @@ const productSchema = new mongoose.Schema(
       default: 0,
     },
     preorder_config: {
-      // null ถ้า product_type = "inStore" หรือ "online" (ใช้เฉพาะ preorder)
+      // null ถ้า product_types มี "inStore"/"online" (ใช้เฉพาะตอน product_types = ["preorder"])
       type: preorderConfigSchema,
       default: null,
     },
@@ -151,8 +157,8 @@ const productSchema = new mongoose.Schema(
 // (ให้รัน scripts/backfill-product-codes.ts เติมรหัสให้ของเดิม)
 productSchema.index({ product_id: 1 }, { unique: true, sparse: true });
 productSchema.index({ category_id: 1 });
-productSchema.index({ product_type: 1 });
-productSchema.index({ product_type: 1, deleted_at: 1 });
+productSchema.index({ product_types: 1 });
+productSchema.index({ product_types: 1, deleted_at: 1 });
 productSchema.index({ avg_rating: -1 });
 productSchema.index({ deleted_at: 1 });
 

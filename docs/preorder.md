@@ -1,6 +1,6 @@
 # ระบบพรีออเดอร์ (Preorder)
 
-สั่งสินค้าล่วงหน้าเป็น "รอบ" สำหรับสินค้าที่ `product_type = "preorder"`
+สั่งสินค้าล่วงหน้าเป็น "รอบ" สำหรับสินค้าที่ `product_types = ["preorder"]`
 แยกคอลเลกชัน + service + route ออกจากออเดอร์ปกติ (`orderModel`) โดยสิ้นเชิง
 
 ---
@@ -15,7 +15,7 @@
 | `PreorderItems` | **รายการในใบสั่ง** — snapshot ชื่อสินค้า + ราคา + จำนวน + `pickup_date` + `cost_per_unit` |
 
 ```
-PreorderRound 1 ──< PreorderRoundItem >── Product (product_type: "preorder")
+PreorderRound 1 ──< PreorderRoundItem >── Product (product_types: ["preorder"])
       │                     │
       │                     └── current_qty / max_qty_total  (โควตา)
       │
@@ -147,7 +147,7 @@ pending → confirmed → preparing → ready → completed
 
 ## 8. ข้อมูลทดสอบ — `npm run seed:preorder-rounds`
 
-สร้างสินค้าซาวโดว์ 5 รายการ (`product_type: "preorder"`) + 4 รอบ:
+สร้างสินค้าซาวโดว์ 5 รายการ (`product_types: ["preorder"]`) + 4 รอบ:
 
 | รอบ | ช่วงเวลา | `round_status` | ใช้เทส |
 |---|---|---|---|

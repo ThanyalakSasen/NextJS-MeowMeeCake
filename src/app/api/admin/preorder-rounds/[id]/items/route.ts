@@ -3,7 +3,7 @@
  *   GET  — รายการสินค้าในรอบ (preorder.view) ?activeOnly= ?includeDeleted=
  *   POST — เพิ่มสินค้าเข้ารอบ (preorder.update)
  *          body: { product_id, price_override?, min_order_qty?, max_qty_total, is_active? }
- *          product_id ต้องเป็นสินค้า product_type = "preorder"
+ *          product_id ต้องเป็นสินค้า product_types = ["preorder"]
  */
 import { okList, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";

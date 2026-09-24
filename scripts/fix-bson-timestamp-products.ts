@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import { ObjectId } from "mongodb";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import dbConnect from "../src/lib/dbConnect";
-import { generateProductCode, type ProductType } from "../src/lib/productCode";
+import { generateProductCode, productTypesOf, type ProductType } from "../src/lib/productCode";
 
 /**
  * แก้ created_at ที่เป็น BSON Timestamp (ไม่ใช่ Date) ของสินค้า 6 รายการที่ scripts/
@@ -74,7 +74,7 @@ async function main() {
   console.log(APPLY ? "โหมด APPLY — จะเขียนลงฐานข้อมูลจริง\n" : "โหมด DRY-RUN — ไม่เขียนอะไรลงฐานข้อมูล (ใส่ --apply เพื่อเขียนจริง)\n");
   console.log(`report สร้างเมื่อ ${report.generated_at} · สินค้าเป้าหมาย ${targets.length}\n`);
 
-  interface Plan { row: ReportRow; oid: ObjectId; oldProductId: string; recoveredDate: Date; type: ProductType }
+  interface Plan { row: ReportRow; oid: ObjectId; oldProductId: string; recoveredDate: Date; types: ProductType[] }
   const plans: Plan[] = [];
   const skipped: { row: ReportRow; reason: string }[] = [];
 
@@ -92,9 +92,8 @@ async function main() {
       continue;
     }
     const recoveredDate = oid.getTimestamp(); // ฝังอยู่ใน ObjectId เสมอ ไม่ขึ้นกับ field ที่เสีย
-    const type: ProductType =
-      doc.product_type === "preorder" ? "preorder" : doc.product_type === "online" ? "online" : "inStore";
-    plans.push({ row, oid, oldProductId: String(doc.product_id ?? ""), recoveredDate, type });
+    const types: ProductType[] = productTypesOf(doc) ?? ["inStore"];
+    plans.push({ row, oid, oldProductId: String(doc.product_id ?? ""), recoveredDate, types });
   }
 
   console.log(`จะแก้ ${plans.length} รายการ · ข้าม ${skipped.length} รายการ\n`);
@@ -127,7 +126,7 @@ async function main() {
     let newCode: string | null = null;
     let ok = false;
     for (let attempt = 0; attempt < 30 && !ok; attempt++) {
-      newCode = generateProductCode(p.type, p.recoveredDate);
+      newCode = generateProductCode(p.types, p.recoveredDate);
       try {
         // filter รวม created_at type เดิมไว้ด้วยทางอ้อม (เช็ค product_id ตรงเป๊ะ — ถ้าถูกแก้ไประหว่างทางจะไม่ match)
         const res = await col.updateOne(

@@ -2,7 +2,7 @@ import "./_env"; // ต้องมาก่อน import ที่อ่าน 
 
 import mongoose from "mongoose";
 import dbConnect from "../src/lib/dbConnect";
-import { generateProductCode, type ProductType } from "../src/lib/productCode";
+import { generateProductCode, productTypesOf, type ProductType } from "../src/lib/productCode";
 import productModel from "../src/models/productModel";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -16,7 +16,7 @@ async function main() {
 
   const missing = await productModel
     .find({ $or: [{ product_id: { $exists: false } }, { product_id: null }, { product_id: "" }] })
-    .select("_id product_type created_at")
+    .select("_id product_types product_type created_at")
     .lean<any[]>();
 
   console.log(`พบสินค้าที่ยังไม่มีรหัส: ${missing.length} รายการ`);
@@ -24,16 +24,16 @@ async function main() {
 
   for (const p of missing) {
     const at = p.created_at ? new Date(p.created_at) : new Date();
-    // online กับ inStore ใช้ prefix เดียวกัน (pos-) ; preorder ใช้ pre-
-    const type: ProductType =
-      p.product_type === "preorder" ? "preorder" : p.product_type === "online" ? "online" : "inStore";
+    // online กับ inStore ใช้ prefix เดียวกัน (pos-) ; preorder ใช้ pre- — อ่าน product_type เดิมด้วยถ้ายัง
+    // ไม่ได้ migrate (productTypesOf) ดีฟอลต์ inStore ถ้าไม่มีทั้งคู่
+    const types: ProductType[] = productTypesOf(p) ?? ["inStore"];
 
     let ok = false;
     for (let attempt = 0; attempt < 30 && !ok; attempt++) {
       try {
         await productModel.updateOne(
           { _id: p._id },
-          { $set: { product_id: generateProductCode(type, at) } }
+          { $set: { product_id: generateProductCode(types, at) } }
         );
         ok = true;
       } catch (err: any) {
