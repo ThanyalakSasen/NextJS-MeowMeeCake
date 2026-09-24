@@ -6,7 +6,7 @@
  *
  * ครอบคลุม:
  *  - สร้างออเดอร์จากตะกร้า (createOrderFromCart) หรือระบุรายการเอง (createOrder เช่น หน้าร้าน/POS)
- *  - ออกเลขออเดอร์ OP-YYYYMMDD-XXXXXX (กันซ้ำด้วย unique index + retry)
+ *  - ออกเลขออเดอร์ ORD-YYYYMMDD-XXXXXX (เว็บไซต์) / POS-YYYYMMDD-XXXXXX (หน้าร้าน) กันซ้ำด้วย unique index + retry
  *  - ตัดสต็อกตอนสร้าง และคืนสต็อกตอนยกเลิก (ผ่าน productService)
  *  - state machine ของ order_status + จัดการสถานะจัดส่ง/ชำระเงิน
  *  - ปฏิเสธสินค้าที่ product_types = ["preorder"] ทั้งใน createOrder และ createOrderFromCart
@@ -255,6 +255,15 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
   });
 }
 
+/**
+ * prefix เลขออเดอร์ตามช่องทาง: เว็บไซต์ (online) = ORD- , หน้าร้าน (instore / POS) = POS-
+ * (พรีออเดอร์ใช้ PRE- แยกใน preorderService) — ออเดอร์เก่าก่อน 2026-09-24 ยังเป็น OP- ไม่ได้เปลี่ยนย้อนหลัง
+ * ค่าเริ่มต้น online ให้ตรงกับ channel ที่ promotionService ใช้ด้านล่าง
+ */
+export function orderNoPrefix(channel: CreateOrderCommon["channel"]): "ORD" | "POS" {
+  return channel === "instore" ? "POS" : "ORD";
+}
+
 // ── helper: บันทึกออเดอร์ + รายการ + ตัดสต็อก (best-effort) ──
 async function persistOrder(
   userId: string,
@@ -365,7 +374,7 @@ async function persistOrder(
     for (let attempt = 0; attempt < 5 && !order; attempt++) {
       try {
         order = await orderModel.create({
-          order_no: generateDocNo("OP"),
+          order_no: generateDocNo(orderNoPrefix(opts.channel)),
           user_id: userId,
           order_type: opts.order_type,
           delivery_address: opts.order_type === "delivery" ? opts.delivery_address : null,

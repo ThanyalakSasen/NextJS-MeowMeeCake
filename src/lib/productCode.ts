@@ -59,7 +59,7 @@ export function isProductCode(value: unknown): value is string {
 
 /**
  * generateDocNo — เลขที่เอกสารรูปแบบ `<prefix>-YYYYMMDD-<random>` (ตัวพิมพ์ใหญ่, base36) ใช้ร่วมกันโดย
- * ออเดอร์ (`OP-`), พรีออเดอร์ (`PRE-`), ใบสั่งผลิต (`PRD-`) — ชนกันได้ (เลขสุ่ม ไม่การันตี unique) ผู้เรียก
+ * ออเดอร์เว็บไซต์ (`ORD-`), ออเดอร์หน้าร้าน (`POS-`), พรีออเดอร์ (`PRE-`), ใบสั่งผลิต (`PRD-`) — ชนกันได้ (เลขสุ่ม ไม่การันตี unique) ผู้เรียก
  * ต้องมี retry-on-duplicate-key ของตัวเองเสมอ (ดู `orderService`/`preorderService`/`productionOrderService`)
  */
 export function generateDocNo(prefix: string, randomLength = 6, now: Date = new Date()): string {
