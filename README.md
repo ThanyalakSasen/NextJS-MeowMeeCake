@@ -46,4 +46,5 @@ npm run seed                   # สร้าง role / units / หมวดห�
 npm run backfill:product-codes # เติมรหัสสินค้า pos-/pre- ให้ของเดิม
 npm run sync-indexes           # ปรับ index ใน DB ให้ตรง schema (+ --fix เพื่อลบข้อมูลซ้ำ)
 npm run seed:preorder-rounds   # สร้างรอบพรีออเดอร์ตัวอย่าง (ซาวโดว์) 4 รอบ สำหรับเทสฝั่งลูกค้า
+npm run migrate:product-types  # แปลง product_type (string) → product_types (array) ของสินค้าเดิม — รันก่อน deploy (BACKLOG2 §14)
 ```

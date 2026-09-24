@@ -1,7 +1,7 @@
 /**
  * preorderService — คำสั่งพรีออเดอร์ (Preorders + PreorderItems)
  *
- * ขอบเขต: สินค้าที่ product_type = "preorder" เท่านั้น สั่งเป็น "รอบ" (PreorderRounds)
+ * ขอบเขต: สินค้าที่ product_types = ["preorder"] เท่านั้น สั่งเป็น "รอบ" (PreorderRounds)
  *   - แยกคอลเลกชันจากออเดอร์ปกติ (orderModel) โดยสิ้นเชิง
  *   - ราคาต่อหน่วย = price_override ของรอบ ?? sale_price ?? product_price (สแนปช็อตลง PreorderItem)
  *   - ค่าส่งคิดฝั่ง server ผ่าน deliveryService (เหมือนออเดอร์ปกติ) ; takeaway = 0

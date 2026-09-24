@@ -39,7 +39,7 @@ const UNIT_NAME = "ชิ้น";
 const at = (y: number, m: number, d: number, hh = 0, mm = 0) =>
   new Date(y, m - 1, d, hh, mm, 0, 0);
 
-/** สินค้าซาวโดว์ตัวอย่าง (product_type = "preorder") — idempotent by product_name_th */
+/** สินค้าซาวโดว์ตัวอย่าง (product_types = ["preorder"]) — idempotent by product_name_th */
 const SOURDOUGH_PRODUCTS: Array<{
   product_name_th: string;
   product_name_eng: string;
@@ -115,7 +115,7 @@ async function ensureProduct(
   for (let attempt = 0; attempt < 30; attempt++) {
     try {
       const doc: any = await productModel.create({
-        product_id: generateProductCode("preorder"),
+        product_id: generateProductCode(["preorder"]),
         product_name_th: base.product_name_th,
         product_name_eng: base.product_name_eng,
         category_id: categoryId,
@@ -123,7 +123,7 @@ async function ensureProduct(
         product_price: base.product_price,
         sale_price: null,
         is_visible: true,
-        product_type: "preorder",
+        product_types: ["preorder"],
         product_stock_quantity: null,
         preorder_config: { min_order_qty: 1, max_order_qty: 10, lead_time_days: 5 },
         product_description: `${base.product_name_eng} — สั่งล่วงหน้าเป็นรอบ อบสดใหม่ก่อนวันรับ`,

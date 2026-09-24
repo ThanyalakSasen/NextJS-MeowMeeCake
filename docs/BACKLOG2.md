@@ -8,7 +8,7 @@
 > แทน Date ใน 6 collection/27 เอกสารทั้งหมด (products 6/6 + roles/banners/ingredients/
 > ingredientcategories/units 21/21) ไม่มีเอกสารไหนเหลือในระบบอีกแล้ว (ยืนยันด้วย audit สแกนครบ 47
 > collection) — §1–§11 ปิดครบเหมือนเดิม · §14 ใหม่ — `product_id` ไม่อัปเดตตามเมื่อ `product_type`
-> ถูกแก้ไขทีหลัง พบ 2 สินค้าที่ prefix รหัส (`pos-`) ไม่ตรงกับประเภทปัจจุบัน (preorder) — ยังไม่แก้ ·
+> ถูกแก้ไขทีหลัง — แก้ต้นเหตุแล้ว 2026-09-24 (พร้อมเปลี่ยนเป็น `product_types` array) · ข้อมูลเดิม 2 ตัวยังรอแก้ ·
 > 2026-09-23 §15 ใหม่แก้ครบแล้ว — `banner_img` เก็บ base64 ตรง ๆ เกินเพดาน 1000 ตัวอักษรที่ schema
 > กำหนด ทำให้เพิ่ม/แก้แบนเนอร์ด้วยรูปจริงพัง 400 เสมอ — ย้ายไปอัปโหลดไฟล์จริงเหมือน product_img แล้ว
 > (`POST /admin/banners/images`, เก็บใน public/uploads/banners/))
@@ -633,7 +633,27 @@ DB จริงแทน ตามแพทเทิร์นเดียวก�
 **เงื่อนไขที่ควรกลับมาทำ:** ก่อนใช้ prefix ของ `product_id` เป็นเกณฑ์แยกประเภทสินค้าในหน้าจอ/รายงานใดๆ
 (เช่นแผ่นบาร์โค้ดที่แยกตาม prefix) ควรตรวจสอบ/แก้ 2 แถวนี้ก่อน ไม่งั้นจะจัดกลุ่มผิด
 
-**สถานะ:** 🟡 ยังไม่แก้ — บันทึกไว้ก่อนตามที่ผู้ใช้ขอ
+**สถานะ:** 🟡 **แก้ต้นเหตุแล้ว (ข) — 2026-09-24** · ข้อมูลเดิม 2 ตัวยังไม่แก้ (รอแอดมิน)
+
+**สิ่งที่แก้ (2026-09-24)** — ทำพร้อมเปลี่ยน `product_type` (string) → **`product_types` (array)**:
+- กติกาใหม่: `inStore`+`online` เลือกพร้อมกันได้ · `preorder` ต้องอยู่เดี่ยว ๆ (`["preorder"]`) เท่านั้น —
+  บังคับใน `validateTypeConsistency()` (`src/services/productService.ts`) · ค่าซ้ำถูกตัดทิ้ง · ส่งฟิลด์เก่า
+  `product_type` มา → 400 (ไม่ปล่อยให้ mongoose ทิ้งเงียบ ๆ)
+- `updateProduct()` สร้าง `product_id` ใหม่ (retry ถ้าชน) เมื่อ `product_types` เปลี่ยนแล้ว prefix
+  `pos-`/`pre-` ไม่ตรง — ⚠️ รหัสเปลี่ยน ต้องพิมพ์บาร์โค้ด/ป้ายใหม่
+- เปลี่ยนสินค้ามีสต็อกเป็น preorder ยังต้องส่ง `product_stock_quantity: null` มาด้วยเหมือนเดิม (กันสต็อก
+  หายเงียบ ๆ)
+- query ฝั่ง API ยังเป็น `?product_type=<ค่าเดียว>` เหมือนเดิม (MongoDB match สมาชิกใน array ให้เอง)
+- dashboard `revenueByProductType` นับสินค้า 1 ตัวเข้ากลุ่มเดียว ลำดับ inStore > online > preorder (กันนับซ้ำ)
+- **สคริปต์ `npm run migrate:product-types`** (`scripts/migrate-product-types.ts`) — แปลงข้อมูลเก่า
+  `product_type` → `product_types` + `$unset` ฟิลด์เก่า (รันซ้ำได้ มี marker ใน `migrations`) และ
+  **รายงาน** (ไม่แก้) สินค้าที่ prefix ไม่ตรง — **ต้องรันกับ DB จริงก่อน deploy** ไม่งั้นสินค้าพรีออเดอร์เก่า
+  จะถูกมองเป็นสินค้ามีสต็อก (`product_types: { $ne: "preorder" }` match เอกสารที่ไม่มีฟิลด์)
+- เทส: `tests/integration/productTypes.test.ts` (7 เคส) + `productTypesOf` ใน `tests/lib/productCode.test.ts`
+
+**ที่ยังค้าง:** 2 แถวในตารางด้านบน (`pos-1626294`, `pos-1626338`) — แก้ได้โดย PATCH `product_types:
+["preorder"]` + `preorder_config` + `product_stock_quantity: null` ผ่าน API (รหัสจะเปลี่ยนเป็น `pre-` ให้เอง)
+หลังรัน migration แล้ว
 
 ---
 

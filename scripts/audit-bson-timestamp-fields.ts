@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import { Timestamp, ObjectId } from "mongodb";
 import { writeFileSync } from "node:fs";
 import dbConnect from "../src/lib/dbConnect";
-import { generateProductCode, isProductCode, type ProductType } from "../src/lib/productCode";
+import { generateProductCode, isProductCode, productTypesOf, type ProductType } from "../src/lib/productCode";
 
 /**
  * ตรวจหาเอกสารที่ created_at/updated_at ถูกเก็บเป็น BSON `Timestamp` (ชนิดภายในของ MongoDB สำหรับ
@@ -114,9 +114,8 @@ async function main() {
       if (t.isProduct) {
         currentCode = (d.product_id as string) ?? null;
         currentCodeValid = currentCode ? isProductCode(currentCode) : null;
-        const type: ProductType =
-          d.product_type === "preorder" ? "preorder" : d.product_type === "online" ? "online" : "inStore";
-        proposedCode = generateProductCode(type, recoveredDate);
+        const types: ProductType[] = productTypesOf(d) ?? ["inStore"];
+        proposedCode = generateProductCode(types, recoveredDate);
       }
 
       rows.push({

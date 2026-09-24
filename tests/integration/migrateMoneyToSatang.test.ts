@@ -192,7 +192,7 @@ describe("scripts/migrate-money-to-satang", () => {
       unit_id: new mongoose.Types.ObjectId(),
       product_price: 35,
       sale_price: 28,
-      product_type: "inStore",
+      product_types: ["inStore"],
       product_stock_quantity: 10,
     });
     const rawVariant = await productVariantModel.create({

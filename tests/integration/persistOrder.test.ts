@@ -105,7 +105,7 @@ describe("orderService.createOrder → persistOrder (integration)", () => {
 
   it("preorder product → reject (ต้องสั่งผ่านระบบ preorder)", async () => {
     const user = await makeUser();
-    const pre = await makeProduct({ product_type: "preorder", product_stock_quantity: null });
+    const pre = await makeProduct({ product_types: ["preorder"], product_stock_quantity: null });
     await expect(
       orderService.createOrder(String(user._id), {
         order_type: "takeaway",

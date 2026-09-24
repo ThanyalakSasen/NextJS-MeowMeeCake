@@ -80,7 +80,7 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       ]),
       productModel.countDocuments({
         deleted_at: null,
-        product_type: { $ne: "preorder" }, // สินค้าที่มีสต็อก (inStore/online)
+        product_types: { $ne: "preorder" }, // สินค้าที่มีสต็อก (inStore/online)
         product_stock_quantity: { $ne: null, $lte: 5 },
       }),
       ingredientModel.countDocuments({
@@ -211,15 +211,26 @@ export async function topProducts(opts: {
 export type ProductTypeKey = "inStore" | "online" | "preorder";
 
 /**
- * รายรับ (ออเดอร์ที่ชำระแล้ว ไม่ถูกลบ ในช่วงวันที่) แยกตาม product_type ของสินค้าในออเดอร์
+ * รายรับ (ออเดอร์ที่ชำระแล้ว ไม่ถูกลบ ในช่วงวันที่) แยกตาม product_types ของสินค้าในออเดอร์
  *
- * - ประเภทสินค้าไม่ได้เก็บไว้กับรายการในออเดอร์ (product_snapshot มีแค่ชื่อ) จึงอ้างจาก product_type "ปัจจุบัน"
- *   ของสินค้า — ถ้าเปลี่ยนประเภทสินค้าภายหลัง ออเดอร์เก่าจะย้ายกลุ่มตามไปด้วย
+ * - ประเภทสินค้าไม่ได้เก็บไว้กับรายการในออเดอร์ (product_snapshot มีแค่ชื่อ) จึงอ้างจาก product_types
+ *   "ปัจจุบัน" ของสินค้า — ถ้าเปลี่ยนประเภทสินค้าภายหลัง ออเดอร์เก่าจะย้ายกลุ่มตามไปด้วย
+ * - สินค้าเลือกได้มากกว่า 1 ประเภทตั้งแต่แก้ docs/BACKLOG2.md §14 (inStore+online พร้อมกันได้) แต่ตัว
+ *   บัคเก็ตของรายงานนี้ยังต้องเป็นค่าเดียวต่อสินค้า (กันนับซ้ำ — ผลรวมทุกกลุ่มต้องตรงกับ total_amount
+ *   เป๊ะเสมอ) เลือกบัคเก็ตด้วยลำดับความสำคัญ inStore > online > preorder (preorder ไม่ผสมกับตัวอื่น
+ *   อยู่แล้ว ไม่มีทางกำกวม) — ดู primaryTypeOf() ด้านล่าง
  * - ผลรวมทุกกลุ่ม = ผลรวม total_amount ของออเดอร์ตรงเป๊ะ: ส่วนที่นอกเหนือจากราคาสินค้า (ค่าส่ง − ส่วนลดระดับออเดอร์)
  *   กระจายตามสัดส่วนยอดสินค้าของแต่ละประเภทในออเดอร์นั้น (คิดเป็นสตางค์ integer เศษปัดเข้ากลุ่มที่ใหญ่สุด)
  * - รายการที่หาสินค้าไม่เจอ (ถูกลบ/ไม่มีข้อมูล) หรือออเดอร์ที่ไม่มีรายการเลย → "unclassified"
  * คืนเป็นบาท (แปลงจากสตางค์ตอนท้ายสุด)
  */
+function primaryTypeOf(types: string[] | undefined): ProductTypeKey | undefined {
+  if (!Array.isArray(types)) return undefined;
+  if (types.includes("inStore")) return "inStore";
+  if (types.includes("online")) return "online";
+  if (types.includes("preorder")) return "preorder";
+  return undefined;
+}
 export async function revenueByProductType(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();
   const orders = await orderModel
@@ -240,10 +251,10 @@ export async function revenueByProductType(opts: { date_from?: string; date_to?:
     const products = productIds.length
       ? await productModel
           .find({ _id: { $in: productIds } })
-          .select("product_type")
-          .lean<Array<{ _id: any; product_type?: string }>>()
+          .select("product_types")
+          .lean<Array<{ _id: any; product_types?: string[] }>>()
       : [];
-    const typeOf = new Map(products.map((p) => [String(p._id), p.product_type]));
+    const typeOf = new Map(products.map((p) => [String(p._id), primaryTypeOf(p.product_types)]));
 
     const byOrder = new Map<string, Record<Bucket, number>>();
     for (const it of items) {

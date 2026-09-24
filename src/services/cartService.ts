@@ -2,7 +2,8 @@
  * cartService — ตะกร้าสินค้าของลูกค้า (Carts + CartItems)
  *
  * - 1 ผู้ใช้ มี 1 ตะกร้า (สร้างอัตโนมัติเมื่อเรียกครั้งแรก)
- * - รับสินค้า product_type = "inStore" / "online" — สินค้าพรีออเดอร์ใช้ระบบ Preorders แยก
+ * - รับสินค้าที่ product_types มี "inStore"/"online" — สินค้าพรีออเดอร์เดี่ยว ๆ (product_types =
+ *   ["preorder"]) ใช้ระบบ Preorders แยก
  * - ราคาต่อหน่วย (price_snapshot) คำนวณ ณ ตอนหยิบใส่ตะกร้า = ราคาสินค้า (sale_price ถ้ามี)
  *   + ส่วนเพิ่มของ variant + ผลรวม extra_price ของ options ที่เลือก
  * - soft delete ทั้ง cart และ cart item ผ่าน deleted_at
@@ -20,6 +21,7 @@ import productVariantModel from "../models/productVariantModel";
 import productOptionModel from "../models/productOptionModel";
 import userModel from "../models/userModel";
 import { toBaht, toBahtFields } from "../lib/money";
+import { hasPreorderType } from "../lib/productCode";
 import { resolveSelectedOptions } from "./productOptionService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -76,7 +78,7 @@ export async function getCartDetail(userId: string) {
   const items = await cartItemModel
     .find({ cart_id: cart._id, deleted_at: null })
     .sort({ added_at: 1 })
-    .populate("product_id", "product_name_th product_name_eng product_img product_type is_visible")
+    .populate("product_id", "product_name_th product_name_eng product_img product_types is_visible")
     .populate("variant_id", "variant_name variant_price")
     .lean();
 
@@ -158,7 +160,7 @@ export async function addItem(userId: string, input: AddCartItemInput) {
     .lean<any>();
   if (!product) throw notFound("ไม่พบสินค้าที่ระบุ");
   if (product.is_visible === false) throw badRequest("สินค้านี้ถูกปิดการขายอยู่");
-  if (product.product_type === "preorder") {
+  if (hasPreorderType(product.product_types)) {
     // ตะกร้าปกติรับเฉพาะ inStore/online — สินค้าพรีออเดอร์สั่งผ่านระบบ Preorders แยกต่างหาก
     throw badRequest("สินค้าพรีออเดอร์ต้องสั่งผ่านระบบพรีออเดอร์ ไม่สามารถเพิ่มลงตะกร้าปกติได้");
   }

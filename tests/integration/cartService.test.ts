@@ -6,7 +6,7 @@ import { makeUser, makeProduct, makeVariant, makeOption } from "./helpers";
 describe("cartService.addItem", () => {
   it("สินค้า product_type=preorder → ปฏิเสธ (ต้องสั่งผ่านระบบพรีออเดอร์แยก)", async () => {
     const user = await makeUser();
-    const p = await makeProduct({ product_type: "preorder", product_stock_quantity: null });
+    const p = await makeProduct({ product_types: ["preorder"], product_stock_quantity: null });
 
     await expect(
       cartService.addItem(String(user._id), { product_id: String(p._id), quantity: 1 })

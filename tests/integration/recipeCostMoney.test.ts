@@ -254,7 +254,7 @@ describe("productService.purchase_cost — เก็บสตางค์ คื
       category_id: String(cat._id),
       product_price: 15,
       unit_id: String(unit._id),
-      product_type: "inStore",
+      product_types: ["inStore"],
       purchase_cost: 8.5,
     });
     expect((created as { purchase_cost: number | null }).purchase_cost).toBe(8.5);

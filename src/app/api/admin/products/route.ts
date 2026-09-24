@@ -33,7 +33,7 @@ export const POST = withPermission("products", "create", async (_s, req) => {
     action_type: "CREATE",
     entity: "Product",
     entity_id: result?._id ? String(result._id) : null,
-    details: { name: body.product_name_th, product_type: body.product_type, price: body.product_price },
+    details: { name: body.product_name_th, product_types: body.product_types, price: body.product_price },
   });
   return created(result);
 });

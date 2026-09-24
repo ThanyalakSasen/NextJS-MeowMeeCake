@@ -1,7 +1,7 @@
 /**
  * orderService — คำสั่งซื้อ (Orders + OrderItems)
  *
- * ขอบเขต: ออเดอร์ปกติ (สินค้า product_type = "inStore" / "online") เท่านั้น
+ * ขอบเขต: ออเดอร์ปกติ (สินค้าที่ product_types มี "inStore"/"online") เท่านั้น
  *   สินค้าพรีออเดอร์เก็บแยกคนละคอลเลกชัน (preorderModel / preorderItemModel) ไม่ปนกับ orderModel
  *
  * ครอบคลุม:
@@ -9,7 +9,7 @@
  *  - ออกเลขออเดอร์ OP-YYYYMMDD-XXXXXX (กันซ้ำด้วย unique index + retry)
  *  - ตัดสต็อกตอนสร้าง และคืนสต็อกตอนยกเลิก (ผ่าน productService)
  *  - state machine ของ order_status + จัดการสถานะจัดส่ง/ชำระเงิน
- *  - ปฏิเสธสินค้า product_type = "preorder" ทั้งใน createOrder และ createOrderFromCart
+ *  - ปฏิเสธสินค้าที่ product_types = ["preorder"] ทั้งใน createOrder และ createOrderFromCart
  *
  * ข้อจำกัดที่ทราบ:
  *  - MongoDB แบบ standalone ไม่มี transaction — ใช้แนวทาง best-effort + ชดเชย (คืนสต็อก/ลบออเดอร์) เมื่อผิดพลาด
@@ -45,7 +45,7 @@ import * as productService from "./productService";
 import { resolveSelectedOptions } from "./productOptionService";
 import { notificationService } from "./notificationService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
-import { generateDocNo } from "../lib/productCode";
+import { generateDocNo, hasPreorderType } from "../lib/productCode";
 import type { z } from "zod";
 import type { updateDeliveryBody } from "../schemas/order";
 
@@ -201,7 +201,7 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
 
     const product = productById.get(String(input.product_id));
     if (!product) throw notFound(`ไม่พบสินค้า ${input.product_id}`);
-    if (product.product_type === "preorder") {
+    if (hasPreorderType(product.product_types)) {
       throw badRequest(
         `สินค้า "${product.product_name_th}" เป็นสินค้าพรีออเดอร์ ต้องสั่งผ่านระบบพรีออเดอร์ (Preorders) ไม่ใช่ออเดอร์ปกติ`
       );
@@ -443,7 +443,7 @@ export async function createOrderFromCart(
 
   // ออเดอร์ปกติเก็บเฉพาะ inStore/online — สินค้าพรีออเดอร์ต้องไปทางระบบ Preorders (preorderModel)
   const preorderInCart = (detail.items as any[]).find(
-    (it) => it.product_id?.product_type === "preorder"
+    (it) => hasPreorderType(it.product_id?.product_types)
   );
   if (preorderInCart) {
     const name = preorderInCart.product_id?.product_name_th ?? "บางรายการ";

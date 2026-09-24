@@ -43,7 +43,7 @@ export async function makeProduct(over: Record<string, unknown> = {}) {
     category_id: oid(),
     unit_id: oid(),
     product_price: 100,
-    product_type: "inStore",
+    product_types: ["inStore"],
     product_stock_quantity: 50,
     ...over,
   };
