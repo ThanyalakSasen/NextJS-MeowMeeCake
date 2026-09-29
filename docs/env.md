@@ -64,7 +64,8 @@ GOOGLE_CLIENT_ID=556882585770-xxxxxxxx.apps.googleusercontent.com
 | `SESSION_SECRET` | เผื่อระบบ session แบบเก่า (express-session ฯลฯ) · โค้ดปัจจุบันใช้ JWT ล้วน — **ควรตั้งเป็นค่าสุ่ม** เผื่อใช้ทีหลัง |
 | `NEXTAUTH_SECRET`, `NEXTAUTH_URL` | เผื่อย้ายไปใช้ NextAuth.js · **ควรตั้งเป็นค่าสุ่ม** |
 | `EMAIL_SERVICE`, `EMAIL_USER`, `EMAIL_PASS` | ส่งอีเมลยืนยัน / reset password (ยังไม่ทำ) |
-| `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_TARGET_ID` | แจ้งเตือนผ่าน LINE (ยังไม่ทำ — ดู `docs/BACKLOG.md` §3.12) |
+| `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_TARGET_ID` | แจ้งเตือนผ่าน LINE (เจ้าของร้าน + ลูกค้า) — ดู [`LINE.md`](LINE.md) |
+| `LINE_LOGIN_CHANNEL_ID`, `LINE_LOGIN_CHANNEL_SECRET`, `LINE_LOGIN_CALLBACK_URL`, `LINE_LINK_RETURN_URL` | ลูกค้าผูกบัญชี LINE (LINE Login) — ดู [`LINE.md`](LINE.md) |
 
 ---
 

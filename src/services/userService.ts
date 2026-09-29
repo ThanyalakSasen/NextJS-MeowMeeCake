@@ -367,3 +367,34 @@ export async function unlockUser(id: string) {
   if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
   return user;
 }
+
+// ── ผูก / ยกเลิกผูกบัญชี LINE (แจ้งเตือนลูกค้า — src/lib/lineLogin.ts) ──
+/**
+ * เก็บ LINE userId ลงบัญชีนี้ · LINE เดียวผูกได้ทีละบัญชี — ถ้าเคยผูกกับบัญชีอื่นจะย้ายมาที่นี่
+ * (กันข้อความของอีกบัญชีเด้งเข้า LINE คนเดียวกันต่อ หลังเจ้าของ LINE เปลี่ยนมาใช้บัญชีใหม่)
+ */
+export async function linkLineAccount(id: string, lineUserId: string) {
+  await dbConnect();
+  assertObjectId(id);
+  await userModel.updateMany(
+    { line_user_id: lineUserId, _id: { $ne: id } },
+    { $set: { line_user_id: null } }
+  );
+  const user = await userModel
+    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { line_user_id: lineUserId } }, { new: true })
+    .select(SELECT_PUBLIC)
+    .lean();
+  if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
+  return user;
+}
+
+export async function unlinkLineAccount(id: string) {
+  await dbConnect();
+  assertObjectId(id);
+  const user = await userModel
+    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { line_user_id: null } }, { new: true })
+    .select(SELECT_PUBLIC)
+    .lean();
+  if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
+  return user;
+}

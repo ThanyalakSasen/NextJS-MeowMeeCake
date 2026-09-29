@@ -29,6 +29,7 @@ import userModel from "../models/userModel";
 import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
+import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { generateDocNo } from "../lib/productCode";
 import type { z } from "zod";
@@ -268,6 +269,7 @@ export async function createPreorder(
 
     // ทุกขั้นสำเร็จ → ทิ้ง undo ก่อนอ่านผลลัพธ์ (getPreorderById อาจ throw โดยไม่ต้อง rollback)
     saga.commit();
+    notifyCustomerLater(userId, customerMessages.created("preorder", preorder.preorder_no, total_amount));
     return getPreorderById(String(preorder._id));
   } catch (err) {
     await saga.rollback();
@@ -432,6 +434,10 @@ export async function updatePreorderStatus(
 
   preorder.order_status = next;
   await preorder.save();
+  notifyCustomerLater(
+    preorder.user_id,
+    customerMessages.orderStatus("preorder", preorder.preorder_no, next, preorder.cancelled_reason)
+  );
   return presentPreorderWithItems(preorder, cancelledItems);
 }
 

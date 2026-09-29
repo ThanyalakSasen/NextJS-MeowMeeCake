@@ -44,6 +44,7 @@ import * as recipeService from "./recipeService";
 import * as productService from "./productService";
 import { resolveSelectedOptions } from "./productOptionService";
 import { notificationService } from "./notificationService";
+import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { generateDocNo, hasPreorderType } from "../lib/productCode";
 import type { z } from "zod";
@@ -433,6 +434,11 @@ async function persistOrder(
     })
     .catch((err) => log.error("order.notify_failed", { order_id: String(order._id), err }));
 
+  // แจ้งลูกค้าทาง LINE (ถ้าผูกบัญชีไว้) — เฉพาะออเดอร์จากเว็บ หน้าร้าน (POS) ลูกค้ายืนอยู่ตรงนั้นแล้ว
+  if (orderNoPrefix(opts.channel) === "ORD") {
+    notifyCustomerLater(userId, customerMessages.created("order", order.order_no, total_amount));
+  }
+
   return presentOrderWithItems(
     order,
     insertedItems.map((it: any) => it.toObject())
@@ -676,6 +682,10 @@ export async function updateOrderStatus(
 
   order.order_status = next;
   await order.save();
+  notifyCustomerLater(
+    order.user_id,
+    customerMessages.orderStatus("order", order.order_no, next, order.cancelled_reason)
+  );
   return presentOrderWithItems(order, cancelledItems);
 }
 
