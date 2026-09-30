@@ -69,7 +69,7 @@
 |---|---|---|---|---|
 | Y1 | ✅ **ยกเลิก/คืนเงินพรีออเดอร์หลังสร้างใบผลิตแล้ว ใบผลิตไม่ลด** — แก้แล้ว (§7.2) | `cancelPreorder` / `refundPayment` ไม่แตะ `productionitems` (ต่างจากจ่ายช้าที่บวกเข้าให้ — #55 §6.4) | ผลิตเกินจำนวนที่ต้องส่งจริง | ตอนพรีออเดอร์ `paid` ในรอบ `closed` ถูกยกเลิก: ใบผลิตยัง `planned` → ลด `planned_qty` ของรายการ (ไม่ต่ำกว่า 0) · เริ่มผลิตแล้ว → แจ้งร้าน (กลับด้านของ `onPreorderPaid`) |
 | Y2 | ✅ **ผลิตเสร็จแล้วไม่เพิ่มสต็อกสินค้าสำเร็จรูป** — แก้แล้ว (§7.6) | `productionItemService` หักวัตถุดิบ (`consumeStock`) แต่ไม่เคยเพิ่ม `product_stock_quantity` | ใบผลิตแบบ manual ของสินค้าปกติ (ขนมหน้าร้าน) → ต้องไปปรับสต็อกเองทุกครั้ง · ถ้าลืม ขายไม่ได้/สต็อกไม่ตรง | **ต้องตัดสินใจ:** เมื่อรายการผลิต `done` + สินค้าปกติ → `increaseStock(actual_qty ?? planned_qty × yield)` (พรีออเดอร์ไม่มีสต็อก — ข้าม) |
-| Y3 | **สลิปโอนเงินเปิดสาธารณะ** | `public/uploads/slips/` เสิร์ฟ static ใครก็ได้ถ้ารู้ URL (#54) | ข้อมูลส่วนตัว (ชื่อ/เลขบัญชี) · ชื่อไฟล์สุ่มเดายาก แต่ไม่ใช่การกันสิทธิ์จริง | ย้ายสลิปออกนอก `public/` + route อ่านไฟล์ที่ตรวจสิทธิ์ (เจ้าของรายการ / staff `payments.view`) หรือ S3 private + signed URL |
+| Y3 | ✅ **สลิปโอนเงินเปิดสาธารณะ** — แก้แล้วใน PR #54 (§7.7) | `public/uploads/slips/` เสิร์ฟ static ใครก็ได้ถ้ารู้ URL (#54) | ข้อมูลส่วนตัว (ชื่อ/เลขบัญชี) · ชื่อไฟล์สุ่มเดายาก แต่ไม่ใช่การกันสิทธิ์จริง | ย้ายสลิปออกนอก `public/` + route อ่านไฟล์ที่ตรวจสิทธิ์ (เจ้าของรายการ / staff `payments.view`) หรือ S3 private + signed URL |
 | Y4 | ✅ **mongoose: option `new: true` เลิกใช้แล้ว** — แก้แล้ว (§7.4) | 25 จุดใน `src/` · เทสขึ้น warning ทุกรอบ | mongoose รุ่นถัดไปอาจเลิกรองรับ | เปลี่ยนเป็น `returnDocument: "after"` ทีเดียวทั้งไฟล์ (พฤติกรรมเท่าเดิม) |
 | Y5 | **dependency มีช่องโหว่ (high)** | `npm audit`: `postcss ≤ 8.5.22` ผ่าน `next` (XSS ใน stringify + อ่านไฟล์ .map ผ่าน sourceMappingURL) | backend นี้เป็น API ล้วน ไม่ประมวลผล CSS จาก user → ความเสี่ยงจริงต่ำ (build-time) | `npm audit fix --force` = อัป Next 16 (breaking) · หรือ `overrides.postcss` ≥ เวอร์ชันที่แก้แล้ว + รันเทส/บิลด์ |
 | Y6 | ✅ **staff ทุกคนลบแจ้งเตือนของร้านได้** — แก้แล้ว (§7.3) | `DELETE /api/admin/notifications/[id]` เช็คแค่ล็อกอิน (`requireAuth`) | แจ้งเตือนสำคัญ (สต็อก, โควตา LINE, ปิดรอบ) หายโดยเจ้าของไม่เห็น | จำกัด DELETE เฉพาะ owner (หรือ permission ใหม่) · PATCH อ่านแล้วให้ทุกคนได้เหมือนเดิม |
@@ -212,3 +212,33 @@ unit 218 ✅ (+3) · integration 257 ✅ (+5) · typecheck ✅ · typecheck:test
 เทส (`tests/integration/productionFinishedStock.test.ts` ใหม่ 3 เคส): สินค้าปกติ 4 + 12 = 16 · พรีออเดอร์ยัง null ·
 บันทึก `product_stock_added_qty` · `use_actual` ใช้ 17 แทนแผน 20 · รายการยกเลิกไม่เพิ่ม ·
 ผลรวม integration 260 ✅ · `next build` ✅
+
+### 7.7 Y3 — สลิปเปิดดูได้เฉพาะผู้มีสิทธิ์ (ตัดสินใจ 2026-10-01 — ทำใน **PR #54** commit `d897d35`)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| ที่เก็บ | `public/uploads/slips/` — ใครรู้ URL ก็เปิดได้ | `storage/private/slips/` นอก `public/` (`PRIVATE_UPLOAD_DIR`) · s3: key `private/…` (ตั้ง prefix ให้ไม่ public) |
+| URL | `/uploads/slips/…` | `/api/files/slips/…` |
+| เปิดดู | ไม่ตรวจอะไรเลย | `GET /api/files/slips/[filename]`: เจ้าของรายการ / owner / staff ที่มี `payments.view` = 200 · อื่น ๆ 403 · ไม่ล็อกอิน 401 · `Cache-Control: private, no-store` |
+
+รายละเอียด + frontend (ต้อง fetch แบบส่ง cookie แล้วทำ blob URL) → [`uploads.md`](uploads.md) §6 · เทส `privateSlips.test.ts` 5 เคส
+
+### 7.8 Y5 — postcss (รอตัดสินใจ)
+
+**postcss คืออะไร:** เครื่องมือแปลง/ประมวลผลไฟล์ CSS ที่ Next.js ใช้ **ตอน build** (เช่น เติม vendor prefix, รัน Tailwind) — ไม่ได้ทำงานตอนรับ
+request จากผู้ใช้ · backend นี้เป็น API ล้วน มี CSS ไฟล์เดียว (`src/app/globals.css` จากตอนสร้างโปรเจกต์) ที่เราเขียนเอง
+
+**ช่องโหว่ที่ `npm audit` เจอ (postcss ≤ 8.5.22 · high):** โจมตีได้เมื่อระบบ **เอา CSS ที่ผู้โจมตีเขียนมาประมวลผล** — (1) CSS ที่แต่งมา
+แทรก `</style>` ทำ XSS ในผลลัพธ์ (2) comment `sourceMappingURL` ชี้ไปอ่านไฟล์ `.map` อื่นในเครื่อง · ระบบนี้ไม่เคยรับ CSS จากผู้ใช้
+→ **ความเสี่ยงจริงต่ำมาก** แต่ scanner/CI ของ GitHub จะเตือนไปเรื่อย ๆ
+
+**ข้อเท็จจริงเวอร์ชัน:** `next` ทุกรุ่น 15.x (ล่าสุด 15.5.27) ล็อก `postcss@8.4.31` (มีช่องโหว่) · `next@16.3.8` ใช้ `postcss@8.5.23` (แก้แล้ว)
+
+| ทางเลือก | ทำอะไร | ข้อดี | ข้อเสีย |
+|---|---|---|---|
+| ก. `overrides` (แนะนำ) | `package.json`: `"overrides": { "next": { "postcss": "^8.5.23" } }` แล้ว `npm install` | แก้ช่องโหว่ทันที · เปลี่ยนแค่ minor ใน 8.x · ไม่แตะโค้ด | บังคับเวอร์ชันที่ Next 15 ไม่ได้ทดสอบมา (ความเสี่ยงต่ำ — ยืนยันด้วย build + เทสทั้งหมด) |
+| ข. อัป Next 16 | `npm install next@16` + แก้ตาม breaking changes | ได้ของใหม่/แพตช์ครบ · ไม่ต้อง override | งานใหญ่: API/convention เปลี่ยน (AGENTS.md เตือน) · ต้องไล่ middleware/route/config · frontend repo ควรอัปตาม |
+| ค. ยอมรับความเสี่ยง | บันทึกไว้ ไม่ทำอะไร | ไม่ต้องทำอะไร | audit เตือนค้าง · ถ้าวันหนึ่งประมวลผล CSS จากผู้ใช้จะเสี่ยงจริง |
+
+พบเพิ่ม: `postcss.config.mjs` อ้างปลั๊กอิน `@tailwindcss/postcss` ที่**ไม่ได้ติดตั้ง** (ค้างจากตอนสร้างโปรเจกต์ · build ยังผ่าน) —
+ถ้าเลือก ก./ข. ควรลบไฟล์นี้หรือ config ทิ้งไปด้วย (API ไม่ใช้ Tailwind)
