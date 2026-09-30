@@ -77,7 +77,7 @@ describe("orderService.updateOrderStatus — cancel path (integration)", () => {
       user_id: String(customer._id),
       order_id: String(order._id),
       amount: order.total_amount,
-      slip_image_url: "https://x/slip.jpg",
+      slip_image_url: "/api/files/slips/1700000000000-aaaaaaaaaaaa.jpg",
     });
     await paymentService.verifyPayment(String(payment._id), {
       verified_by: String(admin._id),
@@ -110,7 +110,7 @@ describe("orderService.updateOrderStatus — cancel path (integration)", () => {
       user_id: String(customer._id),
       order_id: String(order._id),
       amount: order.total_amount,
-      slip_image_url: "https://x/s.jpg",
+      slip_image_url: "/api/files/slips/1700000000000-bbbbbbbbbbbb.jpg",
     });
     await paymentService.verifyPayment(String(payment._id), {
       verified_by: String(admin._id),
