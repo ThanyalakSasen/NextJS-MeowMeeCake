@@ -17,7 +17,7 @@ import { makeUser } from "./helpers";
  * + scripts/migrate-upload-files.ts ย้ายแบนเนอร์ base64 เป็นไฟล์ และรายงานสลิป/ใบเสร็จที่ไม่มีไฟล์จริง
  */
 
-const SLIP = "/uploads/slips/1700000000000-aaaaaaaaaaaa.jpg";
+const SLIP = "/api/files/slips/1700000000000-aaaaaaaaaaaa.jpg";
 const RECEIPT = "/uploads/receipts/1700000000000-bbbbbbbbbbbb.jpg";
 const BANNER = "/uploads/banners/1700000000000-cccccccccccc.jpg";
 
@@ -36,9 +36,9 @@ describe("สลิปโอนเงิน (paymentService)", () => {
     return paymentModel.create({ user_id: u._id, order_id: new mongoose.Types.ObjectId(), amount: 10000, status: "failed" });
   }
 
-  it("submitSlip: ไฟล์ในระบบ (/uploads/slips/...) ผ่าน · url ภายนอก / path รุ่นเก่า → 400", async () => {
+  it("submitSlip: ไฟล์ส่วนตัวในระบบ (/api/files/slips/...) ผ่าน · url ภายนอก / path รุ่นเก่า / public/uploads/slips → 400", async () => {
     const p = await pendingPayment();
-    for (const bad of ["https://evil.example/pixel.gif", "/uploads/slip-6a4e-1787718975936.jpg", "data:image/png;base64,AAAA"]) {
+    for (const bad of ["https://evil.example/pixel.gif", "/uploads/slip-6a4e-1787718975936.jpg", "/uploads/slips/1700000000000-a.jpg", "data:image/png;base64,AAAA"]) {
       await expect(paymentService.submitSlip(String(p._id), { slip_image_url: bad })).rejects.toThrow(/อัปโหลดผ่านระบบ/);
     }
     const ok = (await paymentService.submitSlip(String(p._id), { slip_image_url: SLIP })) as { slip_image_url: string; status: string };

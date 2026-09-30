@@ -173,3 +173,6 @@ vite.config.ts.timestamp-*
 # ข้อมูลจริงของร้านจากสคริปต์ตรวจ/แก้ข้อมูล (scripts/audit-*, fix-*, recompute-*) — ห้าม commit
 scripts/backups/
 scripts/*.report.json
+
+# ไฟล์ส่วนตัว (สลิปโอนเงิน) — ห้าม commit · src/lib/privateFiles.ts
+/storage/

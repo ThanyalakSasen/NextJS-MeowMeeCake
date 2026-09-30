@@ -14,8 +14,8 @@
 |---|---|---|---|
 | รูปสินค้า | `public/uploads/products/` | `products.product_img[]` | `POST /api/admin/products/images` (มีอยู่แล้ว) |
 | แบนเนอร์ | `public/uploads/banners/` | `banners.banner_img` | `POST /api/admin/banners/images` (มีอยู่แล้ว — BACKLOG2 §15) |
-| **สลิปโอนเงิน** (ลูกค้า) | `public/uploads/slips/` | `payments.slip_image_url` | **`POST /api/shop/payments/[id]/slip`** (ใหม่) |
-| **สลิปโอนเงิน** (พนักงาน) | `public/uploads/slips/` | `payments.slip_image_url` | **`POST /api/admin/payments/slips`** (ใหม่) |
+| **สลิปโอนเงิน** (ลูกค้า) | **`storage/private/slips/` (ส่วนตัว — §6)** | `payments.slip_image_url` | **`POST /api/shop/payments/[id]/slip`** (ใหม่) |
+| **สลิปโอนเงิน** (พนักงาน) | **`storage/private/slips/` (ส่วนตัว — §6)** | `payments.slip_image_url` | **`POST /api/admin/payments/slips`** (ใหม่) |
 | **ใบเสร็จค่าใช้จ่าย** | `public/uploads/receipts/` | `expenses.receipt_url` | **`POST /api/admin/expenses/receipts`** (ใหม่) |
 
 `public/uploads/` อยู่ใน `.gitignore` — ไฟล์ไม่เข้า git ต้องสำรองโฟลเดอร์นี้แยกตอน deploy/ย้ายเครื่อง
@@ -42,7 +42,7 @@
 ```
 Content-Type: multipart/form-data
 file (หรือ slip) = <รูปสลิป>        promptpay_ref = <ไม่บังคับ>
-→ 200 { ...payment, slip_image_url: "/uploads/slips/1790...-a1b2c3d4e5f6.jpg", status: "pending" }
+→ 200 { ...payment, slip_image_url: "/api/files/slips/1790...-a1b2c3d4e5f6.jpg", status: "pending" }
 ```
 อัปโหลด + ผูกกับรายการในคำขอเดียว · ผูกไม่สำเร็จ (เช่น รายการ `paid` ไปแล้ว) → ลบไฟล์ที่เพิ่งเขียนทิ้ง ไม่ค้าง
 `PATCH` (JSON) แบบเดิมยังใช้ได้ แต่ `slip_image_url` ต้องเป็นไฟล์ในระบบ
@@ -57,7 +57,7 @@ file = <รูป>   → 200 { url, filename, size }   แล้วนำ url �
 
 | ฟิลด์ | ก่อน | หลัง |
 |---|---|---|
-| `payments.slip_image_url` (`createPayment` / `submitSlip`) | string อะไรก็ได้ ≤ 1000 ตัว | ต้องเป็น `/uploads/slips/<ไฟล์>` (s3: `<S3_PUBLIC_URL_BASE>/slips/<ไฟล์>`) ไม่งั้น 400 |
+| `payments.slip_image_url` (`createPayment` / `submitSlip`) | string อะไรก็ได้ ≤ 1000 ตัว | ต้องเป็น `/api/files/slips/<ไฟล์>` (ไฟล์ส่วนตัว — §6) ไม่งั้น 400 |
 | `expenses.receipt_url` (`create` / `update`) | string อะไรก็ได้ | ต้องเป็น `/uploads/receipts/<ไฟล์>` · **ค่ารุ่นเก่าที่ส่งกลับมาซ้ำตอนแก้ฟิลด์อื่นยังผ่าน** (ไม่บังคับให้แก้ของเก่าก่อนแก้อย่างอื่น) |
 | `banners.banner_img` (`create` / `update`) | string ≤ 500 ตัว (บังคับแค่ schema) | ต้องเป็น `/uploads/banners/<ไฟล์>` · ค่ารุ่นเก่าส่งซ้ำได้เหมือนกัน |
 
@@ -95,8 +95,47 @@ file = <รูป>   → 200 { url, filename, size }   แล้วนำ url �
 
 ## 5. ข้อควรรู้
 
-- **สลิปเป็นข้อมูลส่วนตัว** (ชื่อ/เลขบัญชี) แต่ `public/uploads/` เปิดให้ใครก็ดาวน์โหลดได้ถ้ารู้ URL — ชื่อไฟล์สุ่ม
-  (`<เวลา>-<hex 12 ตัว>`) เดาได้ยาก แต่ไม่ใช่การป้องกันสิทธิ์จริง · ถ้าต้องการปิดจริงต้องย้ายสลิปออกจาก `public/`
-  แล้วเสิร์ฟผ่าน route ที่ตรวจสิทธิ์ (ยังไม่ทำ)
+- ✅ **สลิปเป็นข้อมูลส่วนตัว** — แก้แล้ว 2026-10-01 (§6): ย้ายออกจาก `public/` + เปิดผ่าน route ที่ตรวจสิทธิ์
+  (เดิม: `public/uploads/slips/` ใครรู้ URL ก็เปิดได้ — ชื่อไฟล์สุ่มเดายาก แต่ไม่ใช่การป้องกันสิทธิ์จริง) ·
+  ใบเสร็จค่าใช้จ่าย (`receipts`) และแบนเนอร์ยังอยู่ใน `public/uploads/` ตามเดิม
 - ไม่ลบไฟล์สลิปเก่าเมื่อลูกค้าแนบใหม่ (เก็บเป็นหลักฐาน) · ใบเสร็จ/สลิปไม่ลบไฟล์ตอน soft delete
 - บน serverless (Vercel ฯลฯ) `public/` เขียนไม่ได้ตอน runtime → ต้องใช้ `UPLOAD_DRIVER=s3`
+
+---
+
+## 6. สลิปเป็นไฟล์ส่วนตัว — เปิดดูได้เฉพาะผู้มีสิทธิ์ (2026-10-01 · BACKLOG4 Y3)
+
+**ตัดสินใจ:** สลิปโอนเงิน (มีชื่อ/เลขบัญชีลูกค้า) เปิดดูได้เฉพาะผู้ที่ได้รับสิทธิ์เท่านั้น · โค้ด `src/lib/privateFiles.ts`
+
+| | ก่อน | หลัง |
+|---|---|---|
+| ที่เก็บ (localDisk) | `public/uploads/slips/` — Next.js เสิร์ฟ static ใครรู้ URL ก็เปิดได้ | **`storage/private/slips/`** (นอก `public/` · ตั้งที่อื่นได้ด้วย `PRIVATE_UPLOAD_DIR`) · อยู่ใน `.gitignore` |
+| ที่เก็บ (s3) | `<bucket>/slips/…` public URL | key `private/slips/…` ใน bucket เดิม — ⚠️ **ต้องตั้ง policy ให้ prefix `private/` ไม่เป็น public** |
+| URL ใน DB | `/uploads/slips/<ไฟล์>` | **`/api/files/slips/<ไฟล์>`** |
+| เปิดดู | ใครก็ได้ | **`GET /api/files/slips/[filename]`** ตรวจสิทธิ์ทุกครั้ง |
+| ตรวจ `slip_image_url` | `isUploadedUrl(…, "slips")` | `isPrivateFileUrl(…, "slips")` — url แบบ `/uploads/slips/…` ถูกปฏิเสธแล้ว |
+
+**สิทธิ์เปิดดู `GET /api/files/slips/[filename]`**
+
+| ผู้เรียก | ผล |
+|---|---|
+| ไม่ล็อกอิน | 401 |
+| ลูกค้าเจ้าของรายการชำระเงินที่แนบสลิปนี้ | ✅ 200 |
+| ลูกค้าคนอื่น | 403 |
+| เจ้าของร้าน (owner) | ✅ 200 |
+| พนักงานที่มีสิทธิ์ `payments.view` | ✅ 200 · ไม่มีสิทธิ์ → 403 |
+| สลิปที่ยังไม่ผูกกับรายการ (พนักงานอัปโหลดก่อนสร้างรายการ) | เฉพาะผู้มี `payments.view` |
+| ชื่อไฟล์แปลก (`..`, `/`) / ไม่มีไฟล์ | 404 (ตรวจสิทธิ์ก่อนเสมอ — ไม่บอกคนไม่มีสิทธิ์ว่าไฟล์มีอยู่ไหม) |
+
+ตอบกลับพร้อม `Cache-Control: private, no-store` + `X-Content-Type-Options: nosniff` (ไม่ให้ proxy/CDN แคชสลิป)
+
+**migration:** `npm run migrate:upload-files -- --apply` ย้ายสลิปที่ยังอยู่ใน `public/uploads/slips/` ไปที่เก็บส่วนตัว + เปลี่ยน URL
+ในรายการชำระเงิน (localDisk) · dry-run กับ DB จริง 2026-10-01: **0 ไฟล์ต้องย้าย** (ยังไม่เคยมีใครอัปโหลดผ่านระบบใหม่) ·
+5 สลิปเดิมไม่มีไฟล์อยู่แล้ว (รายงานเหมือนเดิม — §3.3)
+
+**frontend:** แสดงสลิปด้วย `fetch(`${API}${slip_image_url}`, { credentials: "include" })` แล้วทำ blob URL — `<img src>` ตรง ๆ
+ข้าม origin จะ**ไม่ส่ง cookie** ถ้าไม่ได้ตั้ง `COOKIE_DOMAIN` เป็น site เดียวกัน (ได้ 401)
+
+**เทส:** `tests/integration/privateSlips.test.ts` (5 เคส — เขียนนอก public · เจ้าของ/ลูกค้าอื่น/ไม่ล็อกอิน · owner/staff
+ไม่มีสิทธิ์/มีสิทธิ์ · traversal + ไม่มีไฟล์ = 404 · migration ย้ายไฟล์+URL) · `tests/lib/uploadUrl.test.ts` (+2 เคส `isPrivateFileUrl` /
+`isSafeFilename`) · ผลรวม unit 195 ✅ · integration 189 ✅ · `next build` ✅

@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { isUploadedUrl, UPLOAD_DIRS } from "@/lib/upload";
+import { isPrivateFileUrl, isSafeFilename } from "@/lib/privateFiles";
 
 /** docs/uploads.md — ฟิลด์รูปที่ต้องเป็นไฟล์ของระบบเท่านั้น (banner_img / slip_image_url / receipt_url) */
 
@@ -47,5 +48,26 @@ describe("isUploadedUrl — s3", () => {
     expect(isUploadedUrl("/uploads/slips/a.jpg", UPLOAD_DIRS.slips)).toBe(false);
     delete process.env.S3_PUBLIC_URL_BASE;
     expect(isUploadedUrl("https://cdn.example.com/slips/a.jpg", UPLOAD_DIRS.slips)).toBe(false);
+  });
+});
+
+describe("isPrivateFileUrl / isSafeFilename — สลิปเป็นไฟล์ส่วนตัว (BACKLOG4 Y3)", () => {
+  it("รับเฉพาะ /api/files/<dir>/<ไฟล์> · public/uploads ไม่นับ", () => {
+    expect(isPrivateFileUrl("/api/files/slips/1700000000000-abcdef012345.jpg", UPLOAD_DIRS.slips)).toBe(true);
+    for (const bad of [
+      "/uploads/slips/1700000000000-abcdef012345.jpg",
+      "/api/files/receipts/a.jpg",
+      "/api/files/slips/../banners/a.jpg",
+      "/api/files/slips/sub/a.jpg",
+      "/api/files/slips/..jpg",
+      "https://x/api/files/slips/a.jpg",
+    ]) {
+      expect(isPrivateFileUrl(bad, UPLOAD_DIRS.slips), bad).toBe(false);
+    }
+  });
+
+  it("isSafeFilename กัน path traversal", () => {
+    expect(isSafeFilename("1700-abc.jpg")).toBe(true);
+    for (const bad of ["../x.jpg", "a/b.jpg", "a\b.jpg", "..", "", 1]) expect(isSafeFilename(bad), String(bad)).toBe(false);
   });
 });

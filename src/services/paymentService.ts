@@ -23,7 +23,8 @@ import { log } from "../lib/logger";
 import * as orderService from "./orderService";
 import * as preorderService from "./preorderService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
-import { isUploadedUrl, UPLOAD_DIRS } from "../lib/upload";
+import { UPLOAD_DIRS } from "../lib/upload";
+import { isPrivateFileUrl } from "../lib/privateFiles";
 import type { PaymentStatus } from "./orderService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -39,7 +40,8 @@ const AMOUNT_TOLERANCE = 1;
  */
 function assertSlipUrl(url: string | null | undefined): void {
   if (url == null || url === "") return;
-  if (!isUploadedUrl(url, UPLOAD_DIRS.slips)) {
+  // สลิปเป็นไฟล์ส่วนตัว (/api/files/slips/… — BACKLOG4 Y3) ไม่ใช่ public/uploads
+  if (!isPrivateFileUrl(url, UPLOAD_DIRS.slips)) {
     throw badRequest(
       "slip_image_url ต้องเป็นไฟล์ที่อัปโหลดผ่านระบบ — ใช้ POST /api/shop/payments/[id]/slip (multipart) แทน"
     );

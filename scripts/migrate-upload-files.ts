@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import dbConnect from "../src/lib/dbConnect";
 import { isUploadedUrl, saveImages, UPLOAD_DIRS } from "../src/lib/upload";
+import { isPrivateFileUrl, movePublicToPrivate, readPrivateFile } from "../src/lib/privateFiles";
 
 /**
  * docs/uploads.md — ย้ายรูปที่เก็บผิดที่ให้เป็นไฟล์จริงใน public/uploads/<โฟลเดอร์> + ตรวจอ้างอิงที่เสีย
@@ -14,7 +15,8 @@ import { isUploadedUrl, saveImages, UPLOAD_DIRS } from "../src/lib/upload";
  *    BACKLOG2 §15 และลิงก์รูปภายนอก (http/https) → เขียนเป็นไฟล์ใน public/uploads/banners/ ผ่าน saveImages()
  *    (ตรวจ magic bytes เหมือนอัปโหลดปกติ) แล้วเปลี่ยน banner_img เป็น /uploads/banners/<ไฟล์>
  *    ทำทั้งแบนเนอร์ที่ใช้งานและที่ถูกลบ (soft delete — กู้คืนได้ + ลดขนาด DB)
- * 2) payments.slip_image_url / expenses.receipt_url (รายงานอย่างเดียว ไม่แก้) — ค่าที่ไม่ใช่ไฟล์ของระบบ
+ * 2) payments.slip_image_url — สลิปที่อยู่ใน public/uploads/slips ย้ายเป็นไฟล์ส่วนตัว (storage/private/slips ·
+ *    URL เป็น /api/files/slips/… — BACKLOG4 Y3) · expenses.receipt_url + สลิปที่ไม่มีไฟล์ (รายงานอย่างเดียว ไม่แก้) · — ค่าที่ไม่ใช่ไฟล์ของระบบ
  *    หรือชี้ไฟล์ที่ไม่มีอยู่จริงบนดิสก์ (กู้ไฟล์กลับไม่ได้ ต้องให้ลูกค้า/แอดมินแนบใหม่)
  *
  * ความปลอดภัย: ค่าเริ่มต้น dry-run (อ่านอย่างเดียว) · --apply สำรองค่าเดิมลง scripts/backups/ ก่อน ·
@@ -63,6 +65,8 @@ export interface UploadFilesMigrationResult {
     missingFile: Array<{ _id: string; url: string; deleted: boolean }>;
   };
   slips: Array<{ _id: string; value: string; problem: "not-uploaded" | "missing-file"; status: string }>;
+  /** สลิปใน public/uploads/slips ที่ย้าย (หรือจะย้ายตอน --apply) ไปเป็นไฟล์ส่วนตัว */
+  slipsToPrivate: Array<{ _id: string; from: string }>;
   receipts: Array<{ _id: string; value: string; problem: "not-uploaded" | "missing-file"; deleted: boolean }>;
   backupFile: string | null;
 }
@@ -82,6 +86,7 @@ export async function runMigration(
     dryRun,
     banners: { planned: [], converted: [], failed: [], missingFile: [] },
     slips: [],
+    slipsToPrivate: [],
     receipts: [],
     backupFile: null,
   };
@@ -116,15 +121,27 @@ export async function runMigration(
     }
   }
 
-  // ── 2) slips / receipts (รายงานอย่างเดียว) ──
-  const slips = await db
-    .collection("payments")
+  // ── 2) slips — ย้ายสลิปที่เคยเก็บใน public/uploads/slips เป็นไฟล์ส่วนตัว (BACKLOG4 Y3) + รายงานที่ไม่มีไฟล์ ──
+  const paymentCol = db.collection("payments");
+  const slips = await paymentCol
     .find({ slip_image_url: { $nin: [null, ""] }, deleted_at: null }, { projection: { slip_image_url: 1, status: 1 } })
     .toArray();
   for (const p of slips) {
     const v = String(p.slip_image_url);
-    if (!isUploadedUrl(v, UPLOAD_DIRS.slips)) result.slips.push({ _id: String(p._id), value: v, problem: "not-uploaded", status: p.status });
-    else if (!localFileExists(v)) result.slips.push({ _id: String(p._id), value: v, problem: "missing-file", status: p.status });
+    if (isPrivateFileUrl(v, UPLOAD_DIRS.slips)) {
+      const file = v.split("/").pop() ?? "";
+      if (!(await readPrivateFile(UPLOAD_DIRS.slips, file))) {
+        result.slips.push({ _id: String(p._id), value: v, problem: "missing-file", status: p.status });
+      }
+    } else if (isUploadedUrl(v, UPLOAD_DIRS.slips) && localFileExists(v)) {
+      result.slipsToPrivate.push({ _id: String(p._id), from: v });
+      if (!dryRun) {
+        const to = await movePublicToPrivate(v, UPLOAD_DIRS.slips);
+        if (to) await paymentCol.updateOne({ _id: p._id, slip_image_url: v }, { $set: { slip_image_url: to } });
+      }
+    } else {
+      result.slips.push({ _id: String(p._id), value: v, problem: isUploadedUrl(v, UPLOAD_DIRS.slips) ? "missing-file" : "not-uploaded", status: p.status });
+    }
   }
   const receipts = await db
     .collection("expenses")
@@ -149,6 +166,7 @@ export async function runMigration(
   }
   console.log(`  banners ที่ชี้ไฟล์ซึ่งไม่มีจริง: ${b.missingFile.length}`);
   for (const m of b.missingFile) console.log(`    - ${m._id} ${m.url}${m.deleted ? " [ถูกลบ]" : ""}`);
+  console.log(`  สลิปใน public/uploads/slips → ย้ายเป็นไฟล์ส่วนตัว (/api/files/slips/…)${dryRun ? " (จะย้าย)" : ""}: ${result.slipsToPrivate.length}`);
   console.log(`  สลิปโอนเงินที่ไม่มีไฟล์จริง (ไม่แก้ — ให้ลูกค้าแนบใหม่): ${result.slips.length}`);
   for (const s of result.slips) console.log(`    - payment ${s._id} [${s.status}] ${s.value} (${s.problem})`);
   console.log(`  ใบเสร็จค่าใช้จ่ายที่ไม่มีไฟล์จริง (ไม่แก้ — แนบใหม่ผ่านหน้าค่าใช้จ่าย): ${result.receipts.length}`);

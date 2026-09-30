@@ -62,14 +62,14 @@ function sniffImageExt(buf: Buffer): string | null {
   return null;
 }
 
-interface ValidatedFile {
+export interface ValidatedFile {
   buf: Buffer;
   ext: string;
   originalSize: number;
 }
 
-/** ตรวจไฟล์ 3 ชั้น (ใช้ร่วมกันทุก driver — ไม่ให้ driver ไหนหลุดการตรวจ) */
-async function validateFiles(files: File[]): Promise<ValidatedFile[]> {
+/** ตรวจไฟล์ 3 ชั้น (ใช้ร่วมกันทุก driver — ไม่ให้ driver ไหนหลุดการตรวจ · export ให้ privateFiles.ts ใช้ด้วย) */
+export async function validateFiles(files: File[]): Promise<ValidatedFile[]> {
   if (!Array.isArray(files) || files.length === 0) {
     throw badRequest("ไม่พบไฟล์ที่อัปโหลด");
   }
@@ -103,7 +103,7 @@ async function validateFiles(files: File[]): Promise<ValidatedFile[]> {
   return out;
 }
 
-function randomFilename(ext: string): string {
+export function randomFilename(ext: string): string {
   return `${Date.now()}-${randomBytes(6).toString("hex")}${ext}`;
 }
 

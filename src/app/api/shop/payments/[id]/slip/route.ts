@@ -3,9 +3,10 @@
  *
  *   POST  — อัปโหลดไฟล์สลิป (แนะนำ) · multipart/form-data
  *           field: "file" (หรือ "slip") — JPEG / PNG / WEBP / AVIF ≤ 5 MB · field เสริม: "promptpay_ref"
- *           บันทึกไฟล์ที่ public/uploads/slips/ แล้วผูกกับรายการชำระเงินให้ในคำขอเดียว — docs/uploads.md
+ *           บันทึกเป็นไฟล์ส่วนตัว (ไม่อยู่ใน public/ — เปิดดูผ่าน GET /api/files/slips/[filename] ที่ตรวจสิทธิ์)
+ *           แล้วผูกกับรายการชำระเงินให้ในคำขอเดียว — docs/uploads.md §6
  *   PATCH — body JSON { slip_image_url, promptpay_ref? } (แบบเดิม) — slip_image_url ต้องเป็นไฟล์ที่อัปโหลด
- *           ผ่านระบบแล้วเท่านั้น (/uploads/slips/...) ไม่งั้น 400
+ *           ผ่านระบบแล้วเท่านั้น (/api/files/slips/...) ไม่งั้น 400
  */
 import type { NextRequest } from "next/server";
 import { ok } from "@/lib/apiResponse";
@@ -13,7 +14,8 @@ import { withAuth, requireOwner } from "@/lib/authGuard";
 import type { SessionUser } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { parseBody, parse } from "@/lib/validate";
-import { readSingleUpload, saveImages, deleteImages, UPLOAD_DIRS } from "@/lib/upload";
+import { readSingleUpload, UPLOAD_DIRS } from "@/lib/upload";
+import { savePrivateImage, deletePrivateFile } from "@/lib/privateFiles";
 import { submitSlipBody } from "@/schemas/payment";
 import { objectId } from "@/schemas/common";
 import * as paymentService from "@/services/paymentService";
@@ -33,7 +35,7 @@ export const POST = withAuth(async (session, req: NextRequest, ctx: Ctx) => {
   const { file, form } = await readSingleUpload(req, ["file", "slip"]);
   const promptpayRef = form.get("promptpay_ref");
 
-  const [saved] = await saveImages([file], UPLOAD_DIRS.slips);
+  const saved = await savePrivateImage(file, UPLOAD_DIRS.slips);
   let result;
   try {
     result = await paymentService.submitSlip(id, {
@@ -42,7 +44,7 @@ export const POST = withAuth(async (session, req: NextRequest, ctx: Ctx) => {
     });
   } catch (err) {
     // ผูกไม่สำเร็จ (เช่น รายการ paid ไปแล้ว) → ลบไฟล์ที่เพิ่งเขียน ไม่ให้ค้างเป็นขยะ
-    await deleteImages([saved.url]);
+    await deletePrivateFile(saved.url).catch(() => undefined);
     throw err;
   }
 
