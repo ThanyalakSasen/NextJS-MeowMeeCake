@@ -104,6 +104,20 @@ export interface ListPreorderQuery {
   sort?: Record<string, 1 | -1>;
 }
 
+/** ยอดที่ลูกค้าจองไว้แล้วในรอบนี้ ต่อ round_item_id (เฉพาะพรีออเดอร์ที่ยังไม่ยกเลิก/ไม่ถูกลบ) */
+async function quantityAlreadyOrdered(userId: string, roundId: unknown): Promise<Map<string, number>> {
+  const mine = await preorderModel
+    .find({ user_id: userId, round_id: roundId, deleted_at: null, order_status: { $ne: "cancelled" } })
+    .select("_id")
+    .lean<Array<{ _id: unknown }>>();
+  if (mine.length === 0) return new Map();
+  const rows = await preorderItemModel.aggregate<{ _id: unknown; qty: number }>([
+    { $match: { preorder_id: { $in: mine.map((p) => p._id) }, deleted_at: null } },
+    { $group: { _id: "$round_item_id", qty: { $sum: "$quantity" } } },
+  ]);
+  return new Map(rows.map((r) => [String(r._id), r.qty]));
+}
+
 // ── CREATE ───────────────────────────────────────────────────
 export async function createPreorder(
   userId: string,
@@ -163,12 +177,27 @@ export async function createPreorder(
     String(round._id)
   );
 
+  // docs/preorder-round-flow.md ปัญหา 2 — เดิม product.preorder_config (บังคับกรอก) ไม่ถูกใช้เลย
+  // ยอดที่ลูกค้าคนนี้จองไว้แล้วในรอบเดียวกัน (พรีออเดอร์ที่ยังไม่ยกเลิก) ต่อ round_item — ใช้คุม max_order_qty ต่อคน
+  const alreadyByRoundItem = await quantityAlreadyOrdered(userId, round._id);
+
   const lines = resolvedItems.map(({ item, product, unit_price }, idx) => {
     const quantity = quantities[idx];
-    if (quantity < (item.min_order_qty ?? 1)) {
-      throw badRequest(
-        `"${product.product_name_th}" สั่งขั้นต่ำ ${item.min_order_qty} ชิ้นต่อรายการ`
-      );
+    const cfg = product.preorder_config ?? {};
+    // ขั้นต่ำ = ค่าที่มากกว่าระหว่างรายการในรอบกับตัวสินค้า
+    const minQty = Math.max(item.min_order_qty ?? 1, cfg.min_order_qty ?? 1);
+    if (quantity < minQty) {
+      throw badRequest(`"${product.product_name_th}" สั่งขั้นต่ำ ${minQty} ชิ้นต่อรายการ`);
+    }
+    // สูงสุดต่อลูกค้า 1 คนต่อรอบ (รวมพรีออเดอร์เดิมในรอบเดียวกัน) — กันคนเดียวกวาดโควตาทั้งรอบ
+    if (cfg.max_order_qty != null) {
+      const already = alreadyByRoundItem.get(String(item._id)) ?? 0;
+      if (already + quantity > cfg.max_order_qty) {
+        throw badRequest(
+          `"${product.product_name_th}" สั่งได้สูงสุด ${cfg.max_order_qty} ชิ้นต่อคนต่อรอบ` +
+            (already > 0 ? ` (สั่งไว้แล้ว ${already} ชิ้น เหลือสั่งได้อีก ${Math.max(0, cfg.max_order_qty - already)})` : "")
+        );
+      }
     }
 
     // BACKLOG §3.11 เฟส 5b — unit_price จาก preorderRoundService.getOrderableRoundItems() เป็นสตางค์
