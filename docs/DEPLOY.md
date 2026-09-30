@@ -11,7 +11,7 @@
  ① เตรียมเซิร์ฟเวอร์ ─▶ ② เตรียมก่อนวัน deploy ─▶ ③ merge PR ─▶ ④ ตั้ง .env.local ─▶ ⑤ build + รัน (pm2)
      (ครั้งแรกครั้งเดียว)    (DNS, backup, LINE, secret)                                          │
                                                                                                     ▼
- ⑨ ตรวจรับ ◀── ⑧ ตั้ง cron 2 ตัว ◀── ⑦ งานข้อมูลหลัง deploy ◀── ⑥ nginx + HTTPS (ครั้งแรก)
+ ⑨ ตรวจรับ ◀── ⑧ ตั้ง cron 3 ตัว ◀── ⑦ งานข้อมูลหลัง deploy ◀── ⑥ nginx + HTTPS (ครั้งแรก)
 ```
 
 | องค์ประกอบ | ใช้อะไร |
@@ -153,6 +153,13 @@ pm2 startup systemd -u meowmee --hp /home/meowmee   # ทำตามคำส�
 curl -s http://127.0.0.1:3000/api/health             # → {"ok":true,"db":"connected"}
 ```
 
+> ⚠️ **รัน instance เดียวเท่านั้น (BACKLOG4 Y8)** — ห้าม `pm2 start ... -i max` / `-i 2` / `exec_mode: cluster`
+> rate limit (`src/lib/rateLimit.ts`) · permission cache (30 วิ) · delivery-zone cache · cache โควตา LINE
+> (`src/lib/lineQuota.ts`) เก็บในหน่วยความจำของ process — หลาย instance = rate limit หลวมเป็น N เท่า, สิทธิ์ที่เพิ่งถอน
+> ยังใช้ได้ใน instance อื่นจน cache หมดอายุ, โควตา LINE ถูกตัดสินจากตัวเลขคนละชุด · ถ้าแอปตรวจพบว่ารันหลาย instance
+> จะเขียน log `runtime.multi_instance` ตอนเริ่ม (`src/instrumentation.ts`) — ร้านขนาดนี้ instance เดียวรับได้สบาย
+> ถ้าวันหนึ่งต้องขยายจริง ให้ย้าย 4 จุดนี้ไป Redis ก่อน (แก้เฉพาะไฟล์ละตัว)
+
 **deploy รอบถัด ๆ ไป:**
 
 ```bash
@@ -230,10 +237,19 @@ PATCH https://api.example.com/api/admin/products/6a814a064b44d4bf31fb2c4b   { "i
 
 - ✅ `migrate:is-preorder` **ไม่ต้องรัน** — รันไปแล้ว 2026-10-01 00:11 (BACKLOG4 R2)
 - ลูกค้า 3 รายที่สลิป `pending` ไม่มีไฟล์ → แจ้งให้แนบใหม่ ([`uploads.md`](uploads.md) §3.3)
+- กำหนดชำระของพรีออเดอร์เก่า (BACKLOG4 Y7): `npm run backfill:payment-due` (dry-run) — ตรวจ 2026-10-01 ได้ 0 รายการ
+  ไม่ต้อง `--apply` · ถ้าวัน deploy มีพรีออเดอร์ค้างจ่ายที่ยังไม่มีกำหนด ค่อย `-- --apply` (รายการที่เลยกำหนดแล้วจะได้ + 24 ชม.)
+- ตรวจข้อมูลสินค้า (BACKLOG4 Y11): `npm run check:data-integrity -- --no-notify` → ต้องได้ "ไม่พบข้อมูลผิดปกติ" ก่อนเปิดร้าน
+  ⚠️ 2026-10-01 พบราคาเป็นบาทอีกรอบ (BACKLOG4 R7) → แก้ก่อนด้วย:
+  ```bash
+  npm run fix:baht-prices              # ดูแผน: สินค้า 42 · ราคารอบ 3 · ตะกร้า 1
+  npm run fix:baht-prices -- --apply   # ×100 (backup ใน scripts/backups/)
+  npm run check:data-integrity -- --no-notify   # ต้องเหลือแค่รหัส pos-/pre- 2 ตัว (แก้ด้วย PATCH ข้อ 3)
+  ```
 
 ---
 
-## ⑧ ตั้ง cron 2 ตัว
+## ⑧ ตั้ง cron 3 ตัว
 
 ```bash
 sudo -iu meowmee
@@ -251,11 +267,15 @@ PATH=/usr/bin:/bin:/usr/local/bin
 
 # เตือนลูกค้าก่อนวันรับพรีออเดอร์ทาง LINE (LINE.md §9.7)
 0 18 * * * cd /srv/meowmeecake/app && npm run -s remind:preorders >> /srv/meowmeecake/logs/preorder-reminders.log 2>&1
+
+# ตรวจข้อมูลสินค้าผิดปกติ (ราคาเป็นบาท/ฟิลด์เก่า/สต็อก variant) แล้วแจ้งเจ้าของร้าน — กันการแก้ DB ตรงแบบ BACKLOG2 §16 (BACKLOG4 Y11)
+30 7 * * * cd /srv/meowmeecake/app && npm run -s check:data-integrity >> /srv/meowmeecake/logs/data-integrity.log 2>&1
 ```
 
 - ทั้งสองงานรันซ้ำ/พร้อมกันได้ ไม่ทำซ้ำ · ไม่ต้องใช้ `CRON_SECRET` (รันสคริปต์ตรง ไม่ผ่าน HTTP)
 - log โตเรื่อย ๆ → ตั้ง `logrotate` หรือเคลียร์เป็นระยะ
-- ทดสอบก่อนรอ: `npm run remind:preorders -- --dry-run` (ดูรายชื่อ ไม่ส่ง)
+- ทดสอบก่อนรอ: `npm run remind:preorders -- --dry-run` (ดูรายชื่อ ไม่ส่ง) · `npm run check:data-integrity -- --no-notify`
+- `check:data-integrity` จบด้วย exit code 2 เมื่อพบปัญหา (ปกติสำหรับ cron — ดูรายละเอียดใน log / หน้าแจ้งเตือน)
 
 ---
 
@@ -283,6 +303,20 @@ PATH=/usr/bin:/bin:/usr/local/bin
 | `public/uploads/` + `/srv/meowmeecake/private/` | `rsync -a` / tar ไปเก็บนอกเครื่อง | วันละครั้ง |
 | `.env.local` | เก็บในที่ปลอดภัย (password manager) | เมื่อเปลี่ยนค่า |
 
+### ผู้ใช้ DB แยกตามงาน (BACKLOG4 Y11)
+
+ราคาสินค้าถูกเขียนทับเป็นบาทนอกแอปมาแล้ว 2 ครั้ง (2026-09-24 และ 2026-09-30 — ไม่มี userlog) จึงไม่ควรใช้
+user ที่เขียนได้กับเครื่องมืออื่นนอกจากแอป — ตั้งใน Atlas → **Database Access**:
+
+| user | role | ใช้กับ |
+|---|---|---|
+| `meowmee-app` | `readWrite` เฉพาะ DB ของร้าน | `MONGODB_URI` ของแอปบน VPS เท่านั้น |
+| `meowmee-readonly` | `read` เฉพาะ DB ของร้าน | Compass / Atlas Data Explorer / ดูข้อมูล / สคริปต์ audit |
+
+- เปลี่ยนรหัสผ่าน user เดิมที่เคยแจกไป (ถ้าเคยใช้ร่วมกับ Compass) แล้วใช้กับแอปอย่างเดียว
+- Atlas **Project Access**: สมาชิกที่ไม่ใช่ผู้ดูแลระบบ = `Project Read Only` (Data Explorer ของ Atlas UI แก้ข้อมูลได้ถ้ามีสิทธิ์เขียน)
+- แก้ราคา/สินค้าผ่านหน้าเว็บหรือ API เท่านั้น (แปลงสตางค์ให้เอง + มี userlog)
+
 ## ย้อนกลับ (rollback)
 
 ```bash
@@ -301,4 +335,6 @@ git checkout <commit ก่อนหน้า> && npm ci && npm run build && pm2
 | ล็อกอินแล้ว frontend ยังได้ 401 | cookie ไม่ข้าม origin | `COOKIE_DOMAIN=.example.com` + `ALLOWED_ORIGINS=https://app.example.com` · ใช้ HTTPS ทั้งคู่ |
 | ผูก LINE ขึ้น `Invalid redirect_uri` | ยังไม่ได้เพิ่ม Callback URL โดเมนจริงในแท็บ LINE Login | ② + [`LINE.md`](LINE.md) §6.1 |
 | cron ไม่ทำงาน | PATH ของ cron หา `npm` ไม่เจอ / timezone | ใส่ `PATH` ในหัว crontab · ตั้งเครื่องเป็น `Asia/Bangkok` · ดู log |
+| log มี `runtime.multi_instance` | รัน pm2 แบบ cluster / หลาย instance | `pm2 delete meowmeecake-api` แล้ว start ใหม่ตาม §⑤ (fork instance เดียว) |
+| แจ้งเตือน "ตรวจพบข้อมูลสินค้าผิดปกติ" | มีการแก้ DB ตรงนอกแอป (ราคาเป็นบาท ฯลฯ) | ดู `logs/data-integrity.log` · แก้ผ่านหน้าหลังบ้าน · หาว่าใครใช้ user ที่เขียนได้ (§ผู้ใช้ DB) |
 | อัปโหลดรูปได้ `413` | nginx จำกัดขนาด body | `client_max_body_size 45m` |

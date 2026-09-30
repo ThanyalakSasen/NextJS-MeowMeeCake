@@ -152,7 +152,7 @@ describe("orderService.createOrder — resolveLines() batch resolve (BACKLOG §3
       const items = [];
       for (let i = 0; i < itemCount; i++) {
         const p = await makeProduct({ product_price: 50, product_stock_quantity: 10 });
-        const v = await makeVariant(String(p._id), { variant_price: 5 });
+        const v = await makeVariant(String(p._id), { variant_price: 5, variant_stock: 10 }); // BACKLOG4 Y9 — ตัด variant_stock ด้วย
         const o = await makeOption(String(p._id), { extra_price: 2 });
         items.push({
           product_id: String(p._id),
@@ -202,8 +202,8 @@ describe("orderService.createOrder — resolveLines() batch resolve (BACKLOG §3
   it("สินค้าเดียวกันสั่งซ้ำในออเดอร์เดียวคนละ variant/option → join ไม่ปนกัน คิดราคาถูกคนละบรรทัด", async () => {
     const user = await makeUser();
     const p = await makeProduct({ product_price: 100, product_stock_quantity: 10 });
-    const vSmall = await makeVariant(String(p._id), { variant_name: "เล็ก", variant_price: 0 });
-    const vLarge = await makeVariant(String(p._id), { variant_name: "ใหญ่", variant_price: 30 });
+    const vSmall = await makeVariant(String(p._id), { variant_name: "เล็ก", variant_price: 0, variant_stock: 5 });
+    const vLarge = await makeVariant(String(p._id), { variant_name: "ใหญ่", variant_price: 30, variant_stock: 5 });
 
     const order = await orderService.createOrder(String(user._id), {
       order_type: "takeaway",

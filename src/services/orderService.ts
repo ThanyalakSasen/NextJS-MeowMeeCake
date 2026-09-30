@@ -183,7 +183,7 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
     ...new Set(inputs.flatMap((i) => (i.selected_options ?? []).map((s) => s.option_id))),
   ];
 
-  const [products, variants, options] = await Promise.all([
+  const [products, variants, options, withVariants] = await Promise.all([
     productModel.find({ _id: { $in: productIds }, deleted_at: null }).lean<any[]>(),
     variantIds.length
       ? productVariantModel.find({ _id: { $in: variantIds }, deleted_at: null }).lean<any[]>()
@@ -191,6 +191,7 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
     optionIds.length
       ? productOptionModel.find({ _id: { $in: optionIds }, deleted_at: null }).lean<any[]>()
       : Promise.resolve([]),
+    productService.productIdsWithVariants(productIds),
   ]);
   const productById = new Map(products.map((p) => [String(p._id), p]));
   const variantById = new Map(variants.map((v) => [String(v._id), v]));
@@ -215,6 +216,9 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
       // ด้วย _id ล้วนแล้วเช็คทีหลัง เพราะ $in ข้าม product_id ของแต่ละรายการไม่ได้ในคำสั่งเดียว)
       variant = v && String(v.product_id) === String(input.product_id) ? v : null;
       if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
+    } else if (withVariants.has(String(product._id))) {
+      // BACKLOG4 Y9 — สินค้ามีตัวเลือก สต็อกแยกต่อตัวเลือก → ต้องระบุว่าเอาแบบไหน
+      throw badRequest(`กรุณาเลือกตัวเลือกของสินค้า "${product.product_name_th}"`);
     }
 
     // BACKLOG3 §6 — logic ตรวจ/คิดราคา option ย้ายไป productOptionService.resolveSelectedOptions()
@@ -360,6 +364,7 @@ async function persistOrder(
   const stockItems = lines.map((l) => ({
     product_id: String(l.product_id),
     quantity: l.quantity,
+    variant_id: l.variant_id ? String(l.variant_id) : null, // BACKLOG4 Y9 — ตัด variant_stock ด้วย
   }));
 
   // ── สร้างออเดอร์แบบ best-effort + ชดเชยผ่าน Saga (MongoDB standalone ไม่มี transaction) ──
@@ -653,6 +658,7 @@ export async function updateOrderStatus(
     const stockItems = items.map((it) => ({
       product_id: String(it.product_id),
       quantity: it.quantity,
+      variant_id: it.variant_id ? String(it.variant_id) : null, // BACKLOG4 Y9 — คืน variant_stock ด้วย
     }));
     if (stockItems.length) {
       cleanup.onRollback("restock", () => productService.restockForOrder(stockItems));

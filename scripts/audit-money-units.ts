@@ -1,7 +1,9 @@
 import "./_env"; // ต้องมาก่อน import ที่อ่าน env ตอนโหลดโมดูล
 
 import mongoose from "mongoose";
-import { writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import dbConnect from "../src/lib/dbConnect";
 
 /**
@@ -18,11 +20,20 @@ import dbConnect from "../src/lib/dbConnect";
  *   REVIEW         ตัดสินไม่ได้ (ไม่มี updated_at) หรือค่าขัดกับเกณฑ์ เช่น SATANG_LIKELY แต่ค่า < 1000
  *                  หรือ BAHT_LIKELY แต่ค่า ≥ 100000 → ต้องคนดูเอง
  *
+ * docs/BACKLOG4.md Y10 (BACKLOG2 §16.1) — เดิมให้ false positive หลัง fix-money-units --apply เพราะ fix ตั้งใจ
+ * ไม่แตะ updated_at → แถวที่แก้แล้วยังถูกตัดสิน BAHT_LIKELY ซ้ำ (ทำตามรายงาน = เงิน ×100 ซ้ำ) ตอนนี้เพิ่ม:
+ *   SATANG_FIXED   ค่าปัจจุบัน = ค่า "new" ใน scripts/backups/money-fix-*.json / product-price-fix-*.json
+ *                  → แก้เป็นสตางค์แล้ว ห้ามคูณซ้ำ (มาก่อนเกณฑ์ updated_at)
+ *   ค่าปัจจุบัน = ค่า "old" ใน backup → ถูกเขียนกลับเป็นบาท (แบบ BACKLOG2 §16) → BAHT_LIKELY + note
+ *   ค่าไม่ตรงทั้ง old/new → ถูกแก้หลัง fix → REVIEW + note
+ *   มี marker money_fix_units_applied: แถว BAHT_LIKELY ที่ไม่อยู่ใน backup และ updated_at < เวลา fix
+ *                  = แถวที่ fix ตั้งใจไม่แตะ → ลดเป็น REVIEW + note (ไม่ชวนคูณ)
+ *
  * รัน:   npx tsx scripts/audit-money-units.ts [--cutoff=2026-09-12T14:14:00Z] [--verbose]
  * ผลลัพธ์: สรุปตารางใน terminal + รายละเอียดทุกแถวที่ "จะแก้" ใน scripts/audit-money-units.report.json
  */
 
-type Verdict = "BAHT_CERTAIN" | "BAHT_LIKELY" | "SATANG_LIKELY" | "REVIEW";
+type Verdict = "BAHT_CERTAIN" | "BAHT_LIKELY" | "SATANG_LIKELY" | "SATANG_FIXED" | "REVIEW";
 
 interface Target {
   /** id ตรงกับ section ใน migrate-money-to-satang.ts */
@@ -60,11 +71,39 @@ const TARGETS: Target[] = [
   { section: "preorder_round_items", collection: "preorderrounditems", field: "price_override", label: "_id" },
 ];
 
-const args = process.argv.slice(2);
-const VERBOSE = args.includes("--verbose");
-const cutoffArg = args.find((a) => a.startsWith("--cutoff="))?.split("=")[1];
 // ดีฟอลต์ = เวลาที่เฟส 1-2 รันจริง (marker ล่าสุดใน collection migrations) — ตั้งเองได้ถ้ารู้เวลา deploy โค้ดสตางค์
-const CUTOFF = new Date(cutoffArg ?? "2026-09-12T14:14:00Z");
+const DEFAULT_CUTOFF = "2026-09-12T14:14:00Z";
+
+interface FixedValue {
+  old: number;
+  new: number;
+  file: string;
+}
+
+/**
+ * อ่าน backup ของสคริปต์แก้หน่วยเงิน → key "collection|_id|field" → ค่า old/new (ไฟล์ใหม่กว่าทับไฟล์เก่า)
+ *   money-fix-*.json          [{ collection, _id, field, old, new }]
+ *   product-price-fix-*.json  [{ _id, field, old, new }] (products เสมอ)
+ */
+export function loadFixedValues(backupDir: string): Map<string, FixedValue> {
+  const map = new Map<string, FixedValue>();
+  if (!existsSync(backupDir)) return map;
+  // เรียงตามเวลาในชื่อไฟล์ (ส่วนหลัง "-fix-") ไม่ใช่ตามชื่อทั้งหมด — money-fix กับ product-price-fix ปนกันได้
+  const stamp = (f: string) => f.slice(f.indexOf("-fix-") + 5);
+  const files = readdirSync(backupDir)
+    .filter((f) => /^(money-fix|product-price-fix)-.+\.json$/.test(f))
+    .sort((a, b) => stamp(a).localeCompare(stamp(b)));
+  for (const file of files) {
+    const rows = JSON.parse(readFileSync(join(backupDir, file), "utf8")) as unknown;
+    if (!Array.isArray(rows)) continue;
+    for (const r of rows as Array<Record<string, unknown>>) {
+      if (typeof r.old !== "number" || typeof r.new !== "number") continue;
+      const collection = typeof r.collection === "string" ? r.collection : "products";
+      map.set(`${collection}|${String(r._id)}|${String(r.field)}`, { old: r.old, new: r.new, file });
+    }
+  }
+  return map;
+}
 
 /** ดึงค่าตัวเลขทุกตัวที่ path ชี้ไป (รองรับ "$[]" = กระจาย array) */
 function extract(doc: Record<string, unknown>, path: string): number[] {
@@ -84,11 +123,11 @@ function extract(doc: Record<string, unknown>, path: string): number[] {
 }
 
 /** ตัดสินทั้งแถว — ถ้ามีหลายค่า (array) ใช้ค่าที่ "เสี่ยงที่สุด" เป็นตัวแทน */
-function classify(values: number[], updatedAt: Date | null): Verdict {
+function classify(values: number[], updatedAt: Date | null, cutoff: Date): Verdict {
   if (values.some((v) => !Number.isInteger(v))) return "BAHT_CERTAIN";
   if (!updatedAt) return "REVIEW";
   const max = Math.max(...values);
-  if (updatedAt >= CUTOFF) return max < 1000 ? "REVIEW" : "SATANG_LIKELY";
+  if (updatedAt >= cutoff) return max < 1000 ? "REVIEW" : "SATANG_LIKELY";
   return max >= 100_000 ? "REVIEW" : "BAHT_LIKELY";
 }
 
@@ -105,16 +144,51 @@ interface Row {
   proposed: number[] | null;
   /** ค่าที่ API แสดงอยู่ตอนนี้ (÷100) เทียบกับค่าที่ควรเป็น */
   shown_now_baht: number[];
+  /** เหตุผลเพิ่มเติมเมื่อ verdict มาจาก backup/marker (Y10) */
+  note?: string;
 }
 
-async function main() {
+export interface AuditOptions {
+  cutoff?: Date;
+  verbose?: boolean;
+  backupDir?: string;
+  /** null = ไม่เขียนไฟล์รายงาน */
+  reportPath?: string | null;
+}
+
+export interface AuditResult {
+  cutoff: string;
+  fixAppliedAt: string | null;
+  summary: Record<string, Record<Verdict, number>>;
+  rows: Row[];
+}
+
+const emptyCounts = (): Record<Verdict, number> => ({
+  BAHT_CERTAIN: 0,
+  BAHT_LIKELY: 0,
+  SATANG_LIKELY: 0,
+  SATANG_FIXED: 0,
+  REVIEW: 0,
+});
+
+export async function runAudit(opts: AuditOptions = {}): Promise<AuditResult> {
+  const cutoff = opts.cutoff ?? new Date(DEFAULT_CUTOFF);
   await dbConnect();
   const db = mongoose.connection.db;
   if (!db) throw new Error("ไม่มี mongoose.connection.db");
 
-  console.log(`ตรวจหน่วยเงิน (อ่านอย่างเดียว) — cutoff = ${CUTOFF.toISOString()}\n`);
+  console.log(`ตรวจหน่วยเงิน (อ่านอย่างเดียว) — cutoff = ${cutoff.toISOString()}\n`);
 
-  const applied = new Set((await db.collection("migrations").find({}).toArray()).map((m) => String(m._id)));
+  const migrationDocs = await db.collection<{ _id: string; applied_at?: Date }>("migrations").find({}).toArray();
+  const applied = new Set(migrationDocs.map((m) => String(m._id)));
+  const fixMarker = migrationDocs.find((m) => m._id === "money_fix_units_applied");
+  const fixAppliedAt = fixMarker ? (fixMarker.applied_at instanceof Date ? fixMarker.applied_at : new Date()) : null;
+  const fixed = loadFixedValues(opts.backupDir ?? "scripts/backups");
+  if (fixAppliedAt) {
+    console.log(`⚠️  พบ marker money_fix_units_applied (${fixAppliedAt.toISOString()}) — เคยแก้หน่วยเงินไปแล้ว`);
+    console.log(`    เทียบกับ backup ${fixed.size} ค่า · แถวเก่าที่ fix ไม่แตะจะเป็น REVIEW แทน BAHT_LIKELY (ห้ามคูณตามรายงานโดยไม่ตรวจ)\n`);
+  }
+
   const rows: Row[] = [];
   const table: Record<string, Record<Verdict, number>> = {};
 
@@ -130,12 +204,31 @@ async function main() {
       .find({ [topField]: { $exists: true, $ne: null }, ...(t.filter ?? {}) })
       .toArray();
 
-    const bucket = (table[t.section] ??= { BAHT_CERTAIN: 0, BAHT_LIKELY: 0, SATANG_LIKELY: 0, REVIEW: 0 });
+    const bucket = (table[t.section] ??= emptyCounts());
     for (const d of docs) {
       const values = extract(d as Record<string, unknown>, t.field);
       if (!values.length) continue;
       const updatedAt = d.updated_at instanceof Date ? d.updated_at : d.updatedAt instanceof Date ? d.updatedAt : null;
-      const verdict = classify(values, updatedAt);
+      let verdict = classify(values, updatedAt, cutoff);
+      let note: string | undefined;
+
+      const fix = values.length === 1 ? fixed.get(`${t.collection}|${String(d._id)}|${t.field}`) : undefined;
+      if (fix) {
+        if (values[0] === fix.new) {
+          verdict = "SATANG_FIXED";
+          note = `ตรงค่าที่แก้แล้วใน ${fix.file}`;
+        } else if (values[0] === fix.old && verdict !== "BAHT_CERTAIN") {
+          verdict = "BAHT_LIKELY";
+          note = `กลับเป็นค่าก่อนแก้ใน ${fix.file} (ถูกเขียนทับเป็นบาทอีก — ดู BACKLOG2 §16)`;
+        } else if (verdict !== "BAHT_CERTAIN") {
+          verdict = "REVIEW";
+          note = `ถูกแก้หลัง ${fix.file} (old ${fix.old} / new ${fix.new}) — ตรวจเอง`;
+        }
+      } else if (verdict === "BAHT_LIKELY" && fixAppliedAt && updatedAt && updatedAt < fixAppliedAt) {
+        verdict = "REVIEW";
+        note = "fix-money-units ตั้งใจไม่แตะแถวนี้ (ตอนนั้นตัดสินว่าเป็นสตางค์/ต้องดูเอง) — อย่าคูณตามเกณฑ์ updated_at";
+      }
+
       bucket[verdict]++;
       const isBaht = verdict === "BAHT_CERTAIN" || verdict === "BAHT_LIKELY";
       rows.push({
@@ -149,25 +242,33 @@ async function main() {
         current: values,
         proposed: isBaht ? values.map((v) => Math.round(v * 100)) : null,
         shown_now_baht: values.map((v) => v / 100),
+        ...(note ? { note } : {}),
       });
     }
   }
 
   // ── สรุปตาราง ──
   const pad = (s: string, n: number) => s.padEnd(n);
-  console.log(pad("section", 34) + pad("BAHT_CERT", 11) + pad("BAHT_LIKELY", 13) + pad("SATANG_LIKELY", 15) + "REVIEW");
-  console.log("-".repeat(80));
-  const total: Record<Verdict, number> = { BAHT_CERTAIN: 0, BAHT_LIKELY: 0, SATANG_LIKELY: 0, REVIEW: 0 };
+  const line = (label: string, c: Record<Verdict, number>) =>
+    pad(label, 34) +
+    pad(String(c.BAHT_CERTAIN), 11) +
+    pad(String(c.BAHT_LIKELY), 13) +
+    pad(String(c.SATANG_LIKELY), 15) +
+    pad(String(c.SATANG_FIXED), 14) +
+    c.REVIEW;
+  console.log(pad("section", 34) + pad("BAHT_CERT", 11) + pad("BAHT_LIKELY", 13) + pad("SATANG_LIKELY", 15) + pad("SATANG_FIXED", 14) + "REVIEW");
+  console.log("-".repeat(94));
+  const total = emptyCounts();
   for (const [s, c] of Object.entries(table)) {
-    console.log(pad(s, 34) + pad(String(c.BAHT_CERTAIN), 11) + pad(String(c.BAHT_LIKELY), 13) + pad(String(c.SATANG_LIKELY), 15) + c.REVIEW);
+    console.log(line(s, c));
     for (const k of Object.keys(total) as Verdict[]) total[k] += c[k];
   }
-  console.log("-".repeat(80));
-  console.log(pad("รวม", 34) + pad(String(total.BAHT_CERTAIN), 11) + pad(String(total.BAHT_LIKELY), 13) + pad(String(total.SATANG_LIKELY), 15) + total.REVIEW);
+  console.log("-".repeat(94));
+  console.log(line("รวม", total));
 
   // marker ของ section ที่ migrate ไปแล้ว — เตือนถ้าตรวจเจอ BAHT ใน collection ที่ marker บอกว่าแปลงแล้ว
   const appliedFor = (s: string) => [...applied].some((m) => m.includes(s.split(".")[0]));
-  const suspicious = Object.entries(table).filter(([s, c]) => appliedFor(s) && (c.BAHT_CERTAIN > 0));
+  const suspicious = Object.entries(table).filter(([s, c]) => appliedFor(s) && c.BAHT_CERTAIN > 0);
   if (suspicious.length) {
     console.log("\n⚠️  section ที่ marker บอกว่า migrate แล้ว แต่ยังเจอค่าทศนิยม (ผิดปกติ):");
     for (const [s] of suspicious) console.log(`   - ${s}`);
@@ -176,31 +277,52 @@ async function main() {
   // ── รายละเอียดแถวที่จะแก้ / ต้องดู ──
   const toFix = rows.filter((r) => r.proposed);
   const review = rows.filter((r) => r.verdict === "REVIEW");
-  console.log(`\nแถวที่จะแก้ (×100): ${toFix.length} · ต้องคนดูเอง: ${review.length} · ปล่อยไว้ (สตางค์แล้ว): ${total.SATANG_LIKELY}`);
+  console.log(
+    `\nแถวที่จะแก้ (×100): ${toFix.length} · ต้องคนดูเอง: ${review.length} · ปล่อยไว้ (สตางค์แล้ว): ${total.SATANG_LIKELY + total.SATANG_FIXED}`
+  );
 
   const show = (title: string, list: Row[]) => {
     if (!list.length) return;
     console.log(`\n=== ${title} ===`);
-    const limit = VERBOSE ? list.length : 8;
+    const limit = opts.verbose ? list.length : 8;
     for (const r of list.slice(0, limit)) {
       const arrow = r.proposed ? `  →  ${r.proposed.join(", ")} สตางค์` : "";
-      console.log(`  [${r.verdict}] ${r.section} · ${r.label.slice(0, 28)} · ${r.field} = ${r.current.join(", ")}${arrow}  (updated ${r.updated_at?.slice(0, 10) ?? "?"})`);
+      const note = r.note ? ` — ${r.note}` : "";
+      console.log(
+        `  [${r.verdict}] ${r.section} · ${r.label.slice(0, 28)} · ${r.field} = ${r.current.join(", ")}${arrow}  (updated ${r.updated_at?.slice(0, 10) ?? "?"})${note}`
+      );
     }
     if (list.length > limit) console.log(`  ... อีก ${list.length - limit} แถว (ใส่ --verbose เพื่อดูทั้งหมด)`);
   };
   show("จะแก้ — ยังเป็นบาท", toFix);
   show("ต้องคนดูเอง (REVIEW)", review);
   show("ปล่อยไว้ — น่าจะเป็นสตางค์แล้ว (ห้ามคูณซ้ำ)", rows.filter((r) => r.verdict === "SATANG_LIKELY"));
+  show("ปล่อยไว้ — แก้เป็นสตางค์แล้วตาม backup (ห้ามคูณซ้ำ)", rows.filter((r) => r.verdict === "SATANG_FIXED"));
 
-  const out = "scripts/audit-money-units.report.json";
-  writeFileSync(out, JSON.stringify({ cutoff: CUTOFF.toISOString(), generated_at: new Date().toISOString(), summary: table, rows }, null, 2));
-  console.log(`\nรายงานเต็ม (ทุกแถว): ${out}`);
+  const result: AuditResult = {
+    cutoff: cutoff.toISOString(),
+    fixAppliedAt: fixAppliedAt?.toISOString() ?? null,
+    summary: table,
+    rows,
+  };
+  const out = opts.reportPath === undefined ? "scripts/audit-money-units.report.json" : opts.reportPath;
+  if (out) {
+    writeFileSync(out, JSON.stringify({ ...result, generated_at: new Date().toISOString() }, null, 2));
+    console.log(`\nรายงานเต็ม (ทุกแถว): ${out}`);
+  }
   console.log("สคริปต์นี้ไม่ได้เขียนอะไรลงฐานข้อมูล");
+  return result;
 }
 
-main()
-  .catch((err) => {
-    console.error("\naudit-money-units ล้มเหลว:", err);
-    process.exitCode = 1;
-  })
-  .finally(() => mongoose.disconnect());
+// รันจริงเฉพาะตอนเรียกไฟล์นี้ตรง ๆ ผ่าน CLI
+const isDirectRun = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectRun) {
+  const args = process.argv.slice(2);
+  const cutoffArg = args.find((a) => a.startsWith("--cutoff="))?.split("=")[1];
+  runAudit({ verbose: args.includes("--verbose"), cutoff: cutoffArg ? new Date(cutoffArg) : undefined })
+    .catch((err) => {
+      console.error("\naudit-money-units ล้มเหลว:", err);
+      process.exitCode = 1;
+    })
+    .finally(() => mongoose.disconnect());
+}

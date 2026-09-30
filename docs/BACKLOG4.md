@@ -10,8 +10,8 @@
 
 | ระดับ | จำนวน | สรุป |
 |---|---|---|
-| 🔴 ต้องทำก่อนใช้งานจริง | 6 (โค้ด R5 ✅ แก้แล้ว · เหลืองาน deploy R1–R4 + R6) | ส่วนใหญ่เป็น **งานตอน deploy** (migration, cron, env, ลำดับ merge) + รายงานแดชบอร์ดไม่นับรายได้พรีออเดอร์ |
-| 🟡 ควรแก้ | 11 (✅ Y1–Y6 แก้แล้ว · เหลือ Y7–Y11) | ใบผลิตไม่ลดเมื่อยกเลิกพรีออเดอร์ · ผลิตแล้วไม่เพิ่มสต็อกสินค้า · สลิปเปิดสาธารณะ · deprecation · dependency |
+| 🔴 ต้องทำก่อนใช้งานจริง | 7 (โค้ด R5 ✅ แก้แล้ว · เหลืองาน deploy R1–R4 + R6 · **R7 ราคาสินค้าเป็นบาทอีกรอบ — ข้อมูลจริง**) | ส่วนใหญ่เป็น **งานตอน deploy** (migration, cron, env, ลำดับ merge) + รายงานแดชบอร์ดไม่นับรายได้พรีออเดอร์ |
+| 🟡 ควรแก้ | 11 (✅ แก้ครบ Y1–Y11 · Y11 ฝั่งโค้ดเสร็จ เหลือตั้ง DB user ที่ Atlas) | ใบผลิตไม่ลดเมื่อยกเลิกพรีออเดอร์ · ผลิตแล้วไม่เพิ่มสต็อกสินค้า · สลิปเปิดสาธารณะ · deprecation · dependency |
 | 🟢 เล็กน้อย / ต่อยอด | 15 | race ที่เกิดยาก · index · ฟีเจอร์ต่อยอด |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | สิทธิ์ทุก route · CI ทุก PR · cron auth · upload validation · IDOR ฝั่ง shop (§5) |
 
@@ -28,6 +28,7 @@
 | 3 | #55 flow รอบพรีออเดอร์ + วงจรอัตโนมัติ | base #53 |
 | อิสระ | #54 สลิป/ใบเสร็จ/แบนเนอร์เป็นไฟล์ + สลิปส่วนตัว | base `main` · **ชนกับ #55 ที่ `package.json` (scripts) และ `.env.example` (ท้ายไฟล์)** — แก้ตอน merge: เก็บของทั้งสองฝั่ง |
 | อิสระ | #56 postcss override + audit 0 | base `main` · ไม่ชนกับใคร |
+| 4 | Y7–Y11 (`fix/backlog4-y7-y11`) | base #55 · ชนกับ #54 ที่ `package.json` scripts อีกจุด — เก็บทั้งสองฝั่ง |
 
 **ตรวจรวมทุก PR แล้ว (2026-10-01):** merge #52→#53→#55 + #54 + #56 ลง branch ชั่วคราว → typecheck ✅ · lint 0 error · unit 223 ✅ ·
 integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหลือ `new: true` / `product_types` ในโค้ดรัน
@@ -81,6 +82,30 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 - **แก้ (ตอน deploy — ไม่ต้องแก้โค้ด):** ให้ nginx เสิร์ฟ `/uploads/` เองจากดิสก์ (`location /uploads/ { alias …/public/uploads/; }`) —
   config เต็มใน [`DEPLOY.md`](DEPLOY.md) §6 · ทางเลือกในโค้ด (ถ้าไม่มี nginx): route `GET /uploads/[...path]` อ่านไฟล์จากดิสก์เอง หรือใช้ `UPLOAD_DRIVER=s3`
 
+### R7. ⚠️ ราคาสินค้าถูกเขียนทับเป็น "บาท" อีกรอบ (ข้อมูลจริง) — พบ 2026-10-01 จาก `check:data-integrity` (Y11)
+
+- **พบ (อ่านอย่างเดียว):** `npm run check:data-integrity -- --no-notify` บน DB จริง → **48 ปัญหา** ในสินค้า 36 ตัว — `product_price` เป็นค่าบาท
+  (เช่น คัพเค้ก `35` = แสดง 0.35 บาท · เค้กไข่ `10`) · `sale_price` ≥ `product_price` 7 ตัว (sale เป็นสตางค์ถูกต้อง เช่น 6400 vs 65) ·
+  ฟิลด์เก่า `delete_at` 3 ตัว · รหัส `pos-` แต่ `is_preorder: true` 2 ตัว (เดิมรู้อยู่แล้ว — DEPLOY §⑦)
+- **เวลา:** `updated_at` ของ 35 ตัวเรียงกันช่วง **2026-09-30 22:36–22:50 น. (เวลาไทย)** ห่างกันตัวละ ~7–10 วินาที · `userlogs` ช่วงนั้น **ไม่มี**
+  การแก้สินค้าเลย → เขียนนอก API **แบบเดียวกับ BACKLOG2 §16** (09-24) ทั้งที่แก้ข้อมูลไปแล้วเมื่อ 09-25 · ชิโอะปัง (`45`) ค้างมาตั้งแต่ 09-24
+- **ผลกระทบ:** หน้าร้าน/POS แสดงและ**คิดเงิน**ราคาหาร 100 (ออเดอร์ที่สร้างตอนนี้ได้ยอด 0.35 บาท)
+- **ตรวจละเอียด (อ่านอย่างเดียว 2026-10-01):** สินค้า**ทั้ง 42 ตัว** (รวมที่ลบแล้ว 6) มี `product_price` < 1,000 — 41 ตัวเท่ากับค่า `old` ใน
+  `money-fix-2026-09-20…json` เป๊ะ (= ค่าที่ถูก ÷ 100) · ขนมปังซาวโดว์แครนเบอ `492` (backup เคยเป็น 49900 → ตั้งราคาใหม่เป็นบาท) ·
+  ขนมปังซาวโดว์ช็อกโกแลต `366` (ไม่อยู่ใน backup — §16 บันทึกว่าเคยเป็น 36600) · `preorderrounditems.price_override` **366 / 650 / 400**
+  (รอบ `6abd285f…` สร้าง 22:19–22:22 น.) · ตะกร้าที่ยังใช้อยู่ 1 แถว `35` · ออเดอร์ **`ORD-1790786142302-M2PY`** (pending ยังไม่จ่าย
+  ยอด 55 สตางค์ = 0.55 บาท · 2026-09-30 23:35 น.)
+- **ต้นทาง (หลักฐานชี้):** API ปัจจุบันเขียน userlog ทุกครั้งที่แก้สินค้า/เพิ่มสินค้าเข้ารอบ แต่ช่วงนั้นไม่มีเลย · **เลขออเดอร์ `ORD-<timestamp>-XXXX`
+  เป็นรูปแบบของโค้ดรุ่นเก่า** (ปัจจุบัน `generateDocNo` = `ORD-YYYYMMDD-xxxxxx`) · `price_override` เป็นบาทเหมือนโค้ดก่อน §3.11 เฟส 5b ·
+  ฟิลด์ `delete_at` ของ schema เก่า → **น่าจะมี backend รุ่นเก่า (หรือ frontend ที่ต่อ backend รุ่นเก่า) ต่อ DB จริงอยู่** เช่นเครื่อง dev
+  ของสมาชิกในทีมที่ใช้ `MONGODB_URI` ของ production — ต้องหาให้เจอ ไม่งั้นจะเพี้ยนซ้ำทุกครั้งที่มีคนเปิดใช้
+- **แก้ข้อมูล:** `scripts/fix-baht-prices.ts` (`npm run fix:baht-prices` dry-run · `-- --apply`) ×100 สินค้า 42 + ราคารอบ 3 + ตะกร้า 1 แบบมีเงื่อนไข
+  `{ _id, field: ค่าเดิม }` · ไม่แตะ `updated_at` · backup `scripts/backups/money-fix-*.json` (audit Y10 อ่านได้) · dry-run บน DB จริงตรงแผน
+  ⚠️ **ผู้ใช้ต้องรัน `--apply` เอง** — auto mode ของ Claude Code ปฏิเสธการเขียน DB จริง
+- **ออเดอร์ `ORD-1790786142302-M2PY`:** ไม่แตะในสคริปต์ (ยกเลิกแล้วระบบจะแจ้งลูกค้าทาง LINE) — ให้เจ้าของร้านยกเลิกผ่านหลังบ้าน หรือติดต่อลูกค้า
+- **หยุดต้นทาง:** เปลี่ยนรหัสผ่าน DB user ที่แจกไป → เครื่องที่ยังต่อ DB ด้วยรหัสเดิม (backend รุ่นเก่า/Compass) จะต่อไม่ได้ทันที · แยก user อ่านอย่างเดียว
+  (DEPLOY §สำรองข้อมูล → ผู้ใช้ DB) · `check:data-integrity` รายวันจะแจ้งถ้าเกิดอีก
+
 ---
 
 ## 2. 🟡 ควรแก้
@@ -93,11 +118,11 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 | Y4 | ✅ **mongoose: option `new: true` เลิกใช้แล้ว** — แก้แล้ว (§7.4) | 25 จุดใน `src/` · เทสขึ้น warning ทุกรอบ | mongoose รุ่นถัดไปอาจเลิกรองรับ | เปลี่ยนเป็น `returnDocument: "after"` ทีเดียวทั้งไฟล์ (พฤติกรรมเท่าเดิม) |
 | Y5 | ✅ **dependency มีช่องโหว่ (high)** — แก้แล้วใน PR #56 (§7.8) | `npm audit`: `postcss ≤ 8.5.22` ผ่าน `next` (XSS ใน stringify + อ่านไฟล์ .map ผ่าน sourceMappingURL) | backend นี้เป็น API ล้วน ไม่ประมวลผล CSS จาก user → ความเสี่ยงจริงต่ำ (build-time) | `npm audit fix --force` = อัป Next 16 (breaking) · หรือ `overrides.postcss` ≥ เวอร์ชันที่แก้แล้ว + รันเทส/บิลด์ |
 | Y6 | ✅ **staff ทุกคนลบแจ้งเตือนของร้านได้** — แก้แล้ว (§7.3) | `DELETE /api/admin/notifications/[id]` เช็คแค่ล็อกอิน (`requireAuth`) | แจ้งเตือนสำคัญ (สต็อก, โควตา LINE, ปิดรอบ) หายโดยเจ้าของไม่เห็น | จำกัด DELETE เฉพาะ owner (หรือ permission ใหม่) · PATCH อ่านแล้วให้ทุกคนได้เหมือนเดิม |
-| Y7 | **พรีออเดอร์ข้อมูลเก่าไม่มีกำหนดชำระ** | พรีออเดอร์ก่อน #55 มี `payment_due_at: null` | ไม่ถูกยกเลิกตามกำหนด (ถูกยกเลิกตอนปิดรอบแทน) | ถ้าต้องการ: สคริปต์ backfill `payment_due_at` = min(created + N ชม., close) สำหรับรอบที่ยังเปิด |
-| Y8 | **state ในหน่วยความจำ ไม่แชร์ข้าม instance** | `rateLimit` · permission cache · delivery-zone cache · cache โควตา LINE | หลาย instance / serverless: rate limit หลวม · โควตา LINE ตัดสินจากค่า cache ต่าง instance | ตั้ง instance เดียว หรือย้ายไป Redis (แก้เฉพาะไฟล์ lib ละตัว — ออกแบบไว้แล้ว) |
-| Y9 | `variant_stock` ไม่เคยถูกเช็ค/ตัด (ยกมาจาก BACKLOG2 §9) | DB มี variant 0 ตัว (ตอนนั้น) | ถ้าเริ่มใช้ variant แบบจำกัดจำนวน จะขายเกิน | ตัด/คืน `variant_stock` คู่กับ `product_stock_quantity` ใน `deductStockForOrder`/`restockForOrder` |
-| Y10 | `audit-money-units` ให้ false positive หลัง fix (ยกมาจาก BACKLOG2 §16.1) | ใช้ `updated_at` ตัดสิน | ถ้าทำตามรายงาน เงินจะ ×100 ซ้ำ | ให้ audit เทียบกับ `scripts/backups/money-fix-*.json` หรือเตือนเมื่อพบ marker |
-| Y11 | ต้นทางที่เขียน DB ตรงนอกแอป (BACKLOG2 §16 + `product_type: "ready"` ที่เจอ 2026-09-30) | ยังมีการเขียน DB ตรง ๆ (ชิโอะปังนูเทลล่า แก้ล่าสุด 2026-09-30) | ราคา/ประเภทเพี้ยนซ้ำได้ | หาคน/เครื่องมือที่ต่อ DB ตรง (Compass/สคริปต์เก่า/แอปรุ่นเก่า) · แยก DB user อ่านอย่างเดียวสำหรับเครื่องมือ |
+| Y7 | ✅ **พรีออเดอร์ข้อมูลเก่าไม่มีกำหนดชำระ** — แก้แล้ว (§7.9) | พรีออเดอร์ก่อน #55 มี `payment_due_at: null` | ไม่ถูกยกเลิกตามกำหนด (ถูกยกเลิกตอนปิดรอบแทน) | ถ้าต้องการ: สคริปต์ backfill `payment_due_at` = min(created + N ชม., close) สำหรับรอบที่ยังเปิด |
+| Y8 | ✅ **state ในหน่วยความจำ ไม่แชร์ข้าม instance** — ตัดสินใจรัน instance เดียว (§7.10) | `rateLimit` · permission cache · delivery-zone cache · cache โควตา LINE | หลาย instance / serverless: rate limit หลวม · โควตา LINE ตัดสินจากค่า cache ต่าง instance | ตั้ง instance เดียว หรือย้ายไป Redis (แก้เฉพาะไฟล์ lib ละตัว — ออกแบบไว้แล้ว) |
+| Y9 | ✅ `variant_stock` ไม่เคยถูกเช็ค/ตัด (ยกมาจาก BACKLOG2 §9) — แก้แล้ว (§7.11) | DB มี variant 0 ตัว (ตอนนั้น) | ถ้าเริ่มใช้ variant แบบจำกัดจำนวน จะขายเกิน | ตัด/คืน `variant_stock` คู่กับ `product_stock_quantity` ใน `deductStockForOrder`/`restockForOrder` |
+| Y10 | ✅ `audit-money-units` ให้ false positive หลัง fix (ยกมาจาก BACKLOG2 §16.1) — แก้แล้ว (§7.12) | ใช้ `updated_at` ตัดสิน | ถ้าทำตามรายงาน เงินจะ ×100 ซ้ำ | ให้ audit เทียบกับ `scripts/backups/money-fix-*.json` หรือเตือนเมื่อพบ marker |
+| Y11 | ✅ ต้นทางที่เขียน DB ตรงนอกแอป (BACKLOG2 §16 + `product_type: "ready"` ที่เจอ 2026-09-30) — ตรวจรายวัน + แจ้งร้าน (§7.13) · พบเกิดซ้ำจริง → R7 | ยังมีการเขียน DB ตรง ๆ (ชิโอะปังนูเทลล่า แก้ล่าสุด 2026-09-30) | ราคา/ประเภทเพี้ยนซ้ำได้ | หาคน/เครื่องมือที่ต่อ DB ตรง (Compass/สคริปต์เก่า/แอปรุ่นเก่า) · แยก DB user อ่านอย่างเดียวสำหรับเครื่องมือ |
 
 ---
 
@@ -156,7 +181,8 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 2. ~~**R5** แดชบอร์ดนับพรีออเดอร์~~ ✅ (§7.1)
 3. ~~**Y1** ใบผลิตลดเมื่อยกเลิก · **Y6** จำกัดการลบแจ้งเตือน · **Y4** `returnDocument`~~ ✅ (§7.2–§7.4)
 4. **ต้องตัดสินใจก่อน:** **Y2** (ผลิตเสร็จเพิ่มสต็อกอัตโนมัติไหม) · **Y3** (ย้ายสลิปเป็น private) · **Y5** (อัป Next 16 หรือ override postcss)
-5. ที่เหลือ (Y7–Y11, G*) ตามความจำเป็น
+5. ~~Y7–Y11~~ ✅ (§7.9–§7.13) · **R7 แก้ราคาใน DB จริง + ปิดสิทธิ์เขียนของเครื่องมือนอกแอป ก่อนเปิดขาย**
+6. G* ตามความจำเป็น
 
 ---
 
@@ -266,3 +292,76 @@ request จากผู้ใช้ · backend นี้เป็น API ล้�
 **ทำแล้ว (PR #56, commit `6df01ca`):** `overrides.next.postcss: ^8.5.23` (ได้ 8.5.28) · `npm audit fix` แก้ `brace-expansion` ใน eslint (dev,
 ไม่ breaking) · ลบ `postcss.config.mjs` ที่อ้าง Tailwind ซึ่งไม่ได้ติดตั้ง · `npm audit` = **0 vulnerabilities** · typecheck/lint/unit 190/
 integration 178/build ผ่าน · ไม่ชนกับ #52/#54/#55
+
+---
+
+## 7.9–7.13 บันทึกการแก้ไข Y7–Y11 (2026-10-01 — branch `fix/backlog4-y7-y11` ต่อจาก PR #55)
+
+### 7.9 Y7 — เติมกำหนดชำระให้พรีออเดอร์เก่า (`scripts/backfill-payment-due.ts`)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| พรีออเดอร์ก่อน #55 ที่ค้างจ่าย | `payment_due_at: null` → `cancelUnpaidPreorders` ข้าม (กรอง `$ne: null`) ค้างจนปิดรอบ | `npm run backfill:payment-due` เติม = min(สั่ง + `PREORDER_PAYMENT_DEADLINE_HOURS`, ปิดรอบ) — สูตรเดียวกับของใหม่ |
+| รายการที่เลยกำหนดไปแล้ว | — | เลื่อนเป็น "ตอนรัน + grace ชม." (ค่าเริ่มต้น = N ชม., `--grace-hours=`) ลูกค้าไม่ถูกยกเลิกทันทีโดยไม่รู้ตัว · รายงานเป็น "เลื่อน" |
+| ขอบเขต | — | เฉพาะ `payment_status` pending/failed ที่ไม่ยกเลิก/เสร็จ/ลบ · จ่ายแล้วไม่แตะ · หารอบไม่เจอ = รายงาน ไม่แตะ |
+| ความปลอดภัย | — | dry-run ค่าเริ่มต้น · `--apply` backup `scripts/backups/payment-due-*.json` ก่อน · เขียนแบบมีเงื่อนไข `payment_due_at: null` (รันซ้ำได้) |
+
+DB จริง (dry-run 2026-10-01): **0 รายการ** — ยังไม่ต้อง `--apply` (DEPLOY §⑦) · เทส `backfillPaymentDue.test.ts` 2 เคส
+
+### 7.10 Y8 — state ในหน่วยความจำ → รัน instance เดียว (ตัดสินใจ 2026-10-01)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| ข้อกำหนด | ไม่ได้เขียนไว้ — `pm2 -i max` ได้โดยไม่รู้ผล | [`DEPLOY.md`](DEPLOY.md) §⑤ ห้าม cluster / หลาย instance พร้อมเหตุผล 4 จุด (rate limit · permission cache 30 วิ · delivery-zone cache · โควตา LINE) |
+| ตรวจจับ | ไม่มี | `src/instrumentation.ts` (`register()` ตอนเริ่ม) — pm2 `exec_mode=cluster_mode` / `NODE_APP_INSTANCE` ≠ 0 / `VERCEL` → log warn `runtime.multi_instance` |
+| แก้ปัญหา | — | DEPLOY แก้ปัญหาที่เจอบ่อย: เจอ log นี้ → `pm2 delete` แล้ว start ใหม่แบบ fork |
+
+ไม่ย้ายไป Redis — ร้านขนาดนี้ instance เดียวพอ · ถ้าต้องขยาย แก้ไฟล์ละตัว (ออกแบบไว้แล้ว)
+
+### 7.11 Y9 — สต็อกแยกต่อ variant + สต็อกสินค้า = ผลรวม (ตัดสินใจ 2026-10-01)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| สั่งซื้อ (`deductStockForOrder`) | ตัดแค่ `product_stock_quantity` — `variant_stock` ไม่เคยถูกเช็ค/ตัด | รายการมี `variant_id` → ตัด `variant_stock` แบบ atomic (`$gte`) ด้วย · ตัวเลือกไม่พอ = 409 "สต็อกไม่พอสำหรับ X (M)" แม้สต็อกรวมยังเหลือ · ชดเชยคืนทั้งสินค้า+variant ที่ตัดไปแล้ว |
+| ยกเลิก (`restockForOrder`) | คืนแค่สินค้า | คืน variant ด้วย · variant ถูกลบไปแล้วแต่สินค้ายังมีตัวเลือกอื่น → ถอนส่วนที่คืนเข้าสินค้า (ผลรวมยังตรง) |
+| `checkStockAvailability` | ดูสต็อกสินค้าอย่างเดียว | มี `variant_id` → available = min(สินค้า, variant) |
+| ไม่เลือกตัวเลือก | สั่งได้ (ตัดสต็อกรวม ไม่รู้ไซส์) | สินค้ามีตัวเลือก → 400 "กรุณาเลือกตัวเลือกของสินค้า" ทั้งตะกร้า (`cartService.addItem`) และออเดอร์ (`resolveLines` — batch `distinct` ครั้งเดียว) |
+| ปรับสต็อกที่ตัวสินค้า (`setStock`/`adjustStock`/`increaseStock`) | ได้ | สินค้ามีตัวเลือก → 409 ให้ปรับที่ตัวเลือก |
+| แอดมินแก้ตัวเลือก (`productVariantService`) | `variant_stock` เป็นแค่ตัวเลขเก็บไว้ | สร้างตัวแรก/กู้คืนตัวแรก → สต็อกสินค้า = ผลรวม (`syncStockFromVariants`) · ตัวถัดไป/แก้/ลบ/กู้คืน → `$inc` สต็อกสินค้าตามส่วนต่าง (`applyVariantStockDelta` — ค่าก่อน-หลังจาก `findOneAndUpdate` เดียวกัน) + แจ้งใกล้หมด |
+| ปิดงานผลิต (Y2) สินค้ามีตัวเลือก | จะเพิ่มสต็อกรวม (ผลรวมเพี้ยน) | ข้าม + แจ้งเจ้าของร้าน "ต้องเพิ่มสต็อกที่ตัวเลือกเอง" (`product_stock_added_at` ยัง null) |
+
+DB จริงมีตัวเลือก 0 ตัว — ไม่กระทบข้อมูลเดิม · เทส `variantStock.test.ts` 8 เคส · `persistOrder.test.ts` 2 เคสเดิมใส่ `variant_stock` ให้ fixture
+(เดิม 0 = ตอนนี้สั่งไม่ได้ตามกติกาใหม่) · **frontend:** ต้องบังคับเลือกตัวเลือก + แสดงสต็อกต่อตัวเลือก (`resolveScan` คืน `variants[].variant_stock` อยู่แล้ว)
+
+### 7.12 Y10 — `audit-money-units` เทียบ backup + marker (`scripts/audit-money-units.ts`)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| แถวที่ `fix-money-units` แก้แล้ว | `updated_at` เก่า (fix ไม่แตะ) → BAHT_LIKELY ซ้ำ → รายงานชวน ×100 อีก (114 แถว false positive) | ค่าตรง `new` ใน `scripts/backups/money-fix-*.json` / `product-price-fix-*.json` → **SATANG_FIXED** (ไม่เสนอ ×100) |
+| ถูกเขียนกลับเป็นบาท (แบบ §16) | ปนกับข้างบน แยกไม่ออก | ค่าตรง `old` ใน backup → BAHT_LIKELY + note "กลับเป็นค่าก่อนแก้" |
+| ถูกแก้หลัง fix | — | ไม่ตรงทั้ง old/new → REVIEW + note |
+| แถวที่ fix ตั้งใจไม่แตะ | BAHT_LIKELY | มี marker `money_fix_units_applied` + `updated_at` < เวลา fix + ไม่อยู่ใน backup → REVIEW + note · พิมพ์คำเตือน marker ที่หัวรายงาน |
+| โครงสร้าง | `main()` ผูก argv | export `runAudit()` / `loadFixedValues()` (เทสได้) · CLI เหมือนเดิม |
+
+เทส `auditMoneyUnits.test.ts` 3 เคส
+
+### 7.13 Y11 — ตรวจข้อมูลผิดปกติรายวัน + แจ้งร้าน (ตัดสินใจ 2026-10-01)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| รู้ว่ามีการแก้ DB นอกแอป | รู้ตอนลูกค้า/ผู้ใช้เห็นราคาเพี้ยน (§16 ผ่านไป ~1 วัน) | `src/services/dataIntegrityService.ts` ตรวจทุกเช้า (cron 07:30 — DEPLOY §⑧) → แจ้งเตือน `system`/warning + LINE เจ้าของร้าน (10 รายการแรก) |
+| สิ่งที่ตรวจ (อ่านอย่างเดียว) | — | `legacy_fields` (product_type / product_types / delete_at) · `is_preorder_missing` · `price_not_integer` (สินค้า/ตัวเลือก/ตัวเลือกเสริม) · `price_too_low` (< 1,000 สตางค์) · `sale_not_below_price` · `code_prefix_mismatch` · `stock_invalid` · `variant_stock_sum` (Y9) |
+| เรียกใช้ | — | `npm run check:data-integrity` (`--no-notify` = พิมพ์อย่างเดียว · exit 2 เมื่อพบ) · `GET/POST /api/cron/data-integrity` (Bearer `CRON_SECRET`, `?notify=false`) |
+| สิทธิ์ DB | user เดียวใช้ทั้งแอปและ Compass | DEPLOY §สำรองข้อมูล → ผู้ใช้ DB: `meowmee-app` readWrite (แอปเท่านั้น) · `meowmee-readonly` read (เครื่องมือ) · Atlas Project Read Only — **ผู้ใช้ต้องตั้งเองที่ Atlas** |
+
+หมายเหตุ: `preparation_heating` / `yield_per_batch` ที่ BACKLOG2 §16 เรียกว่า "ฟิลด์เก่า" **ยังอยู่ใน schema ปัจจุบัน** — ไม่นับเป็นสัญญาณ ·
+รันกับ DB จริงครั้งแรกเจอ **R7** ทันที · เทส `dataIntegrity.test.ts` 3 เคส
+
+### 7.14 ผลรวม Y7–Y11
+
+- ไฟล์ใหม่: `scripts/backfill-payment-due.ts` · `scripts/check-data-integrity.ts` · `src/services/dataIntegrityService.ts` · `src/app/api/cron/data-integrity/route.ts` · `src/instrumentation.ts`
+- แก้: `productService` · `productVariantService` · `orderService` · `cartService` · `productionOrderService` · `scripts/audit-money-units.ts` · `package.json` (scripts `backfill:payment-due`, `check:data-integrity`) · `docs/DEPLOY.md`
+- R7: `scripts/fix-baht-prices.ts` + `fixBahtPrices.test.ts` 2 เคส (รวม audit อ่าน backup ได้)
+- เทสใหม่ 18 เคส (variantStock 8 · backfillPaymentDue 2 · auditMoneyUnits 3 · dataIntegrity 3 · fixBahtPrices 2) · รวม **496 ผ่าน** (67 ไฟล์) · typecheck 0 · lint 0 error · `next build` ผ่าน
+- ทดสอบจริง: `next start` + `NODE_APP_INSTANCE=1` → log `runtime.multi_instance` · `check:data-integrity` / `backfill:payment-due` บน DB จริงแบบอ่านอย่างเดียว (ไม่แจ้ง ไม่เขียน)
+- merge: `package.json` scripts ชนกับ #54 เพิ่มอีกจุด (เก็บทั้งสองฝั่ง เหมือน #55)
