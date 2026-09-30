@@ -10,7 +10,7 @@
 
 | ระดับ | จำนวน | สรุป |
 |---|---|---|
-| 🔴 ต้องทำก่อนใช้งานจริง | 5 (โค้ด R5 ✅ แก้แล้ว · เหลืองาน deploy R1–R4) | ส่วนใหญ่เป็น **งานตอน deploy** (migration, cron, env, ลำดับ merge) + รายงานแดชบอร์ดไม่นับรายได้พรีออเดอร์ |
+| 🔴 ต้องทำก่อนใช้งานจริง | 6 (โค้ด R5 ✅ แก้แล้ว · เหลืองาน deploy R1–R4 + R6) | ส่วนใหญ่เป็น **งานตอน deploy** (migration, cron, env, ลำดับ merge) + รายงานแดชบอร์ดไม่นับรายได้พรีออเดอร์ |
 | 🟡 ควรแก้ | 11 (✅ Y1–Y6 แก้แล้ว · เหลือ Y7–Y11) | ใบผลิตไม่ลดเมื่อยกเลิกพรีออเดอร์ · ผลิตแล้วไม่เพิ่มสต็อกสินค้า · สลิปเปิดสาธารณะ · deprecation · dependency |
 | 🟢 เล็กน้อย / ต่อยอด | 15 | race ที่เกิดยาก · index · ฟีเจอร์ต่อยอด |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | สิทธิ์ทุก route · CI ทุก PR · cron auth · upload validation · IDOR ฝั่ง shop (§5) |
@@ -71,6 +71,15 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 - **ผลกระทบ:** ร้านขายซาวโดว์ผ่านพรีออเดอร์เป็นหลัก → รายได้/กำไรในหน้าแรกต่ำกว่าจริง ตัดสินใจผิดได้
 - **วิธีแก้:** รวม `preorders` (paid) เข้า revenue/orders · `preorderitems` (ของ preorder ที่ paid) เข้า COGS + top products ·
   salesByDay รวมทั้งสองแหล่ง · แยกยอดได้ด้วย field `source` ถ้าหน้าจอต้องการ · เพิ่มเทสเทียบผลรวมกับ `revenueByChannel`
+
+### R6. รูปที่อัปโหลดหลัง deploy เปิดไม่ได้ (404) ภายใต้ `next start` — พบ 2026-10-01
+
+- **พบ (ทดสอบจริง):** `next build` → `next start` → เขียนไฟล์ใหม่ลง `public/uploads/banners/` → `GET /uploads/banners/<ไฟล์>` = **404**
+  (favicon ที่มีตอน build = 200) · `next start` เสิร์ฟเฉพาะไฟล์ใน `public/` ที่มีอยู่ตอน build · ใน `npm run dev` ใช้ได้ จึงไม่เคยเห็น
+- **ผลกระทบ:** บน production (localDisk) รูปสินค้า / แบนเนอร์ / ใบเสร็จที่อัปโหลดหลัง deploy **เปิดไม่ได้ทั้งหมด** จนกว่าจะ build ใหม่ ·
+  รวมแบนเนอร์ที่ `migrate:upload-files` เขียนเป็นไฟล์ด้วย · สลิปไม่โดน (ไฟล์ส่วนตัวอ่านผ่าน route — PR #54)
+- **แก้ (ตอน deploy — ไม่ต้องแก้โค้ด):** ให้ nginx เสิร์ฟ `/uploads/` เองจากดิสก์ (`location /uploads/ { alias …/public/uploads/; }`) —
+  config เต็มใน [`DEPLOY.md`](DEPLOY.md) §6 · ทางเลือกในโค้ด (ถ้าไม่มี nginx): route `GET /uploads/[...path]` อ่านไฟล์จากดิสก์เอง หรือใช้ `UPLOAD_DRIVER=s3`
 
 ---
 
