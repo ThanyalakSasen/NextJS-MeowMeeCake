@@ -3,6 +3,7 @@
  *
  * โครง path:
  *   /api/auth/*     , /api/health , /api/catalog/*  → สาธารณะ (ไม่ต้องล็อกอิน)
+ *   /api/cron/*                                     → ไม่ใช้ session — route ตรวจ CRON_SECRET เอง
  *   /api/shop/*                                     → ต้องล็อกอิน (ลูกค้า/พนักงานก็ได้)
  *   /api/admin/*                                    → ต้องล็อกอิน + role_type ∈ {owner, staff}
  *
@@ -23,7 +24,8 @@ import { isCsrfSafe } from "@/lib/csrf";
 import { corsHeaders, isAllowedOrigin } from "@/lib/cors";
 import { SESSION_COOKIE, USER_HEADER, clearSession, type SessionUser } from "@/lib/session";
 
-const PUBLIC_PREFIXES = ["/api/auth/", "/api/health", "/api/catalog/"];
+// /api/cron/* ไม่ใช้ session — route ตรวจ CRON_SECRET เอง (src/lib/cronAuth.ts)
+const PUBLIC_PREFIXES = ["/api/auth/", "/api/health", "/api/catalog/", "/api/cron/"];
 
 function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));

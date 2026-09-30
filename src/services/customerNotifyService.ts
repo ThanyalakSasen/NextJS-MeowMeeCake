@@ -68,6 +68,25 @@ export const customerMessages = {
     const why = status === "cancelled" && reason ? `\nเหตุผล: ${reason}` : "";
     return `${header(kind, docNo)}\nสถานะ: ${text}${why}`;
   },
+  /** เตือนก่อนวันรับพรีออเดอร์ (preorderReminderService) — ยังไม่จ่ายเงินให้เตือนด้วย */
+  pickupReminder(
+    preorderNo: string,
+    pickupDate: Date,
+    opts: { orderType?: string | null; unpaid?: boolean } = {}
+  ): string {
+    const day = pickupDate.toLocaleDateString("th-TH", {
+      timeZone: "Asia/Bangkok",
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+    const what =
+      opts.orderType === "delivery"
+        ? `ร้านจะเริ่มจัดส่งพรีออเดอร์ของคุณ${day}`
+        : `ถึงวันรับพรีออเดอร์แล้ว — มารับได้ที่ร้าน${day}`;
+    const pay = opts.unpaid ? "\n⚠️ ยังไม่ได้ชำระเงิน กรุณาชำระก่อนวันรับ" : "";
+    return `${header("preorder", preorderNo)}\n⏰ ${what}${pay}`;
+  },
   paymentStatus(kind: CustomerDocKind, docNo: string, status: string): string | null {
     const text = PAYMENT_STATUS_TEXT[status];
     return text ? `${header(kind, docNo)}\n${text}` : null;

@@ -41,6 +41,7 @@
 | สถานะเปลี่ยน — **เฉพาะ** `ready` (รับเองที่ร้าน) และ `cancelled` + เหตุผล · ไม่แจ้ง confirmed / preparing / completed และ ready ของออเดอร์จัดส่ง (ประหยัดโควตา — §9.6) | ✅ | ✅ | `updateOrderStatus` / `updatePreorderStatus` |
 | ชำระเงิน (paid / failed / refunded) | ✅ | ✅ | `lib/orderLifecycle.setEntityPaymentStatus` |
 | จัดส่ง (shipping + เลขพัสดุ / delivered / failed) | ✅ | ✅ | `lib/orderLifecycle.applyEntityDeliveryUpdate` |
+| ⏰ เตือนก่อนวันรับ (รับเอง: "มารับได้ที่ร้าน…" / จัดส่ง: "จะเริ่มจัดส่ง…" · ยังไม่จ่ายเตือนชำระด้วย) — วันละครั้งจากตัวตั้งเวลา (§9.7) | — | ✅ | `preorderReminderService.sendPickupReminders` |
 
 จัดส่ง: แจ้งเฉพาะตอน `delivery_status` เปลี่ยนจริง — แก้แค่ `tracking_no`/note ไม่แจ้งซ้ำ
 
@@ -57,6 +58,10 @@ LINE_NOTIFY_POS_ORDERS=
 # จำนวนข้อความที่กันไว้ให้เจ้าของร้านต่อเดือน — โควตาเหลือเท่านี้แล้วหยุดส่งหาลูกค้า (ไม่ตั้ง = 30)
 LINE_OWNER_QUOTA_RESERVE=
 
+# งานตั้งเวลา — เตือนก่อนวันรับพรีออเดอร์ (§9.7)
+CRON_SECRET=
+PREORDER_REMINDER_DAYS_BEFORE=
+
 # LINE Login channel — ลูกค้าผูกบัญชี LINE
 LINE_LOGIN_CHANNEL_ID=
 LINE_LOGIN_CHANNEL_SECRET=
@@ -70,6 +75,8 @@ LINE_LINK_RETURN_URL=http://localhost:3001/profile
 | `LINE_TARGET_ID` | userId (ขึ้นต้น `U`) ของเจ้าของร้าน หรือ groupId (ขึ้นต้น `C`) — ต้องเป็นเพื่อน/อยู่ในกลุ่มกับ OA |
 | `LINE_NOTIFY_POS_ORDERS` | ไม่บังคับ — `true` = ออเดอร์ POS ส่ง LINE หาเจ้าของร้านด้วย · ไม่ตั้ง = บันทึกในหน้าแจ้งเตือนเว็บอย่างเดียว (§9.5) |
 | `LINE_OWNER_QUOTA_RESERVE` | ไม่บังคับ — จำนวนเต็ม ≥ 0 (ค่าเริ่มต้น 30) · โควตาเดือนนี้เหลือ ≤ ค่านี้ → หยุดส่งหาลูกค้า เก็บไว้ให้แจ้งเตือนร้าน (§9.6) |
+| `CRON_SECRET` | ต้องตั้งถ้าจะเรียก `/api/cron/preorder-reminders` — ตัวตั้งเวลาส่ง `Authorization: Bearer <ค่านี้>` · ไม่ตั้ง = ปิด endpoint (สคริปต์ `npm run remind:preorders` ไม่ต้องใช้) (§9.7) |
+| `PREORDER_REMINDER_DAYS_BEFORE` | ไม่บังคับ — เตือนก่อนวันรับกี่วัน (ค่าเริ่มต้น 1 · 0 = วันรับ) (§9.7) |
 | `LINE_LOGIN_CHANNEL_ID` | **LINE Login channel** → แท็บ Basic settings → Channel ID |
 | `LINE_LOGIN_CHANNEL_SECRET` | **LINE Login channel** → แท็บ Basic settings → Channel secret |
 | `LINE_LOGIN_CALLBACK_URL` | URL ของ backend — ต้องลงทะเบียนใน LINE Login channel ให้ตรงทุกตัวอักษร (ข้อ 4) |
@@ -186,7 +193,7 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
 2. ~~**สินค้าใกล้หมดแจ้งเฉพาะตอนขาย**~~ — ✅ แก้แล้ว 2026-09-30 (§9)
 3. ~~**เกณฑ์สินค้าใกล้หมดตายตัว 5 ชิ้นทุกสินค้า**~~ — ✅ แก้แล้ว 2026-09-30 (§9.5)
 4. ~~**ออเดอร์ POS แจ้งเจ้าของร้านทุกออเดอร์**~~ — ✅ แก้แล้ว 2026-09-30 (§9.5)
-5. **เตือนลูกค้าก่อนวันรับพรีออเดอร์** — ต้องมี scheduled job (cron) ซึ่งโปรเจกต์ยังไม่มี
+5. ~~**เตือนลูกค้าก่อนวันรับพรีออเดอร์**~~ — ✅ ทำแล้ว 2026-09-30 (§9.7) · **ยังต้องตั้งตัวตั้งเวลาตอน deploy** (§9.7 "ตั้งค่าให้รันทุกวัน")
 6. **ปุ่ม "เชื่อม LINE" ฝั่ง frontend** — อยู่ใน repo frontend (แยกจาก repo นี้) ใช้ API ข้อ 5
 7. **โควตาข้อความ LINE OA ฟรี 300 ข้อความ/เดือน** — ✅ รับมือแล้ว 2026-09-30 (§9.6: ลดข้อความลูกค้า + กันโควตาให้ร้าน + แจ้งในเว็บ) · ถ้าร้านโตจนโควตาไม่พอ ต้องอัปเกรดแพ็กเกจใน LINE Official Account Manager (มีค่าใช้จ่าย — เจ้าของร้านตัดสินใจ)
 
@@ -204,6 +211,7 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
 | 9.4 | ทุก commit | เอกสาร | `docs/LINE.md`, `docs/env.md`, `.env.example` |
 | 9.5 | commit ถัดมา (PR #53) | แจ้งเจ้าของร้าน: เกณฑ์สินค้าใกล้หมดรายสินค้า + ออเดอร์ POS ไม่ส่ง LINE | `lib/lowStock` / `productService` / `dashboardService` / `notificationService` / `orderService` |
 | 9.6 | commit ถัดมา (PR #53) | รับมือโควตา LINE OA 300 ข้อความ/เดือน: ลดข้อความลูกค้า + กันโควตาให้ร้าน + แจ้งในเว็บ | `lib/lineQuota` / `customerNotifyService` / `notificationService` |
+| 9.7 | commit ถัดมา (PR #53) | เตือนลูกค้าก่อนวันรับพรีออเดอร์ (cron endpoint + สคริปต์) | `preorderReminderService` / `/api/cron/preorder-reminders` / `scripts/send-preorder-reminders.ts` |
 
 ---
 
@@ -493,3 +501,80 @@ else if (isQuotaExceededError(result.error)) await alertQuotaExhausted();
   ได้ข้อความเดียว (ready) · + เคสยกเลิกพร้อมเหตุผล · + เคส `orderStatus` คืน `null` ตามตาราง ข้อ ก
 
 ผลรวม: unit 206 ✅ · integration 222 ✅ · typecheck ✅ · `next build` ✅ · lint 0 error (warning 5 จุดเดิม)
+
+---
+
+### 9.7 เตือนลูกค้าก่อนวันรับพรีออเดอร์ (2026-09-30)
+
+**ภาพรวม ก่อน → หลัง**
+
+| | ก่อน | หลัง |
+|---|---|---|
+| ลูกค้ารู้ว่าพรุ่งนี้ต้องมารับ | ต้องจำเอง / เข้าเว็บดู — พรีออเดอร์สั่งล่วงหน้าหลายวัน ลืมง่าย | ได้ LINE วันก่อนรับ: รับเอง "ถึงวันรับพรีออเดอร์แล้ว — มารับได้ที่ร้านวันศุกร์ที่ 2 ตุลาคม" · จัดส่ง "ร้านจะเริ่มจัดส่งพรีออเดอร์ของคุณ…" · ยังไม่จ่าย + "⚠️ ยังไม่ได้ชำระเงิน กรุณาชำระก่อนวันรับ" |
+| ร้านรู้ว่าพรุ่งนี้มีกี่รายการ | ต้องไล่ดูเอง | หน้าแจ้งเตือนเว็บ "พรีออเดอร์ถึงวันรับ 2026-10-02: N รายการ" + เตือนถึงกี่ราย ส่งไม่ถึงกี่ราย + เลขพรีออเดอร์ (ไม่กินโควตา LINE) |
+| ระบบตั้งเวลา | ❌ ไม่มีในโปรเจกต์ | endpoint `/api/cron/preorder-reminders` (มี secret) + สคริปต์ `npm run remind:preorders` — ให้ตัวตั้งเวลาภายนอกเรียกวันละครั้ง |
+
+#### เลือกใครบ้าง
+
+- รอบ (`preorderRound.pickup_date`) ตรงกับ **วันนี้ + `PREORDER_REMINDER_DAYS_BEFORE` วัน ตามเวลาไทย** (ค่าเริ่มต้น 1)
+  — เทียบเป็นช่วงวันไทย `[00:00, 24:00) +07:00` เช่น รอบรับ 00:30 น. วันที่ 2 นับเป็นวันที่ 2 · 23:30 น. วันที่ 1 นับเป็นวันที่ 1
+- ข้าม: รอบ `cancelled` · พรีออเดอร์ `cancelled` / `completed` / ถูกลบ · เคยเตือนแล้ว (`pickup_reminded_at` ไม่ null)
+- ส่งผ่าน `customerNotifyService.notifyCustomer` → **ผ่านกลไกโควตา §9.6 ด้วย** (เหลือ ≤ reserve ไม่ส่ง) · ใช้ 1 ข้อความต่อพรีออเดอร์
+
+#### กันส่งซ้ำ
+
+- ฟิลด์ใหม่ `preorders.pickup_reminded_at` · ก่อนส่งแต่ละราย **จองแบบ atomic** `findOneAndUpdate({ _id, pickup_reminded_at: null }, { $set: now })`
+  — จองไม่ได้ = อีกตัวส่งไปแล้ว → ข้าม
+- ผล: รันซ้ำในวันเดียวกัน / ตัวตั้งเวลายิงซ้ำ / รัน 2 ตัวพร้อมกัน → ลูกค้าได้ข้อความเดียว · สรุปของร้านก็ไม่ซ้ำ (รอบหลังไม่มีรายการ → ไม่สร้าง)
+- ส่งไม่ถึง (ไม่ได้ผูก LINE / โควตาใกล้หมด / LINE error) → **ยังทำเครื่องหมาย ไม่ retry** เพราะวันรุ่งขึ้นคือวันรับแล้ว
+  (นับเป็น `skipped` + อยู่ในสรุปของร้าน ให้ร้านโทรตามเองถ้าจำเป็น)
+- ส่ง**ทีละราย** (ไม่ `Promise.all`) ให้ตัวนับโควตาใน `lib/lineQuota` หยุดตรง reserve ได้แม่น
+
+#### ตั้งค่าให้รันทุกวัน (ต้องทำตอน deploy — ยังไม่ได้ตั้ง)
+
+แนะนำเวลา **18:00 น. เวลาไทย** (ลูกค้าเห็นตอนเย็นก่อนวันรับ) · เลือกทางใดทางหนึ่ง:
+
+| ทาง | ตั้งค่า |
+|---|---|
+| **Vercel Cron** (deploy บน Vercel) | ตั้ง env `CRON_SECRET` แล้วเพิ่ม `vercel.json`: `{ "crons": [{ "path": "/api/cron/preorder-reminders", "schedule": "0 11 * * *" }] }` (เวลา UTC = 18:00 ไทย) — Vercel ส่ง `Authorization: Bearer <CRON_SECRET>` ให้เอง |
+| **บริการตั้งเวลาภายนอก** (cron-job.org, GitHub Actions ฯลฯ) | ยิง `GET https://<โดเมน>/api/cron/preorder-reminders` พร้อม header `Authorization: Bearer <CRON_SECRET>` วันละครั้ง |
+| **เซิร์ฟเวอร์ของเราเอง** (Linux crontab) | `0 18 * * * cd /path/to/app && npm run remind:preorders` (เวลาเครื่องเป็นเวลาไทย) — ไม่ต้องใช้ `CRON_SECRET` |
+| **Windows Task Scheduler** | Action: `npm` · Arguments: `run remind:preorders` · Start in: โฟลเดอร์โปรเจกต์ · Trigger: ทุกวัน 18:00 |
+
+ตรวจก่อนตั้งจริง: `npm run remind:preorders -- --dry-run` หรือ `GET /api/cron/preorder-reminders?dry_run=true` →
+ได้รายชื่อที่จะเตือนโดยไม่ส่ง ไม่ทำเครื่องหมาย (ลองกับ DB จริงแล้ว 2026-09-30: ทำงานได้ ยังไม่มีพรีออเดอร์ที่รับ 2026-10-01)
+
+#### Response / ผลลัพธ์
+
+```json
+{ "pickup_date": "2026-10-02", "dry_run": false, "due": 3, "sent": 2, "skipped": 1, "preorder_nos": ["PRE-…", "PRE-…", "PRE-…"] }
+```
+
+#### ความปลอดภัยของ endpoint (`src/lib/cronAuth.ts`)
+
+- ต้องมี `Authorization: Bearer <CRON_SECRET>` · เทียบแบบ constant-time (sha256 แล้ว `timingSafeEqual`)
+- **ไม่ตั้ง `CRON_SECRET` = ปิด endpoint** (401 เสมอ) — กันเปิดทิ้งไว้ให้ใครก็ยิงได้
+- `src/middleware.ts`: เพิ่ม `/api/cron/` ใน `PUBLIC_PREFIXES` — **ก่อน:** path นี้ไม่ต้องล็อกอินอยู่แล้ว แต่ถ้ามี cookie
+  session เสียติดมาจะโดน 401 จาก middleware · **หลัง:** ไม่ยุ่งกับ session เลย สิทธิ์ตรวจจาก `CRON_SECRET` ใน route อย่างเดียว
+
+#### รายไฟล์
+
+| ไฟล์ | ก่อน | หลัง |
+|---|---|---|
+| `src/services/preorderReminderService.ts` (ใหม่) | — | `sendPickupReminders({ now?, daysBefore?, dryRun? })` · `reminderDaysBefore()` |
+| `src/services/customerNotifyService.ts` | — | + `customerMessages.pickupReminder(preorderNo, pickupDate, { orderType, unpaid })` (วันที่ภาษาไทย เวลาไทย) |
+| `src/models/preorderModel.ts` | — | + `pickup_reminded_at: Date, default null` |
+| `src/lib/cronAuth.ts` (ใหม่) | — | `assertCronAuthorized(req)` |
+| `src/app/api/cron/preorder-reminders/route.ts` (ใหม่) | — | `GET` / `POST` · `?dry_run=true` |
+| `scripts/send-preorder-reminders.ts` (ใหม่) + `package.json` | — | `npm run remind:preorders [-- --dry-run]` |
+| `src/middleware.ts` | `/api/cron/` ไม่อยู่ใน public | อยู่ใน public (ดูหัวข้อความปลอดภัย) |
+| `.env.example`, `docs/env.md`, §3 | — | + `CRON_SECRET`, `PREORDER_REMINDER_DAYS_BEFORE` |
+
+#### เทส
+
+- `tests/integration/preorderReminder.test.ts` ใหม่ 6 เคส — เลือกถูกตามช่วงวันไทย (รวมขอบ 00:30 / 23:30) + ข้ามยกเลิก/เสร็จแล้ว/
+  รอบยกเลิก · ข้อความรับเอง+ยังไม่จ่าย / จัดส่ง+จ่ายแล้ว · ทำเครื่องหมายรวมตัวที่ส่งไม่ถึง · สรุปร้านไม่ push LINE ·
+  รันซ้ำไม่ส่งซ้ำ · **รันพร้อมกัน 2 ตัวได้ข้อความเดียว** · dry run · `daysBefore = 0` · env ค่าผิด
+- `tests/lib/cronAuth.test.ts` ใหม่ 3 เคส — ไม่ตั้ง secret = ปิด · ถูก = ผ่าน · ไม่มี/ผิด/ผิดรูปแบบ = 401
+
+ผลรวม: unit 209 ✅ · integration 228 ✅ · typecheck ✅ · `next build` ✅ · lint 0 error (warning 5 จุดเดิม)

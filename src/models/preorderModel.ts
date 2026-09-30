@@ -38,6 +38,8 @@ const preorderSchema = new mongoose.Schema(
     cancelled_by: { type: mongoose.Schema.Types.ObjectId, ref: "Users", default: null },
     cancelled_reason: { type: String, default: null },
     cancelled_at: { type: Date, default: null },
+    // เวลาที่ส่งเตือนลูกค้าก่อนวันรับแล้ว (preorderReminderService) — ใช้กันส่งซ้ำ · null = ยังไม่เคยเตือน
+    pickup_reminded_at: { type: Date, default: null },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }
