@@ -424,6 +424,9 @@ async function persistOrder(
   }
 
   // แจ้งเตือนออเดอร์ใหม่ (DB + LINE) — best-effort ไม่ทำให้สร้างออเดอร์ล้มเหลวถ้าแจ้งเตือนพัง
+  // ออเดอร์หน้าร้าน (POS-) บันทึกในหน้าแจ้งเตือนเสมอ แต่ push LINE เฉพาะเมื่อตั้ง LINE_NOTIFY_POS_ORDERS=true
+  // (พนักงานคีย์เองอยู่หน้าร้าน ร้านขายเยอะ LINE เจ้าของจะเด้งทุกบิล — docs/LINE.md §9.5)
+  const isPos = orderNoPrefix(opts.channel) === "POS";
   notificationService
     .notify({
       title: `ออเดอร์ใหม่ ${order.order_no}`,
@@ -431,11 +434,12 @@ async function persistOrder(
       module: "order",
       type: "info",
       link: `/owner/orders/manageOrders?id=${order._id}`,
+      line: !isPos || process.env.LINE_NOTIFY_POS_ORDERS === "true",
     })
     .catch((err) => log.error("order.notify_failed", { order_id: String(order._id), err }));
 
   // แจ้งลูกค้าทาง LINE (ถ้าผูกบัญชีไว้) — เฉพาะออเดอร์จากเว็บ หน้าร้าน (POS) ลูกค้ายืนอยู่ตรงนั้นแล้ว
-  if (orderNoPrefix(opts.channel) === "ORD") {
+  if (!isPos) {
     notifyCustomerLater(userId, customerMessages.created("order", order.order_no, total_amount));
   }
 
@@ -684,7 +688,10 @@ export async function updateOrderStatus(
   await order.save();
   notifyCustomerLater(
     order.user_id,
-    customerMessages.orderStatus("order", order.order_no, next, order.cancelled_reason)
+    customerMessages.orderStatus("order", order.order_no, next, {
+      reason: order.cancelled_reason,
+      orderType: order.order_type,
+    })
   );
   return presentOrderWithItems(order, cancelledItems);
 }

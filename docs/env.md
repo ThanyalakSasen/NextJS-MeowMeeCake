@@ -66,6 +66,8 @@ GOOGLE_CLIENT_ID=556882585770-xxxxxxxx.apps.googleusercontent.com
 | `EMAIL_SERVICE`, `EMAIL_USER`, `EMAIL_PASS` | ส่งอีเมลยืนยัน / reset password (ยังไม่ทำ) |
 | `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_TARGET_ID` | แจ้งเตือนผ่าน LINE (เจ้าของร้าน + ลูกค้า) — ดู [`LINE.md`](LINE.md) |
 | `LINE_LOGIN_CHANNEL_ID`, `LINE_LOGIN_CHANNEL_SECRET`, `LINE_LOGIN_CALLBACK_URL`, `LINE_LINK_RETURN_URL` | ลูกค้าผูกบัญชี LINE (LINE Login) — ดู [`LINE.md`](LINE.md) |
+| `LINE_NOTIFY_POS_ORDERS` | `true` = ออเดอร์หน้าร้าน (POS) ส่ง LINE หาเจ้าของร้านด้วย · ไม่ตั้ง = บันทึกในหน้าแจ้งเตือนเว็บอย่างเดียว — ดู [`LINE.md`](LINE.md) §9.5 |
+| `LINE_OWNER_QUOTA_RESERVE` | จำนวนข้อความ LINE ที่กันไว้ให้เจ้าของร้านต่อเดือน (ค่าเริ่มต้น 30) — โควตาเหลือเท่านี้แล้วหยุดส่งหาลูกค้า — ดู [`LINE.md`](LINE.md) §9.6 |
 
 ---
 

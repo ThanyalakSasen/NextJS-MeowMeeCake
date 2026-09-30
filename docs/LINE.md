@@ -25,10 +25,10 @@
 
 | เหตุการณ์ | เงื่อนไข | จุดเรียก |
 |---|---|---|
-| ออเดอร์ใหม่ | ทุกออเดอร์ (เว็บ `ORD-` และหน้าร้าน `POS-`) | `orderService.persistOrder` |
+| ออเดอร์ใหม่ | ออเดอร์เว็บ `ORD-` → หน้าแจ้งเตือนเว็บ + LINE · ออเดอร์หน้าร้าน `POS-` → หน้าแจ้งเตือนเว็บ**อย่างเดียว** (ตั้ง `LINE_NOTIFY_POS_ORDERS=true` ถ้าอยากได้ LINE ด้วย — §9.5) | `orderService.persistOrder` |
 | พรีออเดอร์ใหม่ | ทุกพรีออเดอร์ — ข้อความมีชื่อรอบ + ยอดรวม (เพิ่ม 2026-09-30, §9) | `preorderService.createPreorder` |
 | สลิปรอตรวจ | ลูกค้าแนบ/แก้สลิป | `paymentService.submitSlip` |
-| สินค้าใกล้หมด | สต็อกเพิ่งข้ามจาก > 5 ลงมา ≤ 5 (`LOW_STOCK_THRESHOLD`) — ทั้งตอนขาย **และ** ปรับสต็อกเอง (นับสต็อก/ตัดของเสีย, เพิ่ม 2026-09-30, §9) | `productService.notifyIfLowStockCrossed()` ← `deductStockForOrder` / `setStock` / `adjustStock` (+ `increaseStock`/`decreaseStock`) |
+| สินค้าใกล้หมด | สต็อกเพิ่งข้ามลงมา ≤ **เกณฑ์ของสินค้านั้น** (`products.low_stock_threshold` · ไม่ตั้ง = 5 — §9.5) — ทั้งตอนขาย **และ** ปรับสต็อกเอง (นับสต็อก/ตัดของเสีย — §9.2) | `productService.notifyIfLowStockCrossed()` ← `deductStockForOrder` / `setStock` / `adjustStock` (+ `increaseStock`/`decreaseStock`) |
 | วัตถุดิบใกล้หมด | สต็อกเพิ่งข้ามลงมา ≤ `reorder_point` ของวัตถุดิบนั้น | `ingredientTransactionService.createTransaction` |
 
 แจ้งเฉพาะตอน "เพิ่งข้ามเกณฑ์" — ไม่แจ้งซ้ำทุกครั้งที่ของยังเหลือน้อยอยู่
@@ -38,7 +38,7 @@
 | เหตุการณ์ | ออเดอร์ | พรีออเดอร์ | จุดเรียก |
 |---|---|---|---|
 | ได้รับออเดอร์ + ยอดรวม | ✅ (เฉพาะเว็บ ไม่ส่งสำหรับ POS) | ✅ | `orderService.persistOrder` / `preorderService.createPreorder` |
-| สถานะเปลี่ยน (confirmed / preparing / ready / completed / cancelled + เหตุผล) | ✅ | ✅ | `updateOrderStatus` / `updatePreorderStatus` |
+| สถานะเปลี่ยน — **เฉพาะ** `ready` (รับเองที่ร้าน) และ `cancelled` + เหตุผล · ไม่แจ้ง confirmed / preparing / completed และ ready ของออเดอร์จัดส่ง (ประหยัดโควตา — §9.6) | ✅ | ✅ | `updateOrderStatus` / `updatePreorderStatus` |
 | ชำระเงิน (paid / failed / refunded) | ✅ | ✅ | `lib/orderLifecycle.setEntityPaymentStatus` |
 | จัดส่ง (shipping + เลขพัสดุ / delivered / failed) | ✅ | ✅ | `lib/orderLifecycle.applyEntityDeliveryUpdate` |
 
@@ -52,6 +52,10 @@
 # Messaging API channel (LINE OA) — ใช้ส่งทั้งหาเจ้าของร้านและลูกค้า
 LINE_CHANNEL_ACCESS_TOKEN=
 LINE_TARGET_ID=
+# true = ออเดอร์หน้าร้าน (POS) ส่ง LINE หาเจ้าของร้านด้วย (ไม่ตั้ง = ไม่ส่ง)
+LINE_NOTIFY_POS_ORDERS=
+# จำนวนข้อความที่กันไว้ให้เจ้าของร้านต่อเดือน — โควตาเหลือเท่านี้แล้วหยุดส่งหาลูกค้า (ไม่ตั้ง = 30)
+LINE_OWNER_QUOTA_RESERVE=
 
 # LINE Login channel — ลูกค้าผูกบัญชี LINE
 LINE_LOGIN_CHANNEL_ID=
@@ -64,6 +68,8 @@ LINE_LINK_RETURN_URL=http://localhost:3001/profile
 |---|---|
 | `LINE_CHANNEL_ACCESS_TOKEN` | **Messaging API channel** → แท็บ Messaging API → Channel access token (long-lived) → Issue |
 | `LINE_TARGET_ID` | userId (ขึ้นต้น `U`) ของเจ้าของร้าน หรือ groupId (ขึ้นต้น `C`) — ต้องเป็นเพื่อน/อยู่ในกลุ่มกับ OA |
+| `LINE_NOTIFY_POS_ORDERS` | ไม่บังคับ — `true` = ออเดอร์ POS ส่ง LINE หาเจ้าของร้านด้วย · ไม่ตั้ง = บันทึกในหน้าแจ้งเตือนเว็บอย่างเดียว (§9.5) |
+| `LINE_OWNER_QUOTA_RESERVE` | ไม่บังคับ — จำนวนเต็ม ≥ 0 (ค่าเริ่มต้น 30) · โควตาเดือนนี้เหลือ ≤ ค่านี้ → หยุดส่งหาลูกค้า เก็บไว้ให้แจ้งเตือนร้าน (§9.6) |
 | `LINE_LOGIN_CHANNEL_ID` | **LINE Login channel** → แท็บ Basic settings → Channel ID |
 | `LINE_LOGIN_CHANNEL_SECRET` | **LINE Login channel** → แท็บ Basic settings → Channel secret |
 | `LINE_LOGIN_CALLBACK_URL` | URL ของ backend — ต้องลงทะเบียนใน LINE Login channel ให้ตรงทุกตัวอักษร (ข้อ 4) |
@@ -178,10 +184,11 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
 
 1. ~~**พรีออเดอร์ใหม่ไม่แจ้งเจ้าของร้าน**~~ — ✅ แก้แล้ว 2026-09-30 (§9)
 2. ~~**สินค้าใกล้หมดแจ้งเฉพาะตอนขาย**~~ — ✅ แก้แล้ว 2026-09-30 (§9)
-3. **เกณฑ์สินค้าใกล้หมดตายตัว 5 ชิ้นทุกสินค้า** — ไม่มีฟิลด์เกณฑ์รายสินค้าแบบ `reorder_point` ของวัตถุดิบ
-4. **ออเดอร์ POS แจ้งเจ้าของร้านทุกออเดอร์** — ร้านขายหน้าร้านเยอะอาจ spam
+3. ~~**เกณฑ์สินค้าใกล้หมดตายตัว 5 ชิ้นทุกสินค้า**~~ — ✅ แก้แล้ว 2026-09-30 (§9.5)
+4. ~~**ออเดอร์ POS แจ้งเจ้าของร้านทุกออเดอร์**~~ — ✅ แก้แล้ว 2026-09-30 (§9.5)
 5. **เตือนลูกค้าก่อนวันรับพรีออเดอร์** — ต้องมี scheduled job (cron) ซึ่งโปรเจกต์ยังไม่มี
 6. **ปุ่ม "เชื่อม LINE" ฝั่ง frontend** — อยู่ใน repo frontend (แยกจาก repo นี้) ใช้ API ข้อ 5
+7. **โควตาข้อความ LINE OA ฟรี 300 ข้อความ/เดือน** — ✅ รับมือแล้ว 2026-09-30 (§9.6: ลดข้อความลูกค้า + กันโควตาให้ร้าน + แจ้งในเว็บ) · ถ้าร้านโตจนโควตาไม่พอ ต้องอัปเกรดแพ็กเกจใน LINE Official Account Manager (มีค่าใช้จ่าย — เจ้าของร้านตัดสินใจ)
 
 ---
 
@@ -194,7 +201,9 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
 | 9.1 | commit `8b707bc` | แจ้งเตือนลูกค้าทาง LINE + ผูกบัญชีผ่าน LINE Login | โค้ด + เทส + docs |
 | 9.2 | commit ถัดมา (PR #53) | แจ้งเจ้าของร้าน: พรีออเดอร์ใหม่ + สินค้าใกล้หมดจากการปรับสต็อกเอง | `preorderService` / `productService` |
 | 9.3 | ไม่อยู่ใน git | แก้การตั้งค่า LINE จนใช้งานได้จริง (token 401, ช่องว่างใน env, channel ผิดประเภท, Callback URL) | `.env.local` + LINE Developers Console |
-| 9.4 | ทั้ง 2 commit | เอกสาร | `docs/LINE.md`, `docs/env.md`, `.env.example` |
+| 9.4 | ทุก commit | เอกสาร | `docs/LINE.md`, `docs/env.md`, `.env.example` |
+| 9.5 | commit ถัดมา (PR #53) | แจ้งเจ้าของร้าน: เกณฑ์สินค้าใกล้หมดรายสินค้า + ออเดอร์ POS ไม่ส่ง LINE | `lib/lowStock` / `productService` / `dashboardService` / `notificationService` / `orderService` |
+| 9.6 | commit ถัดมา (PR #53) | รับมือโควตา LINE OA 300 ข้อความ/เดือน: ลดข้อความลูกค้า + กันโควตาให้ร้าน + แจ้งในเว็บ | `lib/lineQuota` / `customerNotifyService` / `notificationService` |
 
 ---
 
@@ -321,3 +330,166 @@ LINE Login channel — OA channel ก็ผ่าน · ต้องดูปร
 | `docs/LINE.md` | ไม่มี | ใหม่ — ภาพรวม, เหตุการณ์, env, ตั้งค่า Console, API frontend, แก้ปัญหา (+ §6.1 แยกประเภท channel), สถานะทดสอบ, ช่องโหว่, บันทึกการแก้ไขนี้ |
 | `docs/env.md` | `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_TARGET_ID` — "ยังไม่ทำ" | ลิงก์มา `LINE.md` + เพิ่มแถว `LINE_LOGIN_*` 4 ตัว |
 | `.env.example` | หัวข้อ LINE "ทำภายหลัง" มี 2 key | อธิบายแต่ละ key + เพิ่ม `LINE_LOGIN_CHANNEL_ID` / `LINE_LOGIN_CHANNEL_SECRET` / `LINE_LOGIN_CALLBACK_URL` / `LINE_LINK_RETURN_URL` พร้อมค่า dev |
+
+---
+
+### 9.5 แจ้งเจ้าของร้าน: เกณฑ์สินค้าใกล้หมดรายสินค้า + ออเดอร์ POS ไม่ส่ง LINE (2026-09-30, §8 ข้อ 3–4)
+
+#### ข้อ 3 — เกณฑ์สินค้าใกล้หมดตั้งได้รายสินค้า
+
+**ภาพรวม ก่อน → หลัง**
+
+| | ก่อน | หลัง |
+|---|---|---|
+| เกณฑ์ | ค่าคงที่ `LOW_STOCK_THRESHOLD = 5` ใน `productService.ts` ใช้ทุกสินค้า — ขนมขายวันละ 50 ชิ้นก็เตือนตอนเหลือ 5 (สายไป) ของฝากขายวันละชิ้นก็เตือนตอน 5 (เร็วไป) | ฟิลด์ใหม่ `products.low_stock_threshold` ตั้งรายสินค้าได้ (เทียบ `reorder_point` ของวัตถุดิบ) · ไม่ตั้ง (`null`) = 5 เหมือนเดิม |
+| ที่ใช้เกณฑ์ | 3 ที่ เขียนเลข 5 แยกกัน: แจ้งเตือน, `GET /api/admin/products/low-stock` (default `?threshold=5`), dashboard (`$lte: 5`) | ทั้ง 3 ที่อ่านจาก `src/lib/lowStock.ts` ที่เดียว — ไม่ drift |
+| ข้อความ LINE | `คงเหลือ 3 ชิ้น` | `คงเหลือ 3 ชิ้น (เกณฑ์แจ้งเตือน 5)` — รู้ว่าเตือนเพราะเกณฑ์เท่าไร |
+
+**รายไฟล์**
+
+| ไฟล์ | ก่อน | หลัง |
+|---|---|---|
+| `src/lib/lowStock.ts` (ใหม่) | — | `DEFAULT_LOW_STOCK_THRESHOLD = 5` · `effectiveLowStockThreshold(product)` (= `low_stock_threshold ?? 5`) · `crossedLowStock(threshold, before, after)` · `LOW_STOCK_EXPR` (MongoDB `$expr`: สต็อก ≤ `$ifNull: ["$low_stock_threshold", 5]`) |
+| `src/models/productModel.ts` | ไม่มีฟิลด์ | + `low_stock_threshold: { type: Number, min: 0, default: null }` |
+| `src/services/productService.ts` — create/update | ไม่รับค่านี้ | รับ `low_stock_threshold` · `assertLowStockThreshold()` บังคับจำนวนเต็ม ≥ 0 หรือ `null` (ผิด → 400) · สินค้า preorder (ไม่มีสต็อก) เก็บเป็น `null` เสมอ · เปลี่ยนประเภทเป็น preorder → ล้างเป็น `null` |
+| `src/services/productService.ts` — `notifyIfLowStockCrossed` | `before > 5 && after <= 5` | `crossedLowStock(effectiveLowStockThreshold(product), before, after)` — ทุกจุดที่เรียก (ขาย/`setStock`/`adjustStock`) ส่ง doc เต็มที่มีฟิลด์นี้อยู่แล้ว ไม่ต้อง query เพิ่ม |
+| `src/services/productService.ts` — `getLowStockProducts` | `(threshold = 5)` → `$lte: threshold` · คืน `{ threshold, count, items }` | `(threshold?)` — **ไม่ส่ง = เกณฑ์รายสินค้า** (`LOW_STOCK_EXPR`) · ส่งตัวเลข = เกณฑ์เดียวทุกตัวแบบเดิม · คืน `{ threshold, per_product, count, items }` + `items[].low_stock_threshold` |
+| `src/app/api/admin/products/low-stock/route.ts` | `parseNumber(threshold) ?? 5` | `parseNumber(threshold)` — ไม่ส่ง `?threshold=` = เกณฑ์รายสินค้า |
+| `src/services/dashboardService.ts` (`overview`) | `product_stock_quantity: { $ne: null, $lte: 5 }` | `product_stock_quantity: { $ne: null }` + `LOW_STOCK_EXPR` |
+
+```ts
+// ก่อน — productService.ts
+const LOW_STOCK_THRESHOLD = 5;
+if (!(before > LOW_STOCK_THRESHOLD && after <= LOW_STOCK_THRESHOLD)) return;
+
+// หลัง — เกณฑ์ของสินค้าชิ้นนั้น (src/lib/lowStock.ts)
+const threshold = effectiveLowStockThreshold(product); // low_stock_threshold ?? 5
+if (!crossedLowStock(threshold, before, after)) return;
+```
+
+**API ที่เปลี่ยน (สำหรับ frontend)**
+- `POST /api/admin/products`, `PATCH /api/admin/products/[id]` — รับ `low_stock_threshold` (จำนวนเต็ม ≥ 0 หรือ `null`)
+  → ควรเพิ่มช่อง "แจ้งเตือนเมื่อเหลือ ≤ … ชิ้น (เว้นว่าง = 5)" ในฟอร์มสินค้าที่มีสต็อก
+- `GET /api/admin/products/low-stock` — ไม่ส่ง `?threshold=` แล้วผลเปลี่ยนจาก "≤ 5 ทุกตัว" เป็น "≤ เกณฑ์ของแต่ละตัว"
+  (สินค้าที่ไม่ได้ตั้งยังเป็น 5 → ผลเหมือนเดิมจนกว่าจะตั้งค่า) · response เพิ่ม `per_product` + `items[].low_stock_threshold`
+- สินค้าเดิมใน DB ไม่ต้อง migrate — ไม่มีฟิลด์ = `null` = 5
+
+#### ข้อ 4 — ออเดอร์หน้าร้าน (POS) ไม่ส่ง LINE หาเจ้าของร้าน
+
+| | ก่อน | หลัง |
+|---|---|---|
+| ออเดอร์เว็บ `ORD-` | หน้าแจ้งเตือนเว็บ + LINE | เหมือนเดิม |
+| ออเดอร์หน้าร้าน `POS-` | หน้าแจ้งเตือนเว็บ + LINE **ทุกบิล** — พนักงานคีย์เองอยู่หน้าร้าน ร้านขายเยอะ LINE เจ้าของเด้งไม่หยุด จนข้อความสำคัญ (ออเดอร์เว็บ/สต็อกใกล้หมด) จมหาย | หน้าแจ้งเตือนเว็บ**อย่างเดียว** (ยังดูย้อนหลังได้) · ตั้ง `LINE_NOTIFY_POS_ORDERS=true` ถ้าอยากได้ LINE เหมือนเดิม |
+| สินค้าใกล้หมดจากการขาย POS | แจ้ง LINE | **ยังแจ้ง LINE เหมือนเดิม** — ปิดแค่ข้อความ "ออเดอร์ใหม่" ของ POS |
+
+| ไฟล์ | ก่อน | หลัง |
+|---|---|---|
+| `src/services/notificationService.ts` | `notify()` บันทึก DB แล้ว push LINE เสมอ | `NotifyInput.line?: boolean` — `false` = บันทึก DB แล้วจบ (`line_sent` คง `false`, ไม่มี `line_error`) · ไม่ส่ง = push เหมือนเดิม (ผู้เรียกเดิมไม่ต้องแก้) |
+| `src/services/orderService.ts` (`persistOrder`) | `notify({ ... })` ทุกช่องทาง | `const isPos = orderNoPrefix(opts.channel) === "POS"` · `notify({ ..., line: !isPos \|\| process.env.LINE_NOTIFY_POS_ORDERS === "true" })` · แจ้งลูกค้าใช้ `!isPos` ตัวเดียวกัน (เดิมเช็ค `=== "ORD"` แยก) |
+| `.env.example`, `docs/env.md` | — | + `LINE_NOTIFY_POS_ORDERS` |
+
+#### เทส (`tests/integration/ownerLineNotify.test.ts` +8 เคส รวม 14)
+
+| เคส | ผลที่คาด |
+|---|---|
+| ตั้งเกณฑ์ 20: `setStock` 25 → 18 | แจ้ง + ข้อความมี "เกณฑ์แจ้งเตือน 20" (ค่าเริ่มต้น 5 จะไม่แจ้ง) |
+| ตั้งเกณฑ์ 0: 10 → 1 แล้ว → 0 | 1 ไม่แจ้ง · 0 แจ้ง |
+| create/update | 12 ✅ · -1 / 2.5 → 400 · `null` ล้างได้ · สินค้า preorder → `null` |
+| `getLowStockProducts` ไม่ส่ง / ส่ง 15 | ไม่ส่ง: สต็อก 15 เกณฑ์ 20 ติด, เกณฑ์ default ไม่ติด · ส่ง 15: ติดทั้งคู่ |
+| dashboard `overview` | นับเพิ่ม 1 (ตัวที่เกณฑ์ 20) ไม่นับตัวที่ใช้ default |
+| ออเดอร์เว็บ | บันทึก + push LINE (`line_sent: true`) |
+| ออเดอร์ POS ค่าเริ่มต้น | บันทึก แต่ไม่ push (`line_sent: false`) |
+| ออเดอร์ POS + `LINE_NOTIFY_POS_ORDERS=true` | push |
+
+ผลรวม: unit 206 ✅ · integration 211 ✅ · typecheck ✅ · `next build` ✅ · lint 0 error (warning 5 จุดเดิม)
+
+---
+
+### 9.6 รับมือโควตาข้อความ LINE OA 300 ข้อความ/เดือน (2026-09-30)
+
+**ที่มา:** ตรวจ `GET /v2/bot/message/quota` ของ OA จริง → `{ type: "limited", value: 300 }` (แพ็กเกจฟรี) ·
+ทุกข้อความ push นับ 1 ต่อผู้รับ 1 คน · ก่อนแก้ ออเดอร์เว็บ 1 ออเดอร์ใช้ ~6–9 ข้อความ → **หมดที่ ~35–50 ออเดอร์/เดือน**
+แล้ว LINE ตอบ `429` ทุกข้อความ**รวมแจ้งเตือนสต็อกของเจ้าของร้าน**จนขึ้นเดือนใหม่ — เงียบโดยไม่มีใครรู้
+(มีแค่ `line_error` ใน DB)
+
+**ภาพรวม ก่อน → หลัง**
+
+| | ก่อน | หลัง |
+|---|---|---|
+| ข้อความต่อออเดอร์เว็บ (รับเอง จ่ายโอน) | ร้าน 1 + ลูกค้า: ได้รับ 1 · ชำระเงิน 1 · confirmed/preparing/ready/completed 4 = **7** | ร้าน 1 + ลูกค้า: ได้รับ 1 · ชำระเงิน 1 · ready 1 = **4** |
+| ข้อความต่อออเดอร์เว็บ (จัดส่ง จ่ายโอน) | ร้าน 1 + ลูกค้า: 1 + 1 + สถานะ 4 + จัดส่ง 2 = **9** | ร้าน 1 + ลูกค้า: 1 + 1 + จัดส่ง 2 = **5** |
+| ออเดอร์เว็บต่อเดือนก่อนโควตาหมด (ประมาณ) | ~35–50 | ~55–65 (270 ÷ 4–5 · หลังหักที่กันไว้ให้ร้าน 30 · ไม่รวมแจ้งเตือนสต็อก) |
+| โควตาใกล้หมด | ส่งหาลูกค้าจนหมด → แจ้งเตือนร้านไม่ถึงด้วย | เหลือ ≤ 30 → **หยุดส่งหาลูกค้า** · ร้านยังได้แจ้งเตือนจาก 30 ข้อความที่กันไว้ |
+| เจ้าของร้านรู้ไหมว่า LINE ใกล้หมด/หมด | ❌ ไม่รู้ | ✅ แจ้งในหน้าแจ้งเตือนเว็บ (ไม่กินโควตา) เดือนละครั้งต่อเรื่อง |
+
+#### ข้อ ก — ลดข้อความถึงลูกค้า (`src/services/customerNotifyService.ts`)
+
+| สถานะ | ก่อน | หลัง | เหตุผล |
+|---|---|---|---|
+| `pending` | "รอดำเนินการ" | ไม่แจ้ง | ได้ "ได้รับออเดอร์" ตอนสร้างแล้ว |
+| `confirmed` | "ร้านยืนยันแล้ว" | ไม่แจ้ง | จ่ายเงินแล้วได้ "ชำระเงินสำเร็จ" + ระบบ auto-confirm อยู่แล้ว |
+| `preparing` | "กำลังเตรียมสินค้า" | ไม่แจ้ง | ลูกค้าไม่ต้องทำอะไร ดูในเว็บได้ |
+| `ready` | "สินค้าพร้อมแล้ว" ทุกออเดอร์ | "สินค้าพร้อมรับที่ร้านแล้ว 🎉" **เฉพาะรับเอง** | ลูกค้าต้องมารับ = สำคัญ · ออเดอร์จัดส่งได้ "กำลังจัดส่ง" แทน |
+| `completed` | "เสร็จสิ้น ขอบคุณที่อุดหนุนค่ะ" | ไม่แจ้ง | ลูกค้ารับของไปแล้ว |
+| `cancelled` | "ถูกยกเลิก" + เหตุผล | เหมือนเดิม | ลูกค้าต้องรู้ |
+| ได้รับออเดอร์ / ชำระเงิน / จัดส่ง | แจ้ง | เหมือนเดิม | — |
+
+```ts
+// ก่อน
+orderStatus(kind, docNo, status, reason?)          // แจ้งทุกสถานะใน ORDER_STATUS_TEXT (6 สถานะ)
+// หลัง
+orderStatus(kind, docNo, status, { reason, orderType })
+// ORDER_STATUS_TEXT เหลือ ready + cancelled · ready + orderType "delivery" → null (ไม่ส่ง)
+```
+
+ผู้เรียก `orderService.updateOrderStatus` / `preorderService.updatePreorderStatus` ส่ง `order_type` มาด้วย
+
+#### ข้อ ข — กันโควตาไว้ให้เจ้าของร้าน (`src/lib/lineQuota.ts` ใหม่)
+
+- `getQuotaStatus()` — ถาม LINE `GET /v2/bot/message/quota` + `/quota/consumption` · **cache 5 นาที** (ไม่ถาม 2 request
+  ทุกข้อความ) · `recordPushed()` หักจาก cache ทุกครั้งที่ส่งสำเร็จ (ทั้งร้านและลูกค้า) เพราะตัวเลข consumption ของ LINE
+  อัปเดตช้า — ไม่งั้นช่วง cache จะส่งทะลุ reserve ได้
+- `canSendToCustomer()` — เหลือ **≤ `LINE_OWNER_QUOTA_RESERVE`** (ค่าเริ่มต้น 30) → `false`
+- `customerNotifyService.notifyCustomer` เช็คก่อน push ทุกครั้ง · **เจ้าของร้านไม่ถูกเช็ค** — ใช้ 30 ข้อความที่กันไว้
+- แพ็กเกจไม่จำกัด (`type: "none"`) → ส่งได้เสมอ
+- **fail-open:** ถามโควตาไม่ได้ (ไม่มี token / network / API error) → ส่งตามปกติ ไม่ให้ปัญหาฝั่ง quota API ทำแจ้งเตือนเงียบทั้งระบบ
+
+```ts
+// หลัง — customerNotifyService.notifyCustomer
+if (!(await canSendToCustomer())) return false;     // เหลือ ≤ reserve → ข้าม (+ แจ้งในเว็บ ข้อ ค)
+const result = await pushLineMessage(text, user.line_user_id);
+if (result.ok) recordPushed();
+else if (isQuotaExceededError(result.error)) await alertQuotaExhausted();
+```
+
+#### ข้อ ค — แจ้งในหน้าแจ้งเตือนเว็บ (ไม่กินโควตา)
+
+| หัวข้อ (module `system`, type `warning`) | เกิดเมื่อ | ข้อความ |
+|---|---|---|
+| `โควตา LINE ใกล้หมด (YYYY-MM)` | `canSendToCustomer()` เจอเหลือ ≤ reserve | เหลือ x/300 — หยุดส่งหาลูกค้าชั่วคราว กันไว้ 30 ให้แจ้งเตือนร้าน |
+| `โควตา LINE หมดแล้ว (YYYY-MM)` | push ได้ `429` (ทั้งฝั่งร้าน `notificationService.notify` และฝั่งลูกค้า) | LINE ปฏิเสธ — แจ้งเตือนทาง LINE ทั้งหมดจะไม่ถึงจนขึ้นเดือนใหม่ ดูในหน้านี้แทน / อัปเกรดแพ็กเกจ |
+
+- **เดือนละครั้งต่อหัวข้อ:** ใส่เดือน (เวลาไทย) ใน title แล้วเช็ค `exists` ก่อนสร้าง — restart server ก็ไม่ซ้ำ
+- เขียนตรงผ่าน `notificationModel` (ไม่ผ่าน `notificationService.notify`) — ไม่ push LINE และกัน import วน
+- `notificationService.notify` ฝั่งร้าน: **ก่อน** push ล้มเหลวแค่บันทึก `line_error` · **หลัง** + `recordPushed()` ตอนสำเร็จ
+  และ `alertQuotaExhausted()` ตอนได้ 429
+
+#### รายไฟล์
+
+| ไฟล์ | เปลี่ยน |
+|---|---|
+| `src/lib/lineQuota.ts` (ใหม่) | `getQuotaStatus` · `recordPushed` · `canSendToCustomer` · `alertQuotaExhausted` · `isQuotaExceededError` · `ownerQuotaReserve` · `resetQuotaCache` (เทส) |
+| `src/services/customerNotifyService.ts` | ข้อ ก (สถานะ) + ข้อ ข/ค (เช็คโควตา, นับ, 429) |
+| `src/services/notificationService.ts` | `recordPushed` ตอนสำเร็จ · `alertQuotaExhausted` ตอน 429 |
+| `src/services/orderService.ts`, `src/services/preorderService.ts` | ส่ง `{ reason, orderType }` ให้ `orderStatus` |
+| `.env.example`, `docs/env.md`, §3 | + `LINE_OWNER_QUOTA_RESERVE` |
+
+#### เทส
+
+- `tests/integration/lineQuota.test.ts` ใหม่ 9 เคส — reserve ค่าเริ่มต้น/ตั้งเอง/ค่าผิด · เหลือเยอะส่งได้ · เหลือ = reserve
+  ไม่ส่ง + แจ้งเว็บครั้งเดียว (เรียก 2 รอบ) · ร้านยังส่งได้ใต้ reserve · นับเองระหว่าง cache แล้วหยุดตรง reserve
+  (ถาม LINE แค่รอบแรก) · แพ็กเกจไม่จำกัด · ถามโควตาไม่ได้ = ส่ง · 429 ฝั่งร้าน/ลูกค้า → แจ้งเว็บครั้งเดียว + `line_error`
+- `tests/integration/customerLineNotify.test.ts` — ปรับเคสสถานะ: ไล่ `confirmed → preparing → ready → completed` แล้ว
+  ได้ข้อความเดียว (ready) · + เคสยกเลิกพร้อมเหตุผล · + เคส `orderStatus` คืน `null` ตามตาราง ข้อ ก
+
+ผลรวม: unit 206 ✅ · integration 222 ✅ · typecheck ✅ · `next build` ✅ · lint 0 error (warning 5 จุดเดิม)

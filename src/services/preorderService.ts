@@ -450,7 +450,10 @@ export async function updatePreorderStatus(
   await preorder.save();
   notifyCustomerLater(
     preorder.user_id,
-    customerMessages.orderStatus("preorder", preorder.preorder_no, next, preorder.cancelled_reason)
+    customerMessages.orderStatus("preorder", preorder.preorder_no, next, {
+      reason: preorder.cancelled_reason,
+      orderType: preorder.order_type,
+    })
   );
   return presentPreorderWithItems(preorder, cancelledItems);
 }

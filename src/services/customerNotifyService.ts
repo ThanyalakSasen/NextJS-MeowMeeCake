@@ -12,18 +12,25 @@ import dbConnect from "../lib/dbConnect";
 import { pushLineMessage } from "../lib/line";
 import { log } from "../lib/logger";
 import { toBaht } from "../lib/money";
+import {
+  alertQuotaExhausted,
+  canSendToCustomer,
+  isQuotaExceededError,
+  recordPushed,
+} from "../lib/lineQuota";
 import userModel from "../models/userModel";
 
 export type CustomerDocKind = "order" | "preorder";
 
 const KIND_LABEL: Record<CustomerDocKind, string> = { order: "ออเดอร์", preorder: "พรีออเดอร์" };
 
+/**
+ * สถานะที่แจ้งลูกค้า — ประหยัดโควตา LINE OA (ฟรี 300 ข้อความ/เดือน — docs/LINE.md §9.6 ข้อ ก)
+ * ไม่แจ้ง: pending (ได้ข้อความ "ได้รับออเดอร์" แล้ว) · confirmed (จ่ายแล้วได้ "ชำระเงินสำเร็จ" + auto-confirm อยู่แล้ว)
+ * · preparing / completed (ไม่ต้องทำอะไรต่อ ดูในเว็บได้) · ready ของออเดอร์จัดส่ง (ได้ "กำลังจัดส่ง" แทน)
+ */
 const ORDER_STATUS_TEXT: Record<string, string> = {
-  pending: "รอดำเนินการ",
-  confirmed: "ร้านยืนยันแล้ว",
-  preparing: "กำลังเตรียมสินค้า",
-  ready: "สินค้าพร้อมแล้ว",
-  completed: "เสร็จสิ้น ขอบคุณที่อุดหนุนค่ะ 🐱",
+  ready: "สินค้าพร้อมรับที่ร้านแล้ว 🎉",
   cancelled: "ถูกยกเลิก",
 };
 
@@ -48,9 +55,16 @@ export const customerMessages = {
   created(kind: CustomerDocKind, docNo: string, totalSatang: number): string {
     return `${header(kind, docNo)}\nได้รับ${KIND_LABEL[kind]}แล้ว ยอดรวม ${toBaht(totalSatang).toLocaleString("th-TH")} บาท`;
   },
-  orderStatus(kind: CustomerDocKind, docNo: string, status: string, reason?: string | null): string | null {
+  orderStatus(
+    kind: CustomerDocKind,
+    docNo: string,
+    status: string,
+    opts: { reason?: string | null; orderType?: string | null } = {}
+  ): string | null {
     const text = ORDER_STATUS_TEXT[status];
     if (!text) return null;
+    if (status === "ready" && opts.orderType === "delivery") return null;
+    const reason = opts.reason;
     const why = status === "cancelled" && reason ? `\nเหตุผล: ${reason}` : "";
     return `${header(kind, docNo)}\nสถานะ: ${text}${why}`;
   },
@@ -83,8 +97,19 @@ export async function notifyCustomer(userId: unknown, text: string | null): Prom
       .lean<{ line_user_id?: string | null } | null>();
     if (!user?.line_user_id) return false;
 
+    // กันโควตาไว้ให้แจ้งเตือนเจ้าของร้าน (docs/LINE.md §9.6 ข้อ ข) — เหลือน้อย = ข้าม + แจ้งในเว็บ (ข้อ ค)
+    if (!(await canSendToCustomer())) {
+      log.warn("customer_notify.skipped_quota_reserve", { user_id: id });
+      return false;
+    }
+
     const result = await pushLineMessage(text, user.line_user_id);
-    if (!result.ok) log.warn("customer_notify.line_push_failed", { user_id: id, error: result.error });
+    if (result.ok) {
+      recordPushed();
+    } else {
+      log.warn("customer_notify.line_push_failed", { user_id: id, error: result.error });
+      if (isQuotaExceededError(result.error)) await alertQuotaExhausted();
+    }
     return result.ok;
   } catch (err) {
     log.warn("customer_notify.failed", { err });

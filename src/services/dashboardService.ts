@@ -14,6 +14,7 @@ import productModel from "../models/productModel";
 import ingredientModel from "../models/ingredientModel";
 import * as expenseService from "./expenseService";
 import { toBaht, round2 } from "../lib/money";
+import { LOW_STOCK_EXPR } from "../lib/lowStock";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -81,7 +82,8 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       productModel.countDocuments({
         deleted_at: null,
         product_types: { $ne: "preorder" }, // สินค้าที่มีสต็อก (inStore/online)
-        product_stock_quantity: { $ne: null, $lte: 5 },
+        product_stock_quantity: { $ne: null },
+        ...LOW_STOCK_EXPR, // เกณฑ์รายสินค้า (low_stock_threshold ?? 5) — src/lib/lowStock.ts
       }),
       ingredientModel.countDocuments({
         deleted_at: null,

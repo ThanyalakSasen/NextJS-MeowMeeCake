@@ -9,6 +9,7 @@
 import { createCrudService } from "../lib/crudService";
 import notificationModel from "../models/notificationModel";
 import { pushLineMessage } from "../lib/line";
+import { alertQuotaExhausted, isQuotaExceededError, recordPushed } from "../lib/lineQuota";
 import { log } from "../lib/logger";
 
 export type NotificationModule = "order" | "ingredient" | "production" | "employee" | "finance" | "system";
@@ -20,6 +21,8 @@ export interface NotifyInput {
   module: NotificationModule;
   type: NotificationType;
   link?: string | null;
+  /** false = บันทึกลง DB อย่างเดียว ไม่ push LINE (เช่น ออเดอร์หน้าร้าน POS — docs/LINE.md §9.5) · ค่าเริ่มต้น true */
+  line?: boolean;
 }
 
 const base = createCrudService(notificationModel, {
@@ -43,13 +46,18 @@ async function notify(input: NotifyInput) {
     is_read: false,
   });
 
+  if (input.line === false) return doc.toObject();
+
   const lineText = `[${input.module}] ${input.title}\n${input.message}`;
   const result = await pushLineMessage(lineText);
   if (result.ok) {
+    recordPushed(); // หักโควตาใน cache ของ lib/lineQuota (ใช้ตัดสินว่าส่งหาลูกค้าต่อได้ไหม)
     await notificationModel.updateOne({ _id: doc._id }, { $set: { line_sent: true } });
   } else {
     log.warn("notification.line_push_failed", { notification_id: String(doc._id), error: result.error });
     await notificationModel.updateOne({ _id: doc._id }, { $set: { line_error: result.error ?? null } });
+    // โควตาหมด (429) — แจ้งในหน้าแจ้งเตือนเว็บเดือนละครั้ง ให้เจ้าของรู้ว่า LINE เงียบเพราะอะไร (docs/LINE.md §9.6 ข้อ ค)
+    if (isQuotaExceededError(result.error)) await alertQuotaExhausted();
   }
 
   return doc.toObject();

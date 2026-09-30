@@ -55,15 +55,29 @@ describe("customerNotifyService.notifyCustomer", () => {
 });
 
 describe("hook เข้า lifecycle ของพรีออเดอร์", () => {
-  it("เปลี่ยนสถานะ → ลูกค้าได้ข้อความสถานะ", async () => {
+  it("ไล่สถานะ pending→completed (รับเอง) → แจ้งแค่ ready ครั้งเดียว (ประหยัดโควตา — LINE.md §9.6 ข้อ ก)", async () => {
     const u = await makeUser({ line_user_id: "U_B" });
     const pre = await makePreorder(String(u._id));
 
-    await preorderService.updatePreorderStatus(String(pre._id), "confirmed");
+    for (const s of ["confirmed", "preparing", "ready", "completed"] as const) {
+      await preorderService.updatePreorderStatus(String(pre._id), s);
+    }
 
     await vi.waitFor(() => expect(pushedTo(fetchSpy, "U_B")).toHaveLength(1));
-    expect(pushedTo(fetchSpy, "U_B")[0]).toContain("ร้านยืนยันแล้ว");
+    await new Promise((r) => setTimeout(r, 100));
+    expect(pushedTo(fetchSpy, "U_B")).toHaveLength(1);
+    expect(pushedTo(fetchSpy, "U_B")[0]).toContain("พร้อมรับที่ร้าน");
     expect(pushedTo(fetchSpy, "U_B")[0]).toContain(pre.preorder_no);
+  });
+
+  it("ยกเลิก → แจ้งพร้อมเหตุผล", async () => {
+    const u = await makeUser({ line_user_id: "U_B2" });
+    const pre = await makePreorder(String(u._id));
+
+    await preorderService.updatePreorderStatus(String(pre._id), "cancelled", { cancelled_reason: "วัตถุดิบหมด" });
+
+    await vi.waitFor(() => expect(pushedTo(fetchSpy, "U_B2")).toHaveLength(1));
+    expect(pushedTo(fetchSpy, "U_B2")[0]).toContain("วัตถุดิบหมด");
   });
 
   it("จัดส่ง: แจ้งเมื่อสถานะเปลี่ยน แต่แก้แค่ tracking_no ไม่แจ้งซ้ำ", async () => {
@@ -110,7 +124,14 @@ describe("userService.linkLineAccount", () => {
 
 describe("customerMessages", () => {
   it("ยกเลิกพร้อมเหตุผล → ใส่เหตุผลในข้อความ", () => {
-    expect(customerMessages.orderStatus("order", "ORD-1", "cancelled", "ของหมด")).toContain("ของหมด");
+    expect(customerMessages.orderStatus("order", "ORD-1", "cancelled", { reason: "ของหมด" })).toContain("ของหมด");
+  });
+  it("สถานะที่ไม่แจ้งแล้ว (pending/confirmed/preparing/completed) → null · ready ของออเดอร์จัดส่ง → null", () => {
+    for (const s of ["pending", "confirmed", "preparing", "completed"]) {
+      expect(customerMessages.orderStatus("order", "ORD-1", s)).toBeNull();
+    }
+    expect(customerMessages.orderStatus("order", "ORD-1", "ready", { orderType: "delivery" })).toBeNull();
+    expect(customerMessages.orderStatus("order", "ORD-1", "ready", { orderType: "takeaway" })).toContain("พร้อมรับ");
   });
   it("สถานะที่ไม่แจ้ง (pending payment) → null", () => {
     expect(customerMessages.paymentStatus("order", "ORD-1", "pending")).toBeNull();

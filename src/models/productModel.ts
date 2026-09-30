@@ -121,6 +121,13 @@ const productSchema = new mongoose.Schema(
       min: 0,
       default: 0,
     },
+    // เกณฑ์ "สินค้าใกล้หมด" รายสินค้า (เทียบ reorder_point ของวัตถุดิบ) — null = ใช้ค่าเริ่มต้น 5
+    // (src/lib/lowStock.ts) · ใช้ทั้งแจ้งเตือน LINE, /api/admin/products/low-stock และ dashboard
+    low_stock_threshold: {
+      type: Number,
+      min: 0,
+      default: null,
+    },
     avg_rating: {
       type: mongoose.Schema.Types.Decimal128,
       min: 0,
