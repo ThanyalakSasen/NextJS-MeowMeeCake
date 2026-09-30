@@ -741,12 +741,12 @@ export async function alertQuotaExhausted() { markQuotaExhausted(); await alertO
 |---|---|---|---|
 | พรีออเดอร์ใหม่ | `พรีออเดอร์ใหม่ PRE-…` | `เปิดพรีออเดอร์รอบใหม่ PRE-…` | `preorderService.createPreorder` |
 | สรุปวันรับพรีออเดอร์ (เว็บอย่างเดียว) | `พรีออเดอร์ถึงวันรับ YYYY-MM-DD: N รายการ` · `เตือนลูกค้าทาง LINE แล้ว N ราย · ส่งไม่ถึง M ราย (… / โควตาใกล้หมด)` | `เปิดรับพรีออเดอร์ถึงวันรับ YYYY-MM-DD: N รายการ` · `เตือนลูกค้าทาง LINE แล้ว จำนวน N ราย · ส่งไม่ถึงจำนวน M ราย (… / โควตาการส่งแจ้งเตือนใกล้หมด)` | `preorderReminderService` |
-| สลิปรอตรวจ | `มีสลิปโอนเงินรอตรวจสอบ` | `มีคำสั่งซื้อรอการรอตรวจสอบสลิปโอนเงิน รหัสคำสั่งซื้อ <order_id/preorder_id>` | `paymentService.submitSlip` |
+| สลิปรอตรวจ | `มีสลิปโอนเงินรอตรวจสอบ` | `มีคำสั่งซื้อรอตรวจสอบสลิปโอนเงิน รหัสคำสั่งซื้อ <order_no/preorder_no>` เช่น `ORD-20261001-AB12CD` / `PRE-…` | `paymentService.submitSlip` (หาเลขด้วย `paymentDocNo()` หลังตอบลูกค้าแล้ว · หาไม่เจอ = ObjectId) |
 | สินค้าใกล้หมด | `สินค้าใกล้หมด: <ชื่อ>` | `สินค้าใกล้จะหมด: <ชื่อ>` | `productService` |
 | วัตถุดิบใกล้หมด | `วัตถุดิบใกล้หมด: <ชื่อ>` | `วัตถุดิบใกล้จะหมด: <ชื่อ>` | `ingredientTransactionService` |
 | จ่ายช้าหลังสร้างใบผลิต | `เพิ่มยอดเข้าใบสั่งผลิต PO-…` | `เพิ่มยอดสินค้าเข้าใบสั่งผลิต PO-…` | `preorderRoundLifecycleService.onPreorderPaid` |
 | ยกเลิกพรีออเดอร์ที่นับเข้าใบผลิต | `ลดยอดใบสั่งผลิต PO-…` | `หักยอดสินค้าในใบสั่งผลิต PO-…` | `preorderRoundLifecycleService.onPreorderCancelled` |
 
-เทสปรับตาม: `ownerLineNotify.test.ts` · `preorderReminder.test.ts`
+เทสปรับตาม: `ownerLineNotify.test.ts` · `preorderReminder.test.ts` · ใหม่ `slipNotification.test.ts` 2 เคส (ออเดอร์/พรีออเดอร์แสดงเลขเอกสาร ไม่ใช่ ObjectId)
 
-⚠️ ข้อสังเกต (ยังไม่แก้): หัวข้อสลิปรอตรวจแสดง `order_id`/`preorder_id` ซึ่งเป็น ObjectId (24 ตัวอักษร) ไม่ใช่เลขออเดอร์ `ORD-…`/`PRE-…` ที่คนอ่านรู้เรื่อง
+✅ หัวข้อสลิปรอตรวจ: เดิม (รุ่นแรกของถ้อยคำใหม่) แสดง ObjectId 24 ตัวอักษร → แก้ให้แสดงเลขออเดอร์/พรีออเดอร์แล้ว
