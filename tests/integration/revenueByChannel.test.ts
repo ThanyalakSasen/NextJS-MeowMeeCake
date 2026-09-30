@@ -7,7 +7,7 @@ import { makeUser, oid } from "./helpers";
 /**
  * dashboardService.revenueByChannel — docs/BACKLOG2.md §14 (2026-09-30): รายรับแยกตามช่องทางออเดอร์
  * web = ORD- · pos = POS- · preorder = พรีออเดอร์ (collection แยก) · other = เลขรุ่นเก่า
- * ข้อมูลสร้างเป็นสตางค์ ผลลัพธ์เป็นบาท
+ * เงินเป็นบาททั้งข้อมูลและผลลัพธ์ (docs/money-units.md)
  */
 describe("revenueByChannel", () => {
   // ช่วงวันที่แคบของแต่ละเทส กันข้อมูลเทสอื่นปน (DB ใช้ร่วมทั้งไฟล์)
@@ -46,11 +46,11 @@ describe("revenueByChannel", () => {
   }
 
   it("แยกยอดตามช่องทาง: ORD- / POS- / พรีออเดอร์ / เลขรุ่นเก่า + จำนวน", async () => {
-    await order(1, "ORD", 10000);
-    await order(1, "ORD", 2550);
-    await order(1, "POS", 7000);
-    await order(1, "OP", 1000); // เลขรุ่นเก่า
-    await preorder(1, 40000);
+    await order(1, "ORD", 100);
+    await order(1, "ORD", 25.5);
+    await order(1, "POS", 70);
+    await order(1, "OP", 10); // เลขรุ่นเก่า
+    await preorder(1, 400);
 
     const r = await revenueByChannel(range(1));
     expect(r).toMatchObject({ web: 125.5, pos: 70, preorder: 400, other: 10, total: 605.5, orders: 5 });
@@ -58,11 +58,11 @@ describe("revenueByChannel", () => {
   });
 
   it("ไม่นับที่ยังไม่จ่าย / ถูกลบ / นอกช่วงวันที่", async () => {
-    await order(2, "ORD", 5000);
-    await order(2, "ORD", 9999, { payment_status: "pending" });
-    await order(2, "POS", 9999, { deleted_at: new Date() });
-    await preorder(2, 9999, { payment_status: "pending" });
-    await order(3, "ORD", 9999); // วันอื่น
+    await order(2, "ORD", 50);
+    await order(2, "ORD", 99.99, { payment_status: "pending" });
+    await order(2, "POS", 99.99, { deleted_at: new Date() });
+    await preorder(2, 99.99, { payment_status: "pending" });
+    await order(3, "ORD", 99.99); // วันอื่น
 
     const r = await revenueByChannel(range(2));
     expect(r).toMatchObject({ web: 50, pos: 0, preorder: 0, other: 0, total: 50, orders: 1 });

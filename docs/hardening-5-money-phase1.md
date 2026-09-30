@@ -1,5 +1,7 @@
 # รอบ 5 — เงินเป็น integer (สตางค์): Order+Preorder+Payment, Expense, Delivery zone, Recipe/Component/Ingredient, Promotion, Product pricing
 
+> ⚠️ **ยกเลิกแล้ว 2026-10-01** — กลับมาเก็บเงินเป็นบาททั้งระบบ ดู [`money-units.md`](money-units.md) (เอกสารนี้เก็บไว้เป็นประวัติ)
+>
 > อัปเดตล่าสุด: 2026-09-12
 > สถานะ: ✅ **เสร็จสมบูรณ์ทั้งหมด** — ครบทุกเฟส (1, 2, 3, 4, 5a, 5b) จาก 18 model ที่แตะเงิน (แผนเดิม
 > วางไว้ 5 เฟส/17 model — เฟส 5 แตกเป็น **5a (Promotion)** กับ **5b (Product pricing + Cart +

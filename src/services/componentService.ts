@@ -86,7 +86,7 @@ async function prepare(input: Record<string, any>, isCreate: boolean): Promise<v
   //   2) ส่งมาเอง (แอดมินกรอกต้นทุน/แบทช์มือ) → เป็นบาททศนิยมตาม API contract ต้องแปลงเป็นสตางค์เอง
   if ((isCreate || input.ingredients !== undefined) && input.estimated_cost_per_batch == null) {
     const cost = await ingredientItemsCost(input.ingredients ?? [], ingredientModel as Model<any>);
-    input.estimated_cost_per_batch = Math.round(cost);
+    input.estimated_cost_per_batch = toSatang(cost); // บาท ปัด 2 ตำแหน่ง (src/lib/money.ts)
   } else if (input.estimated_cost_per_batch != null) {
     input.estimated_cost_per_batch = toSatang(Number(input.estimated_cost_per_batch));
   }

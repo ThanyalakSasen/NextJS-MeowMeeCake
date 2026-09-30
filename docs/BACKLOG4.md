@@ -10,7 +10,7 @@
 
 | ระดับ | จำนวน | สรุป |
 |---|---|---|
-| 🔴 ต้องทำก่อนใช้งานจริง | 7 (โค้ด R5 ✅ แก้แล้ว · เหลืองาน deploy R1–R4 + R6 · **R7 ราคาสินค้าเป็นบาทอีกรอบ — ข้อมูลจริง**) | ส่วนใหญ่เป็น **งานตอน deploy** (migration, cron, env, ลำดับ merge) + รายงานแดชบอร์ดไม่นับรายได้พรีออเดอร์ |
+| 🔴 ต้องทำก่อนใช้งานจริง | 7 (โค้ด R5 ✅ แก้แล้ว · เหลืองาน deploy R1–R4 + R6 · **R7 เปลี่ยนเก็บเงินเป็นบาท — ต้องรัน `migrate:money-to-baht` ตอน deploy**) | ส่วนใหญ่เป็น **งานตอน deploy** (migration, cron, env, ลำดับ merge) + รายงานแดชบอร์ดไม่นับรายได้พรีออเดอร์ |
 | 🟡 ควรแก้ | 11 (✅ แก้ครบ Y1–Y11 · Y11 ฝั่งโค้ดเสร็จ เหลือตั้ง DB user ที่ Atlas) | ใบผลิตไม่ลดเมื่อยกเลิกพรีออเดอร์ · ผลิตแล้วไม่เพิ่มสต็อกสินค้า · สลิปเปิดสาธารณะ · deprecation · dependency |
 | 🟢 เล็กน้อย / ต่อยอด | 15 | race ที่เกิดยาก · index · ฟีเจอร์ต่อยอด |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | สิทธิ์ทุก route · CI ทุก PR · cron auth · upload validation · IDOR ฝั่ง shop (§5) |
@@ -82,29 +82,19 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 - **แก้ (ตอน deploy — ไม่ต้องแก้โค้ด):** ให้ nginx เสิร์ฟ `/uploads/` เองจากดิสก์ (`location /uploads/ { alias …/public/uploads/; }`) —
   config เต็มใน [`DEPLOY.md`](DEPLOY.md) §6 · ทางเลือกในโค้ด (ถ้าไม่มี nginx): route `GET /uploads/[...path]` อ่านไฟล์จากดิสก์เอง หรือใช้ `UPLOAD_DRIVER=s3`
 
-### R7. ⚠️ ราคาสินค้าถูกเขียนทับเป็น "บาท" อีกรอบ (ข้อมูลจริง) — พบ 2026-10-01 จาก `check:data-integrity` (Y11)
+### R7. ✅ ราคาสินค้าหน่วยปนกัน (บาท/สตางค์) — ต้นเหตุคือ FrontOffice เขียน DB ตรงเป็นบาท → เปลี่ยนทั้งระบบเก็บเป็นบาท
 
-- **พบ (อ่านอย่างเดียว):** `npm run check:data-integrity -- --no-notify` บน DB จริง → **48 ปัญหา** ในสินค้า 36 ตัว — `product_price` เป็นค่าบาท
-  (เช่น คัพเค้ก `35` = แสดง 0.35 บาท · เค้กไข่ `10`) · `sale_price` ≥ `product_price` 7 ตัว (sale เป็นสตางค์ถูกต้อง เช่น 6400 vs 65) ·
-  ฟิลด์เก่า `delete_at` 3 ตัว · รหัส `pos-` แต่ `is_preorder: true` 2 ตัว (เดิมรู้อยู่แล้ว — DEPLOY §⑦)
-- **เวลา:** `updated_at` ของ 35 ตัวเรียงกันช่วง **2026-09-30 22:36–22:50 น. (เวลาไทย)** ห่างกันตัวละ ~7–10 วินาที · `userlogs` ช่วงนั้น **ไม่มี**
-  การแก้สินค้าเลย → เขียนนอก API **แบบเดียวกับ BACKLOG2 §16** (09-24) ทั้งที่แก้ข้อมูลไปแล้วเมื่อ 09-25 · ชิโอะปัง (`45`) ค้างมาตั้งแต่ 09-24
-- **ผลกระทบ:** หน้าร้าน/POS แสดงและ**คิดเงิน**ราคาหาร 100 (ออเดอร์ที่สร้างตอนนี้ได้ยอด 0.35 บาท)
-- **ตรวจละเอียด (อ่านอย่างเดียว 2026-10-01):** สินค้า**ทั้ง 42 ตัว** (รวมที่ลบแล้ว 6) มี `product_price` < 1,000 — 41 ตัวเท่ากับค่า `old` ใน
-  `money-fix-2026-09-20…json` เป๊ะ (= ค่าที่ถูก ÷ 100) · ขนมปังซาวโดว์แครนเบอ `492` (backup เคยเป็น 49900 → ตั้งราคาใหม่เป็นบาท) ·
-  ขนมปังซาวโดว์ช็อกโกแลต `366` (ไม่อยู่ใน backup — §16 บันทึกว่าเคยเป็น 36600) · `preorderrounditems.price_override` **366 / 650 / 400**
-  (รอบ `6abd285f…` สร้าง 22:19–22:22 น.) · ตะกร้าที่ยังใช้อยู่ 1 แถว `35` · ออเดอร์ **`ORD-1790786142302-M2PY`** (pending ยังไม่จ่าย
-  ยอด 55 สตางค์ = 0.55 บาท · 2026-09-30 23:35 น.)
-- **ต้นทาง (หลักฐานชี้):** API ปัจจุบันเขียน userlog ทุกครั้งที่แก้สินค้า/เพิ่มสินค้าเข้ารอบ แต่ช่วงนั้นไม่มีเลย · **เลขออเดอร์ `ORD-<timestamp>-XXXX`
-  เป็นรูปแบบของโค้ดรุ่นเก่า** (ปัจจุบัน `generateDocNo` = `ORD-YYYYMMDD-xxxxxx`) · `price_override` เป็นบาทเหมือนโค้ดก่อน §3.11 เฟส 5b ·
-  ฟิลด์ `delete_at` ของ schema เก่า → **น่าจะมี backend รุ่นเก่า (หรือ frontend ที่ต่อ backend รุ่นเก่า) ต่อ DB จริงอยู่** เช่นเครื่อง dev
-  ของสมาชิกในทีมที่ใช้ `MONGODB_URI` ของ production — ต้องหาให้เจอ ไม่งั้นจะเพี้ยนซ้ำทุกครั้งที่มีคนเปิดใช้
-- **แก้ข้อมูล:** `scripts/fix-baht-prices.ts` (`npm run fix:baht-prices` dry-run · `-- --apply`) ×100 สินค้า 42 + ราคารอบ 3 + ตะกร้า 1 แบบมีเงื่อนไข
-  `{ _id, field: ค่าเดิม }` · ไม่แตะ `updated_at` · backup `scripts/backups/money-fix-*.json` (audit Y10 อ่านได้) · dry-run บน DB จริงตรงแผน
-  ⚠️ **ผู้ใช้ต้องรัน `--apply` เอง** — auto mode ของ Claude Code ปฏิเสธการเขียน DB จริง
-- **ออเดอร์ `ORD-1790786142302-M2PY`:** ไม่แตะในสคริปต์ (ยกเลิกแล้วระบบจะแจ้งลูกค้าทาง LINE) — ให้เจ้าของร้านยกเลิกผ่านหลังบ้าน หรือติดต่อลูกค้า
-- **หยุดต้นทาง:** เปลี่ยนรหัสผ่าน DB user ที่แจกไป → เครื่องที่ยังต่อ DB ด้วยรหัสเดิม (backend รุ่นเก่า/Compass) จะต่อไม่ได้ทันที · แยก user อ่านอย่างเดียว
-  (DEPLOY §สำรองข้อมูล → ผู้ใช้ DB) · `check:data-integrity` รายวันจะแจ้งถ้าเกิดอีก
+- **พบ (2026-10-01, `check:data-integrity` Y11 อ่านอย่างเดียว):** `product_price` สินค้าทั้ง 42 ตัวเป็นค่าบาท (คัพเค้ก `35`) ขณะที่ backend
+  อ่านเป็นสตางค์ → แสดง/คิดเงิน 0.35 บาท · `sale_price` 7 ตัวเป็นสตางค์ · ราคารอบพรีออเดอร์ `366/650/400` เป็นบาท · ออเดอร์
+  `ORD-1790786142302-M2PY` ยอด `55` · แก้ช่วง 2026-09-30 22:19–23:35 น. ไม่มี userlog (เหมือน BACKLOG2 §16 เมื่อ 09-24)
+- **ต้นเหตุ (ผู้ใช้ยืนยัน 2026-10-01):** แอป **FrontOffice ต่อ MongoDB ตัวเดียวกันโดยตรง** และเขียนเงินเป็นบาท ไม่ใช่การแก้ด้วยมือ/ของรุ่นเก่า
+- **ตัดสินใจ:** เก็บเงิน **เป็นบาททั้งระบบ** ("ดึงราคา 35 ก็เป็น 35" — FrontOffice ไม่ต้องแก้) → รายละเอียดก่อน/หลังทั้งหมด [`money-units.md`](money-units.md)
+  - โค้ด: `src/lib/money.ts` `toSatang`/`toBaht` = ปัด 2 ตำแหน่ง · ปัดยอดทุกจุดที่คูณ/รวม · ตัวตรวจ Y11 ใช้เกณฑ์บาท
+  - ข้อมูล: `npm run migrate:money-to-baht` (dry-run บน DB จริง: ÷100 347 ค่า · ไม่แตะ 75 ค่าที่เป็นบาทแล้ว · ต้องดูเอง 1)
+    ⚠️ **ผู้ใช้ต้องรัน `--apply` เอง ตอน deploy พร้อมโค้ดใหม่** (หยุด backend + FrontOffice ก่อน — money-units.md §4)
+  - สคริปต์ยุคสตางค์ 6 ตัวถูกบล็อก · ลบ `fix:baht-prices` (×100) ที่เคยเสนอไว้ — ตอนนี้ราคา `35` ถูกต้องแล้ว
+- **ยังควรทำ:** FrontOffice ต่อ DB ตรง = ไม่มี userlog/validation/ตัดสต็อกผ่าน backend — ระยะยาวให้เรียก API · ให้ FrontOffice ใช้ DB user ของตัวเอง
+  (DEPLOY §สำรองข้อมูล → ผู้ใช้ DB)
 
 ---
 
@@ -181,7 +171,7 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 2. ~~**R5** แดชบอร์ดนับพรีออเดอร์~~ ✅ (§7.1)
 3. ~~**Y1** ใบผลิตลดเมื่อยกเลิก · **Y6** จำกัดการลบแจ้งเตือน · **Y4** `returnDocument`~~ ✅ (§7.2–§7.4)
 4. **ต้องตัดสินใจก่อน:** **Y2** (ผลิตเสร็จเพิ่มสต็อกอัตโนมัติไหม) · **Y3** (ย้ายสลิปเป็น private) · **Y5** (อัป Next 16 หรือ override postcss)
-5. ~~Y7–Y11~~ ✅ (§7.9–§7.13) · **R7 แก้ราคาใน DB จริง + ปิดสิทธิ์เขียนของเครื่องมือนอกแอป ก่อนเปิดขาย**
+5. ~~Y7–Y11~~ ✅ (§7.9–§7.13) · **R7 ตอน deploy: หยุด backend+FrontOffice → `migrate:money-to-baht --apply` → deploy (money-units.md §4)**
 6. G* ตามความจำเป็น
 
 ---
@@ -350,7 +340,7 @@ DB จริงมีตัวเลือก 0 ตัว — ไม่กระ
 | | ก่อน | หลัง |
 |---|---|---|
 | รู้ว่ามีการแก้ DB นอกแอป | รู้ตอนลูกค้า/ผู้ใช้เห็นราคาเพี้ยน (§16 ผ่านไป ~1 วัน) | `src/services/dataIntegrityService.ts` ตรวจทุกเช้า (cron 07:30 — DEPLOY §⑧) → แจ้งเตือน `system`/warning + LINE เจ้าของร้าน (10 รายการแรก) |
-| สิ่งที่ตรวจ (อ่านอย่างเดียว) | — | `legacy_fields` (product_type / product_types / delete_at) · `is_preorder_missing` · `price_not_integer` (สินค้า/ตัวเลือก/ตัวเลือกเสริม) · `price_too_low` (< 1,000 สตางค์) · `sale_not_below_price` · `code_prefix_mismatch` · `stock_invalid` · `variant_stock_sum` (Y9) |
+| สิ่งที่ตรวจ (อ่านอย่างเดียว) | — | `legacy_fields` (product_type / product_types / delete_at) · `is_preorder_missing` · `price_bad_precision` (ทศนิยม > 2 — สินค้า/ตัวเลือก/ตัวเลือกเสริม) · `price_too_low` (< 1 บาท) · `price_too_high` (> 10,000 บาท — น่าจะเป็นสตางค์) · `sale_not_below_price` · `code_prefix_mismatch` · `stock_invalid` · `variant_stock_sum` (Y9) |
 | เรียกใช้ | — | `npm run check:data-integrity` (`--no-notify` = พิมพ์อย่างเดียว · exit 2 เมื่อพบ) · `GET/POST /api/cron/data-integrity` (Bearer `CRON_SECRET`, `?notify=false`) |
 | สิทธิ์ DB | user เดียวใช้ทั้งแอปและ Compass | DEPLOY §สำรองข้อมูล → ผู้ใช้ DB: `meowmee-app` readWrite (แอปเท่านั้น) · `meowmee-readonly` read (เครื่องมือ) · Atlas Project Read Only — **ผู้ใช้ต้องตั้งเองที่ Atlas** |
 
@@ -361,7 +351,7 @@ DB จริงมีตัวเลือก 0 ตัว — ไม่กระ
 
 - ไฟล์ใหม่: `scripts/backfill-payment-due.ts` · `scripts/check-data-integrity.ts` · `src/services/dataIntegrityService.ts` · `src/app/api/cron/data-integrity/route.ts` · `src/instrumentation.ts`
 - แก้: `productService` · `productVariantService` · `orderService` · `cartService` · `productionOrderService` · `scripts/audit-money-units.ts` · `package.json` (scripts `backfill:payment-due`, `check:data-integrity`) · `docs/DEPLOY.md`
-- R7: `scripts/fix-baht-prices.ts` + `fixBahtPrices.test.ts` 2 เคส (รวม audit อ่าน backup ได้)
-- เทสใหม่ 18 เคส (variantStock 8 · backfillPaymentDue 2 · auditMoneyUnits 3 · dataIntegrity 3 · fixBahtPrices 2) · รวม **496 ผ่าน** (67 ไฟล์) · typecheck 0 · lint 0 error · `next build` ผ่าน
+- R7: เก็บเงินเป็นบาท ([`money-units.md`](money-units.md)) — `src/lib/money.ts` + จุดคำนวณยอด · `scripts/migrate-money-to-baht.ts` + `migrateMoneyToBaht.test.ts` 2 เคส · บล็อกสคริปต์ยุคสตางค์ (`scripts/_legacyMoney.ts`) · ปรับเทสเงินทั้งหมดให้ DB เป็นบาท
+- เทสใหม่ 18 เคส (variantStock 8 · backfillPaymentDue 2 · auditMoneyUnits 3 · dataIntegrity 3 · migrateMoneyToBaht 2) · รวม **491 ผ่าน** (66 ไฟล์) · typecheck 0 · lint 0 error · `next build` ผ่าน
 - ทดสอบจริง: `next start` + `NODE_APP_INSTANCE=1` → log `runtime.multi_instance` · `check:data-integrity` / `backfill:payment-due` บน DB จริงแบบอ่านอย่างเดียว (ไม่แจ้ง ไม่เขียน)
 - merge: `package.json` scripts ชนกับ #54 เพิ่มอีกจุด (เก็บทั้งสองฝั่ง เหมือน #55)

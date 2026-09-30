@@ -214,12 +214,12 @@ export async function createPreorder(
       },
       quantity,
       unit_price: unitPriceSatang,
-      total_price: unitPriceSatang * quantity,
+      total_price: toSatang(unitPriceSatang * quantity),
       special_request: input.items[idx].special_request?.trim() || null,
     };
   });
 
-  const subtotal = lines.reduce((s, l) => s + l.total_price, 0);
+  const subtotal = toSatang(lines.reduce((s, l) => s + l.total_price, 0));
 
   // ── ค่าส่ง (server คิดเอง) ── deliveryService ยังทำงานเป็นบาท — แปลงข้ามโดเมนแค่จุดนี้
   let delivery_fee = 0;
@@ -241,7 +241,7 @@ export async function createPreorder(
   if (discount_amount > subtotal + delivery_fee) {
     throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
   }
-  const total_amount = subtotal - discount_amount + delivery_fee;
+  const total_amount = toSatang(subtotal - discount_amount + delivery_fee);
 
   // ── ต้นทุนต่อหน่วย (สแนปช็อตจากสูตรล่าสุด) ──
   const costByProduct = await recipeService.getUnitCostByProduct(
@@ -308,7 +308,7 @@ export async function createPreorder(
     // link = null: ยังไม่มี path หน้าจัดการพรีออเดอร์ฝั่ง frontend ที่ยืนยันแล้ว (docs/LINE.md §9)
     notificationService
       .notify({
-        title: `พรีออเดอร์ใหม่ ${preorder.preorder_no}`,
+        title: `เปิดพรีออเดอร์รอบใหม่ ${preorder.preorder_no}`,
         message: `รอบ ${round.round_name ?? "-"} · ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
         module: "order",
         type: "info",

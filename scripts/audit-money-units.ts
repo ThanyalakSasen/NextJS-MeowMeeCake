@@ -1,4 +1,5 @@
 import "./_env"; // ต้องมาก่อน import ที่อ่าน env ตอนโหลดโมดูล
+import { blockLegacyMoneyScript } from "./_legacyMoney";
 
 import mongoose from "mongoose";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -317,6 +318,7 @@ export async function runAudit(opts: AuditOptions = {}): Promise<AuditResult> {
 // รันจริงเฉพาะตอนเรียกไฟล์นี้ตรง ๆ ผ่าน CLI
 const isDirectRun = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
+  blockLegacyMoneyScript("audit-money-units"); // docs/money-units.md — ระบบเก็บเงินเป็นบาทแล้ว
   const args = process.argv.slice(2);
   const cutoffArg = args.find((a) => a.startsWith("--cutoff="))?.split("=")[1];
   runAudit({ verbose: args.includes("--verbose"), cutoff: cutoffArg ? new Date(cutoffArg) : undefined })

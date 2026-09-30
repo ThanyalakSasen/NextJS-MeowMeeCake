@@ -51,8 +51,8 @@ describe("productService — product_price/sale_price เก็บสตาง�
     const raw = await productModel
       .findById(created._id)
       .lean<{ product_price: number; sale_price: number }>();
-    expect(raw!.product_price).toBe(9950);
-    expect(raw!.sale_price).toBe(7925);
+    expect(raw!.product_price).toBe(99.5);
+    expect(raw!.sale_price).toBe(79.25);
 
     const updated = (await productService.updateProduct(String(created._id), {
       product_price: 120,
@@ -63,7 +63,7 @@ describe("productService — product_price/sale_price เก็บสตาง�
     const rawAfter = await productModel
       .findById(created._id)
       .lean<{ product_price: number; sale_price: number | null }>();
-    expect(rawAfter!.product_price).toBe(12000);
+    expect(rawAfter!.product_price).toBe(120);
     expect(rawAfter!.sale_price).toBeNull();
   });
 
@@ -104,7 +104,7 @@ describe("productVariantService / productOptionService — เก็บสตา
     const raw = await productVariantModel
       .findById(created._id)
       .lean<{ variant_price: number }>();
-    expect(raw!.variant_price).toBe(2550);
+    expect(raw!.variant_price).toBe(25.5);
 
     const updated = (await productVariantService.update(String(created._id), {
       variant_price: 30,
@@ -133,7 +133,7 @@ describe("productVariantService / productOptionService — เก็บสตา
     expect(created.extra_price).toBe(12);
 
     const raw = await productOptionModel.findById(created._id).lean<{ extra_price: number }>();
-    expect(raw!.extra_price).toBe(1200);
+    expect(raw!.extra_price).toBe(12);
 
     const updated = (await productOptionService.update(String(created._id), {
       extra_price: 15,
@@ -165,7 +165,7 @@ describe("cartService — price_snapshot/selected_options[].extra_price เก�
     expect(item.price_snapshot).toBe(45.65);
 
     const raw = await cartItemModel.findById(item._id).lean<{ price_snapshot: number }>();
-    expect(raw!.price_snapshot).toBe(4565); // สตางค์เป๊ะ ไม่เพี้ยนจาก float
+    expect(raw!.price_snapshot).toBe(45.65); // สตางค์เป๊ะ ไม่เพี้ยนจาก float
 
     const detail = await cartService.getCartDetail(String(user._id));
     expect(detail.summary.subtotal).toBe(91.3); // 45.65 * 2
@@ -246,7 +246,7 @@ describe("preorderRoundService — price_override เก็บสตางค์
     const raw = await preorderRoundItemModel
       .findById(item._id)
       .lean<{ price_override: number | null }>();
-    expect(raw!.price_override).toBe(5550);
+    expect(raw!.price_override).toBe(55.5);
 
     const updated = (await preorderRoundService.updateRoundItem(String(item._id), {
       price_override: 60,
@@ -329,6 +329,6 @@ describe("preorderRoundService — price_override เก็บสตางค์
     const rawItem = await preorderItemModel
       .findOne({ preorder_id: preorder._id })
       .lean<{ unit_price: number }>();
-    expect(rawItem!.unit_price).toBe(8800); // สตางค์ดิบใน DB
+    expect(rawItem!.unit_price).toBe(88); // สตางค์ดิบใน DB
   });
 });

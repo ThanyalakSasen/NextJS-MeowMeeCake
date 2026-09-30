@@ -240,10 +240,12 @@ PATCH https://api.example.com/api/admin/products/6a814a064b44d4bf31fb2c4b   { "i
 - กำหนดชำระของพรีออเดอร์เก่า (BACKLOG4 Y7): `npm run backfill:payment-due` (dry-run) — ตรวจ 2026-10-01 ได้ 0 รายการ
   ไม่ต้อง `--apply` · ถ้าวัน deploy มีพรีออเดอร์ค้างจ่ายที่ยังไม่มีกำหนด ค่อย `-- --apply` (รายการที่เลยกำหนดแล้วจะได้ + 24 ชม.)
 - ตรวจข้อมูลสินค้า (BACKLOG4 Y11): `npm run check:data-integrity -- --no-notify` → ต้องได้ "ไม่พบข้อมูลผิดปกติ" ก่อนเปิดร้าน
-  ⚠️ 2026-10-01 พบราคาเป็นบาทอีกรอบ (BACKLOG4 R7) → แก้ก่อนด้วย:
+- ⚠️ **ย้ายหน่วยเงินเป็นบาท (BACKLOG4 R7 · [`money-units.md`](money-units.md)) — ต้องทำพร้อม deploy โค้ด #57:**
   ```bash
-  npm run fix:baht-prices              # ดูแผน: สินค้า 42 · ราคารอบ 3 · ตะกร้า 1
-  npm run fix:baht-prices -- --apply   # ×100 (backup ใน scripts/backups/)
+  # หยุด backend (pm2 stop meowmeecake-api) + FrontOffice ก่อน
+  npm run migrate:money-to-baht              # ดูแผน: ÷100 347 ค่า · ไม่แตะ 75 · ต้องดูเอง 1
+  npm run migrate:money-to-baht -- --apply   # backup ใน scripts/backups/ · ลง marker (รันซ้ำไม่ได้)
+  # build + start โค้ดใหม่ (§⑤) แล้วค่อยเปิด FrontOffice
   npm run check:data-integrity -- --no-notify   # ต้องเหลือแค่รหัส pos-/pre- 2 ตัว (แก้ด้วย PATCH ข้อ 3)
   ```
 
@@ -305,17 +307,17 @@ PATH=/usr/bin:/bin:/usr/local/bin
 
 ### ผู้ใช้ DB แยกตามงาน (BACKLOG4 Y11)
 
-ราคาสินค้าถูกเขียนทับเป็นบาทนอกแอปมาแล้ว 2 ครั้ง (2026-09-24 และ 2026-09-30 — ไม่มี userlog) จึงไม่ควรใช้
-user ที่เขียนได้กับเครื่องมืออื่นนอกจากแอป — ตั้งใน Atlas → **Database Access**:
+FrontOffice ต่อ DB ตรง (BACKLOG4 R7) — แยก user ตามแอป จะได้รู้ว่าใครเขียนอะไร และปิดทีละตัวได้ — ตั้งใน Atlas → **Database Access**:
 
 | user | role | ใช้กับ |
 |---|---|---|
-| `meowmee-app` | `readWrite` เฉพาะ DB ของร้าน | `MONGODB_URI` ของแอปบน VPS เท่านั้น |
+| `meowmee-app` | `readWrite` เฉพาะ DB ของร้าน | `MONGODB_URI` ของ backend นี้บน VPS เท่านั้น |
+| `meowmee-frontoffice` | `readWrite` เฉพาะ DB ของร้าน | FrontOffice (ต่อ DB ตรง — เขียนเงินเป็น **บาท**) |
 | `meowmee-readonly` | `read` เฉพาะ DB ของร้าน | Compass / Atlas Data Explorer / ดูข้อมูล / สคริปต์ audit |
 
 - เปลี่ยนรหัสผ่าน user เดิมที่เคยแจกไป (ถ้าเคยใช้ร่วมกับ Compass) แล้วใช้กับแอปอย่างเดียว
 - Atlas **Project Access**: สมาชิกที่ไม่ใช่ผู้ดูแลระบบ = `Project Read Only` (Data Explorer ของ Atlas UI แก้ข้อมูลได้ถ้ามีสิทธิ์เขียน)
-- แก้ราคา/สินค้าผ่านหน้าเว็บหรือ API เท่านั้น (แปลงสตางค์ให้เอง + มี userlog)
+- เงินทุกฟิลด์ใน DB เป็น **บาท** ทศนิยมไม่เกิน 2 ตำแหน่ง ([`money-units.md`](money-units.md)) · แก้ราคาผ่านหน้าเว็บ/API จะมี userlog
 
 ## ย้อนกลับ (rollback)
 

@@ -92,7 +92,7 @@ async function prepare(input: Record<string, any>, isCreate: boolean): Promise<v
   if ((isCreate || hasItemsInfo) && input.estimated_cost_per_batch == null) {
     const ingCost = await ingredientItemsCost(input.ingredients ?? [], ingredientModel as Model<any>);
     const compCost = await componentItemsCost(input.components ?? [], componentModel as Model<any>);
-    input.estimated_cost_per_batch = Math.round(ingCost + compCost);
+    input.estimated_cost_per_batch = toSatang(ingCost + compCost); // บาท ปัด 2 ตำแหน่ง (src/lib/money.ts)
   } else if (input.estimated_cost_per_batch != null) {
     input.estimated_cost_per_batch = toSatang(Number(input.estimated_cost_per_batch));
   }
@@ -224,7 +224,7 @@ export async function getUnitCostByProduct(
     // ปัดเป็นจำนวนเต็มสตางค์ตรง ๆ (ไม่ใช่ ×100/100 แบบเดิมที่ปัดทศนิยมบาท 2 ตำแหน่ง — ไม่มีความหมาย
     // อีกต่อไปเพราะทั้งตัวตั้งและผลลัพธ์เป็นสตางค์แล้ว)
     const unit =
-      r.yield_qty && r.yield_qty > 0 ? Math.round(r.estimated_cost_per_batch / r.yield_qty) : null;
+      r.yield_qty && r.yield_qty > 0 ? toSatang(r.estimated_cost_per_batch / r.yield_qty) : null;
     out.set(key, unit);
   }
 

@@ -20,7 +20,7 @@ import productModel from "../models/productModel";
 import productVariantModel from "../models/productVariantModel";
 import productOptionModel from "../models/productOptionModel";
 import userModel from "../models/userModel";
-import { toBaht, toBahtFields } from "../lib/money";
+import { toBaht, toBahtFields, toSatang } from "../lib/money";
 import { isPreorderProduct } from "../lib/productCode";
 import { resolveSelectedOptions } from "./productOptionService";
 import { productHasVariants } from "./productService";
@@ -187,7 +187,7 @@ export async function addItem(userId: string, input: AddCartItemInput) {
   const basePrice = product.sale_price ?? product.product_price;
   const variantPrice = variant?.variant_price ?? 0;
   const optionsPrice = options.reduce((s, o) => s + o.extra_price, 0);
-  const price_snapshot = basePrice + variantPrice + optionsPrice;
+  const price_snapshot = toSatang(basePrice + variantPrice + optionsPrice);
 
   const cart = await getOrCreateCart(userId);
 

@@ -19,7 +19,7 @@ describe("expenseService — create/update/list/getById คืนบาท เ�
     expect(doc.amount).toBe(199.5); // ค่าที่ presentExpense แปลงกลับให้
 
     const raw = await expenseModel.findById((doc as { _id: unknown })._id).lean<{ amount: number }>();
-    expect(raw!.amount).toBe(19950); // เก็บจริงเป็นสตางค์
+    expect(raw!.amount).toBe(199.5); // เก็บจริงเป็นสตางค์
   });
 
   it("update: amount ใหม่แปลงเป็นสตางค์ถูกต้อง, ไม่แตะฟิลด์อื่นที่ไม่ได้ส่งมา", async () => {
@@ -39,7 +39,7 @@ describe("expenseService — create/update/list/getById คืนบาท เ�
     const raw = await expenseModel
       .findById((doc as { _id: unknown })._id)
       .lean<{ amount: number; description: string }>();
-    expect(raw!.amount).toBe(550000);
+    expect(raw!.amount).toBe(5500);
     expect(raw!.description).toBe("ค่าเช่า"); // ไม่ถูกแตะ
   });
 

@@ -237,10 +237,9 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
     // ทั้งฝั่งสินค้าและฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด unit_price ที่คำนวณตรงนี้จึงเป็นสตางค์อยู่แล้ว
     // โดยอัตโนมัติ ไม่ต้องแปลงอะไรเพิ่ม)
     const basePrice = product.sale_price ?? product.product_price;
-    const unit_price =
-      basePrice +
-      (variant?.variant_price ?? 0) +
-      resolvedOptions.reduce((s, o) => s + o.extra_price, 0);
+    const unit_price = toSatang(
+      basePrice + (variant?.variant_price ?? 0) + resolvedOptions.reduce((s, o) => s + o.extra_price, 0)
+    );
 
     return {
       product_id: product._id,
@@ -289,14 +288,13 @@ async function persistOrder(
     lines.map((l) => String(l.product_id))
   );
 
-  // unit_price/total_price เป็นสตางค์แล้วตั้งแต่ resolveLine() — บวก/คูณ integer ตรงนี้ไม่มี
-  // rounding error เลย ต่างจากตอนเป็นบาท (float) ที่ต้อง round2() ปิดท้ายทุกจุด (BACKLOG §3.11)
+  // เงินเป็นบาท (float) — ปัด 2 ตำแหน่งทุกครั้งที่คูณ/รวม (src/lib/money.ts)
   const itemsPayload = lines.map((l) => ({
     ...l,
-    total_price: l.unit_price * l.quantity,
+    total_price: toSatang(l.unit_price * l.quantity),
     cost_per_unit: costByProduct.get(String(l.product_id)) ?? l.cost_per_unit ?? null,
   }));
-  const subtotal = itemsPayload.reduce((s, it) => s + it.total_price, 0);
+  const subtotal = toSatang(itemsPayload.reduce((s, it) => s + it.total_price, 0));
 
   // ── ค่าส่ง: คิดฝั่ง server เสมอ (เว้นแต่แอดมินสั่ง override) ──
   // deliveryService ยังทำงานเป็น "บาท" (ยังไม่แปลงในเฟสนี้) — แปลง subtotal เป็นบาทตอนส่งออก แล้ว
@@ -359,7 +357,7 @@ async function persistOrder(
   if (discount_amount > subtotal + delivery_fee) {
     throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
   }
-  const total_amount = subtotal - discount_amount + delivery_fee;
+  const total_amount = toSatang(subtotal - discount_amount + delivery_fee);
 
   const stockItems = lines.map((l) => ({
     product_id: String(l.product_id),
