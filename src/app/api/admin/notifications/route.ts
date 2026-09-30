@@ -8,7 +8,7 @@ import type { NextRequest } from "next/server";
 import { ok, route } from "@/lib/apiResponse";
 import { requireAuth } from "@/lib/authGuard";
 import { parseBool, parsePagination } from "@/lib/queryParams";
-import { notificationService } from "@/services/notificationService";
+import { notificationService, parseNotificationModule } from "@/services/notificationService";
 import type { NotificationModule, NotificationType } from "@/services/notificationService";
 
 export const GET = route(async (req: NextRequest) => {
@@ -16,7 +16,8 @@ export const GET = route(async (req: NextRequest) => {
   const sp = req.nextUrl.searchParams;
   const filter: Record<string, unknown> = {};
   if (sp.has("is_read")) filter.is_read = parseBool(sp.get("is_read"));
-  if (sp.get("module")) filter.module = sp.get("module") as NotificationModule;
+  // รับได้ทั้ง key ภาษาอังกฤษ (order) และป้ายไทยที่แสดงอยู่ (คำสั่งซื้อ) — ค่าไม่รู้จัก = ไม่เจออะไร (ไม่ error)
+  if (sp.get("module")) filter.module = parseNotificationModule(sp.get("module")) ?? (sp.get("module") as NotificationModule);
   if (sp.get("type")) filter.type = sp.get("type") as NotificationType;
 
   const result = await notificationService.list({

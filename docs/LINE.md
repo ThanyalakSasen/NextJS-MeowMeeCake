@@ -718,3 +718,17 @@ export async function alertQuotaExhausted() { markQuotaExhausted(); await alertO
 | ลูกค้าบล็อก OA หลังผูก | อยู่แค่ในหมายเหตุ §5 | 8.1 ข้อ 10 |
 | งาน frontend | "ปุ่มเชื่อม LINE" บรรทัดเดียว | 8.2 ครบ 4 หมวด: ก. เชื่อม LINE (รวม `reason=login_required`) · ข. `low_stock_threshold` + API low-stock · ค. หน้าแจ้งเตือน (`link: null`, หัวข้อใหม่) · ง. คำถามที่ต้องตอบ backend |
 | งาน deploy | กระจายอยู่ §4 / §7 / §9.7 | 8.3 checklist ที่เดียว |
+
+### 9.10 หมวดแจ้งเตือน (module) แสดงเป็นภาษาไทย (2026-10-01)
+
+ค่า `module` เก็บใน DB เป็นภาษาอังกฤษเหมือนเดิม (enum ของ `notificationModel` + ใช้กรอง `?module=`) — แปลงเป็นภาษาไทย **ตอนแสดงผล** เท่านั้น
+
+| | ก่อน | หลัง |
+|---|---|---|
+| ค่าใน DB | `order` / `ingredient` / `production` / `employee` / `finance` / `system` | เหมือนเดิม (ห้ามเก็บภาษาไทย — enum ไม่รับ บันทึกแจ้งเตือนไม่ได้) |
+| response `/api/admin/notifications` (list / getById / แก้ / ลบ / กู้คืน) และผลของ `notify()` | มีแค่ `module` | เพิ่ม **`module_label`**: คำสั่งซื้อ / วัตถุดิบ / การผลิต / พนักงาน / การเงิน / อื่น ๆ |
+| หัวข้อความ LINE ถึงเจ้าของร้าน | `[order] พรีออเดอร์ใหม่ …` | `[คำสั่งซื้อ] พรีออเดอร์ใหม่ …` |
+| กรอง `?module=` | ต้องส่ง key อังกฤษ | ส่งได้ทั้ง `order` และ `คำสั่งซื้อ` |
+
+โค้ด: `NOTIFICATION_MODULE_LABELS` / `notificationModuleLabel()` / `parseNotificationModule()` ใน `src/services/notificationService.ts` ·
+เทส `notificationModuleLabel.test.ts` 3 เคส · **frontend:** แสดง `module_label` แทน `module` (ไม่ต้องมีตารางแปลเอง)

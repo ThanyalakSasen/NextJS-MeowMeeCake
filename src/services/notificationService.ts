@@ -12,7 +12,37 @@ import { pushLineMessage } from "../lib/line";
 import { alertQuotaExhausted, isQuotaExceededError, recordPushed } from "../lib/lineQuota";
 import { log } from "../lib/logger";
 
+/** ค่าที่เก็บใน DB — ภาษาอังกฤษ (enum ของ notificationModel · ใช้กรอง ?module=) ห้ามเปลี่ยนเป็นภาษาไทย */
 export type NotificationModule = "order" | "ingredient" | "production" | "employee" | "finance" | "system";
+
+/** ป้ายภาษาไทยสำหรับแสดงผล — ใส่ใน response เป็น `module_label` และหัวข้อความ LINE */
+export const NOTIFICATION_MODULE_LABELS: Record<NotificationModule, string> = {
+  order: "คำสั่งซื้อ",
+  ingredient: "วัตถุดิบ",
+  production: "การผลิต",
+  employee: "พนักงาน",
+  finance: "การเงิน",
+  system: "อื่น ๆ",
+};
+
+/** ป้ายภาษาไทยของ module (ค่าไม่รู้จัก → คืนค่าเดิม) */
+export function notificationModuleLabel(module: unknown): string {
+  return NOTIFICATION_MODULE_LABELS[module as NotificationModule] ?? String(module ?? "");
+}
+
+/** รับได้ทั้ง key ("order") และป้ายไทย ("คำสั่งซื้อ") → key · ไม่รู้จัก = null (ใช้กับ ?module=) */
+export function parseNotificationModule(value: string | null | undefined): NotificationModule | null {
+  if (!value) return null;
+  const v = value.trim();
+  if (v in NOTIFICATION_MODULE_LABELS) return v as NotificationModule;
+  const hit = (Object.entries(NOTIFICATION_MODULE_LABELS) as [NotificationModule, string][]).find(([, label]) => label === v);
+  return hit ? hit[0] : null;
+}
+
+/** เพิ่ม module_label ให้ทุก response (list/getById/update/remove/restore) — ไม่แตะค่า module เดิม */
+function presentNotification<T extends Record<string, unknown>>(doc: T): T {
+  return { ...doc, module_label: notificationModuleLabel(doc.module) };
+}
 export type NotificationType = "info" | "warning" | "success" | "error";
 
 export interface NotifyInput {
@@ -33,6 +63,7 @@ const base = createCrudService(notificationModel, {
   createFields: ["title", "message", "module", "type", "link", "is_read"],
   updateFields: ["is_read"], // client แก้ได้แค่ mark read/unread — เนื้อหาแก้ไม่ได้
   softDelete: true,
+  present: presentNotification,
 });
 
 /** บันทึกแจ้งเตือนลง DB + พยายาม push เข้า LINE คู่กัน (ไม่ throw ถ้า LINE ล้มเหลว) */
@@ -46,9 +77,9 @@ async function notify(input: NotifyInput) {
     is_read: false,
   });
 
-  if (input.line === false) return doc.toObject();
+  if (input.line === false) return presentNotification(doc.toObject());
 
-  const lineText = `[${input.module}] ${input.title}\n${input.message}`;
+  const lineText = `[${notificationModuleLabel(input.module)}] ${input.title}\n${input.message}`;
   const result = await pushLineMessage(lineText);
   if (result.ok) {
     recordPushed(); // หักโควตาใน cache ของ lib/lineQuota (ใช้ตัดสินว่าส่งหาลูกค้าต่อได้ไหม)
@@ -60,7 +91,7 @@ async function notify(input: NotifyInput) {
     if (isQuotaExceededError(result.error)) await alertQuotaExhausted();
   }
 
-  return doc.toObject();
+  return presentNotification(doc.toObject());
 }
 
 export const notificationService = { ...base, notify };
