@@ -117,8 +117,8 @@ export async function sendPickupReminders(
   // สรุปให้ร้าน — หน้าแจ้งเตือนเว็บอย่างเดียว (line: false ไม่กินโควตา)
   await notificationService
     .notify({
-      title: `พรีออเดอร์ถึงวันรับ ${pickupDateStr}: ${due.length} รายการ`,
-      message: `เตือนลูกค้าทาง LINE แล้ว ${result.sent} ราย · ส่งไม่ถึง ${result.skipped} ราย (ไม่ได้ผูก LINE / โควตาใกล้หมด) — ${result.preorder_nos.join(", ")}`,
+      title: `เปิดรับพรีออเดอร์ถึงวันรับ ${pickupDateStr}: ${due.length} รายการ`,
+      message: `เตือนลูกค้าทาง LINE แล้ว จำนวน ${result.sent} ราย · ส่งไม่ถึงจำนวน ${result.skipped} ราย (ไม่ได้ผูก LINE / โควตาการส่งแจ้งเตือนใกล้หมด) — ${result.preorder_nos.join(", ")}`,
       module: "order",
       type: "info",
       link: null,

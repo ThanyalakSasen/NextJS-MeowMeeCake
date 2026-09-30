@@ -308,7 +308,7 @@ export async function createPreorder(
     // link = null: ยังไม่มี path หน้าจัดการพรีออเดอร์ฝั่ง frontend ที่ยืนยันแล้ว (docs/LINE.md §9)
     notificationService
       .notify({
-        title: `พรีออเดอร์ใหม่ ${preorder.preorder_no}`,
+        title: `เปิดพรีออเดอร์รอบใหม่ ${preorder.preorder_no}`,
         message: `รอบ ${round.round_name ?? "-"} · ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
         module: "order",
         type: "info",

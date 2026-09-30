@@ -43,7 +43,7 @@ function notifyIfLowStockCrossed(
   // หมายเหตุ: enum module ไม่มีหมวด "product" แยก — ใช้ "ingredient" ร่วมกัน (หมวดสต็อกสินค้าคงคลัง)
   notificationService
     .notify({
-      title: `สินค้าใกล้หมด: ${product.product_name_th}`,
+      title: `สินค้าใกล้จะหมด: ${product.product_name_th}`,
       message: `คงเหลือ ${after} ชิ้น (เกณฑ์แจ้งเตือน ${threshold})`,
       module: "ingredient",
       type: "warning",

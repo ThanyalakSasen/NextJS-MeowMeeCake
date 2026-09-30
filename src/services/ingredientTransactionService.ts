@@ -130,7 +130,7 @@ export async function createTransaction(input: CreateTransactionInput) {
     if (before > reorderPoint && after <= reorderPoint) {
       notificationService
         .notify({
-          title: `วัตถุดิบใกล้หมด: ${ingredient.ingredient_name}`,
+          title: `วัตถุดิบใกล้จะหมด: ${ingredient.ingredient_name}`,
           message: `คงเหลือ ${after} (จุดสั่งซื้อ ${reorderPoint})`,
           module: "ingredient",
           type: "warning",

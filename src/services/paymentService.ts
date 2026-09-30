@@ -231,7 +231,7 @@ export async function submitSlip(
   // แจ้งเตือนสลิปเข้าใหม่ (DB + LINE) — best-effort ไม่ทำให้แนบสลิปล้มเหลวถ้าแจ้งเตือนพัง
   notificationService
     .notify({
-      title: "มีสลิปโอนเงินรอตรวจสอบ",
+      title: "มีคำสั่งซื้อรอการรอตรวจสอบสลิปโอนเงิน รหัสคำสั่งซื้อ " + (payment.order_id ?? payment.preorder_id),
       message: `ยอด ${toBaht(payment.amount).toLocaleString("th-TH")} บาท`,
       module: "finance",
       type: "info",
