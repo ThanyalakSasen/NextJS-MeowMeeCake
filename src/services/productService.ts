@@ -26,6 +26,29 @@ import { toSatang, toBahtFields } from "../lib/money";
 /** เกณฑ์ "สต็อกเหลือน้อย" ของสินค้า (ตรงกับดีฟอลต์ของ getLowStockProducts) */
 const LOW_STOCK_THRESHOLD = 5;
 
+/**
+ * แจ้งเจ้าของร้าน (DB + LINE) ตอนสต็อกสินค้า "เพิ่งข้าม" LOW_STOCK_THRESHOLD ลงมา — กัน spam ทุกครั้งที่ต่ำอยู่แล้ว
+ * ใช้ร่วมทุกทางที่ลดสต็อก: ขาย (deductStockForOrder) + ปรับเอง (setStock/adjustStock — นับสต็อก/ตัดของเสีย)
+ * best-effort ไม่ throw (docs/LINE.md §8)
+ */
+function notifyIfLowStockCrossed(
+  product: { _id: unknown; product_name_th?: string },
+  before: number,
+  after: number
+): void {
+  if (!(before > LOW_STOCK_THRESHOLD && after <= LOW_STOCK_THRESHOLD)) return;
+  // หมายเหตุ: enum module ไม่มีหมวด "product" แยก — ใช้ "ingredient" ร่วมกัน (หมวดสต็อกสินค้าคงคลัง)
+  notificationService
+    .notify({
+      title: `สินค้าใกล้หมด: ${product.product_name_th}`,
+      message: `คงเหลือ ${after} ชิ้น`,
+      module: "ingredient",
+      type: "warning",
+      link: "/owner/products",
+    })
+    .catch((err) => log.error("product.notify_failed", { product_id: String(product._id), err }));
+}
+
 // BACKLOG §3.11 — purchase_cost เก็บเป็นสตางค์ตั้งแต่เฟส 4 (ดู recipeService.getUnitCostByProduct
 // comment สำหรับเหตุผลที่ต้องแปลงก่อน product_price/sale_price อื่น) ส่วน product_price/sale_price
 // เก็บเป็นสตางค์ตั้งแต่เฟส 5b — API ยังรับ-ส่งบาททศนิยมเหมือนเดิมทั้งหมด
@@ -633,18 +656,19 @@ export async function setStock(id: string, quantity: number) {
   }
   await loadStockableProduct(id);
 
-  const product = await productModel
+  // findOneAndUpdate คืนค่า "ก่อน" อัปเดต (ไม่ส่ง new) — ได้ before ที่แม่นแบบ atomic ไว้เช็คข้ามเกณฑ์
+  const previous = await productModel
     .findOneAndUpdate(
       { _id: id, deleted_at: null, ...STOCKABLE_MATCH },
-      { $set: { product_stock_quantity: quantity } },
-      { new: true }
+      { $set: { product_stock_quantity: quantity } }
     )
-    .lean();
+    .lean<{ _id: unknown; product_name_th?: string; product_stock_quantity?: number } | null>();
 
-  if (!product) {
+  if (!previous) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
-  return product;
+  notifyIfLowStockCrossed(previous, previous.product_stock_quantity ?? 0, quantity);
+  return { ...previous, product_stock_quantity: quantity };
 }
 
 // ── ปรับสต็อกด้วยส่วนต่าง (+ รับเข้า / - ตัดออก) ──────────────
@@ -687,6 +711,8 @@ export async function adjustStock(
     }
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
+  const after = (product as { product_stock_quantity?: number }).product_stock_quantity ?? 0;
+  notifyIfLowStockCrossed(product as { _id: unknown; product_name_th?: string }, after - delta, after);
   return product;
 }
 
@@ -801,21 +827,11 @@ export async function deductStockForOrder(items: StockItemInput[]) {
       }
       applied.push({ product_id, quantity });
 
-      // แจ้งเตือนตอนสต็อกเพิ่งข้าม LOW_STOCK_THRESHOLD ลงมา (กัน spam ทุกครั้งที่ต่ำอยู่แล้ว)
-      const before = product.product_stock_quantity ?? 0;
-      const after = updated.product_stock_quantity ?? 0;
-      if (before > LOW_STOCK_THRESHOLD && after <= LOW_STOCK_THRESHOLD) {
-        // หมายเหตุ: enum module ไม่มีหมวด "product" แยก — ใช้ "ingredient" ร่วมกัน (หมวดสต็อกสินค้าคงคลัง)
-        notificationService
-          .notify({
-            title: `สินค้าใกล้หมด: ${product.product_name_th}`,
-            message: `คงเหลือ ${after} ชิ้น`,
-            module: "ingredient",
-            type: "warning",
-            link: "/owner/products",
-          })
-          .catch((err) => log.error("product.notify_failed", { product_id, err }));
-      }
+      notifyIfLowStockCrossed(
+        product,
+        product.product_stock_quantity ?? 0,
+        updated.product_stock_quantity ?? 0
+      );
     }
   } catch (err) {
     // ชดเชย: คืนสต็อกทุกตัวที่ตัดไปแล้ว
