@@ -10,6 +10,7 @@
  * flow: planned → in_progress → done   (ยกเลิกได้ทุกสถานะที่ยังไม่ done → cancelled)
  *  - startProduction   : planned → in_progress, เซ็ต started_at
  *  - completeProduction: in_progress → done, หักสต็อกวัตถุดิบของรายการที่ยังไม่ถูกหักให้ครบ
+ *                        + เพิ่มสต็อกสินค้าสำเร็จรูปของสินค้าปกติ (BACKLOG4 Y2)
  *  - cancelProduction  : → cancelled, คืนสต็อกของรายการที่หักไปแล้ว
  */
 import dbConnect from "../lib/dbConnect";
@@ -17,7 +18,7 @@ import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { Saga } from "../lib/compensation";
-import { generateDocNo } from "../lib/productCode";
+import { generateDocNo, isPreorderProduct } from "../lib/productCode";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import productionOrderModel from "../models/productionOrderModel";
 import productionItemModel from "../models/productionItemModel";
@@ -26,7 +27,9 @@ import preorderRoundModel from "../models/preorderRoundModel";
 import preorderModel from "../models/preorderModel";
 import preorderItemModel from "../models/preorderItemModel";
 import recipeModel from "../models/recipeModel";
+import productModel from "../models/productModel";
 import * as productionItemService from "./productionItemService";
+import * as productService from "./productService";
 import type { AddItemInput } from "./productionItemService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -374,7 +377,48 @@ export async function completeProduction(
   order.production_status = "done";
   order.completed_at = new Date();
   await order.save();
+
+  // docs/BACKLOG4.md Y2 — เดิมผลิตเสร็จแล้วหักแค่วัตถุดิบ ไม่เพิ่มสต็อกสินค้า ต้องไปปรับสต็อกเองทุกครั้ง
+  await addFinishedGoodsStock(String(order._id), { use_actual: opts.use_actual });
   return getProductionOrderById(id);
+}
+
+/**
+ * ปิดงานผลิตแล้ว → เพิ่มสต็อกสินค้าสำเร็จรูป (docs/BACKLOG4.md Y2 — ตัดสินใจ 2026-10-01: เพิ่มอัตโนมัติ)
+ *   - เฉพาะสินค้าปกติ (is_preorder: false) — พรีออเดอร์ไม่มีสต็อก ของส่งตรงให้ลูกค้าที่สั่ง
+ *   - จำนวน = actual_qty ถ้าส่ง use_actual และกรอกไว้ ไม่งั้น planned_qty (เดียวกับที่ใช้หักวัตถุดิบ)
+ *   - ข้ามรายการที่ยกเลิก / จำนวน 0 · ครั้งเดียวต่อรายการ (จอง product_stock_added_at แบบ atomic)
+ *   - เพิ่มผ่าน productService.increaseStock (atomic $inc เดียวกับการรับสินค้าเข้าสต็อก)
+ */
+async function addFinishedGoodsStock(orderId: string, opts: { use_actual?: boolean } = {}): Promise<void> {
+  const items = await productionItemModel
+    .find({
+      production_order_id: orderId,
+      deleted_at: null,
+      item_status: { $ne: "cancelled" },
+      product_stock_added_at: null,
+    })
+    .lean<any[]>();
+  if (items.length === 0) return;
+
+  const products = await productModel
+    .find({ _id: { $in: items.map((i) => i.product_id) } })
+    .select("is_preorder")
+    .lean<Array<{ _id: unknown; is_preorder?: boolean }>>();
+  const preorderIds = new Set(products.filter((p) => isPreorderProduct(p)).map((p) => String(p._id)));
+
+  for (const it of items) {
+    if (preorderIds.has(String(it.product_id))) continue;
+    const qty = opts.use_actual && it.actual_qty != null ? Number(it.actual_qty) : Number(it.planned_qty);
+    if (!(qty > 0)) continue;
+
+    const claimed = await productionItemModel.findOneAndUpdate(
+      { _id: it._id, product_stock_added_at: null },
+      { $set: { product_stock_added_at: new Date(), product_stock_added_qty: qty } }
+    );
+    if (!claimed) continue;
+    await productService.increaseStock(String(it.product_id), qty);
+  }
 }
 
 /**
