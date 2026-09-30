@@ -153,7 +153,9 @@ export async function createProductionFromRound(input: CreateProductionFromRound
     await assertRefExists(userModel, input.assigned_to, "ผู้รับผิดชอบ", "assigned_to");
   }
 
-  // รวมยอดสั่งจริงต่อสินค้า — เฉพาะพรีออเดอร์ที่ยังไม่ถูกลบ/ยกเลิกในรอบนี้เท่านั้น
+  // รวมยอดสั่งจริงต่อสินค้า — เฉพาะพรีออเดอร์ที่ยังไม่ถูกลบ/ยกเลิก และ "ยืนยันการชำระเงินแล้ว" (paid) ในรอบนี้
+  // docs/preorder-round-flow.md ประเด็น 3 (ตัดสินใจ 2026-10-01) — เดิมนับทุกรายการรวมที่ยังไม่จ่าย → ผลิตให้คนไม่จ่าย
+  // รายการที่จ่ายทีหลัง (เช่น สลิปรอตรวจตอนปิดรอบ) บวกเข้าใบผลิตให้ที่ preorderRoundLifecycleService.onPreorderPaid
   const grouped = await preorderItemModel.aggregate([
     {
       $lookup: {
@@ -169,6 +171,7 @@ export async function createProductionFromRound(input: CreateProductionFromRound
         "preorder.round_id": round._id,
         "preorder.deleted_at": null,
         "preorder.order_status": { $ne: "cancelled" },
+        "preorder.payment_status": "paid",
       },
     },
     {
@@ -179,7 +182,7 @@ export async function createProductionFromRound(input: CreateProductionFromRound
       },
     },
   ]);
-  if (!grouped.length) throw badRequest("รอบนี้ยังไม่มีพรีออเดอร์ที่ต้องผลิต (ไม่นับรายการที่ยกเลิกแล้ว)");
+  if (!grouped.length) throw badRequest("รอบนี้ยังไม่มีพรีออเดอร์ที่ชำระเงินแล้ว (นับเฉพาะรายการที่ยืนยันการชำระเงิน)");
 
   const productIds = grouped.map((g) => String(g._id));
   // เรียงใหม่→เก่า แล้วเอาตัวแรก (ล่าสุด) ต่อสินค้า — คล้าย recipeService.getUnitCostByProduct() แต่เพิ่ม

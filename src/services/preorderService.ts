@@ -31,6 +31,7 @@ import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
 import { notificationService } from "./notificationService";
+import { computePaymentDueAt, onPreorderPaid } from "./preorderRoundLifecycleService";
 import { log } from "../lib/logger";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { generateDocNo } from "../lib/productCode";
@@ -272,6 +273,8 @@ export async function createPreorder(
           discount_amount,
           delivery_fee,
           total_amount,
+          // docs/preorder-round-flow.md ประเด็น 3 — เลยกำหนดแล้วยังไม่จ่าย (ไม่มีสลิปรอตรวจ) → ยกเลิกอัตโนมัติ
+          payment_due_at: computePaymentDueAt(new Date(), round.close_date),
         });
       } catch (err: any) {
         if (err?.code === 11000 && attempt < 4) continue;
@@ -529,6 +532,10 @@ export async function setPaymentStatus(
     paymentId,
     entityLabel: "พรีออเดอร์",
   });
+  // จ่ายหลังปิดรอบ/หลังสร้างใบผลิต → บวกเข้าใบผลิต (fire-and-forget — ไม่ให้การยืนยันชำระเงินล้มเพราะงานนี้)
+  if (status === "paid") {
+    onPreorderPaid(preorderId).catch((err) => log.error("preorder.late_payment_sync_failed", { preorder_id: preorderId, err }));
+  }
   return presentPreorder(preorder);
 }
 

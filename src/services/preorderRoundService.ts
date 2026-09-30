@@ -5,9 +5,10 @@
  *   open_date..close_date = ช่วงเปิดรับ ; pickup_date = วันนัดรับ / เริ่มจัดส่ง
  *
  * round_status (state machine):
- *   scheduled → open → closed          (เดินหน้าตามลำดับ)
+ *   scheduled → open → closed          (เดินหน้าตามลำดับ) · closed → open (ยังไม่มีใบสั่งผลิต)
  *   scheduled | open → cancelled       (ยกเลิกรอบ)
- *   ระบบไม่เลื่อนสถานะอัตโนมัติตามเวลา — แอดมินเป็นคนกด ส่วนตอนลูกค้าสั่งจะเช็ค isRoundOrderable() อีกชั้น
+ *   เปิด/ปิดอัตโนมัติตามเวลาผ่าน cron (preorderRoundLifecycleService.runRoundScheduler) หรือแอดมินกดเอง ·
+ *   ปิดรอบ → ยกเลิกคนไม่จ่าย + สร้างใบสั่งผลิต (onRoundClosed) · ตอนลูกค้าสั่งเช็ค assertRoundOrderable() อีกชั้น
  *
  * PreorderRoundItems = สินค้าพรีออเดอร์ที่เปิดขายในรอบ + เพดานจำนวนรวม (max_qty_total) + ยอดจองปัจจุบัน (current_qty)
  *   commitQty/releaseQty ใช้ $inc แบบมีเงื่อนไข กันจองเกินโควตา (best-effort ไม่มี transaction)
@@ -22,6 +23,7 @@ import preorderRoundModel from "../models/preorderRoundModel";
 import preorderRoundItemModel from "../models/preorderRoundItemModel";
 import preorderModel from "../models/preorderModel";
 import preorderItemModel from "../models/preorderItemModel";
+import productionOrderModel from "../models/productionOrderModel";
 import productModel from "../models/productModel";
 import userModel from "../models/userModel";
 import type { z } from "zod";
@@ -42,7 +44,8 @@ export type RoundStatus = (typeof ROUND_STATUSES)[number];
 const NEXT_ROUND_STATUS: Record<RoundStatus, RoundStatus[]> = {
   scheduled: ["open", "cancelled"],
   open: ["closed", "cancelled"],
-  closed: [],
+  // เปิดกลับได้ถ้ายังไม่มีใบสั่งผลิต (docs/preorder-round-flow.md ประเด็น 8) — ตรวจเพิ่มใน updateRoundStatus
+  closed: ["open"],
   cancelled: [],
 };
 
@@ -336,6 +339,7 @@ export async function updateRound(id: string, input: UpdateRoundInput) {
   await round.save();
 
   if (pickupChanged) await syncPickupDateChange(round._id, pickup_date);
+  if (payload.close_date !== undefined) await recomputePaymentDueDates(round._id, close_date);
   return getRoundDetail(id);
 }
 
@@ -345,6 +349,26 @@ export async function updateRound(id: string, input: UpdateRoundInput) {
  *   - แจ้งลูกค้าทาง LINE ทีละพรีออเดอร์ (ผ่านกลไกโควตา — ส่งไม่ถึงไม่ทำให้การแก้รอบล้ม)
  *   - ล้าง pickup_reminded_at ให้ระบบเตือนก่อนวันรับ (preorderReminderService) เตือนใหม่ตามวันใหม่
  */
+/**
+ * เลื่อน close_date → คำนวณกำหนดชำระใหม่ของรายการที่ยังไม่จ่ายในรอบ = min(สั่ง + N ชม., ปิดรอบใหม่)
+ * (docs/preorder-round-flow.md ประเด็น 3 — เลื่อนปิดออกไปแล้วคนที่ถูกจำกัดด้วยเวลาปิดเดิมได้เวลาเพิ่ม)
+ */
+async function recomputePaymentDueDates(roundId: unknown, closeDate: Date): Promise<void> {
+  const { computePaymentDueAt } = await import("./preorderRoundLifecycleService");
+  const unpaid = await preorderModel
+    .find({
+      round_id: roundId,
+      deleted_at: null,
+      order_status: { $nin: ["cancelled", "completed"] },
+      payment_status: { $in: ["pending", "failed"] },
+    })
+    .select("_id created_at")
+    .lean<Array<{ _id: unknown; created_at: Date }>>();
+  for (const p of unpaid) {
+    await preorderModel.updateOne({ _id: p._id }, { $set: { payment_due_at: computePaymentDueAt(p.created_at, closeDate) } });
+  }
+}
+
 async function syncPickupDateChange(roundId: unknown, pickupDate: Date): Promise<void> {
   const active = await preorderModel
     .find({ round_id: roundId, deleted_at: null, order_status: { $nin: ["cancelled", "completed"] } })
@@ -404,7 +428,11 @@ async function cancelPreordersOfRound(
  * `cancelled` → ยกเลิกพรีออเดอร์ที่ค้างในรอบให้ด้วย (cancelPreordersOfRound) — ต้องส่ง opts.by (ผู้กด) เพื่อให้
  * คืนเงินอัตโนมัติได้ (registerAutoRefundOnCancel ต้องมีผู้ยืนยันการคืนเงิน)
  */
-export async function updateRoundStatus(id: string, next: RoundStatus, opts: { by?: string } = {}) {
+export async function updateRoundStatus(
+  id: string,
+  next: RoundStatus,
+  opts: { by?: string; close_date?: string | Date } = {}
+) {
   await dbConnect();
   assertObjectId(id);
   if (!ROUND_STATUSES.includes(next)) {
@@ -420,9 +448,36 @@ export async function updateRoundStatus(id: string, next: RoundStatus, opts: { b
     throw conflict(`เปลี่ยนสถานะรอบจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
 
+  // ประเด็น 8 — เปิดรอบที่ปิดแล้วกลับ: ต้องยังไม่มีใบสั่งผลิต และ close_date ต้องอยู่ในอนาคต (ไม่งั้นตัวตั้งเวลาปิดซ้ำทันที)
+  // รอบที่ปิดแล้วแก้วันที่ผ่าน updateRound ไม่ได้ → รับ close_date ใหม่มาพร้อมคำสั่งเปิดกลับได้เลย
+  if (current === "closed" && next === "open") {
+    const production = await productionOrderModel.countDocuments({
+      round_id: round._id,
+      deleted_at: null,
+      production_status: { $ne: "cancelled" },
+    });
+    if (production > 0) {
+      throw conflict("รอบนี้มีใบสั่งผลิตแล้ว เปิดกลับไม่ได้ (ยกเลิกใบสั่งผลิตก่อนถ้าจำเป็นต้องเปิดรับเพิ่ม)");
+    }
+    if (opts.close_date !== undefined) {
+      const close = toDate(opts.close_date, "close_date");
+      assertDateOrder(round.open_date, close, round.pickup_date);
+      round.close_date = close;
+    }
+    if (new Date(round.close_date).getTime() <= Date.now()) {
+      throw conflict("close_date ผ่านไปแล้ว — ส่ง close_date ใหม่ (ในอนาคต) มาพร้อมคำสั่งเปิดรอบกลับ");
+    }
+  }
+
   // เปลี่ยนสถานะรอบก่อน — ลูกค้าสั่งเพิ่มไม่ได้ทันที (assertRoundOrderable) ระหว่างไล่ยกเลิกพรีออเดอร์ข้างล่าง
   round.round_status = next;
   await round.save();
+
+  // ปิดรอบ → ยกเลิกคนไม่จ่าย + สร้างใบสั่งผลิตอัตโนมัติ (docs/preorder-round-flow.md §6) — dynamic import กัน circular
+  if (next === "closed") {
+    const { onRoundClosed } = await import("./preorderRoundLifecycleService");
+    return { ...(await getRoundDetail(id)), close_result: await onRoundClosed(round._id) };
+  }
 
   if (next === "cancelled") {
     const cascade = await cancelPreordersOfRound(round._id, round.round_name, opts.by);

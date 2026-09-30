@@ -83,14 +83,15 @@ describe("ปัญหา 1 — ยกเลิกรอบ → ยกเลิ�
     expect((await preorderRoundItemModel.findById(item._id).lean<{ current_qty: number }>())?.current_qty).toBe(1);
   });
 
-  it("เปลี่ยนเป็นสถานะอื่น (open→closed) ไม่แตะพรีออเดอร์", async () => {
+  it("ปิดรอบ (open→closed) ไม่ใช่การยกเลิกรอบ: ไม่มี cancel_cascade · พรีออเดอร์ที่จ่ายแล้วคงอยู่ (คนไม่จ่ายดู preorderLifecycle.test.ts)", async () => {
     const p = await preorderProduct();
     const { round, itemOf } = await openRound([p]);
     const u = await makeUser();
     const pre = await order(u._id, round, itemOf(p)._id, 1);
+    await preorderModel.updateOne({ _id: pre._id }, { $set: { payment_status: "paid", order_status: "confirmed" } });
     const res = (await preorderRoundService.updateRoundStatus(String(round._id), "closed")) as { cancel_cascade?: unknown };
     expect(res.cancel_cascade).toBeUndefined();
-    expect((await preorderModel.findById(pre._id).lean<{ order_status: string }>())?.order_status).toBe("pending");
+    expect((await preorderModel.findById(pre._id).lean<{ order_status: string }>())?.order_status).toBe("confirmed");
   });
 });
 
