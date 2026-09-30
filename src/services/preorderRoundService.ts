@@ -475,10 +475,9 @@ export async function restoreRound(id: string) {
   const itemRes = await preorderRoundItemModel.updateMany(
     {
       round_id: round._id,
-      deleted_at: {
-        $gte: new Date(deletedAt - CASCADE_DELETE_TOLERANCE_MS),
-        $lte: new Date(deletedAt + CASCADE_DELETE_TOLERANCE_MS),
-      },
+      // ข้อมูลเก่า: deleteRound เดิมตั้ง deleted_at ของรอบก่อน แล้วค่อยของรายการ → รายการที่ลบ "พร้อมรอบ" มีเวลา
+      // เท่ากับหรือหลังรอบเสมอ · รายการที่แอดมินลบเองก่อนหน้า (แม้แค่ไม่กี่ ms) อยู่ก่อนเวลารอบ → ไม่ถูกกู้
+      deleted_at: { $gte: new Date(deletedAt), $lte: new Date(deletedAt + CASCADE_DELETE_TOLERANCE_MS) },
     },
     { $set: { deleted_at: null } }
   );
