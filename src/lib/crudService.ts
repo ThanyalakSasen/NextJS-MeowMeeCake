@@ -142,7 +142,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
       .findOneAndUpdate(
         { _id: id, ...activeFilter() },
         { $set: payload },
-        { new: true, runValidators: true }
+        { returnDocument: "after", runValidators: true }
       )
       .lean();
 
@@ -159,7 +159,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
         .findOneAndUpdate(
           { _id: id, deleted_at: null },
           { $set: { deleted_at: new Date() } },
-          { new: true }
+          { returnDocument: "after" }
         )
         .lean();
       if (!doc) throw notFound(`ไม่พบ${opts.label}ที่ระบุ หรือถูกลบไปแล้ว`);
@@ -181,7 +181,7 @@ export function createCrudService(model: AnyModel, opts: CrudOptions): CrudServi
       .findOneAndUpdate(
         { _id: id, deleted_at: { $ne: null } },
         { $set: { deleted_at: null } },
-        { new: true }
+        { returnDocument: "after" }
       )
       .lean();
     if (!doc) throw notFound(`ไม่พบ${opts.label}ที่ถูกลบไว้`);
@@ -213,7 +213,7 @@ export async function softDeleteDoc(
     .findOneAndUpdate(
       { _id: id, deleted_at: null },
       { $set: { deleted_at: new Date(), ...(opts.extraSet ?? {}) } },
-      { new: true }
+      { returnDocument: "after" }
     )
     .lean();
   if (!doc) throw notFound(opts.notFoundMsg);
@@ -232,7 +232,7 @@ export async function restoreDoc(
     .findOneAndUpdate(
       { _id: id, deleted_at: { $ne: null } },
       { $set: { deleted_at: null, ...(opts.extraSet ?? {}) } },
-      { new: true }
+      { returnDocument: "after" }
     )
     .lean();
   if (!doc) throw notFound(opts.notFoundMsg);

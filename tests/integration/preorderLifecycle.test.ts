@@ -10,6 +10,7 @@ import * as preorderService from "@/services/preorderService";
 import {
   cancelUnpaidPreorders,
   computePaymentDueAt,
+  onPreorderCancelled,
   onPreorderPaid,
   paymentDeadlineHours,
   runRoundScheduler,
@@ -310,5 +311,60 @@ describe("ตัวตั้งเวลา (runRoundScheduler)", () => {
     expect(r2.opened.map(String)).not.toContain(expect.stringContaining(`จะเปิด-${now}`));
     expect(r2.closed).toHaveLength(0);
     expect(await productionOrderModel.countDocuments({ round_id: toClose._id })).toBe(1);
+  });
+});
+
+/** docs/BACKLOG4.md Y1 — ยกเลิกพรีออเดอร์ที่ถูกนับเข้าใบผลิตแล้ว → ลดใบผลิต */
+describe("ยกเลิกหลังสร้างใบผลิต → ลดใบผลิต (BACKLOG4 Y1)", () => {
+  async function closedWithTwoPaid() {
+    const p = await preorderProduct();
+    const { round, admin, itemOf } = await openRound([p]);
+    const a = await order(round, itemOf(p)._id, 3);
+    const b = await order(round, itemOf(p)._id, 2);
+    for (const x of [a, b]) {
+      await markPaid(x._id);
+      await paymentModel.create({
+        user_id: (await preorderModel.findById(x._id).lean<{ user_id: unknown }>())!.user_id,
+        preorder_id: x._id,
+        amount: 100,
+        status: "paid",
+      });
+    }
+    await preorderRoundService.updateRoundStatus(String(round._id), "closed");
+    const po = (await productionOrderModel.findOne({ round_id: round._id }).lean<{ _id: unknown }>())!;
+    return { a, b, po, admin };
+  }
+  const item = async (poId: unknown) =>
+    (await productionItemModel.findOne({ production_order_id: poId }).lean<{ planned_qty: number; item_status: string }>())!;
+
+  it("ยกเลิกรายการที่จ่ายแล้ว (คืนเงินอัตโนมัติ) → planned_qty ลด · เรียกซ้ำไม่ลดซ้ำ · หมดเหลือ 0 → รายการ cancelled", async () => {
+    const { a, b, po, admin } = await closedWithTwoPaid();
+    expect((await item(po._id)).planned_qty).toBe(5);
+
+    await preorderService.cancelPreorder(String(a._id), { cancelled_by: String(admin._id), cancelled_reason: "ลูกค้าขอยกเลิก" });
+    expect((await item(po._id)).planned_qty).toBe(2);
+    expect((await statusOf(a._id)).payment_status).toBe("refunded");
+    expect(await onPreorderCancelled(String(a._id), true)).toBe("skipped"); // ลดไปแล้ว
+    expect((await item(po._id)).planned_qty).toBe(2);
+
+    await preorderService.cancelPreorder(String(b._id), { cancelled_by: String(admin._id) });
+    expect(await item(po._id)).toMatchObject({ planned_qty: 0, item_status: "cancelled" });
+  });
+
+  it("ใบผลิตเริ่มผลิตแล้ว → ไม่แตะ แจ้งร้าน", async () => {
+    const { a, po, admin } = await closedWithTwoPaid();
+    await productionOrderModel.updateOne({ _id: po._id }, { $set: { production_status: "in_progress" } });
+    await preorderService.cancelPreorder(String(a._id), { cancelled_by: String(admin._id) });
+    expect((await item(po._id)).planned_qty).toBe(5);
+    expect(await notificationModel.findOne({ title: "พรีออเดอร์ถูกยกเลิกหลังเริ่มผลิต", message: new RegExp(a.preorder_no) })).toBeTruthy();
+  });
+
+  it("ยกเลิกรายการที่ยังไม่จ่าย / รอบยังไม่ปิด → ไม่แตะใบผลิต", async () => {
+    expect(await onPreorderCancelled("000000000000000000000000", false)).toBe("not-counted");
+    const p = await preorderProduct();
+    const { round, itemOf } = await openRound([p]);
+    const pre = await order(round, itemOf(p)._id, 1);
+    await markPaid(pre._id);
+    expect(await onPreorderCancelled(String(pre._id), true)).toBe("not-counted"); // รอบยัง open
   });
 });

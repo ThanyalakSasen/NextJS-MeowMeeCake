@@ -677,7 +677,7 @@ export async function adjustStock(
     .findOneAndUpdate(
       filter,
       { $inc: { product_stock_quantity: delta } },
-      { new: true }
+      { returnDocument: "after" }
     )
     .lean();
 
@@ -795,7 +795,7 @@ export async function deductStockForOrder(items: StockItemInput[]) {
           product_stock_quantity: { $gte: quantity },
         },
         { $inc: { product_stock_quantity: -quantity } },
-        { new: true }
+        { returnDocument: "after" }
       );
 
       if (!updated) {

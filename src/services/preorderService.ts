@@ -31,7 +31,7 @@ import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
 import { notificationService } from "./notificationService";
-import { computePaymentDueAt, onPreorderPaid } from "./preorderRoundLifecycleService";
+import { computePaymentDueAt, onPreorderCancelled, onPreorderPaid } from "./preorderRoundLifecycleService";
 import { log } from "../lib/logger";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { generateDocNo } from "../lib/productCode";
@@ -439,6 +439,9 @@ export async function updatePreorderStatus(
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
 
+  // จำไว้ก่อน cleanup — auto-refund ด้านล่างเปลี่ยน payment_status ใน DB เป็น refunded ไปแล้วตอนเช็คทีหลัง
+  const wasPaid = preorder.payment_status === "paid";
+
   let cancelledItems: any[] | undefined;
   if (next === "cancelled") {
     // cleanup ตอนยกเลิก — best-effort ทั้งหมด (step ที่ fail จะ log ผ่าน logger ไม่ล้มการยกเลิก)
@@ -487,6 +490,13 @@ export async function updatePreorderStatus(
       orderType: preorder.order_type,
     })
   );
+
+  // docs/BACKLOG4.md Y1 — ยกเลิกรายการที่ถูกนับเข้าใบผลิตแล้ว → ลดใบผลิต (best-effort ไม่ให้การยกเลิกล้ม)
+  if (next === "cancelled") {
+    await onPreorderCancelled(String(preorder._id), wasPaid).catch((err) =>
+      log.error("preorder.production_reduce_failed", { preorder_id: String(preorder._id), err })
+    );
+  }
   return presentPreorderWithItems(preorder, cancelledItems);
 }
 

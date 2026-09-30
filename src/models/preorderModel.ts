@@ -45,6 +45,8 @@ const preorderSchema = new mongoose.Schema(
     payment_due_at: { type: Date, default: null },
     // เวลาที่ถูกบวกเข้าใบสั่งผลิตของรอบหลังจ่ายช้า (จ่ายหลังสร้างใบผลิตแล้ว) — กันบวกซ้ำ
     added_to_production_at: { type: Date, default: null },
+    // เวลาที่ถูกหักออกจากใบสั่งผลิตหลังถูกยกเลิก (docs/BACKLOG4.md Y1) — กันหักซ้ำ
+    removed_from_production_at: { type: Date, default: null },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }

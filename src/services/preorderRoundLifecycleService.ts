@@ -286,9 +286,80 @@ export async function onPreorderPaid(preorderId: string): Promise<LatePaymentOut
   return "added";
 }
 
-async function notifyOwner(message: string): Promise<void> {
+// ── ยกเลิกพรีออเดอร์ที่ถูกนับเข้าใบผลิตแล้ว → ลดใบผลิต (docs/BACKLOG4.md Y1) ─────────
+export type CancelledSyncOutcome = "not-counted" | "no-production" | "reduced" | "production-started" | "skipped";
+
+/**
+ * เรียกหลังพรีออเดอร์ถูกยกเลิก (preorderService.updatePreorderStatus) — กลับด้านของ onPreorderPaid
+ * เดิม: ยกเลิก/คืนเงินหลังสร้างใบผลิต ใบผลิตไม่ลด → ผลิตเกินจำนวนที่ต้องส่งจริง
+ *   ไม่เคยถูกนับ (ตอนยกเลิกยังไม่จ่าย) / รอบยังไม่ปิด → ไม่ทำอะไร
+ *   ใบผลิต planned → ลด planned_qty ของรายการสินค้า (เฉพาะรายการ pending ที่ยังไม่ตัดสต็อก) · เหลือ 0 → รายการเป็น cancelled
+ *   ใบผลิตเริ่มผลิตแล้ว → ไม่แตะ แจ้งร้าน
+ * กันลดซ้ำด้วย preorders.removed_from_production_at (จองแบบ atomic)
+ * @param wasPaid สถานะการจ่ายก่อนยกเลิก — ยกเลิกรายการที่จ่ายแล้วจะคืนเงินอัตโนมัติ payment_status ใน DB จึงเปลี่ยนไปแล้ว
+ */
+export async function onPreorderCancelled(preorderId: string, wasPaid: boolean): Promise<CancelledSyncOutcome> {
+  await dbConnect();
+  if (!wasPaid) return "not-counted"; // ใบผลิตนับเฉพาะ paid (ประเด็น 3)
+  const pre = await preorderModel.findOne({ _id: preorderId }).lean<any>();
+  if (!pre || pre.removed_from_production_at) return "skipped";
+  const round = await preorderRoundModel.findOne({ _id: pre.round_id }).select("round_status").lean<any>();
+  if (!round || round.round_status !== "closed") return "not-counted";
+
+  const production = await productionOrderModel
+    .findOne({ round_id: pre.round_id, deleted_at: null, production_status: { $ne: "cancelled" } })
+    .lean<any>();
+  if (!production) return "no-production";
+  if (production.production_status !== "planned") {
+    await notifyOwner(
+      `พรีออเดอร์ ${pre.preorder_no} ถูกยกเลิกหลังใบสั่งผลิต ${production.production_no} เริ่มผลิตแล้ว — ` +
+        "ระบบไม่ได้ลดจำนวนให้ ปรับรายการผลิตเองถ้าจำเป็น",
+      "พรีออเดอร์ถูกยกเลิกหลังเริ่มผลิต"
+    );
+    return "production-started";
+  }
+
+  const claimed = await preorderModel.findOneAndUpdate(
+    { _id: pre._id, removed_from_production_at: null },
+    { $set: { removed_from_production_at: new Date() } }
+  );
+  if (!claimed) return "skipped";
+
+  const items = await preorderItemModel.find({ preorder_id: pre._id, deleted_at: null }).lean<any[]>();
+  for (const it of items) {
+    const pi = await productionItemModel
+      .findOne({
+        production_order_id: production._id,
+        product_id: it.product_id,
+        deleted_at: null,
+        item_status: "pending",
+        stock_updated_at: null,
+      })
+      .lean<any>();
+    if (!pi) continue;
+    const next = Math.max(0, pi.planned_qty - it.quantity);
+    await productionItemModel.updateOne(
+      { _id: pi._id },
+      { $set: next === 0 ? { planned_qty: 0, item_status: "cancelled" } : { planned_qty: next } }
+    );
+  }
+
   await notificationService
-    .notify({ title: "พรีออเดอร์ชำระเงินหลังปิดรอบ", message, module: "production", type: "warning", link: null })
+    .notify({
+      title: `ลดยอดใบสั่งผลิต ${production.production_no}`,
+      message: `พรีออเดอร์ ${pre.preorder_no} ถูกยกเลิก — หักจำนวนออกจากใบผลิตแล้ว`,
+      module: "production",
+      type: "info",
+      link: null,
+      line: false,
+    })
+    .catch((err) => log.error("preorder_lifecycle.cancel_notify_failed", { err }));
+  return "reduced";
+}
+
+async function notifyOwner(message: string, title = "พรีออเดอร์ชำระเงินหลังปิดรอบ"): Promise<void> {
+  await notificationService
+    .notify({ title, message, module: "production", type: "warning", link: null })
     .catch((err) => log.error("preorder_lifecycle.owner_notify_failed", { err }));
 }
 

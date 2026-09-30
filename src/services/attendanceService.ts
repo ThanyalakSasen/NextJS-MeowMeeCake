@@ -205,7 +205,7 @@ export async function recordAttendance(input: RecordAttendanceInput) {
     .findOneAndUpdate(
       { user_id: input.user_id, work_date: input.work_date, deleted_at: null },
       { $set: set, $setOnInsert: { user_id: input.user_id, work_date: input.work_date } },
-      { new: true, upsert: true, runValidators: true, setDefaultsOnInsert: true }
+      { returnDocument: "after", upsert: true, runValidators: true, setDefaultsOnInsert: true }
     )
     .lean();
   return doc;
@@ -237,7 +237,7 @@ export async function updateAttendance(id: string, input: UpdateAttendanceInput)
   assertTimeOrder(nextIn, nextOut);
 
   const doc = await attendanceModel
-    .findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true })
+    .findByIdAndUpdate(id, { $set: payload }, { returnDocument: "after", runValidators: true })
     .lean();
   return doc;
 }
@@ -250,7 +250,7 @@ export async function deleteAttendance(id: string) {
     .findOneAndUpdate(
       { _id: id, deleted_at: null },
       { $set: { deleted_at: new Date() } },
-      { new: true }
+      { returnDocument: "after" }
     )
     .lean();
   if (!doc) throw notFound("ไม่พบบันทึกเวลาที่ระบุ หรือถูกลบไปแล้ว");

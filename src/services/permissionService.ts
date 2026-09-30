@@ -190,7 +190,7 @@ export async function updatePermission(id: string, input: UpdatePermissionInput)
     .findOneAndUpdate(
       { _id: id, deleted_at: null },
       { $set: payload },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     )
     .lean();
   if (!doc) throw notFound("ไม่พบสิทธิ์ที่ระบุ");

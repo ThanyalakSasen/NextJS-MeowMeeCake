@@ -273,6 +273,10 @@ route เดิม `POST /api/admin/production-orders/from-preorder-round` ย�
 | สินค้าไม่มีสูตร | แจ้งร้าน (`no-recipe`) |
 | เรียกซ้ำ | ไม่บวกซ้ำ — จองฟิลด์ใหม่ `preorders.added_to_production_at` แบบ atomic ก่อนบวก |
 
+**กลับด้าน — ยกเลิกหลังสร้างใบผลิต** (`onPreorderCancelled` — เพิ่ม 2026-10-01 จาก [`BACKLOG4.md`](BACKLOG4.md) Y1):
+พรีออเดอร์ที่จ่ายแล้วในรอบ `closed` ถูกยกเลิก → ใบผลิต `planned` ลด `planned_qty` (เหลือ 0 → รายการ `cancelled`) ·
+เริ่มผลิตแล้ว → แจ้งร้าน · กันลดซ้ำด้วย `removed_from_production_at`
+
 ### 6.5 เปิด/ปิดรอบอัตโนมัติ (ประเด็น 5) + เปิดกลับ (ประเด็น 8)
 
 **cron `runRoundScheduler`** (แนะนำทุก 15 นาที — ยิ่งถี่ รอบยิ่งเปิด/ปิดตรงเวลา):
