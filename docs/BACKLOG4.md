@@ -11,7 +11,7 @@
 | ระดับ | จำนวน | สรุป |
 |---|---|---|
 | 🔴 ต้องทำก่อนใช้งานจริง | 5 (โค้ด R5 ✅ แก้แล้ว · เหลืองาน deploy R1–R4) | ส่วนใหญ่เป็น **งานตอน deploy** (migration, cron, env, ลำดับ merge) + รายงานแดชบอร์ดไม่นับรายได้พรีออเดอร์ |
-| 🟡 ควรแก้ | 11 (✅ Y1 Y2 Y3 Y4 Y6 แก้แล้ว · เหลือ 6) | ใบผลิตไม่ลดเมื่อยกเลิกพรีออเดอร์ · ผลิตแล้วไม่เพิ่มสต็อกสินค้า · สลิปเปิดสาธารณะ · deprecation · dependency |
+| 🟡 ควรแก้ | 11 (✅ Y1–Y6 แก้แล้ว · เหลือ Y7–Y11) | ใบผลิตไม่ลดเมื่อยกเลิกพรีออเดอร์ · ผลิตแล้วไม่เพิ่มสต็อกสินค้า · สลิปเปิดสาธารณะ · deprecation · dependency |
 | 🟢 เล็กน้อย / ต่อยอด | 15 | race ที่เกิดยาก · index · ฟีเจอร์ต่อยอด |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | สิทธิ์ทุก route · CI ทุก PR · cron auth · upload validation · IDOR ฝั่ง shop (§5) |
 
@@ -71,7 +71,7 @@
 | Y2 | ✅ **ผลิตเสร็จแล้วไม่เพิ่มสต็อกสินค้าสำเร็จรูป** — แก้แล้ว (§7.6) | `productionItemService` หักวัตถุดิบ (`consumeStock`) แต่ไม่เคยเพิ่ม `product_stock_quantity` | ใบผลิตแบบ manual ของสินค้าปกติ (ขนมหน้าร้าน) → ต้องไปปรับสต็อกเองทุกครั้ง · ถ้าลืม ขายไม่ได้/สต็อกไม่ตรง | **ต้องตัดสินใจ:** เมื่อรายการผลิต `done` + สินค้าปกติ → `increaseStock(actual_qty ?? planned_qty × yield)` (พรีออเดอร์ไม่มีสต็อก — ข้าม) |
 | Y3 | ✅ **สลิปโอนเงินเปิดสาธารณะ** — แก้แล้วใน PR #54 (§7.7) | `public/uploads/slips/` เสิร์ฟ static ใครก็ได้ถ้ารู้ URL (#54) | ข้อมูลส่วนตัว (ชื่อ/เลขบัญชี) · ชื่อไฟล์สุ่มเดายาก แต่ไม่ใช่การกันสิทธิ์จริง | ย้ายสลิปออกนอก `public/` + route อ่านไฟล์ที่ตรวจสิทธิ์ (เจ้าของรายการ / staff `payments.view`) หรือ S3 private + signed URL |
 | Y4 | ✅ **mongoose: option `new: true` เลิกใช้แล้ว** — แก้แล้ว (§7.4) | 25 จุดใน `src/` · เทสขึ้น warning ทุกรอบ | mongoose รุ่นถัดไปอาจเลิกรองรับ | เปลี่ยนเป็น `returnDocument: "after"` ทีเดียวทั้งไฟล์ (พฤติกรรมเท่าเดิม) |
-| Y5 | **dependency มีช่องโหว่ (high)** | `npm audit`: `postcss ≤ 8.5.22` ผ่าน `next` (XSS ใน stringify + อ่านไฟล์ .map ผ่าน sourceMappingURL) | backend นี้เป็น API ล้วน ไม่ประมวลผล CSS จาก user → ความเสี่ยงจริงต่ำ (build-time) | `npm audit fix --force` = อัป Next 16 (breaking) · หรือ `overrides.postcss` ≥ เวอร์ชันที่แก้แล้ว + รันเทส/บิลด์ |
+| Y5 | ✅ **dependency มีช่องโหว่ (high)** — แก้แล้วใน PR #56 (§7.8) | `npm audit`: `postcss ≤ 8.5.22` ผ่าน `next` (XSS ใน stringify + อ่านไฟล์ .map ผ่าน sourceMappingURL) | backend นี้เป็น API ล้วน ไม่ประมวลผล CSS จาก user → ความเสี่ยงจริงต่ำ (build-time) | `npm audit fix --force` = อัป Next 16 (breaking) · หรือ `overrides.postcss` ≥ เวอร์ชันที่แก้แล้ว + รันเทส/บิลด์ |
 | Y6 | ✅ **staff ทุกคนลบแจ้งเตือนของร้านได้** — แก้แล้ว (§7.3) | `DELETE /api/admin/notifications/[id]` เช็คแค่ล็อกอิน (`requireAuth`) | แจ้งเตือนสำคัญ (สต็อก, โควตา LINE, ปิดรอบ) หายโดยเจ้าของไม่เห็น | จำกัด DELETE เฉพาะ owner (หรือ permission ใหม่) · PATCH อ่านแล้วให้ทุกคนได้เหมือนเดิม |
 | Y7 | **พรีออเดอร์ข้อมูลเก่าไม่มีกำหนดชำระ** | พรีออเดอร์ก่อน #55 มี `payment_due_at: null` | ไม่ถูกยกเลิกตามกำหนด (ถูกยกเลิกตอนปิดรอบแทน) | ถ้าต้องการ: สคริปต์ backfill `payment_due_at` = min(created + N ชม., close) สำหรับรอบที่ยังเปิด |
 | Y8 | **state ในหน่วยความจำ ไม่แชร์ข้าม instance** | `rateLimit` · permission cache · delivery-zone cache · cache โควตา LINE | หลาย instance / serverless: rate limit หลวม · โควตา LINE ตัดสินจากค่า cache ต่าง instance | ตั้ง instance เดียว หรือย้ายไป Redis (แก้เฉพาะไฟล์ lib ละตัว — ออกแบบไว้แล้ว) |
@@ -194,7 +194,7 @@ best-effort (พังแล้ว log ไม่ทำให้การยก�
 
 unit 218 ✅ (+3) · integration 257 ✅ (+5) · typecheck ✅ · typecheck:test ✅ · lint 0 error (warning 5 จุดเดิม) · `next build` ✅
 
-**ตัดสินใจแล้ว 2026-10-01:** Y2 เพิ่มอัตโนมัติ (§7.6) · Y3 เปิดดูได้เฉพาะผู้มีสิทธิ์ (§7.7 — ทำใน PR #54) · Y5 รอตัดสินใจ (อธิบายใน §7.8)
+**ตัดสินใจแล้ว 2026-10-01:** Y2 เพิ่มอัตโนมัติ (§7.6) · Y3 เปิดดูได้เฉพาะผู้มีสิทธิ์ (§7.7 — ทำใน PR #54) · Y5 เลือก ก. overrides (§7.8 — PR #56)
 
 ### 7.6 Y2 — ปิดงานผลิตแล้วเพิ่มสต็อกสินค้าอัตโนมัติ (ตัดสินใจ 2026-10-01 — PR #55)
 
@@ -223,7 +223,7 @@ unit 218 ✅ (+3) · integration 257 ✅ (+5) · typecheck ✅ · typecheck:test
 
 รายละเอียด + frontend (ต้อง fetch แบบส่ง cookie แล้วทำ blob URL) → [`uploads.md`](uploads.md) §6 · เทส `privateSlips.test.ts` 5 เคส
 
-### 7.8 Y5 — postcss (รอตัดสินใจ)
+### 7.8 Y5 — postcss (เลือก ก. overrides 2026-10-01 → **PR #56** · `npm audit` = 0)
 
 **postcss คืออะไร:** เครื่องมือแปลง/ประมวลผลไฟล์ CSS ที่ Next.js ใช้ **ตอน build** (เช่น เติม vendor prefix, รัน Tailwind) — ไม่ได้ทำงานตอนรับ
 request จากผู้ใช้ · backend นี้เป็น API ล้วน มี CSS ไฟล์เดียว (`src/app/globals.css` จากตอนสร้างโปรเจกต์) ที่เราเขียนเอง
@@ -242,3 +242,7 @@ request จากผู้ใช้ · backend นี้เป็น API ล้�
 
 พบเพิ่ม: `postcss.config.mjs` อ้างปลั๊กอิน `@tailwindcss/postcss` ที่**ไม่ได้ติดตั้ง** (ค้างจากตอนสร้างโปรเจกต์ · build ยังผ่าน) —
 ถ้าเลือก ก./ข. ควรลบไฟล์นี้หรือ config ทิ้งไปด้วย (API ไม่ใช้ Tailwind)
+
+**ทำแล้ว (PR #56, commit `6df01ca`):** `overrides.next.postcss: ^8.5.23` (ได้ 8.5.28) · `npm audit fix` แก้ `brace-expansion` ใน eslint (dev,
+ไม่ breaking) · ลบ `postcss.config.mjs` ที่อ้าง Tailwind ซึ่งไม่ได้ติดตั้ง · `npm audit` = **0 vulnerabilities** · typecheck/lint/unit 190/
+integration 178/build ผ่าน · ไม่ชนกับ #52/#54/#55
