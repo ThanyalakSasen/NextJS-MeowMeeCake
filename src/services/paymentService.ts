@@ -23,6 +23,7 @@ import { log } from "../lib/logger";
 import * as orderService from "./orderService";
 import * as preorderService from "./preorderService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
+import { isUploadedUrl, UPLOAD_DIRS } from "../lib/upload";
 import type { PaymentStatus } from "./orderService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -30,6 +31,20 @@ import type { PaymentStatus } from "./orderService";
 // BACKLOG §3.11 — order.total_amount/preorder.total_amount เป็นสตางค์ (integer) แล้ว เทียบกับ amount
 // ที่แปลงเป็นสตางค์ด้วย toSatang() ก่อนเทียบ — เผื่อ 1 สตางค์ กัน edge case ปัดเศษที่อาจหลงเหลือ
 const AMOUNT_TOLERANCE = 1;
+
+/**
+ * สลิปต้องเป็นไฟล์ที่อัปโหลดผ่านระบบเรา (public/uploads/slips — docs/uploads.md) — เดิมรับ string อะไรก็ได้
+ * ทำให้ DB มี path ที่ไม่มีไฟล์จริง (/uploads/slip-*.jpg ที่ไม่เคยถูกอัปโหลดมาที่ backend) และเปิดช่องให้ใส่
+ * url ภายนอก (เช่น tracking pixel) ที่แอดมินจะเปิดดูตอนตรวจสลิป
+ */
+function assertSlipUrl(url: string | null | undefined): void {
+  if (url == null || url === "") return;
+  if (!isUploadedUrl(url, UPLOAD_DIRS.slips)) {
+    throw badRequest(
+      "slip_image_url ต้องเป็นไฟล์ที่อัปโหลดผ่านระบบ — ใช้ POST /api/shop/payments/[id]/slip (multipart) แทน"
+    );
+  }
+}
 
 export interface CreatePaymentInput {
   user_id: string;
@@ -126,6 +141,8 @@ export async function createPayment(input: CreatePaymentInput) {
     );
   }
 
+  assertSlipUrl(input.slip_image_url);
+
   let payment;
   try {
     payment = await paymentModel.create({
@@ -217,6 +234,7 @@ export async function submitSlip(
   assertObjectId(id);
 
   if (!input.slip_image_url) throw badRequest("กรุณาแนบ slip_image_url");
+  assertSlipUrl(input.slip_image_url);
 
   const payment = await paymentModel.findOne({ _id: id, deleted_at: null });
   if (!payment) throw notFound("ไม่พบรายการชำระเงินที่ระบุ");

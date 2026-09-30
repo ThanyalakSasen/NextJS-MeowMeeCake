@@ -224,6 +224,47 @@ export async function saveImages(files: File[], dir: string): Promise<SavedFile[
 }
 
 /**
+ * url นี้เป็นไฟล์ที่ระบบเราอัปโหลดเองในโฟลเดอร์ `dir` ไหม (ตาม driver ที่ใช้อยู่) — ใช้กับฟิลด์ที่ต้องเป็นไฟล์
+ * ของเราเท่านั้น (สลิปโอนเงิน / ใบเสร็จค่าใช้จ่าย — docs/uploads.md) กัน client ใส่ url ภายนอก/ไฟล์ที่ไม่มีจริง
+ *   localDisk: `/uploads/<dir>/<ชื่อไฟล์>` · s3: `<S3_PUBLIC_URL_BASE>/<dir>/<ชื่อไฟล์>`
+ */
+export function isUploadedUrl(url: unknown, dir: string): boolean {
+  if (typeof url !== "string") return false;
+  const safeDir = dir.replace(/[^a-z0-9_-]/gi, "") || "misc";
+  const file = "[A-Za-z0-9._-]+";
+  if (process.env.UPLOAD_DRIVER === "s3") {
+    const base = (process.env.S3_PUBLIC_URL_BASE || "").replace(/\/$/, "");
+    if (!base || !url.startsWith(`${base}/`)) return false;
+    return new RegExp(`^${safeDir}/${file}$`).test(url.slice(base.length + 1));
+  }
+  return new RegExp(`^/uploads/${safeDir}/${file}$`).test(url);
+}
+
+/** โฟลเดอร์มาตรฐานของไฟล์แต่ละประเภท (public/uploads/<ค่า>) — ใช้ร่วมกันทุก route/service */
+export const UPLOAD_DIRS = {
+  products: "products",
+  banners: "banners",
+  /** สลิปโอนเงินที่ลูกค้า/พนักงานแนบกับการชำระเงิน */
+  slips: "slips",
+  /** สลิป/ใบเสร็จของค่าใช้จ่ายร้าน */
+  receipts: "receipts",
+} as const;
+
+/**
+ * อ่าน multipart form แล้วคืนไฟล์แรกตามชื่อ field ที่ยอมรับ (ตัวแรกที่เจอ) + form ทั้งก้อน (อ่าน field อื่นต่อได้ —
+ * request body อ่านได้ครั้งเดียว) · ไม่มีไฟล์ → 400
+ */
+export async function readSingleUpload(req: Request, fields: string[]): Promise<{ file: File; form: FormData }> {
+  const form = await req.formData().catch(() => null);
+  if (!form) throw badRequest("ต้องส่งเป็น multipart/form-data");
+  for (const f of fields) {
+    const v = form.get(f);
+    if (v instanceof File) return { file: v, form };
+  }
+  throw badRequest(`ไม่พบไฟล์ที่อัปโหลด (field: ${fields.join(" หรือ ")})`);
+}
+
+/**
  * BACKLOG §3.14 — ลบไฟล์รูปที่ไม่ใช้แล้ว (เช่นตอนแก้ไข/ลบสินค้า) best-effort เสมอ — ไม่ throw
  * ถ้าลบไม่สำเร็จ แค่ log ไว้ (caller ไม่ต้องห่อ .catch() เองอีกชั้น)
  */
