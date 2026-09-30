@@ -26,13 +26,24 @@
 | 1 | #52 `is_preorder` + เลขออเดอร์ ORD-/POS-/PRE- | base `main` |
 | 2 | #53 แจ้งเตือน LINE | base #52 → retarget `main` อัตโนมัติถ้าลบ branch #52 ตอน merge |
 | 3 | #55 flow รอบพรีออเดอร์ + วงจรอัตโนมัติ | base #53 |
-| อิสระ | #54 สลิป/ใบเสร็จ/แบนเนอร์เป็นไฟล์ | base `main` · **ชนกับ #55 ที่ `package.json` (scripts)** — แก้ตอน merge: เก็บ script ของทั้งสองฝั่ง |
+| อิสระ | #54 สลิป/ใบเสร็จ/แบนเนอร์เป็นไฟล์ + สลิปส่วนตัว | base `main` · **ชนกับ #55 ที่ `package.json` (scripts) และ `.env.example` (ท้ายไฟล์)** — แก้ตอน merge: เก็บของทั้งสองฝั่ง |
+| อิสระ | #56 postcss override + audit 0 | base `main` · ไม่ชนกับใคร |
 
-### R2. migration กับ DB จริง (ยังไม่ได้รัน `--apply` เลย — ทดสอบแค่ dry-run)
+**ตรวจรวมทุก PR แล้ว (2026-10-01):** merge #52→#53→#55 + #54 + #56 ลง branch ชั่วคราว → typecheck ✅ · lint 0 error · unit 223 ✅ ·
+integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหลือ `new: true` / `product_types` ในโค้ดรัน
+
+### R2. migration กับ DB จริง
+
+> ⚠️ **อัปเดต 2026-10-01:** `migrate:is-preorder --apply` **ถูกรันกับ DB จริงแล้ว** เมื่อ 2026-10-01 00:11 (เวลาไทย) — ไม่ใช่จาก agent
+> (agent รันแค่ dry-run ~18:30 ของ 30 ก.ย. · เทสใช้ DB ในหน่วยความจำ) · หลักฐาน: `scripts/backups/is-preorder-2026-09-30T17-11-12-921Z.json`
+> (42 รายการ) · ตรวจ DB (อ่านอย่างเดียว): สินค้า 42/42 มี `is_preorder` (พรีออเดอร์ 10) · ไม่เหลือ `product_types`/`product_type` —
+> **ผลตรงกับ dry-run ทุกตัว** · ⚠️ ผลที่ตามมา: ตอนนี้ DB เป็นรูปแบบ `is_preorder` แล้ว แต่ **ยังไม่มีโค้ดที่ merge แล้วตัวไหนอ่าน `is_preorder`**
+> (`main` ใช้ `product_type`) → โค้ด `main` ที่รันกับ DB นี้ (dev/deploy) บันทึกสินค้าไม่ได้และมองพรีออเดอร์เป็นสินค้ามีสต็อก —
+> **merge + deploy #52 เร็วที่สุด**
 
 | ลำดับ | คำสั่ง | ผล dry-run (2026-09-30) | จังหวะ |
 |---|---|---|---|
-| 1 | `npm run migrate:is-preorder -- --apply` | สินค้า 42 (พรีออเดอร์ 10) · ตัดสินไม่ได้ 0 · prefix ผิด 2 | **ก่อน deploy #52 ทันที** (DB ยังเป็น `product_types` ซึ่ง `main` ไม่รู้จัก — ตอนนี้โค้ด `main` ที่รันกับ DB นี้ทำงานผิดอยู่แล้ว BACKLOG2 §14.1) |
+| 1 | ~~`npm run migrate:is-preorder -- --apply`~~ | ✅ **รันแล้ว 2026-10-01 00:11** — 42 (พรีออเดอร์ 10) ตรงกับ dry-run | เหลือ: merge + deploy #52 ให้โค้ดตรงกับ DB |
 | 2 | `PATCH /api/admin/products/<_id> { "is_preorder": true }` × 2 | `pos-1626294`, `pos-1626338` → `pre-` | หลัง deploy #52 · ⚠️ รหัสเปลี่ยน พิมพ์ป้ายใหม่ |
 | 3 | `npm run migrate:upload-files -- --apply` | แบนเนอร์ 11 · สลิปไม่มีไฟล์ 5 · ใบเสร็จไม่มีไฟล์ 3 | หลัง deploy #54 · สำรอง `public/uploads/` แยก |
 
