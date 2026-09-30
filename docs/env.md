@@ -64,7 +64,12 @@ GOOGLE_CLIENT_ID=556882585770-xxxxxxxx.apps.googleusercontent.com
 | `SESSION_SECRET` | เผื่อระบบ session แบบเก่า (express-session ฯลฯ) · โค้ดปัจจุบันใช้ JWT ล้วน — **ควรตั้งเป็นค่าสุ่ม** เผื่อใช้ทีหลัง |
 | `NEXTAUTH_SECRET`, `NEXTAUTH_URL` | เผื่อย้ายไปใช้ NextAuth.js · **ควรตั้งเป็นค่าสุ่ม** |
 | `EMAIL_SERVICE`, `EMAIL_USER`, `EMAIL_PASS` | ส่งอีเมลยืนยัน / reset password (ยังไม่ทำ) |
-| `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_TARGET_ID` | แจ้งเตือนผ่าน LINE (ยังไม่ทำ — ดู `docs/BACKLOG.md` §3.12) |
+| `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_TARGET_ID` | แจ้งเตือนผ่าน LINE (เจ้าของร้าน + ลูกค้า) — ดู [`LINE.md`](LINE.md) |
+| `LINE_LOGIN_CHANNEL_ID`, `LINE_LOGIN_CHANNEL_SECRET`, `LINE_LOGIN_CALLBACK_URL`, `LINE_LINK_RETURN_URL` | ลูกค้าผูกบัญชี LINE (LINE Login) — ดู [`LINE.md`](LINE.md) |
+| `LINE_NOTIFY_POS_ORDERS` | `true` = ออเดอร์หน้าร้าน (POS) ส่ง LINE หาเจ้าของร้านด้วย · ไม่ตั้ง = บันทึกในหน้าแจ้งเตือนเว็บอย่างเดียว — ดู [`LINE.md`](LINE.md) §9.5 |
+| `LINE_OWNER_QUOTA_RESERVE` | จำนวนข้อความ LINE ที่กันไว้ให้เจ้าของร้านต่อเดือน (ค่าเริ่มต้น 30) — โควตาเหลือเท่านี้แล้วหยุดส่งหาลูกค้า — ดู [`LINE.md`](LINE.md) §9.6 |
+| `CRON_SECRET` | secret ของ `/api/cron/*` (header `Authorization: Bearer …`) · ไม่ตั้ง = ปิด endpoint — ดู [`LINE.md`](LINE.md) §9.7 |
+| `PREORDER_REMINDER_DAYS_BEFORE` | เตือนลูกค้าก่อนวันรับพรีออเดอร์กี่วัน (ค่าเริ่มต้น 1 · 0 = วันรับ) — ดู [`LINE.md`](LINE.md) §9.7 |
 
 ---
 

@@ -6,6 +6,9 @@
  *   LINE_CHANNEL_ACCESS_TOKEN — channel access token ของ LINE Official Account / Messaging API channel
  *   LINE_TARGET_ID            — userId/groupId/roomId ปลายทาง (ขอจาก LINE Developers Console)
  *
+ * ส่งหาลูกค้าแต่ละคน: ส่ง `to` = LINE userId ของลูกค้า (ได้จากการผูกบัญชีผ่าน LINE Login —
+ * src/lib/lineLogin.ts) ใช้ token ตัวเดียวกัน · ไม่ส่ง `to` = ส่งเข้า LINE_TARGET_ID (เจ้าของร้าน)
+ *
  * ไม่ตั้งค่าไว้ (เช่นตอน dev/test) = ข้ามเงียบ ๆ คืน { ok:false, error } ไม่ throw —
  * กันไม่ให้ dev ที่ยังไม่มี LINE channel ใช้งานฟีเจอร์อื่นไม่ได้ไปด้วย
  */
@@ -18,10 +21,10 @@ export interface LinePushResult {
   error?: string;
 }
 
-export async function pushLineMessage(text: string): Promise<LinePushResult> {
+export async function pushLineMessage(text: string, to?: string): Promise<LinePushResult> {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
-  const to = process.env.LINE_TARGET_ID;
-  if (!token || !to) {
+  const target = to ?? process.env.LINE_TARGET_ID;
+  if (!token || !target) {
     return { ok: false, error: "ยังไม่ได้ตั้งค่า LINE_CHANNEL_ACCESS_TOKEN/LINE_TARGET_ID" };
   }
 
@@ -33,7 +36,7 @@ export async function pushLineMessage(text: string): Promise<LinePushResult> {
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        to,
+        to: target,
         messages: [{ type: "text", text: text.slice(0, MAX_TEXT_LENGTH) }],
       }),
     });

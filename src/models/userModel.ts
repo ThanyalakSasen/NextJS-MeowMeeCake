@@ -6,6 +6,9 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, lowercase: true, trim: true },
     password: { type: String, default: null },
     googleId: { type: String, default: null },
+    // LINE userId จากการผูกบัญชีผ่าน LINE Login (src/lib/lineLogin.ts) — ใช้ push แจ้งเตือนหาลูกค้า
+    // (customerNotifyService) · null = ยังไม่ผูก / ยกเลิกผูกแล้ว
+    line_user_id: { type: String, default: null },
     auth_provider: { type: String, enum: ["local", "google"], required: true },
     role_id: { type: mongoose.Schema.Types.ObjectId, ref: "Roles", required: true },
     user_birthdate: { type: Date, default: null },
