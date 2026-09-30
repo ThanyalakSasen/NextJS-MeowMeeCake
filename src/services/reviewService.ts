@@ -200,7 +200,7 @@ export async function setReviewVisibility(id: string, isVisible: boolean) {
     .findOneAndUpdate(
       { _id: id, deleted_at: null },
       { $set: { is_visible: !!isVisible } },
-      { new: true }
+      { returnDocument: "after" }
     )
     .lean<any>();
   if (!review) throw notFound("ไม่พบรีวิวที่ระบุ");

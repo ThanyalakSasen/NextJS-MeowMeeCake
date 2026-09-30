@@ -42,7 +42,7 @@ export async function updateSpecialRequest(id: string, specialRequest: string | 
     .findByIdAndUpdate(
       id,
       { $set: { special_request: specialRequest?.trim() || null } },
-      { new: true }
+      { returnDocument: "after" }
     )
     .lean();
   return updated;

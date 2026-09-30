@@ -257,7 +257,7 @@ export async function removeItem(userId: string, itemId: string) {
     .findOneAndUpdate(
       { _id: itemId, cart_id: cart._id, deleted_at: null },
       { $set: { deleted_at: new Date() } },
-      { new: true }
+      { returnDocument: "after" }
     )
     .lean();
   if (!item) throw notFound("ไม่พบรายการในตะกร้า");

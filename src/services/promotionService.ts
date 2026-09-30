@@ -162,7 +162,7 @@ export async function updatePromotion(id: string, input: UpdatePromotionInput) {
   try {
     const doc = await promotionModel
       .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: payload }, {
-        new: true,
+        returnDocument: "after",
         runValidators: true,
       })
       .lean();
