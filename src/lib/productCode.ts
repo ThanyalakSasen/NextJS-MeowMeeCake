@@ -1,52 +1,51 @@
 /**
  * productCode — สร้าง/ตรวจ รหัสสินค้าที่มนุษย์อ่านได้ (ฟิลด์ product_id ใน productModel)
  *
- *   pos-DDYYzzz  = สินค้าหน้าร้าน / ออนไลน์ (product_types มี "inStore" และ/หรือ "online")
- *   pre-DDYYzzz  = สินค้าพรีออเดอร์ (product_types = ["preorder"] เท่านั้น — ห้ามผสมกับตัวอื่น)
+ *   pos-DDYYzzz  = สินค้าปกติ (มีสต็อก) — `is_preorder: false` · ขายได้ทั้งเว็บ (ORD-) และหน้าร้าน (POS-)
+ *   pre-DDYYzzz  = สินค้าพรีออเดอร์ (ไม่มีสต็อก ขายผ่านรอบพรีออเดอร์) — `is_preorder: true`
  *
  *   DD  = วันที่สร้าง 2 หลัก (01-31)
  *   YY  = ปี ค.ศ. 2 หลัก (2026 → "26")   ← ถ้าต้องการ พ.ศ. เปลี่ยนที่บรรทัด yy ด้านล่าง
  *   zzz = เลขสุ่ม 3 หลัก (000-999) กันซ้ำ
+ *
+ * docs/BACKLOG2.md §14 (แก้ 2026-09-30) — เลิกแยกประเภทสินค้าตามช่องทางขาย (inStore/online) แล้ว
+ * ช่องทางดูจาก "ออเดอร์" แทน (ORD- เว็บไซต์ / POS- หน้าร้าน / PRE- พรีออเดอร์ — generateDocNo ด้านล่าง)
+ * สินค้าเหลือแค่ 2 แบบ ตัดสินด้วยฟิลด์ boolean `is_preorder` ตัวเดียว
  */
 
-export const PRODUCT_TYPES = ["inStore", "online", "preorder"] as const;
-export type ProductType = (typeof PRODUCT_TYPES)[number];
-
-/** ประเภทที่มีสต็อก (product_stock_quantity ใช้งาน) — ทุกอย่างยกเว้น preorder */
-export const STOCK_PRODUCT_TYPES = ["inStore", "online"] as const;
-
-export function isStockProductType(t: unknown): boolean {
-  return t === "inStore" || t === "online";
-}
-
-/** มี "preorder" อยู่ใน product_types ไหม (ดีฟอลต์ปลอดภัยถ้าไม่ใช่ array) */
-export function hasPreorderType(types: unknown): boolean {
-  return Array.isArray(types) && types.includes("preorder");
-}
-
-/** มีประเภทที่ "มีสต็อก" (inStore/online) อยู่ใน product_types อย่างน้อย 1 ตัวไหม */
-export function hasStockType(types: unknown): boolean {
-  return Array.isArray(types) && types.some(isStockProductType);
+/** สินค้าเป็นพรีออเดอร์ไหม — true เฉพาะ is_preorder === true (ไม่มีฟิลด์/ค่าอื่น = สินค้าปกติ) */
+export function isPreorderProduct(product: { is_preorder?: unknown } | null | undefined): boolean {
+  return product?.is_preorder === true;
 }
 
 /**
- * อ่าน product_types จากเอกสารดิบใน DB (สคริปต์ที่ query ผ่าน .lean()/native driver) — รองรับข้อมูลเก่า
- * ก่อน scripts/migrate-product-types.ts ที่ยังเป็น `product_type` (string เดี่ยว, รวมค่า "ready" เดิมที่
- * เท่ากับ "inStore") · คืน null ถ้าไม่มีทั้งสองฟิลด์หรือค่าไม่อยู่ใน PRODUCT_TYPES — ผู้เรียกเลือกค่าดีฟอลต์เอง
+ * อ่าน "เป็นพรีออเดอร์ไหม" จากเอกสารดิบใน DB (สคริปต์ที่ query ผ่าน .lean()/native driver) — รองรับข้อมูล
+ * ทุกรุ่นก่อน scripts/migrate-is-preorder.ts:
+ *   is_preorder (boolean) → ใช้เลย
+ *   product_types (array, รุ่น 2026-09-24) → มี "preorder" = true · มี "inStore"/"online" = false
+ *   product_type (string, รุ่นแรก รวม "ready" = inStore) → "preorder" = true · "inStore"/"online"/"ready" = false
+ * คืน null ถ้าตัดสินไม่ได้เลย — ผู้เรียกเลือกค่าดีฟอลต์เอง
  */
-export function productTypesOf(doc: Record<string, unknown>): ProductType[] | null {
-  const valid = (t: unknown): t is ProductType => PRODUCT_TYPES.includes(t as ProductType);
-  if (Array.isArray(doc.product_types) && doc.product_types.length > 0 && doc.product_types.every(valid)) {
-    return [...new Set(doc.product_types)];
+export function isPreorderOf(doc: Record<string, unknown>): boolean | null {
+  if (typeof doc.is_preorder === "boolean") return doc.is_preorder;
+  if (Array.isArray(doc.product_types) && doc.product_types.length > 0) {
+    if (doc.product_types.includes("preorder")) return true;
+    if (doc.product_types.some((t) => t === "inStore" || t === "online")) return false;
   }
-  const legacy = doc.product_type === "ready" ? "inStore" : doc.product_type;
-  return valid(legacy) ? [legacy] : null;
+  if (doc.product_type === "preorder") return true;
+  if (doc.product_type === "inStore" || doc.product_type === "online" || doc.product_type === "ready") return false;
+  return null;
 }
 
 const PATTERN = /^(pos|pre)-\d{7}$/;
 
-export function generateProductCode(types: readonly ProductType[], at: Date = new Date()): string {
-  const prefix = hasPreorderType(types) ? "pre" : "pos";
+/** prefix ที่ถูกต้องของรหัสสินค้า */
+export function productCodePrefix(isPreorder: boolean): "pos" | "pre" {
+  return isPreorder ? "pre" : "pos";
+}
+
+export function generateProductCode(isPreorder: boolean, at: Date = new Date()): string {
+  const prefix = productCodePrefix(isPreorder);
   const dd = String(at.getDate()).padStart(2, "0");
   const yy = String(at.getFullYear() % 100).padStart(2, "0");
   const zzz = String(Math.floor(Math.random() * 1000)).padStart(3, "0");
@@ -72,4 +71,19 @@ export function generateDocNo(prefix: string, randomLength = 6, now: Date = new 
     .slice(2, 2 + randomLength)
     .toUpperCase();
   return `${prefix}-${ymd}-${rand}`;
+}
+
+/**
+ * อ่านตัวกรองประเภทสินค้าจาก query string ของ route รายการสินค้า
+ *   ?is_preorder=true|false (ใหม่) · ?product_type=preorder|inStore|online (เดิม — ยังรับไว้ให้ frontend เก่า:
+ *   preorder = true, inStore/online = false เพราะเลิกแยกช่องทางระดับสินค้าแล้ว) · ไม่ส่ง = undefined (ทั้งหมด)
+ */
+export function isPreorderFilterFrom(sp: URLSearchParams): boolean | undefined {
+  const v = sp.get("is_preorder");
+  if (v === "true" || v === "1") return true;
+  if (v === "false" || v === "0") return false;
+  const legacy = sp.get("product_type");
+  if (legacy === "preorder") return true;
+  if (legacy === "inStore" || legacy === "online") return false;
+  return undefined;
 }

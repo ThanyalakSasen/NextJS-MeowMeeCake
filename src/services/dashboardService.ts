@@ -10,6 +10,7 @@ import dbConnect from "../lib/dbConnect";
 import { bangkokDateString } from "../lib/datetime";
 import orderModel from "../models/orderModel";
 import orderItemModel from "../models/orderItemModel";
+import preorderModel from "../models/preorderModel";
 import productModel from "../models/productModel";
 import ingredientModel from "../models/ingredientModel";
 import * as expenseService from "./expenseService";
@@ -80,7 +81,7 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       ]),
       productModel.countDocuments({
         deleted_at: null,
-        product_types: { $ne: "preorder" }, // สินค้าที่มีสต็อก (inStore/online)
+        is_preorder: { $ne: true }, // สินค้าปกติ (มีสต็อก)
         product_stock_quantity: { $ne: null, $lte: 5 },
       }),
       ingredientModel.countDocuments({
@@ -207,88 +208,55 @@ export async function topProducts(opts: {
   };
 }
 
-// ── รายรับแยกตามประเภทสินค้า (หน้าสรุปกำไร-ขาดทุน) ────────────────
-export type ProductTypeKey = "inStore" | "online" | "preorder";
+// ── รายรับแยกตามช่องทางออเดอร์ (หน้าสรุปกำไร-ขาดทุน) ──────────────
+export type RevenueChannel = "web" | "pos" | "preorder" | "other";
+
+/** ช่องทางของออเดอร์ปกติจากเลขออเดอร์ — ORD- เว็บไซต์ / POS- หน้าร้าน · เลขรุ่นเก่าก่อนแยก prefix (OP-, WEB- ฯลฯ) = other */
+export function orderChannelOf(orderNo: unknown): "web" | "pos" | "other" {
+  if (typeof orderNo !== "string") return "other";
+  if (orderNo.startsWith("ORD-")) return "web";
+  if (orderNo.startsWith("POS-")) return "pos";
+  return "other";
+}
 
 /**
- * รายรับ (ออเดอร์ที่ชำระแล้ว ไม่ถูกลบ ในช่วงวันที่) แยกตาม product_types ของสินค้าในออเดอร์
- *
- * - ประเภทสินค้าไม่ได้เก็บไว้กับรายการในออเดอร์ (product_snapshot มีแค่ชื่อ) จึงอ้างจาก product_types
- *   "ปัจจุบัน" ของสินค้า — ถ้าเปลี่ยนประเภทสินค้าภายหลัง ออเดอร์เก่าจะย้ายกลุ่มตามไปด้วย
- * - สินค้าเลือกได้มากกว่า 1 ประเภทตั้งแต่แก้ docs/BACKLOG2.md §14 (inStore+online พร้อมกันได้) แต่ตัว
- *   บัคเก็ตของรายงานนี้ยังต้องเป็นค่าเดียวต่อสินค้า (กันนับซ้ำ — ผลรวมทุกกลุ่มต้องตรงกับ total_amount
- *   เป๊ะเสมอ) เลือกบัคเก็ตด้วยลำดับความสำคัญ inStore > online > preorder (preorder ไม่ผสมกับตัวอื่น
- *   อยู่แล้ว ไม่มีทางกำกวม) — ดู primaryTypeOf() ด้านล่าง
- * - ผลรวมทุกกลุ่ม = ผลรวม total_amount ของออเดอร์ตรงเป๊ะ: ส่วนที่นอกเหนือจากราคาสินค้า (ค่าส่ง − ส่วนลดระดับออเดอร์)
- *   กระจายตามสัดส่วนยอดสินค้าของแต่ละประเภทในออเดอร์นั้น (คิดเป็นสตางค์ integer เศษปัดเข้ากลุ่มที่ใหญ่สุด)
- * - รายการที่หาสินค้าไม่เจอ (ถูกลบ/ไม่มีข้อมูล) หรือออเดอร์ที่ไม่มีรายการเลย → "unclassified"
- * คืนเป็นบาท (แปลงจากสตางค์ตอนท้ายสุด)
+ * รายรับ (ชำระแล้ว ไม่ถูกลบ ในช่วงวันที่ตาม created_at) แยกตามช่องทาง — docs/BACKLOG2.md §14 (2026-09-30):
+ * เลิกแยกประเภทสินค้าตามช่องทางขายแล้ว ช่องทางดูจาก "ออเดอร์" แทน
+ *   web      = ออเดอร์เว็บไซต์ (ORD-)          ← orders
+ *   pos      = ออเดอร์หน้าร้าน (POS-)          ← orders
+ *   preorder = พรีออเดอร์ (PRE-)               ← preorders (เดิมรายงานแบบแยกประเภทสินค้าไม่ได้นับ collection นี้เลย)
+ *   other    = ออเดอร์เลขรุ่นเก่าก่อนแยก prefix (OP-, WEB- ฯลฯ) — ระบุช่องทางย้อนหลังไม่ได้
+ * ใช้ total_amount ของออเดอร์ทั้งก้อน (รวมค่าส่ง − ส่วนลด) — ออเดอร์หนึ่งอยู่ช่องทางเดียว ไม่ต้องกระจายสัดส่วน
+ * คืนเป็นบาท (แปลงจากสตางค์ตอนท้ายสุด) + จำนวนออเดอร์ต่อช่องทาง
  */
-function primaryTypeOf(types: string[] | undefined): ProductTypeKey | undefined {
-  if (!Array.isArray(types)) return undefined;
-  if (types.includes("inStore")) return "inStore";
-  if (types.includes("online")) return "online";
-  if (types.includes("preorder")) return "preorder";
-  return undefined;
-}
-export async function revenueByProductType(opts: { date_from?: string; date_to?: string } = {}) {
+export async function revenueByChannel(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();
-  const orders = await orderModel
-    .find({ ...rangeMatch(opts.date_from, opts.date_to), payment_status: "paid" })
-    .select("total_amount")
-    .lean<Array<{ _id: any; total_amount: number }>>();
+  const match = { ...rangeMatch(opts.date_from, opts.date_to), payment_status: "paid" };
+  const [orders, preorders] = await Promise.all([
+    orderModel.find(match).select("order_no total_amount").lean<Array<{ order_no?: string; total_amount: number }>>(),
+    preorderModel.find(match).select("total_amount").lean<Array<{ total_amount: number }>>(),
+  ]);
 
-  const KEYS = ["inStore", "online", "preorder", "unclassified"] as const;
-  type Bucket = (typeof KEYS)[number];
-  const sums: Record<Bucket, number> = { inStore: 0, online: 0, preorder: 0, unclassified: 0 };
-
-  if (orders.length > 0) {
-    const items = await orderItemModel
-      .find({ order_id: { $in: orders.map((o) => o._id) }, deleted_at: null })
-      .select("order_id product_id total_price")
-      .lean<Array<{ order_id: any; product_id: any; total_price: number }>>();
-    const productIds = [...new Set(items.map((i) => String(i.product_id)))];
-    const products = productIds.length
-      ? await productModel
-          .find({ _id: { $in: productIds } })
-          .select("product_types")
-          .lean<Array<{ _id: any; product_types?: string[] }>>()
-      : [];
-    const typeOf = new Map(products.map((p) => [String(p._id), primaryTypeOf(p.product_types)]));
-
-    const byOrder = new Map<string, Record<Bucket, number>>();
-    for (const it of items) {
-      const type = typeOf.get(String(it.product_id));
-      const bucket: Bucket = type === "inStore" || type === "online" || type === "preorder" ? type : "unclassified";
-      const row = byOrder.get(String(it.order_id)) ?? { inStore: 0, online: 0, preorder: 0, unclassified: 0 };
-      row[bucket] += it.total_price;
-      byOrder.set(String(it.order_id), row);
-    }
-
-    for (const o of orders) {
-      const parts = byOrder.get(String(o._id));
-      const itemsSum = parts ? KEYS.reduce((s, k) => s + parts[k], 0) : 0;
-      if (!parts || itemsSum <= 0) {
-        sums.unclassified += o.total_amount;
-        continue;
-      }
-      // กระจาย total_amount ตามสัดส่วนยอดสินค้า — เศษที่ปัดแล้วไม่ลงตัวให้กลุ่มที่ใหญ่สุด รวมแล้วตรง total_amount เสมอ
-      const alloc = Object.fromEntries(KEYS.map((k) => [k, Math.round((o.total_amount * parts[k]) / itemsSum)])) as Record<Bucket, number>;
-      const drift = o.total_amount - KEYS.reduce((s, k) => s + alloc[k], 0);
-      if (drift !== 0) {
-        const largest = KEYS.reduce((a, b) => (parts[b] > parts[a] ? b : a));
-        alloc[largest] += drift;
-      }
-      for (const k of KEYS) sums[k] += alloc[k];
-    }
+  const sums: Record<RevenueChannel, number> = { web: 0, pos: 0, preorder: 0, other: 0 };
+  const counts: Record<RevenueChannel, number> = { web: 0, pos: 0, preorder: 0, other: 0 };
+  for (const o of orders) {
+    const ch = orderChannelOf(o.order_no);
+    sums[ch] += o.total_amount;
+    counts[ch] += 1;
+  }
+  for (const p of preorders) {
+    sums.preorder += p.total_amount;
+    counts.preorder += 1;
   }
 
+  const total = sums.web + sums.pos + sums.preorder + sums.other;
   return {
-    in_store: toBaht(sums.inStore),
-    online: toBaht(sums.online),
+    web: toBaht(sums.web),
+    pos: toBaht(sums.pos),
     preorder: toBaht(sums.preorder),
-    unclassified: toBaht(sums.unclassified),
-    total: toBaht(KEYS.reduce((s, k) => s + sums[k], 0)),
-    orders: orders.length,
+    other: toBaht(sums.other),
+    total: toBaht(total),
+    counts,
+    orders: orders.length + preorders.length,
   };
 }

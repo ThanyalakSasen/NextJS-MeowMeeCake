@@ -1,7 +1,7 @@
 /**
  * preorderRoundService — รอบพรีออเดอร์ (PreorderRounds + PreorderRoundItems)
  *
- * รอบพรีออเดอร์ = ช่วงเวลาเปิดรับสั่งล่วงหน้าสำหรับสินค้าที่ product_types = ["preorder"]
+ * รอบพรีออเดอร์ = ช่วงเวลาเปิดรับสั่งล่วงหน้าสำหรับสินค้าพรีออเดอร์ (is_preorder: true)
  *   open_date..close_date = ช่วงเปิดรับ ; pickup_date = วันนัดรับ / เริ่มจัดส่ง
  *
  * round_status (state machine):
@@ -26,7 +26,7 @@ import userModel from "../models/userModel";
 import type { z } from "zod";
 import type { updateRoundBody, updateRoundItemBody } from "../schemas/preorderRound";
 import { toSatang, toBahtFields } from "../lib/money";
-import { hasPreorderType } from "../lib/productCode";
+import { isPreorderProduct } from "../lib/productCode";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -45,7 +45,7 @@ const NEXT_ROUND_STATUS: Record<RoundStatus, RoundStatus[]> = {
 };
 
 const PRODUCT_SELECT =
-  "product_name_th product_name_eng product_price sale_price product_img product_types preorder_config";
+  "product_name_th product_name_eng product_price sale_price product_img is_preorder preorder_config";
 
 // BACKLOG §3.11 เฟส 5b — price_override เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
 // ต้องแปลง "ซ้อน" เข้าไปในผลลัพธ์ populate (product_id.product_price/sale_price) ด้วย เพราะ populate
@@ -151,11 +151,11 @@ export async function createRound(input: CreateRoundInput, createdBy: string) {
       seen.add(String(it.product_id));
       const product = await productModel
         .findOne({ _id: it.product_id, deleted_at: null })
-        .select("product_types product_name_th")
+        .select("is_preorder product_name_th")
         .lean<any>();
       if (!product) throw notFound(`ไม่พบสินค้า ${it.product_id}`);
-      if (!hasPreorderType(product.product_types)) {
-        throw badRequest(`สินค้า "${product.product_name_th}" ไม่ใช่สินค้าพรีออเดอร์ (product_types ต้องเป็น ["preorder"])`);
+      if (!isPreorderProduct(product)) {
+        throw badRequest(`สินค้า "${product.product_name_th}" ไม่ใช่สินค้าพรีออเดอร์ (is_preorder ต้องเป็น true)`);
       }
       resolvedItems.push({
         product_id: product._id,
@@ -380,10 +380,10 @@ export async function addRoundItem(roundId: string, input: RoundItemInput) {
   assertObjectId(input.product_id, "product_id");
   const product = await productModel
     .findOne({ _id: input.product_id, deleted_at: null })
-    .select("product_types product_name_th")
+    .select("is_preorder product_name_th")
     .lean<any>();
   if (!product) throw notFound("ไม่พบสินค้าที่ระบุ");
-  if (!hasPreorderType(product.product_types)) {
+  if (!isPreorderProduct(product)) {
     throw badRequest(`สินค้า "${product.product_name_th}" ไม่ใช่สินค้าพรีออเดอร์`);
   }
 
@@ -496,7 +496,7 @@ export async function getOrderableRoundItems(roundItemIds: string[], roundId: st
   const products = productIds.length
     ? await productModel
         .find({ _id: { $in: productIds }, deleted_at: null })
-        .select("product_name_th product_name_eng product_price sale_price product_types")
+        .select("product_name_th product_name_eng product_price sale_price is_preorder")
         .lean<any[]>()
     : [];
   const productById = new Map(products.map((p) => [String(p._id), p]));

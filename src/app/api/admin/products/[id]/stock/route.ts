@@ -1,5 +1,5 @@
 /**
- * /api/admin/products/[id]/stock  — จัดการสต็อกสินค้าที่มีสต็อก ("inStore" / "online")
+ * /api/admin/products/[id]/stock  — จัดการสต็อกสินค้าปกติ (is_preorder: false — พรีออเดอร์ไม่มีสต็อก)
  *   GET   — อ่านจำนวนคงเหลือ (stock.view)
  *   PUT   — ตั้งค่าสต็อกเป็นจำนวนที่ระบุ (stock.update)   body: { quantity }
  *   PATCH — ปรับสต็อกด้วยส่วนต่าง (stock.update)          body: { delta } หรือ { action, quantity }

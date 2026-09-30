@@ -2,67 +2,77 @@ import { describe, it, expect } from "vitest";
 import {
   generateProductCode,
   isProductCode,
-  isStockProductType,
-  hasPreorderType,
-  hasStockType,
-  productTypesOf,
+  isPreorderProduct,
+  isPreorderOf,
+  isPreorderFilterFrom,
+  productCodePrefix,
   generateDocNo,
 } from "@/lib/productCode";
 
 describe("generateProductCode", () => {
-  it("inStore / online → prefix pos-", () => {
-    expect(generateProductCode(["inStore"])).toMatch(/^pos-\d{7}$/);
-    expect(generateProductCode(["online"])).toMatch(/^pos-\d{7}$/);
-  });
-
-  it("inStore + online พร้อมกัน → prefix pos- เหมือนเดิม (docs/BACKLOG2.md §14)", () => {
-    expect(generateProductCode(["inStore", "online"])).toMatch(/^pos-\d{7}$/);
-  });
-
-  it('preorder → prefix pre- (["preorder"] เดี่ยว ๆ เท่านั้น)', () => {
-    expect(generateProductCode(["preorder"])).toMatch(/^pre-\d{7}$/);
+  it("สินค้าปกติ → prefix pos- · พรีออเดอร์ → prefix pre-", () => {
+    expect(generateProductCode(false)).toMatch(/^pos-\d{7}$/);
+    expect(generateProductCode(true)).toMatch(/^pre-\d{7}$/);
+    expect(productCodePrefix(false)).toBe("pos");
+    expect(productCodePrefix(true)).toBe("pre");
   });
 
   it("DDYY มาจากวันที่ที่ส่งเข้า (5 ม.ค. 2026 → 0526)", () => {
-    const code = generateProductCode(["inStore"], new Date(2026, 0, 5));
-    expect(code.startsWith("pos-0526")).toBe(true);
+    const code = generateProductCode(false, new Date(2026, 0, 5));
     expect(code).toMatch(/^pos-0526\d{3}$/);
   });
 });
 
-describe("hasPreorderType / hasStockType", () => {
-  it("hasPreorderType — true เฉพาะเมื่อมี preorder อยู่ใน array", () => {
-    expect(hasPreorderType(["preorder"])).toBe(true);
-    expect(hasPreorderType(["inStore"])).toBe(false);
-    expect(hasPreorderType(["inStore", "online"])).toBe(false);
-    expect(hasPreorderType(undefined)).toBe(false);
-    expect(hasPreorderType("preorder")).toBe(false); // ไม่ใช่ array — ต้อง false เสมอ ไม่ throw
-  });
-
-  it("hasStockType — true ถ้ามี inStore และ/หรือ online อย่างน้อย 1 ตัว", () => {
-    expect(hasStockType(["inStore"])).toBe(true);
-    expect(hasStockType(["online"])).toBe(true);
-    expect(hasStockType(["inStore", "online"])).toBe(true);
-    expect(hasStockType(["preorder"])).toBe(false);
-    expect(hasStockType(undefined)).toBe(false);
+describe("isPreorderProduct", () => {
+  it("true เฉพาะ is_preorder === true", () => {
+    expect(isPreorderProduct({ is_preorder: true })).toBe(true);
+    expect(isPreorderProduct({ is_preorder: false })).toBe(false);
+    expect(isPreorderProduct({})).toBe(false);
+    expect(isPreorderProduct(null)).toBe(false);
+    expect(isPreorderProduct({ is_preorder: "true" })).toBe(false); // ไม่ใช่ boolean — ไม่เดา
   });
 });
 
-describe("productTypesOf", () => {
-  it("ใช้ product_types ถ้ามี (ตัดค่าซ้ำ)", () => {
-    expect(productTypesOf({ product_types: ["inStore", "online", "inStore"] })).toEqual(["inStore", "online"]);
+describe("isPreorderOf — อ่านเอกสารดิบทุกรุ่น (สคริปต์ migrate)", () => {
+  it("is_preorder มาก่อนเสมอ", () => {
+    expect(isPreorderOf({ is_preorder: true, product_types: ["inStore"] })).toBe(true);
+    expect(isPreorderOf({ is_preorder: false })).toBe(false);
   });
 
-  it("ข้อมูลเก่า: product_type string → array, ready → inStore", () => {
-    expect(productTypesOf({ product_type: "preorder" })).toEqual(["preorder"]);
-    expect(productTypesOf({ product_type: "ready" })).toEqual(["inStore"]);
+  it("product_types (รุ่น 2026-09-24)", () => {
+    expect(isPreorderOf({ product_types: ["preorder"] })).toBe(true);
+    expect(isPreorderOf({ product_types: ["inStore", "online"] })).toBe(false);
+    expect(isPreorderOf({ product_types: ["online"] })).toBe(false);
   });
 
-  it("ไม่มีค่าที่ใช้ได้ → null", () => {
-    expect(productTypesOf({})).toBeNull();
-    expect(productTypesOf({ product_types: [] })).toBeNull();
-    expect(productTypesOf({ product_types: ["bogus"] })).toBeNull();
-    expect(productTypesOf({ product_type: "bogus" })).toBeNull();
+  it("product_type (รุ่นแรก) รวม ready = สินค้าปกติ", () => {
+    expect(isPreorderOf({ product_type: "preorder" })).toBe(true);
+    expect(isPreorderOf({ product_type: "inStore" })).toBe(false);
+    expect(isPreorderOf({ product_type: "ready" })).toBe(false);
+  });
+
+  it("ตัดสินไม่ได้ → null", () => {
+    expect(isPreorderOf({})).toBeNull();
+    expect(isPreorderOf({ product_types: [] })).toBeNull();
+    expect(isPreorderOf({ product_types: ["bogus"] })).toBeNull();
+    expect(isPreorderOf({ product_type: "bogus" })).toBeNull();
+  });
+});
+
+describe("isPreorderFilterFrom — query string รายการสินค้า", () => {
+  const q = (s: string) => isPreorderFilterFrom(new URLSearchParams(s));
+  it("?is_preorder= ใหม่", () => {
+    expect(q("is_preorder=true")).toBe(true);
+    expect(q("is_preorder=false")).toBe(false);
+  });
+  it("?product_type= เดิมยังรับ (preorder=true, inStore/online=false)", () => {
+    expect(q("product_type=preorder")).toBe(true);
+    expect(q("product_type=inStore")).toBe(false);
+    expect(q("product_type=online")).toBe(false);
+  });
+  it("ไม่ส่ง / ค่าแปลก → undefined (ทั้งหมด)", () => {
+    expect(q("")).toBeUndefined();
+    expect(q("product_type=bogus")).toBeUndefined();
   });
 });
 
@@ -99,14 +109,3 @@ describe("generateDocNo (BACKLOG3 — ตัวสร้างเลขที่
   });
 });
 
-describe("isStockProductType", () => {
-  it("inStore / online = มีสต็อก", () => {
-    expect(isStockProductType("inStore")).toBe(true);
-    expect(isStockProductType("online")).toBe(true);
-  });
-  it("preorder / อื่น ๆ = ไม่มีสต็อก", () => {
-    expect(isStockProductType("preorder")).toBe(false);
-    expect(isStockProductType("ready")).toBe(false);
-    expect(isStockProductType(undefined)).toBe(false);
-  });
-});

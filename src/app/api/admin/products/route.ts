@@ -8,7 +8,7 @@ import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
 import { parseBool, parsePagination } from "@/lib/queryParams";
 import * as productService from "@/services/productService";
-import type { ProductType } from "@/lib/productCode";
+import { isPreorderFilterFrom } from "@/lib/productCode";
 
 export const GET = withPermission("products", "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
@@ -16,7 +16,7 @@ export const GET = withPermission("products", "view", async (_s, req) => {
     pagination: parsePagination(sp),
     search: sp.get("search") ?? undefined,
     category_id: sp.get("category_id") ?? undefined,
-    product_type: (sp.get("product_type") as ProductType | null) ?? undefined,
+    is_preorder: isPreorderFilterFrom(sp),
     is_visible: parseBool(sp.get("is_visible")),
     includeDeleted: parseBool(sp.get("includeDeleted")) ?? false,
     sortBy: sp.get("sortBy") ?? undefined,
@@ -33,7 +33,7 @@ export const POST = withPermission("products", "create", async (_s, req) => {
     action_type: "CREATE",
     entity: "Product",
     entity_id: result?._id ? String(result._id) : null,
-    details: { name: body.product_name_th, product_types: body.product_types, price: body.product_price },
+    details: { name: body.product_name_th, is_preorder: body.is_preorder ?? false, price: body.product_price },
   });
   return created(result);
 });

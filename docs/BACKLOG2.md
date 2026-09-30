@@ -634,7 +634,7 @@ DB จริงแทน ตามแพทเทิร์นเดียวก�
 **เงื่อนไขที่ควรกลับมาทำ:** ก่อนใช้ prefix ของ `product_id` เป็นเกณฑ์แยกประเภทสินค้าในหน้าจอ/รายงานใดๆ
 (เช่นแผ่นบาร์โค้ดที่แยกตาม prefix) ควรตรวจสอบ/แก้ 2 แถวนี้ก่อน ไม่งั้นจะจัดกลุ่มผิด
 
-**สถานะ:** 🟡 **แก้ต้นเหตุแล้ว (ข) — 2026-09-24** · ข้อมูลเดิม 2 ตัวยังไม่แก้ (รอแอดมิน)
+**สถานะ:** 🟡 **แก้ต้นเหตุแล้ว (ข) — 2026-09-24** · 2026-09-30 เปลี่ยนเป็น `is_preorder` (14.1) · ข้อมูลเดิม 2 ตัวรอแก้หลัง deploy
 
 **สิ่งที่แก้ (2026-09-24)** — ทำพร้อมเปลี่ยน `product_type` (string) → **`product_types` (array)**:
 - กติกาใหม่: `inStore`+`online` เลือกพร้อมกันได้ · `preorder` ต้องอยู่เดี่ยว ๆ (`["preorder"]`) เท่านั้น —
@@ -652,9 +652,43 @@ DB จริงแทน ตามแพทเทิร์นเดียวก�
   จะถูกมองเป็นสินค้ามีสต็อก (`product_types: { $ne: "preorder" }` match เอกสารที่ไม่มีฟิลด์)
 - เทส: `tests/integration/productTypes.test.ts` (7 เคส) + `productTypesOf` ใน `tests/lib/productCode.test.ts`
 
-**ที่ยังค้าง:** 2 แถวในตารางด้านบน (`pos-1626294`, `pos-1626338`) — แก้ได้โดย PATCH `product_types:
-["preorder"]` + `preorder_config` + `product_stock_quantity: null` ผ่าน API (รหัสจะเปลี่ยนเป็น `pre-` ให้เอง)
-หลังรัน migration แล้ว
+**ที่ยังค้าง:** ~~2 แถวในตารางด้านบน — แก้ได้โดย PATCH `product_types: ["preorder"]` …~~ → ดู 14.1 (วิธีแก้เปลี่ยนแล้ว)
+
+### 14.1 เปลี่ยนทิศ (2026-09-30): เลิก `product_types` → ใช้ `is_preorder` (boolean) · ช่องทางดูจากออเดอร์
+
+**การตัดสินใจ (ผู้ใช้ 2026-09-30):** ไม่แยกประเภทสินค้าตามช่องทางขาย (`inStore`/`online`) แล้ว — ช่องทางดูจาก
+**เลขออเดอร์** แทน: เว็บไซต์/frontOffice = `ORD-` · หน้าร้าน = `POS-` · พรีออเดอร์ = `PRE-` (ทำไว้แล้วใน commit
+`41900fe`) · รหัสสินค้ายังเป็น `pos-` (สินค้าปกติ) / `pre-` (พรีออเดอร์) เหมือนเดิม
+
+| | ก่อน (2026-09-24) | หลัง (2026-09-30) |
+|---|---|---|
+| ฟิลด์ประเภทสินค้า | `product_types: ("inStore"\|"online"\|"preorder")[]` (preorder ต้องอยู่เดี่ยว) | **`is_preorder: boolean`** (required, default `false`) |
+| สินค้าปกติขายที่ไหน | ตาม `inStore`/`online` ที่เลือก | **ทุกช่องทาง** — ซ่อนจากหน้าเว็บด้วย `is_visible` (มีอยู่แล้ว) |
+| prefix รหัสสินค้า | ตาม `product_types` | ตาม `is_preorder` (`false` → `pos-` · `true` → `pre-`) — `productCodePrefix()` |
+| API สร้าง/แก้สินค้า | `product_types` · ส่ง `product_type` → 400 | `is_preorder` · ส่ง `product_type` **หรือ** `product_types` → 400 (บอกให้ใช้ `is_preorder`) |
+| สร้างรหัสใหม่อัตโนมัติ | เมื่อส่ง `product_types` แล้ว prefix ไม่ตรง | เมื่อส่ง `is_preorder` (ค่าใหม่หรือค่าเดิมซ้ำ) แล้ว prefix ไม่ตรง → **ใช้แก้ 2 แถวค้างได้ด้วย `PATCH { is_preorder: true }`** |
+| ตัวกรองรายการสินค้า | `?product_type=<ค่าเดียว>` | `?is_preorder=true\|false` · `?product_type=` เดิมยังรับ (preorder→true, inStore/online→false) — `isPreorderFilterFrom()` |
+| query "สินค้ามีสต็อก" | `product_types: { $ne: "preorder" }` | `is_preorder: { $ne: true }` (`STOCKABLE_MATCH`, dashboard low-stock) |
+| แดชบอร์ดรายรับ | `revenueByProductType` แยก inStore/online/preorder — **อ่านแค่ `orders` จึงไม่เคยนับรายได้พรีออเดอร์จริง** | **`revenueByChannel`** แยก `web` (ORD-) / `pos` (POS-) / `preorder` (collection `preorders`) / `other` (เลขรุ่นเก่า OP-/WEB-) + จำนวนต่อช่องทาง · route ใหม่ `/api/admin/dashboard/revenue-by-channel` (`/revenue-by-type` คงไว้เป็นชื่อเก่า response แบบใหม่) |
+| migration | `migrate:product-types` (รันกับ DB จริงแล้ว 2026-09-24) | **`migrate:is-preorder`** — แปลงทุกรุ่น (`product_types` / `product_type` รวม `ready`) → `is_preorder` + `$unset` ฟิลด์เก่าทั้งสอง · dry-run ค่าเริ่มต้น · `--apply` สำรองลง `scripts/backups/is-preorder-*.json` + เขียนทีละแถวแบบมีเงื่อนไข · สคริปต์เดิมลบทิ้ง |
+
+**ไฟล์:** `src/lib/productCode.ts` (`isPreorderProduct` / `isPreorderOf` / `productCodePrefix` / `isPreorderFilterFrom`
+แทน `hasPreorderType` / `hasStockType` / `productTypesOf` / `PRODUCT_TYPES`) · `productModel` · `productService` ·
+`cartService` · `orderService` · `preorderRoundService` · `dashboardService` · route สินค้า/catalog/dashboard ·
+สคริปต์ `backfill-product-codes` / `audit-bson-timestamp-fields` / `fix-bson-timestamp-products` / `seed-preorder-rounds`
+
+**dry-run กับ DB จริง (2026-09-30, อ่านอย่างเดียว):** สินค้า 42 ตัว ต้องแปลง 42 (พรีออเดอร์ 10) · ตัดสินไม่ได้ 0 ·
+prefix ไม่ตรง 2 (`pos-1626294`, `pos-1626338` → ควรเป็น `pre-`) · รวม 2 ตัวที่มี `product_type: "ready"` ค้างคู่
+`product_types` (ชิโอะปังนูเทลล่า, ขนมปังซาวโดว์ช็อกโกแลต — ถูกเขียนนอกแอปหลัง migrate รอบแรก) จะถูกล้างด้วย
+
+**ลำดับตอน deploy:** (1) `npm run migrate:is-preorder` ดูแผน → (2) `-- --apply` → (3) deploy โค้ด → (4) แก้ 2 แถว
+prefix ผิดด้วย `PATCH /api/admin/products/<_id> { "is_preorder": true }` (⚠️ รหัสเปลี่ยนเป็น `pre-` พิมพ์ป้ายใหม่)
+**ระหว่าง (2)–(3)** โค้ดเก่าที่ยังอ่าน `product_types` จะเห็นสินค้าไม่มีประเภท — ทำ (2)→(3) ติดกัน
+
+**เทส:** `tests/integration/isPreorder.test.ts` (9 เคส รวม migration) · `tests/integration/revenueByChannel.test.ts`
+(3 เคส) · `tests/lib/productCode.test.ts` (เขียนใหม่) · fixture ทุกไฟล์ `product_types: [...]` → `is_preorder`
+
+**สถานะ:** 🟡 โค้ดเสร็จ (2026-09-30) · **ยังไม่ได้รัน `--apply` กับ DB จริง** · 2 แถว prefix ผิดรอแก้หลัง deploy
 
 ---
 
