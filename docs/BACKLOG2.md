@@ -1,6 +1,6 @@
 # MeowMeeCake Backend — BACKLOG 2: บั๊ก/ความเสี่ยงชุดใหม่
 
-> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-22 (§12.1 แก้ครบแล้ว — รีเซ็ตทั้งรหัสผ่านบัญชี owner จริง
+> สร้าง: 2026-09-13 · อัปเดตล่าสุด: 2026-09-25 (§16 ใหม่ — `product_price` ถูกเขียนทับเป็นบาทจากนอก API, แก้ข้อมูลแล้ว + audit เงินให้ false positive หลัง fix · §12.1 แก้ครบแล้ว — รีเซ็ตทั้งรหัสผ่านบัญชี owner จริง
 > (ยืนยันด้วย API จริง: login รหัสใหม่ 200 / รหัส seed เดิม 401) และรหัสผ่าน Atlas DB user (ผู้ใช้เปลี่ยน
 > เองที่ Atlas console, ยืนยันด้วย GET /api/health db:connected + login จริง) · §12.2 แก้แล้ว — เพิ่ม
 > sort ให้ query หาสูตรตอนสร้างใบสั่งผลิตจากรอบพรีออเดอร์ deterministic
@@ -33,6 +33,7 @@
 | **§10 `createProductionOrder` ไม่มี Saga — header ค้างถ้า items ผิด** | ✅ **แก้แล้ว** (2026-09-15) — เพิ่ม `Saga` rollback header เมื่อ `addItems()` throw (เทียบ `orderService`/`preorderService` ที่มี, `preorderRoundService.createRound()` validate ก่อนสร้างอยู่แล้วจึงไม่ต้องแก้) |
 | **§4 พรีออเดอร์ไม่มีทางอัปเดตสถานะจัดส่งเลย (คู่ขนานกับ `orderService.updateDelivery`)** | ✅ **แก้แล้ว** (2026-09-13) — เพิ่ม `preorderService.updateDelivery()` + `PATCH /api/admin/preorders/[id]/delivery` คู่กับของ order + เทส 6 เคสใหม่ |
 | **§5 `crudService.ts` create()/update() ไม่มี default whitelist ถ้า service ลืมระบุ `createFields`** | ✅ **แก้แล้ว** (2026-09-15) — `createFields` เปลี่ยนจาก optional เป็น required ใน `CrudOptions` — compiler เจอ **1 จุดจริง** ที่ยังไม่ระบุ (`notificationService.ts`, ดู §5 ด้านล่าง) |
+| **§16 `product_price` ถูกเขียนทับเป็นบาทจากนอก API (ราคาแสดง 0.65 แทน 65)** | ✅ **แก้ข้อมูลแล้ว** (2026-09-25) — ×100 คืนสตางค์ 35 ตัว + ยกเลิกออเดอร์ที่สร้างขณะราคาเพี้ยน 1 รายการ · 🟡 §16.1 `audit-money-units` ให้ false positive 114 แถวหลัง fix (ห้ามเชื่อผลตรง ๆ) |
 
 ---
 
@@ -633,7 +634,7 @@ DB จริงแทน ตามแพทเทิร์นเดียวก�
 **เงื่อนไขที่ควรกลับมาทำ:** ก่อนใช้ prefix ของ `product_id` เป็นเกณฑ์แยกประเภทสินค้าในหน้าจอ/รายงานใดๆ
 (เช่นแผ่นบาร์โค้ดที่แยกตาม prefix) ควรตรวจสอบ/แก้ 2 แถวนี้ก่อน ไม่งั้นจะจัดกลุ่มผิด
 
-**สถานะ:** 🟡 **แก้ต้นเหตุแล้ว (ข) — 2026-09-24** · ข้อมูลเดิม 2 ตัวยังไม่แก้ (รอแอดมิน)
+**สถานะ:** 🟡 **แก้ต้นเหตุแล้ว (ข) — 2026-09-24** · 2026-09-30 เปลี่ยนเป็น `is_preorder` (14.1) · ข้อมูลเดิม 2 ตัวรอแก้หลัง deploy
 
 **สิ่งที่แก้ (2026-09-24)** — ทำพร้อมเปลี่ยน `product_type` (string) → **`product_types` (array)**:
 - กติกาใหม่: `inStore`+`online` เลือกพร้อมกันได้ · `preorder` ต้องอยู่เดี่ยว ๆ (`["preorder"]`) เท่านั้น —
@@ -651,9 +652,43 @@ DB จริงแทน ตามแพทเทิร์นเดียวก�
   จะถูกมองเป็นสินค้ามีสต็อก (`product_types: { $ne: "preorder" }` match เอกสารที่ไม่มีฟิลด์)
 - เทส: `tests/integration/productTypes.test.ts` (7 เคส) + `productTypesOf` ใน `tests/lib/productCode.test.ts`
 
-**ที่ยังค้าง:** 2 แถวในตารางด้านบน (`pos-1626294`, `pos-1626338`) — แก้ได้โดย PATCH `product_types:
-["preorder"]` + `preorder_config` + `product_stock_quantity: null` ผ่าน API (รหัสจะเปลี่ยนเป็น `pre-` ให้เอง)
-หลังรัน migration แล้ว
+**ที่ยังค้าง:** ~~2 แถวในตารางด้านบน — แก้ได้โดย PATCH `product_types: ["preorder"]` …~~ → ดู 14.1 (วิธีแก้เปลี่ยนแล้ว)
+
+### 14.1 เปลี่ยนทิศ (2026-09-30): เลิก `product_types` → ใช้ `is_preorder` (boolean) · ช่องทางดูจากออเดอร์
+
+**การตัดสินใจ (ผู้ใช้ 2026-09-30):** ไม่แยกประเภทสินค้าตามช่องทางขาย (`inStore`/`online`) แล้ว — ช่องทางดูจาก
+**เลขออเดอร์** แทน: เว็บไซต์/frontOffice = `ORD-` · หน้าร้าน = `POS-` · พรีออเดอร์ = `PRE-` (ทำไว้แล้วใน commit
+`41900fe`) · รหัสสินค้ายังเป็น `pos-` (สินค้าปกติ) / `pre-` (พรีออเดอร์) เหมือนเดิม
+
+| | ก่อน (2026-09-24) | หลัง (2026-09-30) |
+|---|---|---|
+| ฟิลด์ประเภทสินค้า | `product_types: ("inStore"\|"online"\|"preorder")[]` (preorder ต้องอยู่เดี่ยว) | **`is_preorder: boolean`** (required, default `false`) |
+| สินค้าปกติขายที่ไหน | ตาม `inStore`/`online` ที่เลือก | **ทุกช่องทาง** — ซ่อนจากหน้าเว็บด้วย `is_visible` (มีอยู่แล้ว) |
+| prefix รหัสสินค้า | ตาม `product_types` | ตาม `is_preorder` (`false` → `pos-` · `true` → `pre-`) — `productCodePrefix()` |
+| API สร้าง/แก้สินค้า | `product_types` · ส่ง `product_type` → 400 | `is_preorder` · ส่ง `product_type` **หรือ** `product_types` → 400 (บอกให้ใช้ `is_preorder`) |
+| สร้างรหัสใหม่อัตโนมัติ | เมื่อส่ง `product_types` แล้ว prefix ไม่ตรง | เมื่อส่ง `is_preorder` (ค่าใหม่หรือค่าเดิมซ้ำ) แล้ว prefix ไม่ตรง → **ใช้แก้ 2 แถวค้างได้ด้วย `PATCH { is_preorder: true }`** |
+| ตัวกรองรายการสินค้า | `?product_type=<ค่าเดียว>` | `?is_preorder=true\|false` · `?product_type=` เดิมยังรับ (preorder→true, inStore/online→false) — `isPreorderFilterFrom()` |
+| query "สินค้ามีสต็อก" | `product_types: { $ne: "preorder" }` | `is_preorder: { $ne: true }` (`STOCKABLE_MATCH`, dashboard low-stock) |
+| แดชบอร์ดรายรับ | `revenueByProductType` แยก inStore/online/preorder — **อ่านแค่ `orders` จึงไม่เคยนับรายได้พรีออเดอร์จริง** | **`revenueByChannel`** แยก `web` (ORD-) / `pos` (POS-) / `preorder` (collection `preorders`) / `other` (เลขรุ่นเก่า OP-/WEB-) + จำนวนต่อช่องทาง · route ใหม่ `/api/admin/dashboard/revenue-by-channel` (`/revenue-by-type` คงไว้เป็นชื่อเก่า response แบบใหม่) |
+| migration | `migrate:product-types` (รันกับ DB จริงแล้ว 2026-09-24) | **`migrate:is-preorder`** — แปลงทุกรุ่น (`product_types` / `product_type` รวม `ready`) → `is_preorder` + `$unset` ฟิลด์เก่าทั้งสอง · dry-run ค่าเริ่มต้น · `--apply` สำรองลง `scripts/backups/is-preorder-*.json` + เขียนทีละแถวแบบมีเงื่อนไข · สคริปต์เดิมลบทิ้ง |
+
+**ไฟล์:** `src/lib/productCode.ts` (`isPreorderProduct` / `isPreorderOf` / `productCodePrefix` / `isPreorderFilterFrom`
+แทน `hasPreorderType` / `hasStockType` / `productTypesOf` / `PRODUCT_TYPES`) · `productModel` · `productService` ·
+`cartService` · `orderService` · `preorderRoundService` · `dashboardService` · route สินค้า/catalog/dashboard ·
+สคริปต์ `backfill-product-codes` / `audit-bson-timestamp-fields` / `fix-bson-timestamp-products` / `seed-preorder-rounds`
+
+**dry-run กับ DB จริง (2026-09-30, อ่านอย่างเดียว):** สินค้า 42 ตัว ต้องแปลง 42 (พรีออเดอร์ 10) · ตัดสินไม่ได้ 0 ·
+prefix ไม่ตรง 2 (`pos-1626294`, `pos-1626338` → ควรเป็น `pre-`) · รวม 2 ตัวที่มี `product_type: "ready"` ค้างคู่
+`product_types` (ชิโอะปังนูเทลล่า, ขนมปังซาวโดว์ช็อกโกแลต — ถูกเขียนนอกแอปหลัง migrate รอบแรก) จะถูกล้างด้วย
+
+**ลำดับตอน deploy:** (1) `npm run migrate:is-preorder` ดูแผน → (2) `-- --apply` → (3) deploy โค้ด → (4) แก้ 2 แถว
+prefix ผิดด้วย `PATCH /api/admin/products/<_id> { "is_preorder": true }` (⚠️ รหัสเปลี่ยนเป็น `pre-` พิมพ์ป้ายใหม่)
+**ระหว่าง (2)–(3)** โค้ดเก่าที่ยังอ่าน `product_types` จะเห็นสินค้าไม่มีประเภท — ทำ (2)→(3) ติดกัน
+
+**เทส:** `tests/integration/isPreorder.test.ts` (9 เคส รวม migration) · `tests/integration/revenueByChannel.test.ts`
+(3 เคส) · `tests/lib/productCode.test.ts` (เขียนใหม่) · fixture ทุกไฟล์ `product_types: [...]` → `is_preorder`
+
+**สถานะ:** 🟡 โค้ดเสร็จ (2026-09-30) · **ยังไม่ได้รัน `--apply` กับ DB จริง** · 2 แถว prefix ผิดรอแก้หลัง deploy
 
 ---
 
@@ -689,3 +724,62 @@ DB จริงแทน ตามแพทเทิร์นเดียวก�
 ผ่านหมด — ลบข้อมูลทดสอบออกจาก DB/disk เรียบร้อยแล้ว
 
 **สถานะ:** ✅ แก้แล้ว (2026-09-23)
+
+---
+
+## 16. ✅ `product_price` ถูกเขียนทับเป็น "บาท" จากนอก API — ราคาแสดงเล็กลง 100 เท่า (พบ + แก้ 2026-09-25)
+
+> พบจากผู้ใช้แจ้งว่าราคาสินค้าที่หน้าหลังบ้านเปลี่ยน "จาก 65 เป็น 0.65" · ตรวจด้วยการอ่าน DB จริง
+> (read-only) + เทียบกับ backup ของ `fix-money-units` รอบ 2026-09-20 (`scripts/backups/money-fix-2026-09-20T12-20-15-782Z.json`)
+> เวลาในหัวข้อนี้เป็นเวลาไทย (UTC+7) ยกเว้นที่ระบุ
+
+**อาการ:** `product_price` ของสินค้า 35/36 ตัว (ที่ยังไม่ถูกลบ) เป็นค่าบาท (เช่น `65`) ขณะที่ `sale_price`
+ของตัวเดียวกันเป็นสตางค์ (เช่น `6400`) — `presentProduct()` หาร 100 ตามปกติ → แสดง 0.65 บาท
+(ส่วน `sale_price` แสดงถูก เลยเกิดสภาพ "ราคาลดแพงกว่าราคาปกติ 100 เท่า")
+
+**สาเหตุ — ถูกเขียนทับนอก API ช่วง 2026-09-24 13:27–13:34:** ราคาสินค้าทั้งหมดถูกแปลงเป็นสตางค์ถูกต้อง
+แล้วโดย `fix-money-units --apply` เมื่อ 2026-09-20 แต่ช่วงเวลาข้างบน `product_price` ถูกเขียนใหม่เป็นหน่วยบาท
+ทีละตัว (ห่างกัน ~10 วินาที) — เทียบกับ backup 09-20:
+- **19 ตัว** กลับไปเป็นค่าบาทเดิม "ก่อนแปลง" เป๊ะ (เช่น 65 → เคยเป็น 6500 → กลับเป็น 65)
+- **15 ตัว** ถูกตั้งราคาใหม่แต่ใส่เป็นบาท (เช่น เค้กช็อกโกแลต 35 → 350, ชิโอะปังนูเทลล่า 40 → 55)
+
+**ไม่ใช่บั๊กในโค้ด:** `createProduct()`/`updateProduct()` แปลงบาท → สตางค์ถูกต้องทุกเส้นทาง (`toSatang()`)
+และช่วงเวลานั้น **ไม่มี `userlogs` ของการแก้สินค้าเลย** (มีแค่ "ลบสินค้า" 1 รายการผ่าน API) — แปลว่าการเขียน
+ไม่ได้ผ่าน API · เอกสารสินค้ายังมีฟิลด์จาก schema เก่าติดอยู่ (`delete_at`, `preparation_heating`,
+`yield_per_batch`) → น่าจะเป็นการแก้ตรงใน DB (Compass/Atlas UI) หรือ import ข้อมูล export เก่าทับ ·
+**ยังไม่รู้ตัวคน/เครื่องมือที่เขียนแน่ชัด**
+
+**แก้แล้ว (ข้อมูล):**
+- `product_price` ×100 ของ 35 ตัว (34 ตัวข้างบน + "สินค้าทดสอบสแกน" `200` ที่ผู้ใช้ยืนยันว่าตั้งใจ 200 บาท)
+  — เขียนทีละแถวแบบมีเงื่อนไข `{ _id, product_price: ค่าเดิม }` สำเร็จ 35/35 · ไม่แตะ `sale_price` (สตางค์
+  ถูกอยู่แล้วทั้ง 7 ตัว) และ "ขนมปังซาวโดว์ช็อกโกแลต" (`36600` สร้างผ่าน API ถูกต้องอยู่แล้ว)
+- สำรองค่าเดิม: `scripts/backups/product-price-fix-2026-09-24T21-30-28-057Z.json` (ชื่อไฟล์เป็น UTC)
+- ยืนยันหลังแก้: ไม่มีสินค้าที่ `product_price < 1000` สตางค์เหลือ · ไม่มีตัวที่ `sale_price >= product_price`
+- ออเดอร์ `WEB-1790232182609` (pending, ยังไม่ชำระ) ที่สร้างขณะราคาเพี้ยน (2 × 0.55 บาท รวม 1.75 บาท)
+  → ยกเลิกผ่าน `orderService.cancelOrder()` (คืนสต็อก/revoke promo ตามปกติ) ตามที่ผู้ใช้สั่ง
+- ตรวจ collection อื่นที่สร้างในช่วงราคาเพี้ยน: `preorders`/`payments`/`promotionusages`/
+  `preorderrounditems` = 0 · `cartitems` 3 แถว — 2 แถวผิด (`10`, `55`) ถูก soft-delete ไปแล้ว (กลายเป็นออเดอร์
+  ที่ยกเลิกข้างบน) · อีก 1 แถว `3000` ถูกต้อง
+
+### 16.1 ⚠️ `audit-money-units.ts` ให้ผล false positive หลัง `fix-money-units --apply` — ห้ามเชื่อผลตรง ๆ
+
+รัน audit ใหม่ (2026-09-25) ได้ "จะแก้ ×100" **114 แถว** — เทียบกับ backup 09-20 ทีละแถวแล้ว **ทุกแถว
+นอกจาก products เป็นสตางค์ถูกต้องอยู่แล้ว** (ค่าปัจจุบัน = ค่า `new` ใน backup เป๊ะ): ingredients 31,
+components 3, recipes 24, promotions 10, cart_items 42, preorder_round_items 3
+
+**สาเหตุ:** audit ตัดสิน BAHT_LIKELY จาก `updated_at < cutoff` แต่ `fix-money-units.ts` ตั้งใจ **ไม่แตะ
+`updated_at`** (เก็บหลักฐานเวลาเดิม) → แถวที่แก้แล้วยังมี `updated_at` เก่า จึงถูกรายงานซ้ำว่า "ยังเป็นบาท"
+ถ้าทำตาม (เช่นเขียนสคริปต์คูณเองตาม report) ส่วนลด "ลด 50 บาท" (`5000`) จะกลายเป็น 5,000 บาท
+
+**กันไว้แล้วบางส่วน:** `fix-money-units.ts` เองปฏิเสธรันซ้ำเมื่อเจอ marker `money_fix_units_applied`
+แต่ report ของ audit ยังชวนเข้าใจผิดได้
+
+**ข้อเสนอ (ยังไม่ทำ):** ให้ audit เทียบกับไฟล์ใน `scripts/backups/money-fix-*.json` ก่อนตัดสิน (แถวที่ค่า =
+`new` ใน backup → SATANG) หรืออย่างน้อยพิมพ์คำเตือนเมื่อพบ marker `money_fix_units_applied`
+
+### 16.2 ข้อควรปฏิบัติ
+
+- แก้ราคาสินค้าผ่านหน้าเว็บ/API เท่านั้น (backend แปลงเป็นสตางค์ให้เอง + มี userlog)
+- ถ้าจำเป็นต้องแก้ตรงใน DB: เงินทุกฟิลด์เป็น **สตางค์** (65 บาท = `6500`) · ห้าม import export เก่าทับ
+
+**สถานะ:** ✅ ข้อมูลแก้แล้ว (2026-09-25) · 🟡 §16.1 ข้อเสนอปรับ audit ยังไม่ทำ · ต้นทางการเขียนทับยังไม่ทราบ

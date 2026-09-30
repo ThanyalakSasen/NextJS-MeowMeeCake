@@ -1,7 +1,7 @@
 /**
  * orderService — คำสั่งซื้อ (Orders + OrderItems)
  *
- * ขอบเขต: ออเดอร์ปกติ (สินค้าที่ product_types มี "inStore"/"online") เท่านั้น
+ * ขอบเขต: ออเดอร์ปกติ (สินค้าปกติ is_preorder: false) เท่านั้น — ช่องทาง (เว็บ/หน้าร้าน) ดูจาก channel ของออเดอร์
  *   สินค้าพรีออเดอร์เก็บแยกคนละคอลเลกชัน (preorderModel / preorderItemModel) ไม่ปนกับ orderModel
  *
  * ครอบคลุม:
@@ -9,7 +9,7 @@
  *  - ออกเลขออเดอร์ ORD-YYYYMMDD-XXXXXX (เว็บไซต์) / POS-YYYYMMDD-XXXXXX (หน้าร้าน) กันซ้ำด้วย unique index + retry
  *  - ตัดสต็อกตอนสร้าง และคืนสต็อกตอนยกเลิก (ผ่าน productService)
  *  - state machine ของ order_status + จัดการสถานะจัดส่ง/ชำระเงิน
- *  - ปฏิเสธสินค้าที่ product_types = ["preorder"] ทั้งใน createOrder และ createOrderFromCart
+ *  - ปฏิเสธสินค้าพรีออเดอร์ (is_preorder: true) ทั้งใน createOrder และ createOrderFromCart
  *
  * ข้อจำกัดที่ทราบ:
  *  - MongoDB แบบ standalone ไม่มี transaction — ใช้แนวทาง best-effort + ชดเชย (คืนสต็อก/ลบออเดอร์) เมื่อผิดพลาด
@@ -46,7 +46,7 @@ import { resolveSelectedOptions } from "./productOptionService";
 import { notificationService } from "./notificationService";
 import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
-import { generateDocNo, hasPreorderType } from "../lib/productCode";
+import { generateDocNo, isPreorderProduct } from "../lib/productCode";
 import type { z } from "zod";
 import type { updateDeliveryBody } from "../schemas/order";
 
@@ -202,7 +202,7 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
 
     const product = productById.get(String(input.product_id));
     if (!product) throw notFound(`ไม่พบสินค้า ${input.product_id}`);
-    if (hasPreorderType(product.product_types)) {
+    if (isPreorderProduct(product)) {
       throw badRequest(
         `สินค้า "${product.product_name_th}" เป็นสินค้าพรีออเดอร์ ต้องสั่งผ่านระบบพรีออเดอร์ (Preorders) ไม่ใช่ออเดอร์ปกติ`
       );
@@ -462,7 +462,7 @@ export async function createOrderFromCart(
 
   // ออเดอร์ปกติเก็บเฉพาะ inStore/online — สินค้าพรีออเดอร์ต้องไปทางระบบ Preorders (preorderModel)
   const preorderInCart = (detail.items as any[]).find(
-    (it) => hasPreorderType(it.product_id?.product_types)
+    (it) => isPreorderProduct(it.product_id)
   );
   if (preorderInCart) {
     const name = preorderInCart.product_id?.product_name_th ?? "บางรายการ";

@@ -238,7 +238,8 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
 
 - [ ] ช่อง "แจ้งเตือนเมื่อเหลือไม่เกิน … ชิ้น (เว้นว่าง = 5)" ใน `POST /api/admin/products` / `PATCH /api/admin/products/[id]`
   ฟิลด์ `low_stock_threshold` — จำนวนเต็ม ≥ 0 หรือ `null` (เว้นว่าง) · ค่าผิดได้ 400
-- [ ] แสดงเฉพาะสินค้าที่มีสต็อก (`product_types` มี `inStore` / `online`) — สินค้า preorder ไม่มีช่องนี้ (server เก็บเป็น `null` เสมอ)
+- [ ] แสดงเฉพาะสินค้าปกติ (`is_preorder: false`) — สินค้าพรีออเดอร์ไม่มีช่องนี้ (server เก็บเป็น `null` เสมอ) ·
+  ⚠️ ฟิลด์ประเภทสินค้าเปลี่ยนจาก `product_types` เป็น `is_preorder` แล้ว (PR #52 / BACKLOG2 §14.1)
 - [ ] (ถ้ามีหน้า "สินค้าใกล้หมด") `GET /api/admin/products/low-stock` **ไม่ส่ง `?threshold=`** แล้ว = ใช้เกณฑ์รายสินค้า ·
   response เพิ่ม `per_product` และ `items[].low_stock_threshold` — ถ้าหน้าเดิมส่ง `?threshold=5` ตายตัวไว้ ให้เอาออก
 

@@ -57,7 +57,7 @@ describe("สินค้าใกล้หมด — ปรับสต็อ�
 describe("พรีออเดอร์ใหม่ → แจ้งเจ้าของร้าน", () => {
   it("createPreorder → มี notification 'พรีออเดอร์ใหม่ PRE-…' พร้อมชื่อรอบและยอด", async () => {
     const user = await makeUser();
-    const product = await makeProduct({ product_types: ["preorder"], product_price: 120 });
+    const product = await makeProduct({ is_preorder: true, product_price: 120 });
     const roundName = `รอบแจ้งเตือน-${Date.now()}`;
     const round = await preorderRoundService.createRound(
       {
@@ -125,7 +125,7 @@ describe("เกณฑ์สินค้าใกล้หมดรายสิ�
     };
     expect(cleared.low_stock_threshold).toBeNull();
 
-    const pre = await makeProduct({ product_types: ["preorder"], product_stock_quantity: null, low_stock_threshold: 3 });
+    const pre = await makeProduct({ is_preorder: true, product_stock_quantity: null, low_stock_threshold: 3 });
     const toPre = (await productService.updateProduct(String(pre._id), { product_name_th: `พรี-${Date.now()}` })) as {
       low_stock_threshold: number | null;
     };
