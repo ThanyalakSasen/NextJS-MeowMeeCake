@@ -128,8 +128,9 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
 | `?line=linked` | ผูกสำเร็จ | "เชื่อมต่อ LINE เรียบร้อย" |
 | `?line=cancelled` | ลูกค้ากดยกเลิกในหน้า LINE | ไม่ต้องแสดงอะไร |
 | `?line=error` | state หมดอายุ / ไม่ใช่บัญชีเดียวกับที่ล็อกอิน / แลก code ไม่ผ่าน | "เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง" |
+| `?line=error&reason=login_required` | ไม่ได้ล็อกอิน / session หมดอายุระหว่างอยู่หน้า LINE (เพิ่ม §9.8) — ไม่ส่ง `reason` = กรณีอื่นข้างบน | "กรุณาเข้าสู่ระบบอีกครั้ง แล้วกดเชื่อม LINE ใหม่" (หรือใช้ข้อความเดียวกับ `error` ก็ได้ — เพิ่ม `reason` แบบไม่ทำให้โค้ดเดิมพัง) |
 
-ไม่ตั้ง `LINE_LINK_RETURN_URL` = ตอบ JSON `{ line: "linked" | ... }` แทนการ redirect
+ไม่ตั้ง `LINE_LINK_RETURN_URL` = ตอบ JSON `{ line: "linked" | ..., reason? }` แทนการ redirect
 
 ### `DELETE /api/shop/me/line` — ยกเลิกผูก
 ```json
@@ -152,6 +153,8 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
 | `authorize_url` เป็น `null` | ยังตั้ง `LINE_LOGIN_*` ไม่ครบ | ข้อ 3 แล้ว restart dev server |
 | ผูกแล้วแต่ลูกค้าไม่ได้ข้อความ | ไม่ได้เป็นเพื่อน OA / LINE Login channel อยู่คนละ Provider กับ OA | ให้ลูกค้าเพิ่มเพื่อน OA · ตั้ง Linked OA · ย้าย channel ให้อยู่ Provider เดียวกัน |
 | ร้านไม่ได้ข้อความ แต่ในเว็บมีแจ้งเตือน | push ล้มเหลว | ดู `line_error` ใน notification นั้น (`/api/admin/notifications`) |
+| กลับมาหน้าโปรไฟล์ด้วย `?line=error&reason=login_required` | session หมดอายุ / ล็อกอินคนละเบราว์เซอร์กับที่เปิดหน้า LINE | ล็อกอินใหม่แล้วกดเชื่อม LINE อีกครั้ง (§9.8) |
+| ในเว็บขึ้น "โควตา LINE หมดแล้ว (YYYY-MM)" | LINE ตอบ 429 monthly limit | ระบบหยุดยิงหาลูกค้าเองทันที (§9.8) · รอขึ้นเดือนใหม่ หรืออัปเกรดแพ็กเกจ OA · 429 แบบ rate limit ไม่นับ |
 
 ### 6.1 แยก Messaging API channel กับ LINE Login channel ให้ออก
 
@@ -212,6 +215,7 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
 | 9.5 | commit ถัดมา (PR #53) | แจ้งเจ้าของร้าน: เกณฑ์สินค้าใกล้หมดรายสินค้า + ออเดอร์ POS ไม่ส่ง LINE | `lib/lowStock` / `productService` / `dashboardService` / `notificationService` / `orderService` |
 | 9.6 | commit ถัดมา (PR #53) | รับมือโควตา LINE OA 300 ข้อความ/เดือน: ลดข้อความลูกค้า + กันโควตาให้ร้าน + แจ้งในเว็บ | `lib/lineQuota` / `customerNotifyService` / `notificationService` |
 | 9.7 | commit ถัดมา (PR #53) | เตือนลูกค้าก่อนวันรับพรีออเดอร์ (cron endpoint + สคริปต์) | `preorderReminderService` / `/api/cron/preorder-reminders` / `scripts/send-preorder-reminders.ts` |
+| 9.8 | commit ถัดมา (PR #53) | หลัง 429 หยุดยิงหาลูกค้าทันที + แยก 429 rate limit · callback ไม่มี session พากลับหน้าโปรไฟล์ | `lib/lineQuota` / callback route / `middleware` |
 
 ---
 
@@ -578,3 +582,56 @@ else if (isQuotaExceededError(result.error)) await alertQuotaExhausted();
 - `tests/lib/cronAuth.test.ts` ใหม่ 3 เคส — ไม่ตั้ง secret = ปิด · ถูก = ผ่าน · ไม่มี/ผิด/ผิดรูปแบบ = 401
 
 ผลรวม: unit 209 ✅ · integration 228 ✅ · typecheck ✅ · `next build` ✅ · lint 0 error (warning 5 จุดเดิม)
+
+---
+
+### 9.8 แก้จุดที่เจอตอนตรวจรอบ 2: หลัง 429 + callback ไม่มี session (2026-09-30)
+
+#### ข้อ 5 — หลัง LINE ตอบ 429 (โควตาหมด) หยุดยิงหาลูกค้าทันที (`src/lib/lineQuota.ts`)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| หลังได้ 429 ครั้งแรก | cache โควตา (5 นาที) ยังเชื่อว่าเหลือ → ยิงหาลูกค้าต่อทุกราย โดน 429 ทุกครั้ง (เปลือง request + log รก) | `markQuotaExhausted()` ตั้ง cache = เหลือ 0 ทันที → ลูกค้ารายถัดไป**ไม่ถูกยิงเลย** จน cache หมดอายุแล้วถาม LINE ใหม่ |
+| 429 จากฝั่งเจ้าของร้าน | ไม่กระทบการส่งหาลูกค้า | ตั้ง cache = 0 เหมือนกัน → ลูกค้าหยุดด้วย (เจ้าของร้านยังพยายามส่งตามปกติ — ไม่ถูกเช็คโควตา) |
+| แจ้งในเว็บตอนเหลือ 0 | อาจได้ทั้ง "หมดแล้ว" และ "ใกล้หมด เหลือ 0/…" ซ้อนกัน | เหลือ 0 → ไม่สร้าง "ใกล้หมด" (มี "หมดแล้ว" อยู่แล้ว) |
+| **429 แบบ rate limit** (`The API rate limit has been exceeded`) | นับว่าโควตาหมด → แจ้ง "โควตา LINE หมดแล้ว" ผิด ๆ | `isQuotaExceededError` ต้องเป็น 429 **และ** มีข้อความ `monthly limit` — rate limit หายเองในไม่กี่วินาที ไม่ปิดการส่ง ไม่แจ้งเว็บ |
+
+```ts
+// ก่อน
+export function isQuotaExceededError(error) { return /LINE API 429/.test(error); }
+export async function alertQuotaExhausted() { await alertOwnerOnce("โควตา LINE หมดแล้ว", …); }
+
+// หลัง
+export function isQuotaExceededError(error) { return /LINE API 429/.test(error) && /monthly limit/i.test(error); }
+export async function alertQuotaExhausted() { markQuotaExhausted(); await alertOwnerOnce("โควตา LINE หมดแล้ว", …); }
+// canSendToCustomer: remaining === 0 → return false (ไม่แจ้ง "ใกล้หมด" ซ้อน)
+```
+
+ขึ้นเดือนใหม่ / อัปเกรดแพ็กเกจ → cache หมดอายุ (≤ 5 นาที) → ถาม LINE ได้โควตาใหม่ → กลับมาส่งเอง ไม่ต้อง restart
+
+#### ข้อ 6 — callback ไม่มี session → พากลับหน้าโปรไฟล์ (callback route + `src/middleware.ts`)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| ลูกค้าอยู่หน้า LINE นานจน session หมดอายุ / ล็อกอินคนละเบราว์เซอร์ แล้ว LINE redirect กลับ | middleware ตัดตั้งแต่ต้น → เบราว์เซอร์โชว์ JSON ดิบ `{"success":false,"error":{"code":"UNAUTHORIZED"…}}` ค้างที่โดเมน API — ดูเหมือนระบบพัง | redirect ไป `LINE_LINK_RETURN_URL?line=error&reason=login_required` → หน้าโปรไฟล์บอกให้ล็อกอินใหม่ได้ |
+| cookie session เสีย (ลายเซ็นผิด/หมดอายุ) | middleware ตอบ `SESSION_INVALID` 401 | เหมือนไม่มี session → `login_required` |
+| ตรวจสิทธิ์ | `withAuth` (โยน 401) | `route()` + `getSession()` เอง — ไม่มี session → `finish("error", "login_required")` · มี session → ตรวจ `state` ตรงกับ user เหมือนเดิม |
+
+**middleware — ทำไมต้องแก้ด้วย:** `/api/shop/*` ถูก middleware บังคับล็อกอิน (ตอบ JSON 401) **ก่อน**ถึง route เลย แก้แค่ route ไม่พอ
+- เพิ่ม `SELF_AUTH_PATHS = new Set(["/api/shop/me/line/callback"])` — **ตรงตัว** ไม่ใช่ prefix (path อื่นใต้ `/api/shop` ยังต้องล็อกอินเหมือนเดิม
+  รวม `/api/shop/me/line` และ `/api/shop/me/line/callback/extra`)
+- path นี้: ไม่ตัด 401 เมื่อไม่มี user · cookie เสียไม่ตัด `SESSION_INVALID` · **ยังแนบ `x-mmc-user` ตามปกติ**ถ้า cookie ถูกต้อง (route ใช้ตรวจ state)
+- ความปลอดภัยไม่ลดลง: route ยังต้องมี session **และ** `state` (JWT ผูก user_id อายุ 10 นาที) ตรงกับ session ถึงจะผูก LINE ได้
+
+**API ที่เปลี่ยน (frontend):** เพิ่ม `reason=login_required` คู่กับ `line=error` (§5) — เพิ่มแบบไม่ทำให้โค้ดเดิมพัง: frontend ที่อ่านแค่ `line`
+ยังแสดง "เชื่อมต่อไม่สำเร็จ" ได้เหมือนเดิม · ไม่ตั้ง `LINE_LINK_RETURN_URL` → JSON `{ line: "error", reason: "login_required" }` (400)
+
+#### เทส
+
+- `tests/integration/lineQuota.test.ts` +3 เคส (รวม 12) — 429 โควตาหมด: ลูกค้ารายที่ 2 ไม่ถูกยิง, แจ้ง "หมดแล้ว" 1 ครั้ง ไม่มี "ใกล้หมด",
+  cache = 0 · 429 ฝั่งร้าน → ลูกค้าหยุดด้วย · 429 rate limit → ยังส่งต่อ ไม่แจ้งเว็บ cache ไม่เปลี่ยน
+- `tests/lib/lineCallback.test.ts` ใหม่ 7 เคส — callback: ไม่มี session → redirect `login_required` · กดยกเลิก → `cancelled` ·
+  state ไม่ตรง → `error` ไม่มี reason · ไม่ตั้ง return URL → JSON 400 · middleware: callback ไม่มี cookie / cookie เสีย → ผ่านถึง route ·
+  `/api/shop/me/line`, `/api/shop/me`, `/api/shop/me/line/callback/extra` ยังได้ 401
+
+ผลรวม: unit 216 ✅ · integration 231 ✅ · typecheck ✅ · `next build` ✅ · lint 0 error (warning 5 จุดเดิม)

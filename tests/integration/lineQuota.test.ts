@@ -14,7 +14,13 @@ import { makeUser } from "./helpers";
 const PUSH_URL = "https://api.line.me/v2/bot/message/push";
 
 /** fetch ปลอม: ตอบ quota/consumption ตามที่กำหนด · push ตอบตาม pushStatus */
-function stubLine(opts: { limit?: number | null; used?: number; pushStatus?: number; quotaFails?: boolean }) {
+function stubLine(opts: {
+  limit?: number | null;
+  used?: number;
+  pushStatus?: number;
+  quotaFails?: boolean;
+  pushText?: string;
+}) {
   const spy = vi.fn(async (url: string) => {
     if (url.endsWith("/v2/bot/message/quota")) {
       if (opts.quotaFails) return { ok: false, status: 500, json: async () => ({}) };
@@ -27,7 +33,8 @@ function stubLine(opts: { limit?: number | null; used?: number; pushStatus?: num
       return { ok: true, json: async () => ({ totalUsage: opts.used ?? 0 }) };
     }
     const status = opts.pushStatus ?? 200;
-    return { ok: status < 400, status, text: async () => (status === 429 ? "You have reached your monthly limit." : "") };
+    const body = opts.pushText ?? (status === 429 ? "{\"message\":\"You have reached your monthly limit.\"}" : "");
+    return { ok: status < 400, status, text: async () => body };
   });
   vi.stubGlobal("fetch", spy);
   return spy;
@@ -141,5 +148,49 @@ describe("ข้อ ค — LINE ตอบ 429 (โควตาหมด) → �
     const u = await makeUser({ line_user_id: "U_C6" });
     expect(await notifyCustomer(String(u._id), "hi")).toBe(false);
     expect(await quotaAlerts("โควตา LINE หมดแล้ว")).toHaveLength(1);
+  });
+});
+
+/** docs/LINE.md §9.8 ข้อ 5 — หลัง 429 (โควตาหมด) หยุดยิงหาลูกค้าทันที · 429 แบบ rate limit ไม่นับว่าโควตาหมด */
+describe("หลัง LINE ตอบ 429", () => {
+  it("โควตาหมด (monthly limit) → ลูกค้ารายถัดไปไม่ถูกยิงเลย (cache = เหลือ 0) และไม่แจ้ง 'ใกล้หมด' ซ้อน", async () => {
+    const spy = stubLine({ limit: 300, used: 100, pushStatus: 429 }); // quota API ยังบอกว่าเหลือ 200
+    const u1 = await makeUser({ line_user_id: "U_X1" });
+    const u2 = await makeUser({ line_user_id: "U_X2" });
+
+    expect(await notifyCustomer(String(u1._id), "1")).toBe(false); // ยิงแล้วโดน 429
+    expect(await notifyCustomer(String(u2._id), "2")).toBe(false); // ไม่ยิงแล้ว
+
+    expect(pushes(spy, "U_X1")).toBe(1);
+    expect(pushes(spy, "U_X2")).toBe(0);
+    expect(await quotaAlerts("โควตา LINE หมดแล้ว")).toHaveLength(1);
+    expect(await quotaAlerts("โควตา LINE ใกล้หมด")).toHaveLength(0);
+    expect((await getQuotaStatus())?.remaining).toBe(0);
+  });
+
+  it("เจ้าของร้านโดน 429 โควตาหมด → ลูกค้าหยุดส่งด้วย", async () => {
+    const spy = stubLine({ limit: 300, used: 100, pushStatus: 429 });
+    await notificationService.notify({ title: "ออเดอร์ใหม่ Q", message: "x", module: "order", type: "info" });
+    const u = await makeUser({ line_user_id: "U_X3" });
+    expect(await notifyCustomer(String(u._id), "hi")).toBe(false);
+    expect(pushes(spy, "U_X3")).toBe(0);
+  });
+
+  it("429 แบบ rate limit → ไม่ใช่โควตาหมด: ไม่แจ้งในเว็บ ไม่ปิดการส่งหาลูกค้า", async () => {
+    const spy = stubLine({
+      limit: 300,
+      used: 100,
+      pushStatus: 429,
+      pushText: '{"message":"The API rate limit has been exceeded. Try again later."}',
+    });
+    const u1 = await makeUser({ line_user_id: "U_Y1" });
+    const u2 = await makeUser({ line_user_id: "U_Y2" });
+
+    expect(await notifyCustomer(String(u1._id), "1")).toBe(false);
+    expect(await notifyCustomer(String(u2._id), "2")).toBe(false);
+
+    expect(pushes(spy, "U_Y2")).toBe(1); // ยังพยายามส่ง — rate limit หายเองได้
+    expect(await quotaAlerts("โควตา LINE หมดแล้ว")).toHaveLength(0);
+    expect((await getQuotaStatus())?.remaining).toBe(200);
   });
 });

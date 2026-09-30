@@ -3,27 +3,37 @@
  *   query: code, state (หรือ error ถ้าลูกค้ากดยกเลิก)
  *   ตรวจ state ต้องเป็นของ user เดียวกับ session (กัน CSRF) → แลก code เป็น LINE userId → เก็บลงบัญชี
  *   จบแล้ว redirect ไป LINE_LINK_RETURN_URL?line=linked|cancelled|error (ไม่ตั้ง = ตอบ JSON แทน)
+ *
+ * ตรวจ session เอง (ไม่ใช้ withAuth) — ลูกค้าอยู่หน้า LINE นาน/session หมดอายุระหว่างนั้น ต้องพากลับหน้าโปรไฟล์
+ * ด้วย ?line=error&reason=login_required แทนการโชว์ JSON 401 ดิบ ๆ ในเบราว์เซอร์ (docs/LINE.md §9.8)
+ * — middleware ยกเว้น path นี้ไว้ให้ถึง route ได้แม้ไม่มี/มี session เสีย (SELF_AUTH_PATHS)
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { ok } from "@/lib/apiResponse";
-import { withAuth } from "@/lib/authGuard";
+import { ok, route } from "@/lib/apiResponse";
 import { log } from "@/lib/logger";
 import { exchangeCodeForLineUserId, lineLoginConfig, verifyLinkState } from "@/lib/lineLogin";
+import { getSession } from "@/lib/session";
 import * as userService from "@/services/userService";
 
 type LinkResult = "linked" | "cancelled" | "error";
 
-function finish(result: LinkResult): NextResponse {
+function finish(result: LinkResult, reason?: "login_required"): NextResponse {
   const returnUrl = process.env.LINE_LINK_RETURN_URL;
-  if (!returnUrl) return ok({ line: result }, result === "error" ? 400 : 200);
+  if (!returnUrl) {
+    return ok({ line: result, ...(reason ? { reason } : {}) }, result === "error" ? 400 : 200);
+  }
   const url = new URL(returnUrl);
   url.searchParams.set("line", result);
+  if (reason) url.searchParams.set("reason", reason);
   return NextResponse.redirect(url);
 }
 
-export const GET = withAuth(async (session, req: NextRequest) => {
+export const GET = route(async (req: NextRequest) => {
   const params = req.nextUrl.searchParams;
   if (params.get("error")) return finish("cancelled"); // ลูกค้ากดไม่ยินยอมในหน้า LINE
+
+  const session = getSession(req);
+  if (!session) return finish("error", "login_required");
 
   const config = lineLoginConfig();
   const code = params.get("code");

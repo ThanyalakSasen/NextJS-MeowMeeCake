@@ -74,6 +74,19 @@ export function recordPushed(): void {
   if (s.remaining !== null) s.remaining = Math.max(0, s.remaining - 1);
 }
 
+/**
+ * LINE ตอบ 429 = โควตาหมดจริงแล้ว → ตั้ง cache เป็นเหลือ 0 ทันที (docs/LINE.md §9.8)
+ * ไม่งั้นช่วงที่ cache ยังเชื่อว่าเหลือ (สูงสุด 5 นาที) จะยิงหาลูกค้าต่อแล้วโดน 429 ทุกครั้ง — เปลือง request + log รก
+ * หมดอายุ cache แล้วถาม LINE ใหม่ตามปกติ (ขึ้นเดือนใหม่/อัปเกรดแพ็กเกจ → กลับมาส่งได้เอง)
+ */
+export function markQuotaExhausted(): void {
+  const prev = cache?.status;
+  cache = {
+    at: Date.now(),
+    status: { limit: prev?.limit ?? null, used: prev?.used ?? 0, remaining: 0 },
+  };
+}
+
 /** ล้าง cache — ใช้ในเทส */
 export function resetQuotaCache(): void {
   cache = null;
@@ -88,6 +101,8 @@ export async function canSendToCustomer(): Promise<boolean> {
   if (!status || status.remaining === null) return true;
   const reserve = ownerQuotaReserve();
   if (status.remaining > reserve) return true;
+  // หมดแล้ว (0) — มีแจ้ง "โควตา LINE หมดแล้ว" จาก alertQuotaExhausted อยู่แล้ว ไม่ต้องแจ้ง "ใกล้หมด" ซ้อน
+  if (status.remaining === 0) return false;
   await alertOwnerOnce(
     "โควตา LINE ใกล้หมด",
     `เดือนนี้เหลือ ${status.remaining}/${status.limit} ข้อความ — หยุดส่ง LINE หาลูกค้าชั่วคราว ` +
@@ -98,6 +113,7 @@ export async function canSendToCustomer(): Promise<boolean> {
 
 /** LINE ตอบ 429 ตอน push (โควตาหมดแล้ว) — แจ้งในเว็บเดือนละครั้ง (ข้อ ค) */
 export async function alertQuotaExhausted(): Promise<void> {
+  markQuotaExhausted();
   await alertOwnerOnce(
     "โควตา LINE หมดแล้ว",
     "LINE ปฏิเสธการส่งข้อความ (429) — แจ้งเตือนทาง LINE ทั้งหมด (รวมสต็อกใกล้หมด) จะไม่ถึงจนขึ้นเดือนใหม่ " +
@@ -105,9 +121,13 @@ export async function alertQuotaExhausted(): Promise<void> {
   );
 }
 
-/** ตรวจว่า error ของ pushLineMessage คือโควตาหมด */
+/**
+ * ตรวจว่า error ของ pushLineMessage คือ "โควตารายเดือนหมด" — LINE ใช้ 429 ทั้งโควตาหมด
+ * ("You have reached your monthly limit.") และยิงถี่เกิน rate limit ("The API rate limit has been exceeded...")
+ * ต้องแยก: rate limit หายเองในไม่กี่วินาที ไม่ควรไปปิดการส่งหาลูกค้า 5 นาที/แจ้งว่าโควตาหมด (docs/LINE.md §9.8)
+ */
 export function isQuotaExceededError(error: string | undefined): boolean {
-  return typeof error === "string" && /LINE API 429/.test(error);
+  return typeof error === "string" && /LINE API 429/.test(error) && /monthly limit/i.test(error);
 }
 
 /**
