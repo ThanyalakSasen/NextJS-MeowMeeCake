@@ -29,7 +29,7 @@
 | สคริปต์ยุคสตางค์ (`migrate-money-to-satang`, `fix-money-units`, `fix-orders-money`, `audit-money-units`, `audit-orders-money`, `recompute-order-costs`) | รันได้ | **ถูกบล็อก** ตอนรันจาก CLI (`scripts/_legacyMoney.ts`) — รันแล้ว = ×100 ผิด · ลบ `npm run migrate:money-to-satang` |
 | `fix:baht-prices` (R7 ×100) | อยู่ใน PR #57 | **ลบ** — ราคา `35` ถูกต้องแล้วตามหน่วยใหม่ |
 
-discount engine / ค่าส่ง / LINE / dashboard ไม่ต้องแก้ — ทำงานเป็นบาทอยู่แล้ว (เดิมแปลงที่ขอบ) · เทสทั้งหมดปรับให้ DB เป็นบาท (491 ผ่าน)
+discount engine / ค่าส่ง / LINE / dashboard ไม่ต้องแก้ — ทำงานเป็นบาทอยู่แล้ว (เดิมแปลงที่ขอบ) · เทสทั้งหมดปรับให้ DB เป็นบาท (ทั้ง PR #57: 500 ผ่าน)
 
 ## 3. ย้ายข้อมูลใน DB จริง — `scripts/migrate-money-to-baht.ts`
 

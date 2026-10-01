@@ -291,6 +291,13 @@ PATH=/usr/bin:/bin:/usr/local/bin
 - [ ] `curl https://api.example.com/api/health` → `{"ok":true,"db":"connected"}`
 - [ ] ล็อกอินบัญชี owner ผ่าน frontend ได้ (cookie ข้าม subdomain — ถ้า 401 ตรวจ `COOKIE_DOMAIN`/`ALLOWED_ORIGINS`)
 - [ ] รายการสินค้าแสดงครบ 42 · พรีออเดอร์ 10 (`?is_preorder=true`)
+- [ ] **หน่วยเงินหลัง `migrate:money-to-baht`** ([`money-units.md`](money-units.md)) — ราคาต้องเป็นบาทตรง ๆ ไม่เพี้ยน ×100 / ÷100:
+  - [ ] คัพเค้ก (เช่น `pos-1726265`) ราคา **35** บาท (ไม่ใช่ 0.35 / 3,500) · สินค้าที่มีราคาลด: `sale_price` < `product_price` (เช่น ชิโอะปัง 45 → ลด 40)
+  - [ ] เปิดออเดอร์เก่า 1 ใบ (เช่นยอด 105 บาท) → ยอดรวม / ค่าส่ง / รายการ เป็นบาทถูกต้อง (ไม่ใช่ 10,500)
+  - [ ] Dashboard ภาพรวม: รายได้ / ค่าใช้จ่าย / COGS อยู่ในหลักเดียวกับยอดขายจริง (ไม่โตผิดปกติ 100 เท่า)
+  - [ ] โปรโมชันแบบลดเป็นบาท (เช่น "ลด 50 บาท") แสดง 50 · ขั้นต่ำ 300 · วัตถุดิบ/สูตรแสดงต้นทุนเป็นบาท
+  - [ ] FrontOffice เปิดสินค้าเดียวกัน → ราคาตรงกับหลังร้าน
+  - [ ] `npm run check:data-integrity -- --no-notify` → ไม่มี `price_too_high` / `price_too_low` / `sale_not_below_price`
 - [ ] **อัปโหลดรูปสินค้าใหม่ แล้วเปิด URL ที่ได้ → ต้องเห็นรูป** (ถ้า 404 = nginx `location /uploads/` ยังไม่ทำงาน — §6)
 - [ ] แบนเนอร์หน้าเว็บขึ้นครบหลัง `migrate:upload-files --apply`
 - [ ] `curl -H "Authorization: Bearer <CRON_SECRET>" "https://api.example.com/api/cron/preorder-reminders?dry_run=true"` → 200 · ไม่ส่ง header → 401
