@@ -3,6 +3,8 @@
 > ตรวจ: 2026-10-01 · ฐานโค้ดที่ตรวจ: `feat/preorder-round-flow` (รวม PR #52 → #53 → #55) + diff ของ PR #54 (`fix/uploads-slips-receipts`)
 > วิธีตรวจ: อ่านโค้ด + รันเทสทั้งหมด (unit 215 · integration 252 ผ่าน) + `npm audit` + CI ทุก PR + query DB จริงแบบอ่านอย่างเดียว
 > backlog ก่อนหน้า: [`BACKLOG.md`](BACKLOG.md) · [`BACKLOG2.md`](BACKLOG2.md) · [`BACKLOG3.md`](BACKLOG3.md) (ปิดเกือบครบ — ที่ยังค้างยกมาไว้ที่นี่)
+>
+> **สถานะล่าสุด / งานที่เหลือ → [§8](#8-สถานะคงเหลือ-2026-10-01)** (โค้ดใน repo นี้ไม่มีอะไรต้องแก้แล้ว — เหลืองาน merge / deploy / ตัดสินใจ)
 
 ---
 
@@ -170,9 +172,9 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 1. **R1–R4** (งาน deploy) — ทำตามลำดับ merge แล้วรัน migration + ตั้ง cron + env
 2. ~~**R5** แดชบอร์ดนับพรีออเดอร์~~ ✅ (§7.1)
 3. ~~**Y1** ใบผลิตลดเมื่อยกเลิก · **Y6** จำกัดการลบแจ้งเตือน · **Y4** `returnDocument`~~ ✅ (§7.2–§7.4)
-4. **ต้องตัดสินใจก่อน:** **Y2** (ผลิตเสร็จเพิ่มสต็อกอัตโนมัติไหม) · **Y3** (ย้ายสลิปเป็น private) · **Y5** (อัป Next 16 หรือ override postcss)
-5. ~~Y7–Y11~~ ✅ (§7.9–§7.13) · **R7 ตอน deploy: หยุด backend+FrontOffice → `migrate:money-to-baht --apply` → deploy (money-units.md §4)**
-6. G* ตามความจำเป็น
+4. ~~**Y2** ผลิตเสร็จเพิ่มสต็อก · **Y3** สลิป private · **Y5** postcss~~ ✅ (§7.6–§7.8 — ตัดสินใจแล้ว 2026-10-01)
+5. ~~Y7–Y11 · R7 เงินเป็นบาท~~ ✅ โค้ด (§7.9–§7.15, PR #57) · **ตอน deploy: หยุด backend+FrontOffice → `migrate:money-to-baht --apply` → deploy (money-units.md §4)**
+6. G* ตามความจำเป็น · งานที่เหลือทั้งหมดดู §8
 
 ---
 
@@ -370,3 +372,60 @@ DB จริงมีตัวเลือก 0 ตัว — ไม่กระ
 
 คอมเมนต์ใน service อื่นที่ยังพูดถึง "สตางค์" (~78 จุด) เป็นคำอธิบายประวัติของ §3.11 — หน่วยจริงดูที่ `src/lib/money.ts` / `money-units.md` ·
 เทส `cleanupLegacyProductFields.test.ts` 1 เคส
+
+---
+
+## 8. สถานะคงเหลือ (2026-10-01)
+
+ตรวจซ้ำหลังแก้ทุกรายการแล้ว: **โค้ดและเอกสารใน repo นี้ไม่มีอะไรต้องแก้เพิ่ม** — branch `fix/backlog4-y7-y11` (PR #57) ตรงกับ origin ·
+typecheck 0 · lint 0 error · เทส 500 ผ่าน · `next build` ✅ · ทดลอง merge กับ #54 แล้ว (เทส 516 ✅ · แก้ conflict ตาม R1)
+· ทดสอบส่ง LINE เจ้าของร้านจริง 7 หมวดสำเร็จ (ข้อความขึ้นต้น "🧪 ทดสอบ" ส่งตรง ไม่เขียน DB)
+
+### 8.1 merge PR (ลำดับ — รายละเอียด [`DEPLOY.md`](DEPLOY.md) §③ / R1)
+
+| ลำดับ | PR | base | หมายเหตุ |
+|---|---|---|---|
+| 1 | #56 postcss override | `main` | ไม่ชนกับใคร |
+| 2 | #52 `is_preorder` + เลขออเดอร์ | `main` | ติ๊ก Delete branch |
+| 3 | #53 แจ้งเตือน LINE | #52 → `main` | |
+| 4 | #55 flow รอบพรีออเดอร์ | #53 → `main` | |
+| 5 | #57 Y7–Y11 + เงินเป็นบาท | #55 → `main` | ต้อง deploy พร้อม `migrate:money-to-baht` (§8.2) |
+| อิสระ | #54 สลิป/ไฟล์ | `main` | conflict `package.json` + `.env.example` — **ห้ามเก็บ `migrate:money-to-satang`** |
+
+ปิดแล้ว (2026-10-01 ไม่ merge): #35 (docs BACKLOG.md) · #2 "generate DOC" — branch `develop` **เก็บไว้เฉย ๆ ไม่ merge** (แผน rebuild เป็นเว็บ
+Next 16 + antd + i18n ที่ทำถึง D0.5 · ตามหลัง main 175 commit · ดึงเฉพาะไฟล์ได้ด้วย `git checkout origin/develop -- <path>`)
+
+### 8.2 deploy (ผู้ใช้รันเอง — auto mode ของ Claude Code ไม่เขียน DB จริง)
+
+| ขั้น | คำสั่ง / งาน | อ้างอิง |
+|---|---|---|
+| 1 | หยุด backend + FrontOffice | [`money-units.md`](money-units.md) §4 |
+| 2 | `npm run migrate:money-to-baht` (ดูแผน: ÷100 347 · ไม่แตะ 75 · ต้องดูเอง 1) → `-- --apply` | R7 |
+| 3 | build + start โค้ดใหม่ (pm2 instance เดียว) แล้วเปิด FrontOffice | DEPLOY §⑤ · Y8 |
+| 4 | `npm run cleanup:legacy-product-fields -- --apply` (ลบ `delete_at: null` 4 ตัว) | §7.15 |
+| 5 | PATCH `is_preorder: true` สินค้า 2 ตัวที่รหัสยังเป็น `pos-` | DEPLOY §⑦ ข้อ 3 |
+| 6 | `npm run check:data-integrity -- --no-notify` → ไม่พบข้อมูลผิดปกติ | Y11 |
+| 7 | ตั้ง cron 3 ตัว (รอบพรีออเดอร์ 15 นาที · เตือนวันรับ 18:00 · ตรวจข้อมูล 07:30) | DEPLOY §⑧ |
+| 8 | Atlas: แยก DB user (`meowmee-app` / `meowmee-frontoffice` / `meowmee-readonly`) + เปลี่ยนรหัสผ่าน user เดิม | DEPLOY §สำรองข้อมูล |
+| 9 | ตรวจรับตาม checklist (รวมตรวจหน่วยเงินหลังย้าย) | DEPLOY §⑨ |
+| — | หมุน `LINE_LOGIN_CHANNEL_SECRET` (เคยวางในแชต) · nginx `/uploads/` (R6) · env/โดเมนจริง (`ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, LINE callback/return URL) | R4 · R6 · LINE.md §8.3 |
+
+### 8.3 รอผู้ใช้/ทีมตัดสินใจ
+
+| เรื่อง | ผลกระทบ | ทางเลือก |
+|---|---|---|
+| FrontOffice เขียน MongoDB ตรง (R7) | ไม่มี userlog · ไม่ตัดสต็อกผ่าน backend (สต็อก variant Y9 เพี้ยนได้ — Y11 จับ `variant_stock_sum`) · ไม่ผ่าน validation · เลขออเดอร์ `ORD-<timestamp>` ถูกนับช่องทาง "อื่น ๆ" ใน dashboard | ให้ FrontOffice เรียก API ของ backend (ยั่งยืนสุด) · หรืออย่างน้อยใช้เลขออเดอร์รูปแบบ `ORD-YYYYMMDD-xxxxxx` + DB user แยก |
+| ออเดอร์ `ORD-1790786142302-M2PY` (pending ยังไม่จ่าย · 55 บาท) | ค้างในระบบ | เจ้าของร้านยกเลิกผ่านหลังบ้าน (ระบบจะแจ้งลูกค้าทาง LINE) หรือติดต่อลูกค้า |
+| `WEB-1790317257577` (ยกเลิกแล้ว · หน่วยปนในใบเดียว) | ยอดรวมไม่ลงตัวหลังย้ายหน่วย | ปล่อยไว้ได้ (ยกเลิกแล้ว) หรือแก้มือ |
+
+### 8.4 frontend (repo แยก)
+
+- [ ] หน้าแจ้งเตือน: แสดง `module_label` · เอาตัวกรอง `employee` ออก · ปรับจุดที่เทียบข้อความหัวข้อตามถ้อยคำใหม่ — [`LINE.md`](LINE.md) §8.2 ค., §9.10–9.11
+- [ ] สินค้าที่มีตัวเลือก (Y9): บังคับเลือกตัวเลือกก่อนใส่ตะกร้า/สั่ง (ไม่เลือก = 400) · แสดงสต็อกต่อตัวเลือก · ปรับสต็อกที่ตัวเลือก (ที่ตัวสินค้า = 409)
+- [ ] สลิป: เปิดผ่าน `/api/files/slips/…` แบบส่ง cookie แล้วทำ blob URL (PR #54 — `uploads.md` §6)
+- [ ] เชื่อม LINE ลูกค้า + เกณฑ์สินค้าใกล้หมดรายสินค้า + คำถามที่ต้องตอบ backend — [`LINE.md`](LINE.md) §8.2 ก., ข., ง.
+
+### 8.5 ต่อยอด (ไม่เร่ง)
+
+- G1–G15 (§3) · คอมเมนต์ใน service ที่ยังเล่าประวัติ "สตางค์" ~78 จุด (หน่วยจริงดู `src/lib/money.ts` / `money-units.md`)
+- ทดสอบแจ้งเตือนฝั่งลูกค้าทาง LINE (ต้องมีบัญชีลูกค้าที่ผูก LINE แล้ว)
