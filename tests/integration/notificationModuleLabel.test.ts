@@ -42,9 +42,23 @@ describe("notification module → ป้ายภาษาไทยตอนแ�
     expect(one.module_label).toBeTruthy();
   });
 
+  it("เอกสารเก่าที่ module = employee (เลิกใช้แล้ว) → ยังอ่าน/ทำเครื่องหมายอ่านได้ และแสดงป้ายไทย", async () => {
+    const legacy = await notificationModel.collection.insertOne({
+      title: "เก่า", message: "m", module: "employee", type: "info", is_read: false, deleted_at: null, created_at: new Date(),
+    });
+    const id = String(legacy.insertedId);
+    expect(((await notificationService.getById(id)) as { module_label: string }).module_label).toBe("พนักงาน");
+    const updated = (await notificationService.update(id, { is_read: true })) as { is_read: boolean };
+    expect(updated.is_read).toBe(true);
+    await expect(
+      notificationService.notify({ title: "x", message: "m", module: "employee" as never, type: "info", line: false })
+    ).rejects.toThrow();
+  });
+
   it("ตัวช่วยแปลง: key ↔ ป้ายไทย", () => {
     expect(notificationModuleLabel("system")).toBe("อื่น ๆ");
     expect(notificationModuleLabel("unknown")).toBe("unknown");
+    expect(notificationModuleLabel("employee")).toBe("พนักงาน"); // ค่าเลิกใช้ในเอกสารเก่า
     expect(parseNotificationModule("คำสั่งซื้อ")).toBe("order");
     expect(parseNotificationModule("ingredient")).toBe("ingredient");
     expect(parseNotificationModule("ไม่มี")).toBeNull();

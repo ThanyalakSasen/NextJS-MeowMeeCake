@@ -725,13 +725,13 @@ export async function alertQuotaExhausted() { markQuotaExhausted(); await alertO
 
 | | ก่อน | หลัง |
 |---|---|---|
-| ค่าใน DB | `order` / `ingredient` / `production` / `employee` / `finance` / `system` | เหมือนเดิม (ห้ามเก็บภาษาไทย — enum ไม่รับ บันทึกแจ้งเตือนไม่ได้) |
-| response `/api/admin/notifications` (list / getById / แก้ / ลบ / กู้คืน) และผลของ `notify()` | มีแค่ `module` | เพิ่ม **`module_label`**: คำสั่งซื้อ / วัตถุดิบ / การผลิต / พนักงาน / การเงิน / อื่น ๆ |
+| ค่าใน DB | `order` / `ingredient` / `production` / `employee` / `finance` / `system` | เหมือนเดิม (ห้ามเก็บภาษาไทย — enum ไม่รับ บันทึกแจ้งเตือนไม่ได้) · **เลิกใช้ `employee`** (ไม่มีจุดไหนสร้าง — ลบจาก enum/type · เอกสารเก่า 1 รายการใน DB จริงยังอ่าน/ทำเครื่องหมายอ่านได้ แสดงป้าย "พนักงาน") |
+| response `/api/admin/notifications` (list / getById / แก้ / ลบ / กู้คืน) และผลของ `notify()` | มีแค่ `module` | เพิ่ม **`module_label`**: คำสั่งซื้อ / วัตถุดิบ / การผลิต / การเงิน / อื่น ๆ (+ พนักงาน เฉพาะเอกสารเก่า) |
 | หัวข้อความ LINE ถึงเจ้าของร้าน | `[order] พรีออเดอร์ใหม่ …` | `[คำสั่งซื้อ] พรีออเดอร์ใหม่ …` |
 | กรอง `?module=` | ต้องส่ง key อังกฤษ | ส่งได้ทั้ง `order` และ `คำสั่งซื้อ` |
 
 โค้ด: `NOTIFICATION_MODULE_LABELS` / `notificationModuleLabel()` / `parseNotificationModule()` ใน `src/services/notificationService.ts` ·
-เทส `notificationModuleLabel.test.ts` 3 เคส · **frontend:** แสดง `module_label` แทน `module` (ไม่ต้องมีตารางแปลเอง)
+เทส `notificationModuleLabel.test.ts` 4 เคส · **frontend:** แสดง `module_label` แทน `module` (ไม่ต้องมีตารางแปลเอง)
 
 ### 9.11 ปรับถ้อยคำหัวข้อแจ้งเตือนเจ้าของร้าน (2026-10-01)
 

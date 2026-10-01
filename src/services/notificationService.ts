@@ -13,21 +13,25 @@ import { alertQuotaExhausted, isQuotaExceededError, recordPushed } from "../lib/
 import { log } from "../lib/logger";
 
 /** ค่าที่เก็บใน DB — ภาษาอังกฤษ (enum ของ notificationModel · ใช้กรอง ?module=) ห้ามเปลี่ยนเป็นภาษาไทย */
-export type NotificationModule = "order" | "ingredient" | "production" | "employee" | "finance" | "system";
+export type NotificationModule = "order" | "ingredient" | "production" | "finance" | "system";
 
 /** ป้ายภาษาไทยสำหรับแสดงผล — ใส่ใน response เป็น `module_label` และหัวข้อความ LINE */
 export const NOTIFICATION_MODULE_LABELS: Record<NotificationModule, string> = {
   order: "คำสั่งซื้อ",
   ingredient: "วัตถุดิบ",
   production: "การผลิต",
-  employee: "พนักงาน",
   finance: "การเงิน",
   system: "อื่น ๆ",
 };
 
+/** ป้ายของค่าที่เลิกใช้แล้ว แต่ยังมีในเอกสารเก่า — ใช้แสดงผลอย่างเดียว (สร้างใหม่ไม่ได้) */
+const LEGACY_MODULE_LABELS: Record<string, string> = { employee: "พนักงาน" };
+
 /** ป้ายภาษาไทยของ module (ค่าไม่รู้จัก → คืนค่าเดิม) */
 export function notificationModuleLabel(module: unknown): string {
-  return NOTIFICATION_MODULE_LABELS[module as NotificationModule] ?? String(module ?? "");
+  return (
+    NOTIFICATION_MODULE_LABELS[module as NotificationModule] ?? LEGACY_MODULE_LABELS[String(module)] ?? String(module ?? "")
+  );
 }
 
 /** รับได้ทั้ง key ("order") และป้ายไทย ("คำสั่งซื้อ") → key · ไม่รู้จัก = null (ใช้กับ ?module=) */
