@@ -84,10 +84,8 @@ async function prepare(input: Record<string, any>, isCreate: boolean): Promise<v
   }
 
   // คิดต้นทุน/แบทช์ อัตโนมัติเมื่อไม่ได้ส่งมา และมีข้อมูลรายการพอจะคิด
-  // BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ (integer) แล้ว เหมือน componentService:
-  //   1) auto-calc → ingCost/compCost มาจาก DB (satang อยู่แล้ว) ปัด Math.round() ตรง ๆ เป็น integer
-  //      สตางค์ (ไม่ใช่ ×100/100 แบบเดิมที่ปัดทศนิยมบาท 2 ตำแหน่ง — ไม่มีความหมายอีกต่อไป)
-  //   2) ส่งมาเอง → เป็นบาททศนิยมตาม API contract ต้องแปลงเป็นสตางค์เอง
+  // estimated_cost_per_batch เป็นบาท (docs/money-units.md) — คิดเองจากวัตถุดิบ/ส่วนประกอบ หรือรับที่แอดมินกรอก
+  // แล้วปัด 2 ตำแหน่งเหมือนกันทั้งสองทาง
   const hasItemsInfo = input.ingredients !== undefined || input.components !== undefined;
   if ((isCreate || hasItemsInfo) && input.estimated_cost_per_batch == null) {
     const ingCost = await ingredientItemsCost(input.ingredients ?? [], ingredientModel as Model<any>);
@@ -221,8 +219,7 @@ export async function getUnitCostByProduct(
     const key = String(r.product_id);
     if (seen.has(key)) continue;
     seen.add(key);
-    // ปัดเป็นจำนวนเต็มสตางค์ตรง ๆ (ไม่ใช่ ×100/100 แบบเดิมที่ปัดทศนิยมบาท 2 ตำแหน่ง — ไม่มีความหมาย
-    // อีกต่อไปเพราะทั้งตัวตั้งและผลลัพธ์เป็นสตางค์แล้ว)
+    // ต้นทุนต่อชิ้น (บาท) = ต้นทุน/แบทช์ ÷ จำนวนที่ได้ต่อแบทช์ ปัด 2 ตำแหน่ง
     const unit =
       r.yield_qty && r.yield_qty > 0 ? toSatang(r.estimated_cost_per_batch / r.yield_qty) : null;
     out.set(key, unit);

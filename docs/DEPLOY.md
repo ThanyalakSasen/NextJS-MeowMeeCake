@@ -80,7 +80,11 @@ sudo -iu meowmee git clone https://github.com/ThanyalakSasen/NextJS-MeowMeeCake.
            └─ #55 รอบพรีออเดอร์ (base ย้ายเป็น main เอง) ─▶ main
 #54 สลิป/ไฟล์ ── merge main เข้า branch ก่อน → แก้ conflict 2 ไฟล์ ─▶ main
                  package.json (scripts) + .env.example (ท้ายไฟล์) — เก็บของทั้งสองฝั่ง
+#57 Y7–Y11 + เงินเป็นบาท (base #55) ──────────────▶ main   (หลัง #55)
 ```
+
+⚠️ ตอนแก้ conflict `package.json` ระหว่าง #54 กับ #57: ใช้ฝั่ง #57 แล้วเพิ่มแค่ `"migrate:upload-files"` —
+**ห้ามเก็บ `"migrate:money-to-satang"`** (#57 ลบแล้ว · ระบบเก็บเงินเป็นบาท — [`money-units.md`](money-units.md)) · `.env.example` เก็บทั้งสองฝั่ง
 
 ไม่ได้ติ๊กลบ branch → เปลี่ยน base ของ PR ถัดไปเป็น `main` เอง · ตรวจรวมทุก PR แล้ว (BACKLOG4 §1 R1): unit 223 · integration 271 · build ✅
 
@@ -246,6 +250,7 @@ PATCH https://api.example.com/api/admin/products/6a814a064b44d4bf31fb2c4b   { "i
   npm run migrate:money-to-baht              # ดูแผน: ÷100 347 ค่า · ไม่แตะ 75 · ต้องดูเอง 1
   npm run migrate:money-to-baht -- --apply   # backup ใน scripts/backups/ · ลง marker (รันซ้ำไม่ได้)
   # build + start โค้ดใหม่ (§⑤) แล้วค่อยเปิด FrontOffice
+  npm run cleanup:legacy-product-fields -- --apply   # ลบ delete_at: null ที่ค้าง 4 ตัว (ไม่งั้นแจ้งเตือนทุกเช้า — BACKLOG4 §7.15)
   npm run check:data-integrity -- --no-notify   # ต้องเหลือแค่รหัส pos-/pre- 2 ตัว (แก้ด้วย PATCH ข้อ 3)
   ```
 

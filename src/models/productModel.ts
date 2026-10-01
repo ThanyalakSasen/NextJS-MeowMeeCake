@@ -47,14 +47,13 @@ const productSchema = new mongoose.Schema(
       ref: "ProductCategories",
       required: true,
     },
-    // BACKLOG §3.11 เฟส 5b — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (ดู src/lib/money.ts)
-    // API (productService) ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม
+    // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md)
     product_price: {
       type: Number,
       required: true,
       min: 0,
     },
-    // BACKLOG §3.11 เฟส 5b — เก็บเป็นสตางค์เช่นกัน (เหตุผลเดียวกับ product_price)
+    // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md)
     sale_price: {
       // ราคาโปรโมชัน — null = ไม่มีการลดราคา ใช้ product_price ตามปกติ
       type: Number,
@@ -86,12 +85,7 @@ const productSchema = new mongoose.Schema(
     // ต้นทุนต่อหน่วยที่กรอกมือ (BACKLOG §3.16) — fallback ให้ recipeService.getUnitCostByProduct()
     // ใช้เฉพาะสินค้าที่ "ซื้อมาขายต่อ" ไม่มีสูตรการผลิต (recipeModel) ให้คำนวณต้นทุนเองได้
     // ถ้าสินค้ามีสูตรอยู่แล้ว ต้นทุนจากสูตรจะมาก่อนเสมอ (ดูลำดับความสำคัญใน recipeService)
-    // BACKLOG §3.11 เฟส 4 — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 — ต้องแปลงพร้อม
-    // recipeModel/componentModel/ingredientModel เพราะ getUnitCostByProduct() ผสมค่าจากทั้งสองแหล่ง
-    // เข้าด้วยกัน (สูตรมาก่อนเสมอ, purchase_cost เป็น fallback) ถ้าปล่อย purchase_cost เป็นบาทไว้ตาม
-    // Product pricing อื่น (เฟส 5b) จะได้ Map ที่หน่วยปนกัน (บาง productId เป็นสตางค์จากสูตร บาง
-    // productId เป็นบาทจาก fallback) โดยไม่มีทางรู้จากภายนอกว่าค่าไหนมาจากไหน — API (productService)
-    // ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม ส่วน product_price/sale_price แปลงเป็นสตางค์แล้วในเฟส 5b
+    // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md) — ต้นทุนซื้อมาขายต่อ ใช้เป็น fallback ของ getUnitCostByProduct() เมื่อไม่มีสูตร
     purchase_cost: {
       type: Number,
       default: null,

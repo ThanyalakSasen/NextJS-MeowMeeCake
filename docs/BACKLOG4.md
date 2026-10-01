@@ -28,7 +28,7 @@
 | 3 | #55 flow รอบพรีออเดอร์ + วงจรอัตโนมัติ | base #53 |
 | อิสระ | #54 สลิป/ใบเสร็จ/แบนเนอร์เป็นไฟล์ + สลิปส่วนตัว | base `main` · **ชนกับ #55 ที่ `package.json` (scripts) และ `.env.example` (ท้ายไฟล์)** — แก้ตอน merge: เก็บของทั้งสองฝั่ง |
 | อิสระ | #56 postcss override + audit 0 | base `main` · ไม่ชนกับใคร |
-| 4 | Y7–Y11 (`fix/backlog4-y7-y11`) | base #55 · ชนกับ #54 ที่ `package.json` scripts อีกจุด — เก็บทั้งสองฝั่ง |
+| 4 | #57 Y7–Y11 + เงินเป็นบาท (`fix/backlog4-y7-y11`) | base #55 · ชนกับ #54 ที่ `package.json` + `.env.example` — **`.env.example` เก็บทั้งสองฝั่ง · `package.json` ใช้ฝั่ง #57 แล้วเพิ่มแค่ `"migrate:upload-files"` — ⚠️ ห้ามเก็บ `"migrate:money-to-satang"` ที่ฝั่ง #54 ยังมี** (#57 ลบทิ้งแล้ว — สคริปต์ถูกบล็อก · docs/money-units.md) · ทดลอง merge #57+#54 แบบนี้แล้ว (2026-10-01): typecheck ✅ · เทส 514 ✅ |
 
 **ตรวจรวมทุก PR แล้ว (2026-10-01):** merge #52→#53→#55 + #54 + #56 ลง branch ชั่วคราว → typecheck ✅ · lint 0 error · unit 223 ✅ ·
 integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหลือ `new: true` / `product_types` ในโค้ดรัน
@@ -111,7 +111,7 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 | Y7 | ✅ **พรีออเดอร์ข้อมูลเก่าไม่มีกำหนดชำระ** — แก้แล้ว (§7.9) | พรีออเดอร์ก่อน #55 มี `payment_due_at: null` | ไม่ถูกยกเลิกตามกำหนด (ถูกยกเลิกตอนปิดรอบแทน) | ถ้าต้องการ: สคริปต์ backfill `payment_due_at` = min(created + N ชม., close) สำหรับรอบที่ยังเปิด |
 | Y8 | ✅ **state ในหน่วยความจำ ไม่แชร์ข้าม instance** — ตัดสินใจรัน instance เดียว (§7.10) | `rateLimit` · permission cache · delivery-zone cache · cache โควตา LINE | หลาย instance / serverless: rate limit หลวม · โควตา LINE ตัดสินจากค่า cache ต่าง instance | ตั้ง instance เดียว หรือย้ายไป Redis (แก้เฉพาะไฟล์ lib ละตัว — ออกแบบไว้แล้ว) |
 | Y9 | ✅ `variant_stock` ไม่เคยถูกเช็ค/ตัด (ยกมาจาก BACKLOG2 §9) — แก้แล้ว (§7.11) | DB มี variant 0 ตัว (ตอนนั้น) | ถ้าเริ่มใช้ variant แบบจำกัดจำนวน จะขายเกิน | ตัด/คืน `variant_stock` คู่กับ `product_stock_quantity` ใน `deductStockForOrder`/`restockForOrder` |
-| Y10 | ✅ `audit-money-units` ให้ false positive หลัง fix (ยกมาจาก BACKLOG2 §16.1) — แก้แล้ว (§7.12) | ใช้ `updated_at` ตัดสิน | ถ้าทำตามรายงาน เงินจะ ×100 ซ้ำ | ให้ audit เทียบกับ `scripts/backups/money-fix-*.json` หรือเตือนเมื่อพบ marker |
+| Y10 | ✅ `audit-money-units` ให้ false positive หลัง fix (ยกมาจาก BACKLOG2 §16.1) — แก้แล้ว (§7.12) · เลิกใช้หลังเปลี่ยนเป็นบาท (R7) | ใช้ `updated_at` ตัดสิน | ถ้าทำตามรายงาน เงินจะ ×100 ซ้ำ | ให้ audit เทียบกับ `scripts/backups/money-fix-*.json` หรือเตือนเมื่อพบ marker |
 | Y11 | ✅ ต้นทางที่เขียน DB ตรงนอกแอป (BACKLOG2 §16 + `product_type: "ready"` ที่เจอ 2026-09-30) — ตรวจรายวัน + แจ้งร้าน (§7.13) · พบเกิดซ้ำจริง → R7 | ยังมีการเขียน DB ตรง ๆ (ชิโอะปังนูเทลล่า แก้ล่าสุด 2026-09-30) | ราคา/ประเภทเพี้ยนซ้ำได้ | หาคน/เครื่องมือที่ต่อ DB ตรง (Compass/สคริปต์เก่า/แอปรุ่นเก่า) · แยก DB user อ่านอย่างเดียวสำหรับเครื่องมือ |
 
 ---
@@ -325,6 +325,9 @@ DB จริงมีตัวเลือก 0 ตัว — ไม่กระ
 
 ### 7.12 Y10 — `audit-money-units` เทียบ backup + marker (`scripts/audit-money-units.ts`)
 
+> ⚠️ **เลิกใช้แล้ว (2026-10-01):** ระบบเก็บเงินเป็นบาท (R7 · [`money-units.md`](money-units.md)) — สคริปต์นี้ตัดสินด้วยสมมติฐานสตางค์
+> จึงถูกบล็อกตอนรันจาก CLI (`scripts/_legacyMoney.ts`) · โค้ดและเทสด้านล่างเก็บไว้เป็นประวัติ · ตรวจหน่วยเงินตอนนี้ใช้ `check:data-integrity` (Y11)
+
 | | ก่อน | หลัง |
 |---|---|---|
 | แถวที่ `fix-money-units` แก้แล้ว | `updated_at` เก่า (fix ไม่แตะ) → BAHT_LIKELY ซ้ำ → รายงานชวน ×100 อีก (114 แถว false positive) | ค่าตรง `new` ใน `scripts/backups/money-fix-*.json` / `product-price-fix-*.json` → **SATANG_FIXED** (ไม่เสนอ ×100) |
@@ -355,3 +358,14 @@ DB จริงมีตัวเลือก 0 ตัว — ไม่กระ
 - เทสใหม่ 18 เคส (variantStock 8 · backfillPaymentDue 2 · auditMoneyUnits 3 · dataIntegrity 3 · migrateMoneyToBaht 2) · รวม **491 ผ่าน** (66 ไฟล์) · typecheck 0 · lint 0 error · `next build` ผ่าน
 - ทดสอบจริง: `next start` + `NODE_APP_INSTANCE=1` → log `runtime.multi_instance` · `check:data-integrity` / `backfill:payment-due` บน DB จริงแบบอ่านอย่างเดียว (ไม่แจ้ง ไม่เขียน)
 - merge: `package.json` scripts ชนกับ #54 เพิ่มอีกจุด (เก็บทั้งสองฝั่ง เหมือน #55)
+
+### 7.15 ล้างฟิลด์เก่า `delete_at` ของสินค้า + คอมเมนต์หน่วยเงิน (2026-10-01)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| สินค้า 4 ตัวมี `delete_at: null` (ฟิลด์ schema เก่า สะกดผิดของ `deleted_at`) | `check:data-integrity` แจ้ง `legacy_fields` ทุกเช้า | `npm run cleanup:legacy-product-fields` ($unset เฉพาะ `delete_at: null` · มีวันที่ = รายงาน ไม่แตะ · backup · ไม่แตะ `updated_at`) — dry-run บน DB จริง: 4 ตัว (`pos-2726067`, `pos-0126264`, `pos-2826088`, `pos-2626624`) · **ผู้ใช้รัน `--apply` เอง** |
+| คอมเมนต์ฟิลด์เงินใน `src/models/*` (22 จุด) | "เก็บเป็นสตางค์ (integer)" — ผิดหลัง R7 ชวนให้เขียนค่าผิดหน่วย | "เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (docs/money-units.md)" + คงข้อมูลสำคัญ (discount_value ตอน % ไม่ใช่เงิน ฯลฯ) |
+| คอมเมนต์การปัดต้นทุนใน `recipeService`/`componentService` | อธิบาย `Math.round` เป็นสตางค์เต็ม | อธิบายการปัด 2 ตำแหน่งแบบบาท |
+
+คอมเมนต์ใน service อื่นที่ยังพูดถึง "สตางค์" (~78 จุด) เป็นคำอธิบายประวัติของ §3.11 — หน่วยจริงดูที่ `src/lib/money.ts` / `money-units.md` ·
+เทส `cleanupLegacyProductFields.test.ts` 1 เคส

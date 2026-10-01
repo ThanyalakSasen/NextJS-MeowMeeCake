@@ -77,13 +77,8 @@ async function prepare(input: Record<string, any>, isCreate: boolean): Promise<v
     await validateIngredientItems(input.ingredients, ingredientModel as Model<any>, unitModel as Model<any>);
   }
 
-  // BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ (integer) แล้ว มี 2 ทาง:
-  //   1) ไม่ได้ส่งมาเอง → คิดอัตโนมัติจาก ingredientItemsCost() ซึ่ง query cost_per_unit จาก DB มา
-  //      เป็นสตางค์อยู่แล้ว (ดู src/lib/bom.ts) ปัดเป็นจำนวนเต็มสตางค์ตรง ๆ ด้วย Math.round(cost) —
-  //      ไม่ใช่ Math.round(cost*100)/100 แบบเดิมที่ออกแบบไว้ปัดทศนิยมบาท 2 ตำแหน่ง (ถ้าใช้สูตรเดิมต่อ
-  //      จะกลายเป็นปัดสตางค์ให้เหลือละเอียดถึง 1/100 สตางค์ ซึ่งไม่มีความหมายเพราะสตางค์เป็นหน่วย
-  //      เล็กที่สุดของระบบอยู่แล้ว)
-  //   2) ส่งมาเอง (แอดมินกรอกต้นทุน/แบทช์มือ) → เป็นบาททศนิยมตาม API contract ต้องแปลงเป็นสตางค์เอง
+  // estimated_cost_per_batch เป็นบาท (docs/money-units.md) — ไม่ส่งมา = คิดจาก ingredientItemsCost() ·
+  // ส่งมาเอง = ค่าที่แอดมินกรอก · ปัด 2 ตำแหน่งทั้งสองทาง
   if ((isCreate || input.ingredients !== undefined) && input.estimated_cost_per_batch == null) {
     const cost = await ingredientItemsCost(input.ingredients ?? [], ingredientModel as Model<any>);
     input.estimated_cost_per_batch = toSatang(cost); // บาท ปัด 2 ตำแหน่ง (src/lib/money.ts)

@@ -22,8 +22,7 @@ const orderSchema = new mongoose.Schema(
     order_status: { type: String, enum: ["pending", "confirmed", "preparing", "ready", "completed", "cancelled"], default: "pending" },
     payment_status: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
     delivery_address: { type: deliveryAddressSchema, default: null },
-    // BACKLOG §3.11 — เก็บเป็น "สตางค์" (integer) ไม่ใช่บาท (float) แล้ว ตั้งแต่ 2026-09-12
-    // (API ยังรับ-ส่งบาททศนิยมเหมือนเดิม — แปลงที่ชั้น route/service ดู src/lib/money.ts)
+    // subtotal / discount_amount / delivery_fee / total_amount: เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md)
     subtotal: { type: Number, required: true, min: 0 },
     discount_amount: { type: Number, default: 0 },
     delivery_fee: { type: Number, default: 0 },

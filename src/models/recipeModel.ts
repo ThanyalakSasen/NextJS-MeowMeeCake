@@ -64,8 +64,7 @@ const recipeSchema = new mongoose.Schema(
       ref: "Units",
       required: true,
     },
-    // BACKLOG §3.11 เฟส 4 — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (ดู src/lib/money.ts)
-    // API (recipeService) ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม
+    // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md)
     estimated_cost_per_batch: {
       type: Number,
       required: true,
