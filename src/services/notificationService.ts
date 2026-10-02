@@ -70,6 +70,24 @@ const base = createCrudService(notificationModel, {
   present: presentNotification,
 });
 
+/**
+ * ลิงก์เต็มสำหรับแนบท้ายข้อความ LINE — กดแล้วเปิดหน้าที่เกี่ยวข้องในเว็บหลังร้าน (docs/LINE.md §9.12)
+ * link แบบ path ("/owner/orders/manageOrders?id=…") ต่อกับ ADMIN_APP_URL · link ที่เป็น http(s) อยู่แล้วใช้ตรง ๆ
+ * ไม่ตั้ง ADMIN_APP_URL / ไม่มี link / ค่าผิดรูป → null (ไม่แนบ — ข้อความเหมือนเดิม)
+ */
+export function notificationLineUrl(link: string | null | undefined): string | null {
+  if (!link) return null;
+  if (/^https?:\/\//i.test(link)) return link;
+  const base = process.env.ADMIN_APP_URL?.trim();
+  if (!base || !link.startsWith("/")) return null;
+  try {
+    // ต่อ path ตรง ๆ (ไม่ใช้ new URL(link, base) — path ที่ขึ้นต้น / จะตัด sub-path ของ base ทิ้ง เช่น https://x.com/admin)
+    return new URL(base.replace(/\/+$/, "") + link).toString();
+  } catch {
+    return null;
+  }
+}
+
 /** บันทึกแจ้งเตือนลง DB + พยายาม push เข้า LINE คู่กัน (ไม่ throw ถ้า LINE ล้มเหลว) */
 async function notify(input: NotifyInput) {
   const doc = await notificationModel.create({
@@ -83,7 +101,9 @@ async function notify(input: NotifyInput) {
 
   if (input.line === false) return presentNotification(doc.toObject());
 
-  const lineText = `[${notificationModuleLabel(input.module)}] ${input.title}\n${input.message}`;
+  const url = notificationLineUrl(input.link);
+  const lineText =
+    `[${notificationModuleLabel(input.module)}] ${input.title}\n${input.message}` + (url ? `\n🔗 ${url}` : "");
   const result = await pushLineMessage(lineText);
   if (result.ok) {
     recordPushed(); // หักโควตาใน cache ของ lib/lineQuota (ใช้ตัดสินว่าส่งหาลูกค้าต่อได้ไหม)

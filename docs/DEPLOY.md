@@ -124,6 +124,7 @@ LINE_LOGIN_CHANNEL_ID=2011804283
 LINE_LOGIN_CHANNEL_SECRET=<ค่าของ channel 2011804283>
 LINE_LOGIN_CALLBACK_URL=https://api.example.com/api/shop/me/line/callback
 LINE_LINK_RETURN_URL=https://app.example.com/profile
+ADMIN_APP_URL=https://app.example.com          # ลิงก์ 🔗 ท้ายข้อความ LINE ถึงร้าน (LINE.md §9.12)
 
 # ── cron (สคริปต์ npm ไม่ต้องใช้ แต่ตั้งไว้เผื่อเรียกผ่าน HTTP) ──
 CRON_SECRET=<สุ่มใหม่>

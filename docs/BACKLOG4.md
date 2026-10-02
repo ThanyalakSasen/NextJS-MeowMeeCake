@@ -408,7 +408,7 @@ Next 16 + antd + i18n ที่ทำถึง D0.5 · ตามหลัง mai
 | 7 | ตั้ง cron 3 ตัว (รอบพรีออเดอร์ 15 นาที · เตือนวันรับ 18:00 · ตรวจข้อมูล 07:30) | DEPLOY §⑧ |
 | 8 | Atlas: แยก DB user (`meowmee-app` / `meowmee-frontoffice` / `meowmee-readonly`) + เปลี่ยนรหัสผ่าน user เดิม | DEPLOY §สำรองข้อมูล |
 | 9 | ตรวจรับตาม checklist (รวมตรวจหน่วยเงินหลังย้าย) | DEPLOY §⑨ |
-| — | หมุน `LINE_LOGIN_CHANNEL_SECRET` (เคยวางในแชต) · nginx `/uploads/` (R6) · env/โดเมนจริง (`ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, LINE callback/return URL) | R4 · R6 · LINE.md §8.3 |
+| — | หมุน `LINE_LOGIN_CHANNEL_SECRET` (เคยวางในแชต) · nginx `/uploads/` (R6) · env/โดเมนจริง (`ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, LINE callback/return URL, `ADMIN_APP_URL` สำหรับลิงก์ 🔗 ใน LINE — LINE.md §9.12) | R4 · R6 · LINE.md §8.3 |
 
 ### 8.3 รอผู้ใช้/ทีมตัดสินใจ
 
@@ -422,6 +422,7 @@ Next 16 + antd + i18n ที่ทำถึง D0.5 · ตามหลัง mai
 
 - [ ] หน้าแจ้งเตือน: แสดง `module_label` · เอาตัวกรอง `employee` ออก · ปรับจุดที่เทียบข้อความหัวข้อตามถ้อยคำใหม่ — [`LINE.md`](LINE.md) §8.2 ค., §9.10–9.11
 - [ ] สินค้าที่มีตัวเลือก (Y9): บังคับเลือกตัวเลือกก่อนใส่ตะกร้า/สั่ง (ไม่เลือก = 400) · แสดงสต็อกต่อตัวเลือก · ปรับสต็อกที่ตัวเลือก (ที่ตัวสินค้า = 409)
+- [ ] ลิงก์จาก LINE: `/owner/orders/manageOrders?id=<orderId>` ต้องเปิดออเดอร์นั้นได้ตรง ๆ · บอก path หน้าจัดการพรีออเดอร์ เพื่อให้แจ้งเตือนพรีออเดอร์มีลิงก์ด้วย — [`LINE.md`](LINE.md) §9.12
 - [ ] สลิป: เปิดผ่าน `/api/files/slips/…` แบบส่ง cookie แล้วทำ blob URL (PR #54 — `uploads.md` §6)
 - [ ] เชื่อม LINE ลูกค้า + เกณฑ์สินค้าใกล้หมดรายสินค้า + คำถามที่ต้องตอบ backend — [`LINE.md`](LINE.md) §8.2 ก., ข., ง.
 

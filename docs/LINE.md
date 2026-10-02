@@ -73,6 +73,7 @@ LINE_LINK_RETURN_URL=http://localhost:3001/profile
 |---|---|
 | `LINE_CHANNEL_ACCESS_TOKEN` | **Messaging API channel** → แท็บ Messaging API → Channel access token (long-lived) → Issue |
 | `LINE_TARGET_ID` | userId (ขึ้นต้น `U`) ของเจ้าของร้าน หรือ groupId (ขึ้นต้น `C`) — ต้องเป็นเพื่อน/อยู่ในกลุ่มกับ OA |
+| `ADMIN_APP_URL` | ไม่บังคับ — URL เว็บหลังร้าน · ตั้งแล้วข้อความ LINE ถึงเจ้าของร้านแนบลิงก์ `🔗` ไปหน้าที่เกี่ยวข้อง (§9.12) |
 | `LINE_NOTIFY_POS_ORDERS` | ไม่บังคับ — `true` = ออเดอร์ POS ส่ง LINE หาเจ้าของร้านด้วย · ไม่ตั้ง = บันทึกในหน้าแจ้งเตือนเว็บอย่างเดียว (§9.5) |
 | `LINE_OWNER_QUOTA_RESERVE` | ไม่บังคับ — จำนวนเต็ม ≥ 0 (ค่าเริ่มต้น 30) · โควตาเดือนนี้เหลือ ≤ ค่านี้ → หยุดส่งหาลูกค้า เก็บไว้ให้แจ้งเตือนร้าน (§9.6) |
 | `CRON_SECRET` | ต้องตั้งถ้าจะเรียก `/api/cron/preorder-reminders` — ตัวตั้งเวลาส่ง `Authorization: Bearer <ค่านี้>` · ไม่ตั้ง = ปิด endpoint (สคริปต์ `npm run remind:preorders` ไม่ต้องใช้) (§9.7) |
@@ -755,3 +756,20 @@ export async function alertQuotaExhausted() { markQuotaExhausted(); await alertO
 เทสปรับตาม: `ownerLineNotify.test.ts` · `preorderReminder.test.ts` · ใหม่ `slipNotification.test.ts` 2 เคส (ออเดอร์/พรีออเดอร์แสดงเลขเอกสาร ไม่ใช่ ObjectId)
 
 ✅ หัวข้อสลิปรอตรวจ: เดิม (รุ่นแรกของถ้อยคำใหม่) แสดง ObjectId 24 ตัวอักษร → แก้ให้แสดงเลขออเดอร์/พรีออเดอร์แล้ว
+
+### 9.12 แนบลิงก์เข้าเว็บหลังร้านท้ายข้อความ LINE (2026-10-02)
+
+ตัดสินใจ 2026-10-02: **แนบลิงก์ให้กดเข้าเว็บไปแก้สถานะ** (ไม่ทำปุ่มเปลี่ยนสถานะในแชต LINE — ต้องมี webhook + ผูกสิทธิ์พนักงาน
+และเสี่ยงยืนยันสลิปโดยไม่เห็นรูป) · ไม่เพิ่มแจ้งเตือนออเดอร์ค้างจ่าย (แจ้ง "ออเดอร์ใหม่" ตอนสั่ง + "สลิปรอตรวจ" ตอนแนบ พอแล้ว)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| ข้อความ LINE ถึงเจ้าของร้าน | `[คำสั่งซื้อ] ออเดอร์ใหม่ ORD-…` + รายละเอียด — ต้องไปหาออเดอร์เองในเว็บ | ต่อท้าย `🔗 https://<ADMIN_APP_URL>/owner/orders/manageOrders?id=…` กดแล้วเปิดหน้านั้นเลย |
+| แจ้งเตือนที่มีลิงก์ | ออเดอร์ใหม่ · สลิปรอตรวจ (ออเดอร์) → หน้าออเดอร์ · สินค้าใกล้หมด / ผลิตเสร็จสินค้ามีตัวเลือก / ข้อมูลผิดปกติ → `/owner/products` · วัตถุดิบใกล้หมด → `/owner/ingredients` | เหมือนเดิม — แค่แนบลิงก์เต็มไปกับ LINE ด้วย |
+| แจ้งเตือนพรีออเดอร์ / สลิปของพรีออเดอร์ / ใบผลิต / สรุปวันรับ | `link: null` | ยังไม่มีลิงก์ — รอ frontend บอก path หน้าจัดการพรีออเดอร์ (§8.2 ง.) |
+| env | — | `ADMIN_APP_URL` (ไม่ตั้ง = ไม่แนบลิงก์ ข้อความเหมือนเดิม) |
+
+- โค้ด: `notificationLineUrl()` ใน `src/services/notificationService.ts` — path ต่อกับ `ADMIN_APP_URL` · link ที่เป็น `http(s)` อยู่แล้วใช้ตรง ๆ · ค่าผิดรูป = ไม่แนบ
+- ลิงก์มีแค่ id — หน้าเว็บยังต้องล็อกอิน (เปิดใน browser ของ LINE ครั้งแรกอาจต้องล็อกอินใหม่ เพราะ cookie แยกจาก browser ปกติ)
+- **frontend:** path `/owner/orders/manageOrders?id=<orderId>` ต้องเปิดออเดอร์นั้นได้ตรง ๆ (ถ้า path จริงต่างไป บอก backend ให้แก้ `link`)
+- เทส `notificationModuleLabel.test.ts` +2 เคส (แนบเมื่อตั้ง env · ไม่แนบเมื่อไม่ตั้ง/ไม่มี link)

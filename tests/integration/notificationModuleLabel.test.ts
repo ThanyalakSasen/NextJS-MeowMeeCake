@@ -3,6 +3,7 @@ import notificationModel from "@/models/notificationModel";
 import {
   notificationService,
   notificationModuleLabel,
+  notificationLineUrl,
   parseNotificationModule,
 } from "@/services/notificationService";
 
@@ -14,7 +15,10 @@ import {
 vi.mock("@/lib/line", () => ({ pushLineMessage: vi.fn(async () => ({ ok: true })) }));
 import { pushLineMessage } from "@/lib/line";
 
-afterEach(() => vi.mocked(pushLineMessage).mockClear());
+afterEach(() => {
+  vi.mocked(pushLineMessage).mockClear();
+  delete process.env.ADMIN_APP_URL;
+});
 
 describe("notification module → ป้ายภาษาไทยตอนแสดงผล", () => {
   it("notify: DB เก็บ key อังกฤษ · response มี module_label · LINE ขึ้นป้ายไทย", async () => {
@@ -62,5 +66,30 @@ describe("notification module → ป้ายภาษาไทยตอนแ�
     expect(parseNotificationModule("คำสั่งซื้อ")).toBe("order");
     expect(parseNotificationModule("ingredient")).toBe("ingredient");
     expect(parseNotificationModule("ไม่มี")).toBeNull();
+  });
+
+  it("ADMIN_APP_URL ตั้งไว้ → ข้อความ LINE แนบลิงก์เต็มไปหน้าที่เกี่ยวข้อง (LINE.md §9.12)", async () => {
+    process.env.ADMIN_APP_URL = "https://app.example.com/";
+    await notificationService.notify({
+      title: "ออเดอร์ใหม่ ORD-20261002-AAAAAA",
+      message: "ยอดรวม 105 บาท",
+      module: "order",
+      type: "info",
+      link: "/owner/orders/manageOrders?id=abc123",
+    });
+    expect(vi.mocked(pushLineMessage).mock.calls[0][0]).toBe(
+      "[คำสั่งซื้อ] ออเดอร์ใหม่ ORD-20261002-AAAAAA\nยอดรวม 105 บาท\n🔗 https://app.example.com/owner/orders/manageOrders?id=abc123"
+    );
+  });
+
+  it("ไม่ตั้ง ADMIN_APP_URL / ไม่มี link → ข้อความเหมือนเดิม · sub-path ของ base ไม่หาย · http(s) ใช้ตรง ๆ", async () => {
+    await notificationService.notify({ title: "t", message: "m", module: "order", type: "info", link: "/owner/x" });
+    expect(vi.mocked(pushLineMessage).mock.calls[0][0]).not.toContain("🔗");
+
+    process.env.ADMIN_APP_URL = "https://shop.example.com/admin";
+    expect(notificationLineUrl(null)).toBeNull();
+    expect(notificationLineUrl("/owner/products")).toBe("https://shop.example.com/admin/owner/products");
+    expect(notificationLineUrl("https://other.example.com/x")).toBe("https://other.example.com/x");
+    expect(notificationLineUrl("owner/no-slash")).toBeNull();
   });
 });
