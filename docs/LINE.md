@@ -30,6 +30,7 @@
 | สลิปรอตรวจ | ลูกค้าแนบ/แก้สลิป | `paymentService.submitSlip` |
 | สินค้าใกล้หมด | สต็อกเพิ่งข้ามลงมา ≤ **เกณฑ์ของสินค้านั้น** (`products.low_stock_threshold` · ไม่ตั้ง = 5 — §9.5) — ทั้งตอนขาย **และ** ปรับสต็อกเอง (นับสต็อก/ตัดของเสีย — §9.2) | `productService.notifyIfLowStockCrossed()` ← `deductStockForOrder` / `setStock` / `adjustStock` (+ `increaseStock`/`decreaseStock`) |
 | วัตถุดิบใกล้หมด | สต็อกเพิ่งข้ามลงมา ≤ `reorder_point` ของวัตถุดิบนั้น | `ingredientTransactionService.createTransaction` |
+| สรุปยอดรายเดือน | วันที่ 1 ของเดือน (cron) — สรุปเดือนที่แล้ว ครั้งเดียวต่อเดือน (§9.13) | `monthlySummaryService.sendMonthlySummary` |
 
 แจ้งเฉพาะตอน "เพิ่งข้ามเกณฑ์" — ไม่แจ้งซ้ำทุกครั้งที่ของยังเหลือน้อยอยู่
 
@@ -773,3 +774,33 @@ export async function alertQuotaExhausted() { markQuotaExhausted(); await alertO
 - ลิงก์มีแค่ id — หน้าเว็บยังต้องล็อกอิน (เปิดใน browser ของ LINE ครั้งแรกอาจต้องล็อกอินใหม่ เพราะ cookie แยกจาก browser ปกติ)
 - **frontend:** path `/owner/orders/manageOrders?id=<orderId>` ต้องเปิดออเดอร์นั้นได้ตรง ๆ (ถ้า path จริงต่างไป บอก backend ให้แก้ `link`)
 - เทส `notificationModuleLabel.test.ts` +2 เคส (แนบเมื่อตั้ง env · ไม่แนบเมื่อไม่ตั้ง/ไม่มี link)
+
+### 9.13 สรุปยอดรายเดือนถึงเจ้าของร้าน (2026-10-03)
+
+| | ก่อน | หลัง |
+|---|---|---|
+| สรุปรายเดือน | ไม่มี — ต้องเปิด dashboard แล้วตั้งช่วงวันที่เอง | วันที่ 1 ของเดือน 08:00 น. ส่ง **1 ข้อความ** (หน้าแจ้งเตือนเว็บ + LINE) สรุป**เดือนที่แล้ว** |
+| หัวข้อ | — | `[การเงิน] สรุปยอดเดือนกันยายน 2569` (ชื่อเดือนไทย + ปี พ.ศ.) |
+| เนื้อหา | — | ยอดขาย (ออเดอร์ + พรีออเดอร์ที่ชำระแล้ว) **เทียบเดือนก่อน %** · แยกช่องทาง เว็บ / หน้าร้าน / พรีออเดอร์ (/ อื่น ๆ) · จำนวนที่ชำระแล้ว + เฉลี่ยต่อบิล · ค่าใช้จ่าย · ต้นทุนวัตถุดิบ · **กำไรโดยประมาณ** · ขายดี 3 อันดับ · สินค้า/วัตถุดิบที่ใกล้หมดตอนส่ง |
+| ลิงก์ | — | `🔗 <ADMIN_APP_URL>/owner/dashboard` — ⚠️ **path ยังไม่ได้ยืนยันกับ frontend** (แก้ได้ที่ `MONTHLY_SUMMARY_LINK`) |
+| ตัวเลข | — | มาจาก `dashboardService` ชุดเดียวกับหน้า dashboard (overview / revenueByChannel / topProducts) → ตรงกันเสมอ |
+| รอบเดือน | — | ตามเวลาไทย (เช่น ออเดอร์ 1 ต.ค. 00:30 น. นับเป็นตุลาคม) |
+| ส่งซ้ำ | — | ครั้งเดียวต่อเดือน — มีแจ้งเตือนหัวข้อเดือนนั้นแล้ว = ข้าม (รันซ้ำ/cron ซ้ำได้) |
+
+ตัวอย่างข้อความ:
+```
+[การเงิน] สรุปยอดเดือนกันยายน 2569
+ยอดขาย 1,060 บาท (เดือนก่อน 700 · +51.43%)
+• เว็บ 350 · หน้าร้าน 70 · พรีออเดอร์ 640
+ชำระแล้ว 3 รายการ · เฉลี่ย 353.33 บาท/บิล
+ค่าใช้จ่าย 200 · ต้นทุนวัตถุดิบ 120 บาท
+กำไรโดยประมาณ 740 บาท
+ขายดี: 1) คัพเค้กช็อกโกแลต 12 ชิ้น · 2) …
+🔗 https://app.example.com/owner/dashboard
+```
+
+- เรียกใช้: `npm run summary:monthly` (`-- --dry-run` ดูข้อความ · `-- --month=YYYY-MM` ระบุเดือน) · `GET/POST /api/cron/monthly-summary`
+  (Bearer `CRON_SECRET`, `?month=`, `?dry_run=true`) · crontab `0 8 1 * *` (DEPLOY §⑧)
+- ไฟล์: `src/services/monthlySummaryService.ts` · `src/app/api/cron/monthly-summary/route.ts` · `scripts/send-monthly-summary.ts`
+- โควตา LINE: +1 ข้อความ/เดือน · เทส `monthlySummary.test.ts` 4 เคส (ช่วงเดือนไทย · ตัวเลข · ส่งครั้งเดียว · เดือนว่าง)
+- ข้อจำกัด: ออเดอร์ที่ FrontOffice เขียนตรงด้วยเลขรูปแบบเก่า (`ORD-<timestamp>`) ถูกนับในช่อง "อื่น ๆ" (BACKLOG4 R7)

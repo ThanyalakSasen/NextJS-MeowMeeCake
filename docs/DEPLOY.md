@@ -11,7 +11,7 @@
  ① เตรียมเซิร์ฟเวอร์ ─▶ ② เตรียมก่อนวัน deploy ─▶ ③ merge PR ─▶ ④ ตั้ง .env.local ─▶ ⑤ build + รัน (pm2)
      (ครั้งแรกครั้งเดียว)    (DNS, backup, LINE, secret)                                          │
                                                                                                     ▼
- ⑨ ตรวจรับ ◀── ⑧ ตั้ง cron 3 ตัว ◀── ⑦ งานข้อมูลหลัง deploy ◀── ⑥ nginx + HTTPS (ครั้งแรก)
+ ⑨ ตรวจรับ ◀── ⑧ ตั้ง cron 4 ตัว ◀── ⑦ งานข้อมูลหลัง deploy ◀── ⑥ nginx + HTTPS (ครั้งแรก)
 ```
 
 | องค์ประกอบ | ใช้อะไร |
@@ -257,7 +257,7 @@ PATCH https://api.example.com/api/admin/products/6a814a064b44d4bf31fb2c4b   { "i
 
 ---
 
-## ⑧ ตั้ง cron 3 ตัว
+## ⑧ ตั้ง cron 4 ตัว
 
 ```bash
 sudo -iu meowmee
@@ -278,11 +278,15 @@ PATH=/usr/bin:/bin:/usr/local/bin
 
 # ตรวจข้อมูลสินค้าผิดปกติ (ราคาเป็นบาท/ฟิลด์เก่า/สต็อก variant) แล้วแจ้งเจ้าของร้าน — กันการแก้ DB ตรงแบบ BACKLOG2 §16 (BACKLOG4 Y11)
 30 7 * * * cd /srv/meowmeecake/app && npm run -s check:data-integrity >> /srv/meowmeecake/logs/data-integrity.log 2>&1
+
+# สรุปยอดเดือนที่แล้วถึงเจ้าของร้าน (เว็บ + LINE 1 ข้อความ) — วันที่ 1 ของเดือน 08:00 น. (LINE.md §9.13)
+0 8 1 * * cd /srv/meowmeecake/app && npm run -s summary:monthly >> /srv/meowmeecake/logs/monthly-summary.log 2>&1
 ```
 
 - ทั้งสองงานรันซ้ำ/พร้อมกันได้ ไม่ทำซ้ำ · ไม่ต้องใช้ `CRON_SECRET` (รันสคริปต์ตรง ไม่ผ่าน HTTP)
 - log โตเรื่อย ๆ → ตั้ง `logrotate` หรือเคลียร์เป็นระยะ
-- ทดสอบก่อนรอ: `npm run remind:preorders -- --dry-run` (ดูรายชื่อ ไม่ส่ง) · `npm run check:data-integrity -- --no-notify`
+- ทดสอบก่อนรอ: `npm run remind:preorders -- --dry-run` (ดูรายชื่อ ไม่ส่ง) · `npm run check:data-integrity -- --no-notify` ·
+  `npm run summary:monthly -- --dry-run` (ดูข้อความสรุปเดือนที่แล้ว ไม่ส่ง)
 - `check:data-integrity` จบด้วย exit code 2 เมื่อพบปัญหา (ปกติสำหรับ cron — ดูรายละเอียดใน log / หน้าแจ้งเตือน)
 
 ---

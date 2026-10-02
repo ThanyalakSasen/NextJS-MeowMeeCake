@@ -26,7 +26,8 @@
     "remind:preorders": "tsx scripts/send-preorder-reminders.ts",
     "cron:preorder-rounds": "tsx scripts/run-preorder-rounds.ts",
     "backfill:payment-due": "tsx scripts/backfill-payment-due.ts",
-    "check:data-integrity": "tsx scripts/check-data-integrity.ts"
+    "check:data-integrity": "tsx scripts/check-data-integrity.ts",
+    "summary:monthly": "tsx scripts/send-monthly-summary.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1131.0",
