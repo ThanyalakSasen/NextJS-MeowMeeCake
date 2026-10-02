@@ -18,28 +18,28 @@ describe("dashboardService.overview — ผสม revenue (order) + expense ถ�
     const user = await makeUser();
     const product = await makeProduct();
 
-    // สร้างออเดอร์ paid ตรง ๆ ผ่าน model (subtotal/total_amount เป็นสตางค์ — BACKLOG §3.11 เฟส 1)
+    // สร้างออเดอร์ paid ตรง ๆ ผ่าน model (เงินเป็นบาท — docs/money-units.md)
     const order = await orderModel.create({
       order_no: `OP-DASH-${Date.now()}`,
       user_id: user._id,
       order_type: "takeaway",
       payment_status: "paid",
-      subtotal: 100000, // 1000 บาท
+      subtotal: 1000, // 1000 บาท
       discount_amount: 0,
       delivery_fee: 0,
-      total_amount: 100000,
+      total_amount: 1000,
     });
     await orderItemModel.create({
       order_id: order._id,
       product_id: product._id,
       product_snapshot: { product_name_th: "x", product_name_eng: "x" },
       quantity: 1,
-      unit_price: 100000,
-      total_price: 100000,
-      cost_per_unit: 30000, // 300 บาท (สตางค์ตั้งแต่เฟส 4) — cogs = 30000*1 สตางค์ = 300 บาท
+      unit_price: 1000,
+      total_price: 1000,
+      cost_per_unit: 300, // 300 บาท — cogs = 300 × 1 = 300 บาท
     });
 
-    // ค่าใช้จ่าย 200 บาท (เก็บเป็นสตางค์ในเฟส 2 — totalInRange() คืนบาทให้)
+    // ค่าใช้จ่าย 200 บาท (สร้างผ่าน expenseService)
     await expenseService.create({
       date: new Date(),
       description: "ค่าไฟ",
@@ -59,7 +59,7 @@ describe("dashboardService.overview — ผสม revenue (order) + expense ถ�
 
 /**
  * docs/BACKLOG4.md R5 — overview/salesByDay/topProducts รวมพรีออเดอร์ด้วย (เดิมอ่านแค่ orders)
- * ข้อมูลสร้างเป็นสตางค์ · ผลลัพธ์เป็นบาท · ใช้ช่วงวันที่ของตัวเอง (ปี 2032) กันข้อมูลเทสอื่นปน
+ * เงินเป็นบาททั้งข้อมูลและผลลัพธ์ (docs/money-units.md) · ใช้ช่วงวันที่ของตัวเอง (ปี 2032) กันข้อมูลเทสอื่นปน
  */
 describe("dashboardService — รวมพรีออเดอร์ (BACKLOG4 R5)", () => {
   const at = new Date(Date.UTC(2032, 2, 10, 5, 0, 0));
@@ -72,26 +72,26 @@ describe("dashboardService — รวมพรีออเดอร์ (BACKLOG4
 
     const o = await orderModel.create({
       order_no: `ORD-R5-${Date.now()}`, user_id: user._id, order_type: "takeaway", payment_status: "paid",
-      order_status: "completed", subtotal: 10000, discount_amount: 1000, total_amount: 9000, created_at: at,
+      order_status: "completed", subtotal: 100, discount_amount: 10, total_amount: 90, created_at: at,
     });
     await orderItemModel.create({
       order_id: o._id, product_id: cake._id, product_snapshot: { product_name_th: cake.product_name_th, product_name_eng: "c" },
-      quantity: 2, unit_price: 5000, total_price: 10000, cost_per_unit: 1000,
+      quantity: 2, unit_price: 50, total_price: 100, cost_per_unit: 10,
     });
 
     const p = await preorderModel.create({
       preorder_no: `PRE-R5-${Date.now()}`, user_id: user._id, round_id: oid(), order_type: "takeaway", payment_status: "paid",
-      order_status: "confirmed", subtotal: 30000, discount_amount: 0, total_amount: 30000, created_at: at,
+      order_status: "confirmed", subtotal: 300, discount_amount: 0, total_amount: 300, created_at: at,
     });
     await preorderItemModel.create({
       preorder_id: p._id, round_item_id: oid(), product_id: bread._id, pickup_date: at,
       product_snapshot: { product_name_th: bread.product_name_th, product_name_eng: "b" },
-      quantity: 3, unit_price: 10000, total_price: 30000, cost_per_unit: 4000,
+      quantity: 3, unit_price: 100, total_price: 300, cost_per_unit: 40,
     });
     // ยังไม่จ่าย — ต้องไม่นับ
     await preorderModel.create({
       preorder_no: `PRE-R5-U-${Date.now()}`, user_id: user._id, round_id: oid(), order_type: "takeaway", payment_status: "pending",
-      subtotal: 99900, total_amount: 99900, created_at: at,
+      subtotal: 999, total_amount: 999, created_at: at,
     });
     return { cake, bread };
   }

@@ -208,6 +208,19 @@ export async function getPaymentById(id: string) {
   return presentPayment(doc);
 }
 
+/** เลขเอกสารของ payment: order_no (ORD-/POS-…) หรือ preorder_no (PRE-…) · หาไม่เจอ = ObjectId เดิม (ยังพอสืบได้) */
+async function paymentDocNo(payment: { order_id?: unknown; preorder_id?: unknown }): Promise<string> {
+  if (payment.order_id) {
+    const o = await orderModel.findById(payment.order_id).select("order_no").lean<{ order_no?: string } | null>();
+    return o?.order_no ?? String(payment.order_id);
+  }
+  if (payment.preorder_id) {
+    const p = await preorderModel.findById(payment.preorder_id).select("preorder_no").lean<{ preorder_no?: string } | null>();
+    return p?.preorder_no ?? String(payment.preorder_id);
+  }
+  return "-";
+}
+
 // ── ลูกค้าแนบสลิป / แก้สลิป (ก่อนแอดมินตรวจ) ─────────────────
 export async function submitSlip(
   id: string,
@@ -229,14 +242,17 @@ export async function submitSlip(
   await payment.save();
 
   // แจ้งเตือนสลิปเข้าใหม่ (DB + LINE) — best-effort ไม่ทำให้แนบสลิปล้มเหลวถ้าแจ้งเตือนพัง
-  notificationService
-    .notify({
-      title: "มีสลิปโอนเงินรอตรวจสอบ",
-      message: `ยอด ${toBaht(payment.amount).toLocaleString("th-TH")} บาท`,
-      module: "finance",
-      type: "info",
-      link: payment.order_id ? `/owner/orders/manageOrders?id=${payment.order_id}` : null,
-    })
+  // หัวข้อแสดงเลขเอกสารที่คนอ่านรู้เรื่อง (ORD-/POS-/PRE-…) ไม่ใช่ ObjectId — หาเลขหลังตอบลูกค้าแล้ว (ไม่หน่วง response)
+  paymentDocNo(payment)
+    .then((docNo) =>
+      notificationService.notify({
+        title: "มีคำสั่งซื้อรอตรวจสอบสลิปโอนเงิน รหัสคำสั่งซื้อ " + docNo,
+        message: `ยอด ${toBaht(payment.amount).toLocaleString("th-TH")} บาท`,
+        module: "finance",
+        type: "info",
+        link: payment.order_id ? `/owner/orders/manageOrders?id=${payment.order_id}` : null,
+      })
+    )
     .catch((err) => log.error("payment.notify_failed", { payment_id: String(payment._id), err }));
 
   return presentPayment(payment.toObject());

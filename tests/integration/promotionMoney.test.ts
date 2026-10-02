@@ -43,7 +43,7 @@ describe("promotionService.createPromotion/updatePromotion — discount_value �
     expect(created.discount_value).toBe(50);
 
     const raw = await promotionModel.findById(created._id).lean<{ discount_value: number }>();
-    expect(raw!.discount_value).toBe(5000);
+    expect(raw!.discount_value).toBe(50);
   });
 
   it("Percentage: discount_value ไม่ถูกแปลง (ยังเป็น % ดิบ 0-100)", async () => {
@@ -86,8 +86,8 @@ describe("promotionService.createPromotion/updatePromotion — discount_value �
       min_order_amount: number;
       max_discount_amount: number;
     }>();
-    expect(raw!.min_order_amount).toBe(20000);
-    expect(raw!.max_discount_amount).toBe(8000);
+    expect(raw!.min_order_amount).toBe(200);
+    expect(raw!.max_discount_amount).toBe(80);
   });
 
   it("update: เปลี่ยน discount_value ของโปร Amount ที่มีอยู่แล้ว แปลงถูกทาง", async () => {
@@ -101,7 +101,7 @@ describe("promotionService.createPromotion/updatePromotion — discount_value �
     } as UpdateInput)) as PromoDoc;
     expect(updated.discount_value).toBe(70);
     const raw = await promotionModel.findById(created._id).lean<{ discount_value: number }>();
-    expect(raw!.discount_value).toBe(7000);
+    expect(raw!.discount_value).toBe(70);
   });
 
   it("update: ส่ง discount_type ใหม่พร้อม discount_value ในคำขอเดียวกัน ใช้ type ใหม่ตัดสินใจแปลง", async () => {
@@ -117,7 +117,7 @@ describe("promotionService.createPromotion/updatePromotion — discount_value �
     } as UpdateInput)) as PromoDoc;
     expect(updated.discount_value).toBe(99);
     const raw = await promotionModel.findById(created._id).lean<{ discount_value: number }>();
-    expect(raw!.discount_value).toBe(9900);
+    expect(raw!.discount_value).toBe(99);
   });
 
   it("update: ไม่ได้ส่ง discount_value มาด้วยเลย → ค่าเดิมใน DB ไม่ถูกแตะ แม้จะเปลี่ยน discount_type", async () => {

@@ -30,6 +30,8 @@ import recipeModel from "../models/recipeModel";
 import productModel from "../models/productModel";
 import * as productionItemService from "./productionItemService";
 import * as productService from "./productService";
+import { notificationService } from "./notificationService";
+import { log } from "../lib/logger";
 import type { AddItemInput } from "./productionItemService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -389,6 +391,8 @@ export async function completeProduction(
  *   - จำนวน = actual_qty ถ้าส่ง use_actual และกรอกไว้ ไม่งั้น planned_qty (เดียวกับที่ใช้หักวัตถุดิบ)
  *   - ข้ามรายการที่ยกเลิก / จำนวน 0 · ครั้งเดียวต่อรายการ (จอง product_stock_added_at แบบ atomic)
  *   - เพิ่มผ่าน productService.increaseStock (atomic $inc เดียวกับการรับสินค้าเข้าสต็อก)
+ *   - สินค้าที่มีตัวเลือก (Y9 — สต็อกแยกต่อ variant) ข้าม: งานผลิตไม่รู้ว่าได้ตัวเลือกไหนกี่ชิ้น →
+ *     แจ้งเจ้าของร้านให้ไปเพิ่มสต็อกที่ตัวเลือกเอง (product_stock_added_at ยังเป็น null)
  */
 async function addFinishedGoodsStock(orderId: string, opts: { use_actual?: boolean } = {}): Promise<void> {
   const items = await productionItemModel
@@ -403,14 +407,21 @@ async function addFinishedGoodsStock(orderId: string, opts: { use_actual?: boole
 
   const products = await productModel
     .find({ _id: { $in: items.map((i) => i.product_id) } })
-    .select("is_preorder")
-    .lean<Array<{ _id: unknown; is_preorder?: boolean }>>();
+    .select("is_preorder product_name_th")
+    .lean<Array<{ _id: unknown; is_preorder?: boolean; product_name_th?: string }>>();
+  const nameById = new Map(products.map((p) => [String(p._id), p.product_name_th ?? String(p._id)]));
   const preorderIds = new Set(products.filter((p) => isPreorderProduct(p)).map((p) => String(p._id)));
+  const variantIds = await productService.productIdsWithVariants(items.map((i) => String(i.product_id)));
+  const skippedVariant: string[] = [];
 
   for (const it of items) {
     if (preorderIds.has(String(it.product_id))) continue;
     const qty = opts.use_actual && it.actual_qty != null ? Number(it.actual_qty) : Number(it.planned_qty);
     if (!(qty > 0)) continue;
+    if (variantIds.has(String(it.product_id))) {
+      skippedVariant.push(`${nameById.get(String(it.product_id))} ×${qty}`);
+      continue;
+    }
 
     const claimed = await productionItemModel.findOneAndUpdate(
       { _id: it._id, product_stock_added_at: null },
@@ -418,6 +429,18 @@ async function addFinishedGoodsStock(orderId: string, opts: { use_actual?: boole
     );
     if (!claimed) continue;
     await productService.increaseStock(String(it.product_id), qty);
+  }
+
+  if (skippedVariant.length) {
+    notificationService
+      .notify({
+        title: "ผลิตเสร็จ — สินค้ามีตัวเลือก ต้องเพิ่มสต็อกเอง",
+        message: `สินค้าที่มีตัวเลือก (variant) ไม่ถูกเพิ่มสต็อกอัตโนมัติ กรุณาเพิ่มที่ตัวเลือกแต่ละแบบ: ${skippedVariant.join(", ")}`,
+        module: "production",
+        type: "warning",
+        link: "/owner/products",
+      })
+      .catch((err) => log.error("production.variant_stock_notify_failed", { orderId, err }));
   }
 }
 

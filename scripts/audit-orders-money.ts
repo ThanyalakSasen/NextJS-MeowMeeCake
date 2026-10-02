@@ -1,4 +1,5 @@
 import "./_env"; // ต้องมาก่อน import ที่อ่าน env ตอนโหลดโมดูล
+import { blockLegacyMoneyScript } from "./_legacyMoney";
 
 import mongoose from "mongoose";
 import { writeFileSync } from "node:fs";
@@ -168,6 +169,7 @@ async function auditConsistency(db: mongoose.mongo.Db): Promise<Inconsistency[]>
 }
 
 async function main() {
+  blockLegacyMoneyScript("audit-orders-money"); // docs/money-units.md — ระบบเก็บเงินเป็นบาทแล้ว
   await dbConnect();
   const db = mongoose.connection.db;
   if (!db) throw new Error("ไม่มี mongoose.connection.db");

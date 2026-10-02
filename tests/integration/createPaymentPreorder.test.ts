@@ -11,9 +11,9 @@ describe("paymentService.createPayment — preorder branch (BACKLOG 2b.1)", () =
   it("preorder_id ของคนอื่น → 400 ไม่ให้สร้าง payment", async () => {
     const owner = await makeUser();
     const stranger = await makeUser();
-    // total_amount เป็นสตางค์ (BACKLOG §3.11) — 25000 = 250 บาท · amount ที่ paymentService.createPayment
+    // total_amount เป็นบาท (docs/money-units.md) · amount ที่ paymentService.createPayment
     // รับยังเป็นบาทเหมือนเดิม (API ไม่เปลี่ยน) แปลงเป็นสตางค์เทียบกันภายใน
-    const preorder = await makePreorder(String(owner._id), { total_amount: 25000 });
+    const preorder = await makePreorder(String(owner._id), { total_amount: 250 });
 
     await expect(
       paymentService.createPayment({
@@ -27,7 +27,7 @@ describe("paymentService.createPayment — preorder branch (BACKLOG 2b.1)", () =
   it("พรีออเดอร์ที่ถูกยกเลิกแล้ว → 409 ไม่ให้สร้าง payment", async () => {
     const owner = await makeUser();
     const preorder = await makePreorder(String(owner._id), {
-      total_amount: 15000,
+      total_amount: 150,
       order_status: "cancelled",
     });
 
@@ -42,7 +42,7 @@ describe("paymentService.createPayment — preorder branch (BACKLOG 2b.1)", () =
 
   it("amount ไม่ตรงกับ total_amount → 400", async () => {
     const owner = await makeUser();
-    const preorder = await makePreorder(String(owner._id), { total_amount: 30000 });
+    const preorder = await makePreorder(String(owner._id), { total_amount: 300 });
 
     await expect(
       paymentService.createPayment({
@@ -55,7 +55,7 @@ describe("paymentService.createPayment — preorder branch (BACKLOG 2b.1)", () =
 
   it("เจ้าของจริง + สถานะปกติ + amount ตรง → สร้าง payment สำเร็จ", async () => {
     const owner = await makeUser();
-    const preorder = await makePreorder(String(owner._id), { total_amount: 18000 });
+    const preorder = await makePreorder(String(owner._id), { total_amount: 180 });
 
     const payment = await paymentService.createPayment({
       user_id: String(owner._id),

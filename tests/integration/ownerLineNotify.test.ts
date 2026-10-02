@@ -10,7 +10,7 @@ import { makeUser, makeProduct } from "./helpers";
 /** docs/LINE.md §9 — แจ้งเจ้าของร้าน: พรีออเดอร์ใหม่ + สินค้าใกล้หมดจากการปรับสต็อกเอง */
 
 async function lowStockNotes(productName: string) {
-  return notificationModel.find({ title: `สินค้าใกล้หมด: ${productName}` }).lean();
+  return notificationModel.find({ title: `สินค้าใกล้จะหมด: ${productName}` }).lean();
 }
 
 /** notify() เป็น fire-and-forget — รอให้ record ถูกสร้าง (หรือยืนยันว่าไม่มีหลังรอสักครู่) */
@@ -55,7 +55,7 @@ describe("สินค้าใกล้หมด — ปรับสต็อ�
 });
 
 describe("พรีออเดอร์ใหม่ → แจ้งเจ้าของร้าน", () => {
-  it("createPreorder → มี notification 'พรีออเดอร์ใหม่ PRE-…' พร้อมชื่อรอบและยอด", async () => {
+  it("createPreorder → มี notification 'เปิดพรีออเดอร์รอบใหม่ PRE-…' พร้อมชื่อรอบและยอด", async () => {
     const user = await makeUser();
     const product = await makeProduct({ is_preorder: true, product_price: 120 });
     const roundName = `รอบแจ้งเตือน-${Date.now()}`;
@@ -78,9 +78,9 @@ describe("พรีออเดอร์ใหม่ → แจ้งเจ้�
     })) as { preorder_no: string };
 
     await vi.waitFor(async () =>
-      expect(await notificationModel.findOne({ title: `พรีออเดอร์ใหม่ ${preorder.preorder_no}` })).toBeTruthy()
+      expect(await notificationModel.findOne({ title: `เปิดพรีออเดอร์รอบใหม่ ${preorder.preorder_no}` })).toBeTruthy()
     );
-    const note = await notificationModel.findOne({ title: `พรีออเดอร์ใหม่ ${preorder.preorder_no}` }).lean<{
+    const note = await notificationModel.findOne({ title: `เปิดพรีออเดอร์รอบใหม่ ${preorder.preorder_no}` }).lean<{
       message: string;
       module: string;
     }>();

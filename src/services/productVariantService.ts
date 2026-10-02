@@ -12,6 +12,7 @@ import { createCrudService } from "../lib/crudService";
 import { assertRefExists } from "../lib/refs";
 import { badRequest } from "../lib/httpError";
 import { toSatang, toBahtFields } from "../lib/money";
+import { applyVariantStockDelta, productHasVariants, syncStockFromVariants } from "./productService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -66,17 +67,54 @@ export const productVariantService = {
       input.variant_price != null
         ? { ...input, variant_price: toSatang(Number(input.variant_price)) }
         : input;
-    return base.create(payload);
+    const hadVariants = await productHasVariants(String(input.product_id));
+    const created = await base.create(payload);
+    // docs/BACKLOG4.md Y9 — สต็อกสินค้า = ผลรวม variant_stock: variant ตัวแรก → ตั้งสต็อกสินค้าเป็นผลรวม
+    // (ทิ้งสต็อกเดิมที่ไม่ได้แยกตัวเลือก) · ตัวถัดไป → บวกส่วนของมันเข้าไป
+    await syncVariantStock(String(input.product_id), Number(created.variant_stock ?? 0), hadVariants);
+    return created;
   },
 
   async update(id: string, input: Record<string, any>) {
     await assertRefs(input);
+    const { variant_stock, ...rest } = input;
     const payload =
-      input.variant_price != null
-        ? { ...input, variant_price: toSatang(Number(input.variant_price)) }
-        : input;
-    return base.update(id, payload);
+      rest.variant_price != null
+        ? { ...rest, variant_price: toSatang(Number(rest.variant_price)) }
+        : rest;
+    const updated = await base.update(id, payload);
+    if (variant_stock == null) return updated;
+
+    // ตั้ง variant_stock แบบ atomic แล้วเลื่อนสต็อกสินค้าตามส่วนต่าง (ค่าก่อน-หลังจาก doc เดียวกัน —
+    // ไม่ชนกับออเดอร์ที่ตัด $inc variant เดียวกันพร้อมกัน)
+    const before = await productVariantModel
+      .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { variant_stock: Number(variant_stock) } })
+      .lean<{ product_id: unknown; variant_stock?: number } | null>();
+    if (!before) return updated;
+    await applyVariantStockDelta(String(before.product_id), Number(variant_stock) - (before.variant_stock ?? 0));
+    return base.getById(id);
+  },
+
+  async remove(id: string) {
+    const removed = await base.remove(id);
+    // ลบตัวเลือก → สต็อกของตัวเลือกนั้นออกจากผลรวมของสินค้าด้วย
+    await applyVariantStockDelta(String(removed.product_id), -Number(removed.variant_stock ?? 0));
+    return removed;
+  },
+
+  async restore(id: string) {
+    const doc = await productVariantModel.findOne({ _id: id }).select("product_id").lean<{ product_id: unknown } | null>();
+    const hadVariants = doc ? await productHasVariants(String(doc.product_id)) : false;
+    const restored = await base.restore(id);
+    await syncVariantStock(String(restored.product_id), Number(restored.variant_stock ?? 0), hadVariants);
+    return restored;
   },
 };
+
+/** variant เพิ่มเข้ามา (สร้าง/กู้คืน): ตัวแรกของสินค้า → ตั้งสต็อกสินค้า = ผลรวม · ไม่ใช่ตัวแรก → บวกเพิ่ม */
+async function syncVariantStock(productId: string, stock: number, hadVariants: boolean): Promise<void> {
+  if (hadVariants) await applyVariantStockDelta(productId, stock);
+  else await syncStockFromVariants(productId);
+}
 
 export default productVariantService;

@@ -97,11 +97,11 @@ describe("sendPickupReminders", () => {
     expect(marked).toBe(3);
 
     // สรุปให้ร้านในหน้าแจ้งเตือนเว็บ ไม่ push LINE
-    const summary = await notificationModel.findOne({ title: "พรีออเดอร์ถึงวันรับ 2026-10-02: 3 รายการ" }).lean<{
+    const summary = await notificationModel.findOne({ title: "เปิดรับพรีออเดอร์ถึงวันรับ 2026-10-02: 3 รายการ" }).lean<{
       message: string;
       line_sent: boolean;
     }>();
-    expect(summary?.message).toContain("เตือนลูกค้าทาง LINE แล้ว 2 ราย");
+    expect(summary?.message).toContain("เตือนลูกค้าทาง LINE แล้ว จำนวน 2 ราย");
     expect(summary?.line_sent).toBe(false);
   });
 
@@ -114,7 +114,7 @@ describe("sendPickupReminders", () => {
     const again = await sendPickupReminders({ now: NOW });
     expect(again.due).toBe(0);
     expect(pushedTo("U_R")).toHaveLength(1);
-    expect(await notificationModel.countDocuments({ title: /^พรีออเดอร์ถึงวันรับ 2026-10-02/ })).toBe(1);
+    expect(await notificationModel.countDocuments({ title: /^เปิดรับพรีออเดอร์ถึงวันรับ 2026-10-02/ })).toBe(1);
   });
 
   it("รันพร้อมกัน 2 ตัว → ลูกค้าได้ข้อความเดียว (จอง pickup_reminded_at แบบ atomic)", async () => {

@@ -1,4 +1,5 @@
 import "./_env"; // ต้องมาก่อน import ที่อ่าน env ตอนโหลดโมดูล
+import { blockLegacyMoneyScript } from "./_legacyMoney";
 
 import mongoose from "mongoose";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -68,6 +69,7 @@ const APPLY = process.argv.includes("--apply");
 const REPORT = "scripts/audit-money-units.report.json";
 
 async function main() {
+  blockLegacyMoneyScript("fix-money-units"); // docs/money-units.md — ระบบเก็บเงินเป็นบาทแล้ว
   const report = JSON.parse(readFileSync(REPORT, "utf8")) as { generated_at: string; rows: ReportRow[] };
   const ageH = (Date.now() - new Date(report.generated_at).getTime()) / 3_600_000;
   if (ageH > 24) {

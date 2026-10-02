@@ -183,7 +183,7 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
     ...new Set(inputs.flatMap((i) => (i.selected_options ?? []).map((s) => s.option_id))),
   ];
 
-  const [products, variants, options] = await Promise.all([
+  const [products, variants, options, withVariants] = await Promise.all([
     productModel.find({ _id: { $in: productIds }, deleted_at: null }).lean<any[]>(),
     variantIds.length
       ? productVariantModel.find({ _id: { $in: variantIds }, deleted_at: null }).lean<any[]>()
@@ -191,6 +191,7 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
     optionIds.length
       ? productOptionModel.find({ _id: { $in: optionIds }, deleted_at: null }).lean<any[]>()
       : Promise.resolve([]),
+    productService.productIdsWithVariants(productIds),
   ]);
   const productById = new Map(products.map((p) => [String(p._id), p]));
   const variantById = new Map(variants.map((v) => [String(v._id), v]));
@@ -215,6 +216,9 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
       // ด้วย _id ล้วนแล้วเช็คทีหลัง เพราะ $in ข้าม product_id ของแต่ละรายการไม่ได้ในคำสั่งเดียว)
       variant = v && String(v.product_id) === String(input.product_id) ? v : null;
       if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
+    } else if (withVariants.has(String(product._id))) {
+      // BACKLOG4 Y9 — สินค้ามีตัวเลือก สต็อกแยกต่อตัวเลือก → ต้องระบุว่าเอาแบบไหน
+      throw badRequest(`กรุณาเลือกตัวเลือกของสินค้า "${product.product_name_th}"`);
     }
 
     // BACKLOG3 §6 — logic ตรวจ/คิดราคา option ย้ายไป productOptionService.resolveSelectedOptions()
@@ -233,10 +237,9 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
     // ทั้งฝั่งสินค้าและฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด unit_price ที่คำนวณตรงนี้จึงเป็นสตางค์อยู่แล้ว
     // โดยอัตโนมัติ ไม่ต้องแปลงอะไรเพิ่ม)
     const basePrice = product.sale_price ?? product.product_price;
-    const unit_price =
-      basePrice +
-      (variant?.variant_price ?? 0) +
-      resolvedOptions.reduce((s, o) => s + o.extra_price, 0);
+    const unit_price = toSatang(
+      basePrice + (variant?.variant_price ?? 0) + resolvedOptions.reduce((s, o) => s + o.extra_price, 0)
+    );
 
     return {
       product_id: product._id,
@@ -285,14 +288,13 @@ async function persistOrder(
     lines.map((l) => String(l.product_id))
   );
 
-  // unit_price/total_price เป็นสตางค์แล้วตั้งแต่ resolveLine() — บวก/คูณ integer ตรงนี้ไม่มี
-  // rounding error เลย ต่างจากตอนเป็นบาท (float) ที่ต้อง round2() ปิดท้ายทุกจุด (BACKLOG §3.11)
+  // เงินเป็นบาท (float) — ปัด 2 ตำแหน่งทุกครั้งที่คูณ/รวม (src/lib/money.ts)
   const itemsPayload = lines.map((l) => ({
     ...l,
-    total_price: l.unit_price * l.quantity,
+    total_price: toSatang(l.unit_price * l.quantity),
     cost_per_unit: costByProduct.get(String(l.product_id)) ?? l.cost_per_unit ?? null,
   }));
-  const subtotal = itemsPayload.reduce((s, it) => s + it.total_price, 0);
+  const subtotal = toSatang(itemsPayload.reduce((s, it) => s + it.total_price, 0));
 
   // ── ค่าส่ง: คิดฝั่ง server เสมอ (เว้นแต่แอดมินสั่ง override) ──
   // deliveryService ยังทำงานเป็น "บาท" (ยังไม่แปลงในเฟสนี้) — แปลง subtotal เป็นบาทตอนส่งออก แล้ว
@@ -355,11 +357,12 @@ async function persistOrder(
   if (discount_amount > subtotal + delivery_fee) {
     throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
   }
-  const total_amount = subtotal - discount_amount + delivery_fee;
+  const total_amount = toSatang(subtotal - discount_amount + delivery_fee);
 
   const stockItems = lines.map((l) => ({
     product_id: String(l.product_id),
     quantity: l.quantity,
+    variant_id: l.variant_id ? String(l.variant_id) : null, // BACKLOG4 Y9 — ตัด variant_stock ด้วย
   }));
 
   // ── สร้างออเดอร์แบบ best-effort + ชดเชยผ่าน Saga (MongoDB standalone ไม่มี transaction) ──
@@ -653,6 +656,7 @@ export async function updateOrderStatus(
     const stockItems = items.map((it) => ({
       product_id: String(it.product_id),
       quantity: it.quantity,
+      variant_id: it.variant_id ? String(it.variant_id) : null, // BACKLOG4 Y9 — คืน variant_stock ด้วย
     }));
     if (stockItems.length) {
       cleanup.onRollback("restock", () => productService.restockForOrder(stockItems));

@@ -20,9 +20,10 @@ import productModel from "../models/productModel";
 import productVariantModel from "../models/productVariantModel";
 import productOptionModel from "../models/productOptionModel";
 import userModel from "../models/userModel";
-import { toBaht, toBahtFields } from "../lib/money";
+import { toBaht, toBahtFields, toSatang } from "../lib/money";
 import { isPreorderProduct } from "../lib/productCode";
 import { resolveSelectedOptions } from "./productOptionService";
+import { productHasVariants } from "./productService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -172,6 +173,9 @@ export async function addItem(userId: string, input: AddCartItemInput) {
       .findOne({ _id: input.variant_id, product_id: input.product_id, deleted_at: null })
       .lean<any>();
     if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
+  } else if (await productHasVariants(String(input.product_id))) {
+    // docs/BACKLOG4.md Y9 — สินค้ามีตัวเลือก สต็อกแยกต่อตัวเลือก → ต้องระบุว่าเอาแบบไหน
+    throw badRequest(`กรุณาเลือกตัวเลือกของสินค้า "${product.product_name_th}"`);
   }
 
   const options = await resolveOptions(input.product_id, input.selected_options);
@@ -183,7 +187,7 @@ export async function addItem(userId: string, input: AddCartItemInput) {
   const basePrice = product.sale_price ?? product.product_price;
   const variantPrice = variant?.variant_price ?? 0;
   const optionsPrice = options.reduce((s, o) => s + o.extra_price, 0);
-  const price_snapshot = basePrice + variantPrice + optionsPrice;
+  const price_snapshot = toSatang(basePrice + variantPrice + optionsPrice);
 
   const cart = await getOrCreateCart(userId);
 

@@ -275,7 +275,7 @@ export async function onPreorderPaid(preorderId: string): Promise<LatePaymentOut
 
   await notificationService
     .notify({
-      title: `เพิ่มยอดเข้าใบสั่งผลิต ${production.production_no}`,
+      title: `เพิ่มยอดสินค้าเข้าใบสั่งผลิต ${production.production_no}`,
       message: `พรีออเดอร์ ${pre.preorder_no} ชำระเงินหลังปิดรอบ — บวกจำนวนเข้าใบผลิตแล้ว`,
       module: "production",
       type: "info",
@@ -346,7 +346,7 @@ export async function onPreorderCancelled(preorderId: string, wasPaid: boolean):
 
   await notificationService
     .notify({
-      title: `ลดยอดใบสั่งผลิต ${production.production_no}`,
+      title: `หักยอดสินค้าในใบสั่งผลิต ${production.production_no}`,
       message: `พรีออเดอร์ ${pre.preorder_no} ถูกยกเลิก — หักจำนวนออกจากใบผลิตแล้ว`,
       module: "production",
       type: "info",
