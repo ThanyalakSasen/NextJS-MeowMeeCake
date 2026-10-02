@@ -358,7 +358,8 @@ DB จริงมีตัวเลือก 0 ตัว — ไม่กระ
 - แก้: `productService` · `productVariantService` · `orderService` · `cartService` · `productionOrderService` · `scripts/audit-money-units.ts` · `package.json` (scripts `backfill:payment-due`, `check:data-integrity`) · `docs/DEPLOY.md`
 - R7: เก็บเงินเป็นบาท ([`money-units.md`](money-units.md)) — `src/lib/money.ts` + จุดคำนวณยอด · `scripts/migrate-money-to-baht.ts` + `migrateMoneyToBaht.test.ts` 2 เคส · บล็อกสคริปต์ยุคสตางค์ (`scripts/_legacyMoney.ts`) · ปรับเทสเงินทั้งหมดให้ DB เป็นบาท
 - เทสใหม่ 18 เคส (variantStock 8 · backfillPaymentDue 2 · auditMoneyUnits 3 · dataIntegrity 3 · migrateMoneyToBaht 2) · รวม 491 ผ่าน (66 ไฟล์) ณ commit เงินเป็นบาท
-- หลังรวมงานแจ้งเตือน (module_label · ถ้อยคำใหม่ · เลขออเดอร์ในสลิป · เลิกใช้ employee) + cleanup (§7.15): รวม **500 ผ่าน** (70 ไฟล์) · `next build` ✅ · typecheck 0 · lint 0 error · `next build` ผ่าน
+- หลังรวมงานแจ้งเตือน (module_label · ถ้อยคำใหม่ · เลขออเดอร์ในสลิป · เลิกใช้ employee) + cleanup (§7.15): รวม 500 ผ่าน (70 ไฟล์)
+- หลังเพิ่มลิงก์ 🔗 ใน LINE (LINE.md §9.12) + สรุปยอดรายเดือน (§9.13): รวม **506 ผ่าน** (71 ไฟล์) · `next build` ✅ · typecheck 0 · lint 0 error · `next build` ผ่าน
 - ทดสอบจริง: `next start` + `NODE_APP_INSTANCE=1` → log `runtime.multi_instance` · `check:data-integrity` / `backfill:payment-due` บน DB จริงแบบอ่านอย่างเดียว (ไม่แจ้ง ไม่เขียน)
 - merge: `package.json` scripts ชนกับ #54 เพิ่มอีกจุด (เก็บทั้งสองฝั่ง เหมือน #55)
 
@@ -378,7 +379,7 @@ DB จริงมีตัวเลือก 0 ตัว — ไม่กระ
 ## 8. สถานะคงเหลือ (2026-10-01)
 
 ตรวจซ้ำหลังแก้ทุกรายการแล้ว: **โค้ดและเอกสารใน repo นี้ไม่มีอะไรต้องแก้เพิ่ม** — branch `fix/backlog4-y7-y11` (PR #57) ตรงกับ origin ·
-typecheck 0 · lint 0 error · เทส 500 ผ่าน · `next build` ✅ · ทดลอง merge กับ #54 แล้ว (เทส 516 ✅ · แก้ conflict ตาม R1)
+typecheck 0 · lint 0 error · เทส 506 ผ่าน · `next build` ✅ · e2e ผ่าน HTTP บน production build + MongoDB ทดสอบ 26/26 (2026-10-03) · ทดลอง merge กับ #54 แล้ว (เทส 516 ✅ · แก้ conflict ตาม R1)
 · ทดสอบส่ง LINE เจ้าของร้านจริง 7 หมวดสำเร็จ (ข้อความขึ้นต้น "🧪 ทดสอบ" ส่งตรง ไม่เขียน DB)
 
 ### 8.1 merge PR (ลำดับ — รายละเอียด [`DEPLOY.md`](DEPLOY.md) §③ / R1)
