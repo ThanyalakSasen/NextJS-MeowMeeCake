@@ -248,11 +248,12 @@ export async function topProducts(opts: {
 // ── รายรับแยกตามช่องทางออเดอร์ (หน้าสรุปกำไร-ขาดทุน) ──────────────
 export type RevenueChannel = "web" | "pos" | "preorder" | "other";
 
-/** ช่องทางของออเดอร์ปกติจากเลขออเดอร์ — ORD- เว็บไซต์ / POS- หน้าร้าน · เลขรุ่นเก่าก่อนแยก prefix (OP-, WEB- ฯลฯ) = other */
-export function orderChannelOf(orderNo: unknown): "web" | "pos" | "other" {
+/** ช่องทางจากเลขเอกสาร — ORD- เว็บไซต์ / POS- หน้าร้าน / PRE- พรีออเดอร์ · เลขรุ่นเก่าก่อนแยก prefix (OP-, WEB- ฯลฯ) = other */
+export function orderChannelOf(orderNo: unknown): RevenueChannel {
   if (typeof orderNo !== "string") return "other";
   if (orderNo.startsWith("ORD-")) return "web";
   if (orderNo.startsWith("POS-")) return "pos";
+  if (orderNo.startsWith("PRE-")) return "preorder";
   return "other";
 }
 

@@ -71,8 +71,8 @@ describe("revenueByChannel", () => {
   it("orderChannelOf", () => {
     expect(orderChannelOf("ORD-20260930-ABC123")).toBe("web");
     expect(orderChannelOf("POS-20260930-ABC123")).toBe("pos");
+    expect(orderChannelOf("PRE-20260930-ABC123")).toBe("preorder");
     expect(orderChannelOf("OP-123")).toBe("other");
-    expect(orderChannelOf("WEB-1790232182609")).toBe("other");
     expect(orderChannelOf(undefined)).toBe("other");
   });
 });

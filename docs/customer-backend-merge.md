@@ -37,7 +37,7 @@ controller ~70 · ไม่มีหน้าเว็บสักหน้า) 
 | 3 | ผูก LINE คนละฟิลด์ (`lineId` / `line_user_id`) | ลูกค้าผูกฝั่งหนึ่ง อีกฝั่งไม่เห็น → แจ้งเตือนลูกค้าของหลักไม่ถึง |
 | 4 | ค่าส่งคนละระบบ (`ShippingZones` / `DeliveryZones`) | ค่าส่งของออเดอร์จาก 2 ทางคิดคนละตาราง |
 | 5 | ตัดสต็อก · แจ้งเตือน · กฎพรีออเดอร์ (กำหนดชำระ #55 · ใบผลิตอัตโนมัติ · ลดใบผลิตเมื่อยกเลิก) คนละชุด | ออเดอร์จากฝั่งลูกค้าไม่เข้ากฎของหลัก (ไม่มี LINE ถึงร้าน · ไม่มี `payment_due_at` · ไม่บวก/ลดใบผลิต) |
-| 6 | เลขออเดอร์ `ORD-<timestamp>` | dashboard / สรุปรายเดือนนับเป็นช่อง "อื่น ๆ" ไม่ใช่ "เว็บ" |
+| 6 | เลขออเดอร์ `ORD-<timestamp>` · รุ่นเก่า `WEB-<timestamp>` | ✏️ แก้ข้อมูล 2026-10-05: `ORD-<timestamp>` นับเป็น "เว็บ" อยู่แล้ว (ขึ้นต้น `ORD-`) · `WEB-<timestamp>` รุ่นเก่ายังเป็น "อื่น ๆ" (ผู้ใช้เลือกให้เว็บ = `ORD-` เท่านั้น — §8.6) |
 
 ## 3. เทียบ model (collection เดียวกันใน MongoDB)
 
@@ -163,7 +163,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | ส่วนลดซ้อน | **แบบฝั่งลูกค้า** — คูปองส่วนตัว **หรือ** โค้ด 1 อย่าง + ใช้แต้มร่วมได้ | แต้ม: 25 บาท = 1 แต้ม · 10 แต้ม = 1 บาท · ลดได้ ≤ 30% ของยอดสินค้า · ขั้นต่ำ 100 แต้ม · อายุ 365 วัน |
 | แจ้งเตือนลูกค้า | **กระดิ่งในเว็บ + LINE** | ทุกคนเห็นในเว็บ (`CustomerNotifications`) · LINE ส่งผ่าน `customerNotifyService` ของหลักครั้งเดียว (มีตัวกันโควตา) — ไม่ส่งซ้ำ 2 ทาง |
 | รีวิว | **แสดงทันที** ร้านซ่อนทีหลังได้ | `status` เริ่มต้น `approved` · เพิ่มปักหมุด / ตอบกลับ / แท็ก-โน้ตภายใน / อ่านแล้ว |
-| ออเดอร์เก่า `ORD-<timestamp>` | **นับเป็น "เว็บ"** ใน dashboard + สรุปรายเดือน | แก้ตัวแยกช่องทาง ไม่แก้ข้อมูลใน DB |
+| ออเดอร์เก่า `ORD-<timestamp>` | **นับเป็น "เว็บ"** ใน dashboard + สรุปรายเดือน | `ORD-<timestamp>` เป็น "เว็บ" อยู่แล้ว ไม่ต้องแก้โค้ด · ช่องเว็บ = `ORD-` เท่านั้น (`WEB-` ไม่นับ — §8.6) |
 | พรีออเดอร์หลายตัวเลือก | **อยู่ใบเดียวได้** | เลิกห้าม `round_item_id` ซ้ำ ถ้าตัวเลือกต่างกัน · โควตารอบ / สูงสุดต่อคน นับรวมทุกแถว |
 | ⏳ **หลังร้านตัวไหน** | **ยังไม่ตัดสินใจ — ต้องคุยกับทีม** | หน้าเว็บลูกค้ามี `/owner` + `/employee` ครบชุด (เรียก `/api/owner/*` 43 เส้น + route ทั่วไป) ซ้อนกับ FrontEnd repo · ระหว่างนี้ทำเฉพาะฝั่งลูกค้า (`/api/shop/*`) · **ปิดพอร์ต 4000 ไม่ได้จนกว่าจะตัดสินใจ** |
 
@@ -172,10 +172,10 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | ลำดับ | ขั้น | งาน | ต้องรอ | สถานะ |
 |---|---|---|---|---|
 | — | 1 | กลุ่มตัวเลือก + ออปชัน (ตัวเลือกไม่มีสต็อก) · เลิก Y9 | — | ✅ 2026-10-05 (§8.3) |
-| **P0** | 0 | แก้ `Downloads/backend`: `product_type` → `is_preorder` (ตะกร้า · checkout · POS) · ตอนปิดรอบเลิกเขียน `product_type`/สต็อก 0 | ผู้ใช้ยืนยันว่าโค้ดตรงกับตัวที่รัน + deploy เอง | ⏳ |
-| P1 | 2 | สคริปต์ย้าย `lineId` → `line_user_id` (dry-run · ผู้ใช้รัน `--apply`) | — | ⏳ |
+| **P0** | 0 | แก้ `Downloads/backend`: `product_type` → `is_preorder` (ตะกร้า · checkout · POS) · ตอนปิดรอบเลิกเขียน `product_type`/สต็อก 0 | ผู้ใช้ deploy เอง | 🟡 แก้แล้ว 2026-10-05 รอ deploy (§8.5) |
+| P1 | 2 | สคริปต์ย้าย `lineId` → `line_user_id` (dry-run · ผู้ใช้รัน `--apply`) | ผู้ใช้รัน `--apply` | ✅ สคริปต์พร้อม 2026-10-05 (§8.6) |
 | P1 | 3 | next-auth ใน backend หลัก · `/api/shop/*` รับ 2 แบบ · สมัคร/ยืนยันอีเมล/ลืมรหัสผ่าน/ตั้งรหัสใหม่ (nodemailer) | ตั้งค่า SMTP + `NEXTAUTH_SECRET` ใน env | ⏳ |
-| P1 | — | dashboard: `ORD-<timestamp>` นับเป็น "เว็บ" | — | ⏳ (เล็ก) |
+| P1 | — | dashboard: `ORD-<timestamp>` นับเป็น "เว็บ" | — | ✅ เป็นอยู่แล้ว ไม่ต้องแก้ (§8.6) |
 | P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ⏳ |
 | P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ⏳ |
 | P2 | — | พรีออเดอร์: สินค้าเดียวกันหลายตัวเลือกในใบเดียว | — | ⏳ |
@@ -220,3 +220,34 @@ Next 16 + next-auth + antd · `BACKEND_URL` (ค่าเริ่มต้น `
   preorder-rounds/items (+dashboard/customers) · products (+customization) · product-categories · reviews (+analytics/bulk/dashboard/filter-options/products) ·
   search-synonyms · semantic-terms · shipping-zones · store-profile · store-settings) + route ทั่วไป (bundles · components · expenses · ingredient-* ·
   notifications · permissions (+temporary) · production-* · promotions · recipes · reports/sales · roles · units · user-logs · users · weekly-markets · me/permissions)
+
+### 8.5 ขั้น 0 — แก้ `Downloads/backend` แล้ว (2026-10-05 · รอ deploy)
+
+แก้ 12 ไฟล์ · typecheck 0 error · ทดสอบ hook ของ model กับ MongoDB ชั่วคราวผ่าน 6 กรณี · **สำรองไฟล์เดิม + diff ที่
+`Downloads/backend/backup-stage0-2026-10-05/`** (ย้อนกลับ = คัดลอกไฟล์ในนั้นทับคืน)
+
+- `productModel`: เพิ่ม `is_preorder` · `product_type` ไม่บังคับ · hook แปลง `product_type` ที่ส่งมา → `is_preorder` และไม่บันทึก `product_type` (create / save / updateOne / updateMany / findOneAndUpdate) · save ครั้งถัดไปลบ `product_type` ที่ค้าง
+- ตะกร้า · checkout · ชุดสินค้า · POS: กรองพรีออเดอร์ด้วย `is_preorder: { $ne: true }`
+- ปิดรอบ: **เลิกเขียน `product_type: "ready"` + สต็อก 0**
+- เพิ่มสินค้าเข้ารอบ: ต้องเป็น `is_preorder: true` (ไม่งั้น 400) · ไม่พลิกประเภท/ล้างสต็อกให้
+- serializer ยังคืน `product_type` (คำนวณจาก `is_preorder`) + `is_preorder` → หน้าเว็บลูกค้าไม่ต้องแก้
+- แนะนำสินค้า · รายงานรีวิวรายสินค้า · ฟอร์มสินค้า: ใช้ `is_preorder`
+
+**หลัง deploy ฝั่งลูกค้า:** backend หลัก `npm run cleanup:legacy-product-fields` (dry-run) → `-- --apply` · ตรวจสินค้า 5 ตัวที่ `product_type` เคยขัดกับ `is_preorder` (ต่อไปใช้ `is_preorder`)
+
+### 8.6 ขั้น 2 + ช่องทางออเดอร์ (2026-10-05)
+
+**ขั้น 2 — `npm run migrate:line-user-id`** (`scripts/migrate-line-user-id.ts` · เทส `migrateLineUserId.test.ts` 2 เคส)
+
+| กรณี (ผู้ใช้ที่ยังไม่ถูกลบ + มี `lineId`) | ผล |
+|---|---|
+| `line_user_id` ว่าง | คัดลอก `lineId` → `line_user_id` |
+| ตรงกันอยู่แล้ว | ข้าม |
+| `line_user_id` มีค่าอื่น / LINE นี้ผูกกับผู้ใช้อื่นแล้ว | **ไม่แตะ** รายงานให้ตรวจเอง |
+
+- **ไม่ลบ `lineId`** — backend ฝั่งลูกค้า (พอร์ต 4000) ยังอ่าน `lineId` ส่ง LINE · ลูกค้าที่ผูก LINE ผ่านฝั่งลูกค้าหลังรันสคริปต์ → รันซ้ำเพื่อเก็บตก (รันซ้ำได้)
+- `-- --apply --remove-old` = ลบ `lineId` ของคนที่ตรงกันแล้ว — **ใช้หลังปิดพอร์ต 4000 เท่านั้น**
+- dry-run ค่าเริ่มต้น · backup `scripts/backups/line-user-id-*.json` · เขียนแบบมีเงื่อนไข · ไม่แตะ `updated_at` · log แสดง LINE userId แบบปิดบางส่วน
+
+**ช่องทางออเดอร์ (`orderChannelOf`)** — ไม่แก้โค้ด: `ORD-<timestamp>-xxxx` ของฝั่งลูกค้านับเป็น "เว็บ" อยู่แล้ว (ขึ้นต้น `ORD-`) ·
+ช่องเว็บ = `ORD-` เท่านั้น (ผู้ใช้เลือก 2026-10-05) · `PRE-` = พรีออเดอร์ (`orderChannelOf` คืน `preorder` · ยอดพรีออเดอร์ยังนับจาก collection `preorders`) · `WEB-<timestamp>` / `OP-` รุ่นเก่ายังเป็น "อื่น ๆ" · เทส `orderChannelOf` เอาเคส `WEB-` ออก
