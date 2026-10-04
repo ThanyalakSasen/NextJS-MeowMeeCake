@@ -20,6 +20,7 @@ import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
 import { deleteImages } from "../lib/upload";
 import { toSatang, toBahtFields } from "../lib/money";
+import { adminLinks } from "../lib/adminLinks";
 import {
   DEFAULT_LOW_STOCK_THRESHOLD,
   LOW_STOCK_EXPR,
@@ -47,7 +48,7 @@ function notifyIfLowStockCrossed(
       message: `คงเหลือ ${after} ชิ้น (เกณฑ์แจ้งเตือน ${threshold})`,
       module: "ingredient",
       type: "warning",
-      link: "/owner/products",
+      link: adminLinks.product(product._id),
     })
     .catch((err) => log.error("product.notify_failed", { product_id: String(product._id), err }));
 }

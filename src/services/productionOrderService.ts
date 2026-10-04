@@ -33,6 +33,7 @@ import * as productService from "./productService";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
 import type { AddItemInput } from "./productionItemService";
+import { adminLinks } from "../lib/adminLinks";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -438,7 +439,7 @@ async function addFinishedGoodsStock(orderId: string, opts: { use_actual?: boole
         message: `สินค้าที่มีตัวเลือก (variant) ไม่ถูกเพิ่มสต็อกอัตโนมัติ กรุณาเพิ่มที่ตัวเลือกแต่ละแบบ: ${skippedVariant.join(", ")}`,
         module: "production",
         type: "warning",
-        link: "/owner/products",
+        link: adminLinks.production(orderId),
       })
       .catch((err) => log.error("production.variant_stock_notify_failed", { orderId, err }));
   }

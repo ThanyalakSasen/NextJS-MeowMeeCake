@@ -39,6 +39,7 @@ import type { z } from "zod";
 // BACKLOG2 §4 — schema เดียวกับ orderService.updateDelivery() ทุกฟิลด์ (generic ไม่มีอะไรเฉพาะ order)
 // ใช้ร่วมกันได้เลย ไม่ต้องสร้างซ้ำ
 import type { updateDeliveryBody } from "../schemas/order";
+import { adminLinks } from "../lib/adminLinks";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -305,14 +306,14 @@ export async function createPreorder(
     saga.commit();
 
     // แจ้งเจ้าของร้าน (DB + LINE) — คู่กับ orderService.persistOrder · best-effort ไม่ทำให้สร้างพรีออเดอร์ล้มเหลว
-    // link = null: ยังไม่มี path หน้าจัดการพรีออเดอร์ฝั่ง frontend ที่ยืนยันแล้ว (docs/LINE.md §9)
+    // link → หน้าพรีออเดอร์ (เปิด drawer ด้วย ?id= — frontend PR #16)
     notificationService
       .notify({
         title: `เปิดพรีออเดอร์รอบใหม่ ${preorder.preorder_no}`,
         message: `รอบ ${round.round_name ?? "-"} · ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
         module: "order",
         type: "info",
-        link: null,
+        link: adminLinks.preorder(preorder._id),
       })
       .catch((err) => log.error("preorder.notify_failed", { preorder_id: String(preorder._id), err }));
     notifyCustomerLater(userId, customerMessages.created("preorder", preorder.preorder_no, total_amount));

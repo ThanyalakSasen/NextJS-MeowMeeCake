@@ -15,14 +15,15 @@ import { round2 } from "../lib/money";
 import notificationModel from "../models/notificationModel";
 import * as dashboardService from "./dashboardService";
 import { notificationService } from "./notificationService";
+import { adminLinks } from "../lib/adminLinks";
 
 const BANGKOK_OFFSET_MS = 7 * 60 * 60 * 1000;
 const THAI_MONTHS = [
   "มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน",
   "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม",
 ];
-/** หน้า dashboard ของเว็บหลังร้าน — ⚠️ ยังไม่ได้ยืนยัน path กับ frontend (docs/LINE.md §9.13) */
-export const MONTHLY_SUMMARY_LINK = "/owner/dashboard";
+/** หน้า dashboard ของเว็บหลังร้าน — ยืนยันแล้วกับ frontend (2026-10-03) */
+export const MONTHLY_SUMMARY_LINK = adminLinks.dashboard;
 
 export function isMonthString(v: unknown): v is string {
   return typeof v === "string" && /^\d{4}-(0[1-9]|1[0-2])$/.test(v);

@@ -804,3 +804,31 @@ export async function alertQuotaExhausted() { markQuotaExhausted(); await alertO
 - ไฟล์: `src/services/monthlySummaryService.ts` · `src/app/api/cron/monthly-summary/route.ts` · `scripts/send-monthly-summary.ts`
 - โควตา LINE: +1 ข้อความ/เดือน · เทส `monthlySummary.test.ts` 4 เคส (ช่วงเดือนไทย · ตัวเลข · ส่งครั้งเดียว · เดือนว่าง)
 - ข้อจำกัด: ออเดอร์ที่ FrontOffice เขียนตรงด้วยเลขรูปแบบเก่า (`ORD-<timestamp>`) ถูกนับในช่อง "อื่น ๆ" (BACKLOG4 R7)
+
+### 9.14 ลิงก์แจ้งเตือนครบทุกหน้า ตาม path ที่ frontend ยืนยัน (2026-10-03)
+
+frontend PR #16 (merge `49cae44`) ทำหน้าออเดอร์ / พรีออเดอร์ / ใบผลิต ให้เปิด drawer รายละเอียดจาก `?id=` ได้ (ยังไม่ล็อกอิน → `?next=` พากลับมาหลังล็อกอิน)
+→ รวม path ไว้ที่ `src/lib/adminLinks.ts` ที่เดียว แล้วทุกจุดที่แจ้งเตือนเรียกใช้
+
+| | ก่อน | หลัง |
+|---|---|---|
+| พรีออเดอร์ใหม่ / สลิปของพรีออเดอร์ | `link: null` | หน้าพรีออเดอร์ `?tab=orders&id=` |
+| แจ้งเตือนใบผลิต (ปิดรอบ · จ่ายช้า · เพิ่ม/หักยอด · ยกเลิกหลังเริ่มผลิต · ผลิตเสร็จสินค้ามีตัวเลือก) | `null` / `/owner/products` | หน้าใบผลิต `?id=` (`autoCreateProduction` คืน `production_id` เพิ่ม) |
+| สินค้าใกล้จะหมด | `/owner/products` (หน้ารวม) | `/owner/products/<id>/edit` (สินค้าตัวนั้น) |
+| สรุปวันรับพรีออเดอร์ | `null` | `/owner/orders/preOrderRound` |
+| สรุปยอดรายเดือน | `/owner/dashboard` (เดา) | `/owner/dashboard` (ยืนยันแล้ว) |
+| path กระจายในหลายไฟล์ | เขียน string เองแต่ละ service | `adminLinks.*` ที่เดียว |
+
+| แจ้งเตือน | ลิงก์ (2026-10-03 — `src/lib/adminLinks.ts`) |
+|---|---|
+| ออเดอร์ใหม่ · สลิปรอตรวจของออเดอร์ | `/owner/orders/manageOrders?id=<orderId>` |
+| พรีออเดอร์ใหม่ · สลิปรอตรวจของพรีออเดอร์ · จ่ายช้าแต่สร้างใบผลิตไม่ได้ | `/owner/orders/preOrderRound?tab=orders&id=<preorderId>` |
+| ปิดรอบ (สร้างใบผลิตแล้ว) · จ่ายช้าแต่เริ่มผลิตแล้ว/สินค้าไม่มีสูตร · เพิ่ม/หักยอดใบผลิต · ยกเลิกหลังเริ่มผลิต · ผลิตเสร็จสินค้ามีตัวเลือก | `/owner/production?id=<productionOrderId>` |
+| ปิดรอบ (สร้างใบผลิตไม่ได้) · สรุปวันรับพรีออเดอร์ (เว็บอย่างเดียว) | `/owner/orders/preOrderRound` |
+| สินค้าใกล้จะหมด | `/owner/products/<productId>/edit` |
+| ข้อมูลสินค้าผิดปกติ | `/owner/products` |
+| วัตถุดิบใกล้จะหมด | `/owner/ingredients` (ไม่มีหน้ารายตัว) |
+| สรุปยอดรายเดือน | `/owner/dashboard` |
+| โควตา LINE ใกล้หมด/หมด (เว็บอย่างเดียว) | — |
+
+เทส `notificationLinks.test.ts` 5 เคส (path · พรีออเดอร์ใหม่ + สลิป · ปิดรอบสร้างใบผลิต/ไม่ได้ · สินค้าใกล้หมด) · เทสรวม 511 ผ่าน

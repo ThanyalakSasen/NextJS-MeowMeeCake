@@ -49,6 +49,7 @@ import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { generateDocNo, isPreorderProduct } from "../lib/productCode";
 import type { z } from "zod";
 import type { updateDeliveryBody } from "../schemas/order";
+import { adminLinks } from "../lib/adminLinks";
 
 type UpdateDeliveryInput = z.infer<typeof updateDeliveryBody>;
 
@@ -436,7 +437,7 @@ async function persistOrder(
       message: `ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
       module: "order",
       type: "info",
-      link: `/owner/orders/manageOrders?id=${order._id}`,
+      link: adminLinks.order(order._id),
       line: !isPos || process.env.LINE_NOTIFY_POS_ORDERS === "true",
     })
     .catch((err) => log.error("order.notify_failed", { order_id: String(order._id), err }));

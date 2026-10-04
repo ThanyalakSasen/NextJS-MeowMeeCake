@@ -19,6 +19,7 @@ import preorderModel from "../models/preorderModel";
 import preorderRoundModel from "../models/preorderRoundModel";
 import { customerMessages, notifyCustomer } from "./customerNotifyService";
 import { notificationService } from "./notificationService";
+import { adminLinks } from "../lib/adminLinks";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_DAYS_BEFORE = 1;
@@ -121,7 +122,7 @@ export async function sendPickupReminders(
       message: `เตือนลูกค้าทาง LINE แล้ว จำนวน ${result.sent} ราย · ส่งไม่ถึงจำนวน ${result.skipped} ราย (ไม่ได้ผูก LINE / โควตาการส่งแจ้งเตือนใกล้หมด) — ${result.preorder_nos.join(", ")}`,
       module: "order",
       type: "info",
-      link: null,
+      link: adminLinks.preorderRounds,
       line: false,
     })
     .catch((err) => log.error("preorder_reminder.summary_failed", { err }));

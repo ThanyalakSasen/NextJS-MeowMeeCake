@@ -24,6 +24,7 @@ import * as orderService from "./orderService";
 import * as preorderService from "./preorderService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import type { PaymentStatus } from "./orderService";
+import { adminLinks } from "../lib/adminLinks";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -250,7 +251,11 @@ export async function submitSlip(
         message: `ยอด ${toBaht(payment.amount).toLocaleString("th-TH")} บาท`,
         module: "finance",
         type: "info",
-        link: payment.order_id ? `/owner/orders/manageOrders?id=${payment.order_id}` : null,
+        link: payment.order_id
+          ? adminLinks.order(payment.order_id)
+          : payment.preorder_id
+            ? adminLinks.preorder(payment.preorder_id)
+            : null,
       })
     )
     .catch((err) => log.error("payment.notify_failed", { payment_id: String(payment._id), err }));

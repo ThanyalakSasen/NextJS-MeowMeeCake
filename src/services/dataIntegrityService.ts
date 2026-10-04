@@ -25,6 +25,7 @@ import productModel from "../models/productModel";
 import productVariantModel from "../models/productVariantModel";
 import productOptionModel from "../models/productOptionModel";
 import { notificationService } from "./notificationService";
+import { adminLinks } from "../lib/adminLinks";
 
 export type IntegrityIssueCode =
   | "legacy_fields"
@@ -157,7 +158,7 @@ export async function checkDataIntegrity(opts: { notify?: boolean } = {}): Promi
         message: `อาจมีการแก้ฐานข้อมูลตรงนอกระบบ — ตรวจและแก้ผ่านหน้าหลังบ้าน:\n${lines.join("\n")}`,
         module: "system",
         type: "warning",
-        link: "/owner/products",
+        link: adminLinks.products,
       });
       notified = true;
     } catch (err) {
