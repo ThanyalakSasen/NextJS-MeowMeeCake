@@ -31,31 +31,23 @@
 
 discount engine / ค่าส่ง / LINE / dashboard ไม่ต้องแก้ — ทำงานเป็นบาทอยู่แล้ว (เดิมแปลงที่ขอบ) · เทสทั้งหมดปรับให้ DB เป็นบาท (ทั้ง PR #57: 506 ผ่าน)
 
-## 3. ย้ายข้อมูลใน DB จริง — `scripts/migrate-money-to-baht.ts`
+## 3. ข้อมูลเดิมใน DB จริง (สตางค์) — ยังไม่ได้ย้าย
 
-ข้อมูลจริง (ตรวจอ่านอย่างเดียว 2026-10-01) มีสองหน่วยปน → แบ่งฟิลด์ 2 แบบ:
+⚠️ **เอาสคริปต์ `migrate-money-to-baht` ออกแล้ว (2026-10-04 — ผู้ใช้สั่ง)** · ข้อมูลเงินที่ยังเป็นสตางค์ใน DB จริง (ราคาลด 7 ตัว · โปรโมชัน · พรีออเดอร์เก่า · ชำระเงินเก่า · ตะกร้า · ต้นทุนวัตถุดิบ/สูตร/ส่วนประกอบ · ค่าใช้จ่าย) **ยังไม่ได้แก้** → แสดงเกินจริง ×100 จนกว่าจะแก้ด้วยวิธีอื่น
 
-| แบบ | ฟิลด์ | ทำ |
-|---|---|---|
-| **big-only** (FrontOffice เขียนได้) | `products.product_price` · `orders.subtotal/delivery_fee/total_amount` · `orderitems.unit_price/total_price` · `payments.amount` · `cartitems.price_snapshot` · `preorderrounditems.price_override` | ÷100 เฉพาะค่า ≥ 1,000 · ค่า < 1,000 = บาทอยู่แล้ว ไม่แตะ (สินค้าร้านนี้ไม่มีชิ้นไหนต่ำกว่า 10 บาท) |
-| **all** (backend เขียนอย่างเดียว — สตางค์ทั้งหมด) | `products.sale_price/purchase_cost` · `orders.discount_amount` · `orderitems.cost_per_unit/selected_options[].extra_price` · `cartitems.selected_options[].extra_price` · พรีออเดอร์ + รายการ · โปรโมชัน (`discount_value` เฉพาะ Amount, `min_order_amount`, `max_discount_amount`) · `promotionusages` · ค่าใช้จ่าย · โซนค่าส่ง · วัตถุดิบ · ส่วนประกอบ · สูตร · variant/option | ÷100 ทุกค่า |
+ตรวจล่าสุด (อ่านอย่างเดียว 2026-10-04): ค่าที่ยังเป็นสตางค์ **168 ค่า** — `products.sale_price` 7 (เช่น ชิโอะปัง 4000 = ควรเป็น 40) ·
+`payments.amount` 27 · `cartitems.price_snapshot` 42 · `preorderrounditems.price_override` 3 · พรีออเดอร์เก่า 3 ใบ + รายการ ·
+โปรโมชัน 11 ค่า · ค่าใช้จ่าย 8 · วัตถุดิบ 30 · ส่วนประกอบ 2 · สูตร 24 · ที่เป็นบาทอยู่แล้ว 119 ค่า (ราคาปกติทุกตัว · ออเดอร์/รายการปัจจุบัน ·
+ตัวเลือก/ตัวเลือกเสริม · ราคาลด 29 · พรีออเดอร์จาก FrontOffice ฯลฯ)
 
-dry-run บน DB จริง (2026-10-01): **÷100 347 ค่า** (orders 70 · orderitems 109 · payments 27 · cartitems 42 · products 7 (sale_price) ·
-promotions 11 · ingredients 30 · recipes 24 · …) · **ไม่แตะ 75 ค่า** (product_price 42 · ออเดอร์/รายการ/ชำระเงินยุคราคาเพี้ยน · ตะกร้า ·
-price_override 366/650/400) · **ต้องดูเอง 1:** `WEB-1790317257577` (ยกเลิกแล้ว — subtotal สตางค์แต่ค่าส่งเป็นบาท ยอดไม่ลงตัว)
+ทางเลือกที่เหลือ (ต้องตัดสินใจ): แก้ทีละรายการผ่านหน้าหลังร้าน (ราคาลด · โปรโมชัน · ต้นทุนวัตถุดิบ ฯลฯ) · หรือเขียนสคริปต์ใหม่ภายหลัง ·
+ข้อมูลประวัติ (ชำระเงินเก่า · ตะกร้าเก่า · พรีออเดอร์เก่า) จะแสดงผิดต่อไปถ้าไม่แก้
 
-ความปลอดภัย: dry-run ค่าเริ่มต้น · `--apply` backup ทุกค่าลง `scripts/backups/money-to-baht-*.json` ก่อน · เขียนแบบมีเงื่อนไข
-`{ _id, field: ค่าเดิม }` · ไม่แตะ `updated_at` · ลง marker `money_to_baht_applied` → รันซ้ำไม่ได้ · เทส `migrateMoneyToBaht.test.ts` 2 เคส
+## 4. ขั้นตอนตอน deploy
 
-## 4. ขั้นตอนตอน deploy (ต้องทำพร้อมกัน — โค้ดใหม่อ่านข้อมูลเป็นบาท)
-
-1. **หยุด backend + FrontOffice** (กันเขียนระหว่างย้าย)
-2. `npm run migrate:money-to-baht` → ตรวจแผน → `npm run migrate:money-to-baht -- --apply`
-3. deploy backend โค้ดใหม่ (PR #57) แล้วเปิด backend + FrontOffice
-4. `npm run check:data-integrity -- --no-notify` → ต้องเหลือแค่รหัส `pos-`/`pre-` 2 ตัว (DEPLOY §⑦ ข้อ 3)
-5. แก้มือ: `WEB-1790317257577` (ยกเลิกแล้ว — จะปล่อยไว้ก็ได้) · ออเดอร์ `ORD-1790786142302-M2PY` ยอด 55 บาทถูกต้องแล้วตามหน่วยใหม่
-
-⚠️ ห้าม deploy โค้ดใหม่โดยไม่ย้ายข้อมูล (ยอดเดิมจะแสดง ×100) และห้ามย้ายข้อมูลแล้วรันโค้ดเก่า (ยอดจะแสดง ÷100)
+1. deploy backend โค้ดใหม่ (PR #57)
+2. แก้ข้อมูลเงินที่ยังเป็นสตางค์ตาม §3 (ราคาลด / โปรโมชันที่ยังใช้อยู่ก่อน — กระทบราคาขาย)
+3. `npm run check:data-integrity -- --no-notify` → ตรวจ `sale_not_below_price` / `price_too_high`
 
 ## 5. สิ่งที่ยังต้องระวัง
 

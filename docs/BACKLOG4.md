@@ -12,7 +12,7 @@
 
 | ระดับ | จำนวน | สรุป |
 |---|---|---|
-| 🔴 ต้องทำก่อนใช้งานจริง | 7 (โค้ด R5 ✅ แก้แล้ว · เหลืองาน deploy R1–R4 + R6 · **R7 เปลี่ยนเก็บเงินเป็นบาท — ต้องรัน `migrate:money-to-baht` ตอน deploy**) | ส่วนใหญ่เป็น **งานตอน deploy** (migration, cron, env, ลำดับ merge) + รายงานแดชบอร์ดไม่นับรายได้พรีออเดอร์ |
+| 🔴 ต้องทำก่อนใช้งานจริง | 7 (โค้ด R5 ✅ แก้แล้ว · เหลืองาน deploy R1–R4 + R6 · **R7 เปลี่ยนเก็บเงินเป็นบาท — ข้อมูลสตางค์เดิมยังไม่ได้ย้าย (เอาสคริปต์ออกแล้ว 2026-10-04)**) | ส่วนใหญ่เป็น **งานตอน deploy** (migration, cron, env, ลำดับ merge) + รายงานแดชบอร์ดไม่นับรายได้พรีออเดอร์ |
 | 🟡 ควรแก้ | 11 (✅ แก้ครบ Y1–Y11 · Y11 ฝั่งโค้ดเสร็จ เหลือตั้ง DB user ที่ Atlas) | ใบผลิตไม่ลดเมื่อยกเลิกพรีออเดอร์ · ผลิตแล้วไม่เพิ่มสต็อกสินค้า · สลิปเปิดสาธารณะ · deprecation · dependency |
 | 🟢 เล็กน้อย / ต่อยอด | 15 | race ที่เกิดยาก · index · ฟีเจอร์ต่อยอด |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | สิทธิ์ทุก route · CI ทุก PR · cron auth · upload validation · IDOR ฝั่ง shop (§5) |
@@ -92,7 +92,8 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 - **ต้นเหตุ (ผู้ใช้ยืนยัน 2026-10-01):** แอป **FrontOffice ต่อ MongoDB ตัวเดียวกันโดยตรง** และเขียนเงินเป็นบาท ไม่ใช่การแก้ด้วยมือ/ของรุ่นเก่า
 - **ตัดสินใจ:** เก็บเงิน **เป็นบาททั้งระบบ** ("ดึงราคา 35 ก็เป็น 35" — FrontOffice ไม่ต้องแก้) → รายละเอียดก่อน/หลังทั้งหมด [`money-units.md`](money-units.md)
   - โค้ด: `src/lib/money.ts` `toSatang`/`toBaht` = ปัด 2 ตำแหน่ง · ปัดยอดทุกจุดที่คูณ/รวม · ตัวตรวจ Y11 ใช้เกณฑ์บาท
-  - ข้อมูล: `npm run migrate:money-to-baht` (dry-run บน DB จริง: ÷100 347 ค่า · ไม่แตะ 75 ค่าที่เป็นบาทแล้ว · ต้องดูเอง 1)
+  - ⚠️ **เอาสคริปต์ `migrate-money-to-baht` ออกแล้ว (2026-10-04 — ผู้ใช้สั่ง)** · ข้อมูลเงินที่ยังเป็นสตางค์ใน DB จริง (ราคาลด 7 ตัว · โปรโมชัน · พรีออเดอร์เก่า · ชำระเงินเก่า · ตะกร้า · ต้นทุนวัตถุดิบ/สูตร/ส่วนประกอบ · ค่าใช้จ่าย) **ยังไม่ได้แก้** → แสดงเกินจริง ×100 จนกว่าจะแก้ด้วยวิธีอื่น
+  - ~~ข้อมูล: `npm run migrate:money-to-baht`~~ (dry-run บน DB จริง: ÷100 347 ค่า · ไม่แตะ 75 ค่าที่เป็นบาทแล้ว · ต้องดูเอง 1)
     ⚠️ **ผู้ใช้ต้องรัน `--apply` เอง ตอน deploy พร้อมโค้ดใหม่** (หยุด backend + FrontOffice ก่อน — money-units.md §4)
   - สคริปต์ยุคสตางค์ 6 ตัวถูกบล็อก · ลบ `fix:baht-prices` (×100) ที่เคยเสนอไว้ — ตอนนี้ราคา `35` ถูกต้องแล้ว
 - **ยังควรทำ:** FrontOffice ต่อ DB ตรง = ไม่มี userlog/validation/ตัดสต็อกผ่าน backend — ระยะยาวให้เรียก API · ให้ FrontOffice ใช้ DB user ของตัวเอง
@@ -173,7 +174,7 @@ integration 271 ✅ · `next build` ✅ · `npm audit` 0 · ไม่เหล�
 2. ~~**R5** แดชบอร์ดนับพรีออเดอร์~~ ✅ (§7.1)
 3. ~~**Y1** ใบผลิตลดเมื่อยกเลิก · **Y6** จำกัดการลบแจ้งเตือน · **Y4** `returnDocument`~~ ✅ (§7.2–§7.4)
 4. ~~**Y2** ผลิตเสร็จเพิ่มสต็อก · **Y3** สลิป private · **Y5** postcss~~ ✅ (§7.6–§7.8 — ตัดสินใจแล้ว 2026-10-01)
-5. ~~Y7–Y11 · R7 เงินเป็นบาท~~ ✅ โค้ด (§7.9–§7.15, PR #57) · **ตอน deploy: หยุด backend+FrontOffice → `migrate:money-to-baht --apply` → deploy (money-units.md §4)**
+5. ~~Y7–Y11 · R7 เงินเป็นบาท~~ ✅ โค้ด (§7.9–§7.15, PR #57) · **ข้อมูลสตางค์เดิมยังไม่ได้ย้าย — เอาสคริปต์ออกแล้ว 2026-10-04 (money-units.md §3)**
 6. G* ตามความจำเป็น · งานที่เหลือทั้งหมดดู §8
 
 ---
@@ -394,7 +395,7 @@ typecheck 0 · lint 0 error · เทส 506 ผ่าน · `next build` ✅ ·
 | 2 | #52 `is_preorder` + เลขออเดอร์ | `main` | ติ๊ก Delete branch |
 | 3 | #53 แจ้งเตือน LINE | #52 → `main` | |
 | 4 | #55 flow รอบพรีออเดอร์ | #53 → `main` | |
-| 5 | #57 Y7–Y11 + เงินเป็นบาท | #55 → `main` | ต้อง deploy พร้อม `migrate:money-to-baht` (§8.2) |
+| 5 | #57 Y7–Y11 + เงินเป็นบาท | #55 → `main` | ข้อมูลสตางค์เดิมยังไม่ได้ย้าย (money-units.md §3) |
 | อิสระ | #54 สลิป/ไฟล์ | `main` | conflict `package.json` + `.env.example` — **ห้ามเก็บ `migrate:money-to-satang`** |
 
 ปิดแล้ว (2026-10-01 ไม่ merge): #35 (docs BACKLOG.md) · #2 "generate DOC" — branch `develop` **เก็บไว้เฉย ๆ ไม่ merge** (แผน rebuild เป็นเว็บ
@@ -405,7 +406,7 @@ Next 16 + antd + i18n ที่ทำถึง D0.5 · ตามหลัง mai
 | ขั้น | คำสั่ง / งาน | อ้างอิง |
 |---|---|---|
 | 1 | หยุด backend + FrontOffice | [`money-units.md`](money-units.md) §4 |
-| 2 | `npm run migrate:money-to-baht` (ดูแผน: ÷100 347 · ไม่แตะ 75 · ต้องดูเอง 1) → `-- --apply` | R7 |
+| 2 | ~~`migrate:money-to-baht`~~ — เอาออกแล้ว (2026-10-04) · แก้ข้อมูลสตางค์ที่เหลือด้วยวิธีอื่น (money-units.md §3) | R7 |
 | 3 | build + start โค้ดใหม่ (pm2 instance เดียว) แล้วเปิด FrontOffice | DEPLOY §⑤ · Y8 |
 | 4 | `npm run cleanup:legacy-product-fields -- --apply` (ลบ `delete_at: null` 4 ตัว) | §7.15 |
 | 5 | PATCH `is_preorder: true` สินค้า 2 ตัวที่รหัสยังเป็น `pos-` | DEPLOY §⑦ ข้อ 3 |
@@ -460,7 +461,7 @@ Next 16 + antd + i18n ที่ทำถึง D0.5 · ตามหลัง mai
 
 | # | เรื่อง | คำตอบ / สถานะ |
 |---|---|---|
-| 1 | ลำดับ deploy #52 + migrate (ด่วน) | **ไม่ต้องรัน `migrate-is-preorder`** — DB จริงย้ายแล้ว 2026-10-01 00:11 (R2) → backend `main` รุ่นเก่ากับ DB ตอนนี้ไม่ตรงกัน ยิ่งช้ายิ่งเสี่ยง · ลำดับ: merge #56 → #52 → #53 → #55 → #57 + #54 → หยุด backend+FrontOffice → `migrate:money-to-baht --apply` → deploy backend → **deploy frontend `main` (PR #16) รอบเดียวกัน** → เปิด FrontOffice → §8.2 ที่เหลือ |
+| 1 | ลำดับ deploy #52 + migrate (ด่วน) | **ไม่ต้องรัน `migrate-is-preorder`** — DB จริงย้ายแล้ว 2026-10-01 00:11 (R2) → backend `main` รุ่นเก่ากับ DB ตอนนี้ไม่ตรงกัน ยิ่งช้ายิ่งเสี่ยง · ลำดับ: merge #56 → #52 → #53 → #55 → #57 + #54 → deploy backend (สคริปต์ย้ายหน่วยเงินเอาออกแล้ว 2026-10-04 — money-units.md §3) → **deploy frontend `main` (PR #16) รอบเดียวกัน** → เปิด FrontOffice → §8.2 ที่เหลือ |
 | 2 | ใส่ link แจ้งเตือนพรีออเดอร์/ใบผลิต | ✅ ทำแล้ว (LINE.md §9.14 · `src/lib/adminLinks.ts`) — ใช้ได้หลัง merge #57 |
 | 3 | ลำดับ merge #54 + `COOKIE_DOMAIN` | #54 merge แยกได้ แต่ deploy รอบเดียวกัน · conflict `package.json` ใช้ฝั่ง #57 + เพิ่ม `migrate:upload-files` (**ห้าม** `migrate:money-to-satang`) · `.env.example` เก็บทั้งคู่ · `COOKIE_DOMAIN=.<โดเมน>` เมื่อ `app.`/`api.` เป็น subdomain เดียวกัน → cookie `SameSite=Lax`+`Secure` (สลิป `<img>` ได้ · ไม่โดนบล็อก third-party) คู่กับ `ALLOWED_ORIGINS=https://app.<โดเมน>` + HTTPS · **แนะนำ subdomain** (คนละโดเมน = `SameSite=None` อาจโดน Safari/Firefox บล็อก) |
 | 4 | `LINE_LINK_RETURN_URL` production | `https://app.<โดเมน>/profile` · คู่กับ `LINE_LOGIN_CALLBACK_URL=https://api.<โดเมน>/api/shop/me/line/callback` (ลงทะเบียนใน LINE Login ตรงตัว) · `ADMIN_APP_URL=https://app.<โดเมน>` (ลิงก์ 🔗) |

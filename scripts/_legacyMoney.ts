@@ -8,7 +8,7 @@
 export function blockLegacyMoneyScript(name: string): void {
   console.error(
     `✖ ${name} เลิกใช้แล้ว — ระบบเก็บเงินเป็นบาทตั้งแต่ 2026-10-01 (docs/money-units.md)\n` +
-      "  สคริปต์นี้เขียน/ตัดสินค่าแบบสตางค์ รันตอนนี้จะทำให้เงินเพี้ยน ×100 · ใช้ scripts/migrate-money-to-baht.ts แทน"
+      "  สคริปต์นี้เขียน/ตัดสินค่าแบบสตางค์ รันตอนนี้จะทำให้เงินเพี้ยน ×100"
   );
   process.exit(1);
 }

@@ -245,12 +245,8 @@ PATCH https://api.example.com/api/admin/products/6a814a064b44d4bf31fb2c4b   { "i
 - กำหนดชำระของพรีออเดอร์เก่า (BACKLOG4 Y7): `npm run backfill:payment-due` (dry-run) — ตรวจ 2026-10-01 ได้ 0 รายการ
   ไม่ต้อง `--apply` · ถ้าวัน deploy มีพรีออเดอร์ค้างจ่ายที่ยังไม่มีกำหนด ค่อย `-- --apply` (รายการที่เลยกำหนดแล้วจะได้ + 24 ชม.)
 - ตรวจข้อมูลสินค้า (BACKLOG4 Y11): `npm run check:data-integrity -- --no-notify` → ต้องได้ "ไม่พบข้อมูลผิดปกติ" ก่อนเปิดร้าน
-- ⚠️ **ย้ายหน่วยเงินเป็นบาท (BACKLOG4 R7 · [`money-units.md`](money-units.md)) — ต้องทำพร้อม deploy โค้ด #57:**
+- ⚠️ **หน่วยเงิน (BACKLOG4 R7 · [`money-units.md`](money-units.md) §3):** เอาสคริปต์ย้ายหน่วยออกแล้ว (2026-10-04) — ข้อมูลที่ยังเป็นสตางค์ต้องแก้ด้วยวิธีอื่น
   ```bash
-  # หยุด backend (pm2 stop meowmeecake-api) + FrontOffice ก่อน
-  npm run migrate:money-to-baht              # ดูแผน: ÷100 347 ค่า · ไม่แตะ 75 · ต้องดูเอง 1
-  npm run migrate:money-to-baht -- --apply   # backup ใน scripts/backups/ · ลง marker (รันซ้ำไม่ได้)
-  # build + start โค้ดใหม่ (§⑤) แล้วค่อยเปิด FrontOffice
   npm run cleanup:legacy-product-fields -- --apply   # ลบ delete_at: null ที่ค้าง 4 ตัว (ไม่งั้นแจ้งเตือนทุกเช้า — BACKLOG4 §7.15)
   npm run check:data-integrity -- --no-notify   # ต้องเหลือแค่รหัส pos-/pre- 2 ตัว (แก้ด้วย PATCH ข้อ 3)
   ```
@@ -296,7 +292,7 @@ PATH=/usr/bin:/bin:/usr/local/bin
 - [ ] `curl https://api.example.com/api/health` → `{"ok":true,"db":"connected"}`
 - [ ] ล็อกอินบัญชี owner ผ่าน frontend ได้ (cookie ข้าม subdomain — ถ้า 401 ตรวจ `COOKIE_DOMAIN`/`ALLOWED_ORIGINS`)
 - [ ] รายการสินค้าแสดงครบ 42 · พรีออเดอร์ 10 (`?is_preorder=true`)
-- [ ] **หน่วยเงินหลัง `migrate:money-to-baht`** ([`money-units.md`](money-units.md)) — ราคาต้องเป็นบาทตรง ๆ ไม่เพี้ยน ×100 / ÷100:
+- [ ] **หน่วยเงิน** ([`money-units.md`](money-units.md) §3 — ข้อมูลเก่ายังไม่ได้ย้าย) — ราคาต้องเป็นบาทตรง ๆ ไม่เพี้ยน ×100 / ÷100:
   - [ ] คัพเค้ก (เช่น `pos-1726265`) ราคา **35** บาท (ไม่ใช่ 0.35 / 3,500) · สินค้าที่มีราคาลด: `sale_price` < `product_price` (เช่น ชิโอะปัง 45 → ลด 40)
   - [ ] เปิดออเดอร์เก่า 1 ใบ (เช่นยอด 105 บาท) → ยอดรวม / ค่าส่ง / รายการ เป็นบาทถูกต้อง (ไม่ใช่ 10,500)
   - [ ] Dashboard ภาพรวม: รายได้ / ค่าใช้จ่าย / COGS อยู่ในหลักเดียวกับยอดขายจริง (ไม่โตผิดปกติ 100 เท่า)
