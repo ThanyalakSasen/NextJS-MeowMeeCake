@@ -62,6 +62,8 @@ Ingredients · Permissions · PreorderRoundItems · ProductionOrders · Promotio
 
 ## 4. ฟีเจอร์ที่มีเฉพาะฝั่งลูกค้า (ต้องย้ายถ้ารวม)
 
+> รายละเอียดระดับ route + ตารางเทียบ → [§7](#7-เทียบระดับ-api--ฝั่งลูกค้ามีแต่หลักไม่มี-ตรวจ-2026-10-05)
+
 ชุดสินค้า (bundles) · แต้มสะสม (points + แชร์แต้ม) · คูปองส่วนตัว (`UserCoupons`) · รายการโปรด · จุดรับสินค้า / ตลาดนัดรายสัปดาห์ ·
 payment link · แนะนำสินค้า + ตรวจสารก่อภูมิแพ้ · คำค้นหาเทียบเคียง (search synonyms) · ตั้งค่า/ข้อมูลร้าน (store settings/profile/logo/map) ·
 แจ้งเตือนถึงลูกค้าในเว็บ (`CustomerNotifications`) · จัดการรีวิว (ปักหมุด · ตอบกลับ · preset · analytics) · ตัวเลือกสินค้าแบบกลุ่ม
@@ -83,3 +85,58 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 2. ฝั่งลูกค้ายังมีทีมพัฒนาต่อไหม · โค้ดที่ส่งมา (`Downloads`, ไม่มี git) ตรงกับตัวที่รันจริงหรือเปล่า
 3. เริ่ม**ขั้น 0** เลยไหม (แก้ในโปรเจกต์ฝั่งลูกค้า)
 4. ฟิลด์ผูก LINE (`lineId` / `line_user_id`) และระบบค่าส่ง (`ShippingZones` / `DeliveryZones`) จะใช้ตัวไหนเป็นหลัก
+
+---
+
+## 7. เทียบระดับ API — ฝั่งลูกค้ามีแต่หลักไม่มี (ตรวจ 2026-10-05)
+
+> ฝั่งลูกค้า 138 route · หลัก 168 route · เทียบ route + model + `src/lib/*` (อ่านอย่างเดียว) · ละเอียดกว่า §4
+
+### 7.1 ❌ ไม่มีในหลักเลย (ต้องย้ายถ้ารวม)
+
+| # | ฟีเจอร์ | route ฝั่งลูกค้า | หมายเหตุ |
+|---|---|---|---|
+| 1 | ชุดสินค้า (bundle) | `/bundles` · `/customer/bundles` | ออเดอร์มี `bundle_id` · `bundle_lines` |
+| 2 | แต้มสะสม + แชร์แต้ม | `/customer/points` · `/points/share` | model `PointTransactions` · ออเดอร์ `points_redeemed/discount` |
+| 3 | คูปองส่วนตัว (ดู/เช็ค/แลก) | `/customer/coupons` · `/check` · `/redeem` | model `UserCoupons` · โปรโมชัน `points_cost` (แลกด้วยแต้ม) |
+| 4 | รายการโปรด | `/customer/favorites` | |
+| 5 | จุดรับสินค้า / ตลาดนัดรายสัปดาห์ | `/customer/pickup-locations` · `/weekly-markets` | ออเดอร์ `pickup_point` · `pickup_date` |
+| 6 | payment link | `/customer/payment-link` · `/redeem` | |
+| 7 | QR พร้อมเพย์ให้ลูกค้าจ่าย | `/customer/orders/[id]/payment` | ไลบรารี `promptpay-qr` · หลักมีแค่ `promptpay_ref` |
+| 8 | แนะนำสินค้า / สินค้าคล้ายกัน / ตรวจสารก่อภูมิแพ้ | `/customer/recommendations` · `/similar/[id]` · `/products/recommended` · `/customer/ingredients` | model `Interactions` |
+| 9 | คำค้นหาเทียบเคียง | `/customer/search-synonyms` · `/owner/search-synonyms` | |
+| 10 | ข้อมูล/ตั้งค่าร้าน (โลโก้ · แผนที่) | `/owner/store-profile` · `/store-settings` · `/map-link` · `/customer/store-info` · `/store-logo` | |
+| 11 | แจ้งเตือนถึงลูกค้าในเว็บ | `/customer/notifications` | หลักแจ้งลูกค้าทาง LINE อย่างเดียว |
+| 12 | ติดต่อร้าน (อีเมล) | `/customer/contact` | nodemailer |
+| 13 | ยืนยันอีเมล / ลืมรหัสผ่าน / ตั้งรหัสใหม่ | `/user/verify-email` · `/auth/forgot-password` · `/auth/reset-password` | หลักมี field ใน user model แต่ไม่มี route |
+| 14 | จัดการรีวิวขั้นสูง | `/owner/reviews` (+ `bulk` · `analytics` · `dashboard` · `filter-options` · `products/[id]`) · `/owner/review-presets` | ตอบกลับ · ปักหมุด · สถานะ · แท็ก/โน้ตภายใน · อ่านแล้ว — หลักมีแค่ซ่อน + sentiment |
+| 15 | อัปโหลดรูป/วิดีโอในรีวิว | `/customer/reviews/upload` | |
+| 16 | หมวดรีวิว (aspect) แบบเต็ม | `/owner/aspects/reorder` | เรียงลำดับ · เปิด/ปิด · ไอคอน |
+| 17 | ตัวเลือกสินค้าแบบกลุ่ม | `/owner/products/[id]/customization` | `ProductVariantGroups` (เช่นเลือกครีมชีส/มะยงชิด) — ⚠️ ชนกับ Y9 ของหลัก (ตัวเลือกมีสต็อก) |
+| 18 | แจ้งลูกค้าเมื่อเปิดรอบ/มีโปรใหม่ | (`customerBroadcast`) | `customer_notified_at` ของรอบ/โปรโมชัน |
+| 19 | dashboard รอบพรีออเดอร์ + รายชื่อลูกค้าในรอบ | `/owner/preorder-rounds/dashboard` · `/[id]/customers` | หลักกรองพรีออเดอร์ตามรอบได้ แต่ไม่มีหน้าสรุป |
+| 20 | ยกเลิกออเดอร์ทั่วไปที่ไม่จ่ายอัตโนมัติ + นโยบายยกเลิกของลูกค้า | (`orderExpiry` · `cancelPolicy`) | หลักมีกำหนดชำระเฉพาะพรีออเดอร์ |
+| 21 | ข้อมูลคืนเงินพร้อมเพย์ของลูกค้า | (field user) | `refund_promptpay_id/name` |
+| 22 | หมวดสินค้าส่งทั่วประเทศ | (field หมวด) | `ships_nationwide` |
+
+### 7.2 ⚠️ มีในหลัก แต่ออกแบบต่างกัน (ต้องเลือกมาตรฐาน)
+
+| เรื่อง | ฝั่งลูกค้า | หลัก |
+|---|---|---|
+| ค่าส่ง | `ShippingZones` | `DeliveryZones` + `/admin/delivery-fee` |
+| ล็อกอิน | next-auth | JWT cookie + Google |
+| ผูก LINE | `/line/connect` · `/callback` · `lineId` | `/shop/me/line` · `line_user_id` |
+| ขายหน้าร้าน | เรียกครั้งเดียว `/owner/pos-checkout` | สร้างออเดอร์ → ชำระเงิน → ยืนยัน (หลายครั้ง) |
+| สิทธิ์ชั่วคราว | `/permissions/temporary` | `expires_at` บน permission |
+| รายงานยอดขาย | `/reports/sales` | `/admin/dashboard/*` |
+
+### 7.3 ✅ มีเทียบเท่ากันแล้ว
+
+สมัคร/ล็อกอิน · ที่อยู่ · ตะกร้า · สั่งซื้อ · พรีออเดอร์ + รอบ · ชำระเงิน/สลิป · แคตตาล็อก/หมวด/รายละเอียดสินค้า/รีวิว · แบนเนอร์ ·
+ตรวจโค้ดโปรโมชัน · แจ้งเตือนเจ้าของร้าน · ฝั่งเจ้าของร้านทั้งหมด (สินค้า · หมวด · วัตถุดิบ · สูตร · ส่วนประกอบ · การผลิต · ค่าใช้จ่าย ·
+โปรโมชัน · ผู้ใช้ · role · สิทธิ์ · userlog · หน่วย · aspect · คำวิเคราะห์รีวิว)
+
+### 7.4 หลักมี แต่ฝั่งลูกค้าไม่มี (ประกอบการตัดสินใจ)
+
+กำหนดชำระพรีออเดอร์ + ยกเลิกอัตโนมัติ · สร้างใบผลิตอัตโนมัติตอนปิดรอบ · เพิ่มสต็อกเมื่อผลิตเสร็จ · แจ้งเตือน LINE ถึงร้าน (+ ลิงก์ 🔗) ·
+สรุปยอดรายเดือน · ตรวจข้อมูลผิดปกติรายวัน · ลงเวลาทำงาน · สลิปเป็นไฟล์ส่วนตัว (#54) · สถานะจัดส่ง/เลขพัสดุ · dashboard แยกช่องทาง
