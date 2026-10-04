@@ -13,10 +13,10 @@ import { round2 } from "../src/lib/money";
  * ตัดสินใจ 2026-10-01: ทั้งระบบเก็บเป็นบาท (โค้ดใน PR เดียวกันเปลี่ยนแล้ว)
  *
  * ข้อมูลจริงมีทั้งสองหน่วยปน (ตรวจ 2026-10-01) จึงแบ่งฟิลด์เป็น 2 แบบ:
- *   all       ÷100 ทุกค่า — ฟิลด์ที่ FrontOffice ไม่เขียน/ตรวจแล้วเป็นสตางค์ทั้งหมด (ต้นทุน, วัตถุดิบ, สูตร,
- *             ค่าใช้จ่าย, โปรโมชัน, พรีออเดอร์, sale_price ฯลฯ)
+ *   all       ÷100 ทุกค่า — วัตถุดิบ · ส่วนประกอบ · สูตร · ค่าใช้จ่าย · โซนค่าส่ง (ไม่มีแถวใหม่หลัง 2026-10-01 · ตรวจ 2026-10-04)
  *   big-only  ÷100 เฉพาะค่า ≥ 1,000 — ค่า < 1,000 ถือว่าเป็นบาทอยู่แล้ว (FrontOffice/ช่วงราคาเพี้ยน) ไม่แตะ:
- *             product_price (บาททั้ง 42 ตัว) · ยอดออเดอร์/รายการ/ค่าส่ง · การชำระเงิน · ตะกร้า · price_override
+ *             ราคาสินค้าทุกฟิลด์ (product_price · sale_price · purchase_cost · ตัวเลือก · ตัวเลือกเสริม) ·
+ *             ออเดอร์และรายการทุกฟิลด์ · การชำระเงิน · ตะกร้า · price_override
  *             (สินค้าร้านนี้ไม่มีชิ้นไหนต่ำกว่า 10 บาท → สตางค์ ≥ 1,000 เสมอ)
  * หลังคำนวณ: ออเดอร์/พรีออเดอร์ที่ subtotal − discount + delivery_fee ≠ total_amount → รายงาน "ต้องดูเอง"
  *
@@ -48,31 +48,35 @@ export const TARGETS: Target[] = [
   { collection: "orders", field: "subtotal", mode: "big-only" },
   { collection: "orders", field: "delivery_fee", mode: "big-only" },
   { collection: "orders", field: "total_amount", mode: "big-only" },
-  { collection: "orders", field: "discount_amount", mode: "all" },
+  { collection: "orders", field: "discount_amount", mode: "big-only" },
   { collection: "orderitems", field: "unit_price", mode: "big-only" },
   { collection: "orderitems", field: "total_price", mode: "big-only" },
-  { collection: "orderitems", field: "cost_per_unit", mode: "all" },
-  { collection: "orderitems", field: "selected_options.$[].extra_price", mode: "all" },
+  { collection: "orderitems", field: "cost_per_unit", mode: "big-only" },
+  { collection: "orderitems", field: "selected_options.$[].extra_price", mode: "big-only" },
   { collection: "payments", field: "amount", mode: "big-only" },
   { collection: "cartitems", field: "price_snapshot", mode: "big-only" },
-  { collection: "cartitems", field: "selected_options.$[].extra_price", mode: "all" },
+  { collection: "cartitems", field: "selected_options.$[].extra_price", mode: "big-only" },
   { collection: "preorderrounditems", field: "price_override", mode: "big-only" },
-  // ── สตางค์ทั้งหมด (backend เขียนอย่างเดียว) ──
-  { collection: "products", field: "sale_price", mode: "all" },
-  { collection: "products", field: "purchase_cost", mode: "all" },
-  { collection: "productvariants", field: "variant_price", mode: "all" },
-  { collection: "productoptions", field: "extra_price", mode: "all" },
-  { collection: "preorders", field: "subtotal", mode: "all" },
-  { collection: "preorders", field: "discount_amount", mode: "all" },
-  { collection: "preorders", field: "delivery_fee", mode: "all" },
-  { collection: "preorders", field: "total_amount", mode: "all" },
-  { collection: "preorderitems", field: "unit_price", mode: "all" },
-  { collection: "preorderitems", field: "total_price", mode: "all" },
-  { collection: "preorderitems", field: "cost_per_unit", mode: "all" },
-  { collection: "promotionusages", field: "discount_applied", mode: "all" },
-  { collection: "promotions", field: "discount_value", mode: "all", filter: { discount_type: "Amount" } },
-  { collection: "promotions", field: "min_order_amount", mode: "all" },
-  { collection: "promotions", field: "max_discount_amount", mode: "all" },
+  // ตรวจ 2026-10-04: มีค่าบาทใหม่เข้ามาหลังวางแผน (ราคาลด 29 · ตัวเลือก +30/+35 · ตัวเลือกเสริม +25 ·
+  // ส่วนลดออเดอร์ FrontOffice 140) → ราคาสินค้าทุกฟิลด์เป็น big-only ด้วย
+  { collection: "products", field: "sale_price", mode: "big-only" },
+  { collection: "products", field: "purchase_cost", mode: "big-only" },
+  { collection: "productvariants", field: "variant_price", mode: "big-only" },
+  { collection: "productoptions", field: "extra_price", mode: "big-only" },
+  // พรีออเดอร์/โปรโมชัน: มีค่าบาทใหม่หลังวางแผน (PRE- จาก FrontOffice 275 · โปรขั้นต่ำ 50 · ส่วนลดที่ใช้ 139.5) —
+  // ค่าสตางค์เดิมของกลุ่มนี้ ≥ 1,000 ทั้งหมด → big-only
+  { collection: "preorders", field: "subtotal", mode: "big-only" },
+  { collection: "preorders", field: "discount_amount", mode: "big-only" },
+  { collection: "preorders", field: "delivery_fee", mode: "big-only" },
+  { collection: "preorders", field: "total_amount", mode: "big-only" },
+  { collection: "preorderitems", field: "unit_price", mode: "big-only" },
+  { collection: "preorderitems", field: "total_price", mode: "big-only" },
+  { collection: "preorderitems", field: "cost_per_unit", mode: "big-only" },
+  { collection: "promotionusages", field: "discount_applied", mode: "big-only" },
+  { collection: "promotions", field: "discount_value", mode: "big-only", filter: { discount_type: "Amount" } },
+  { collection: "promotions", field: "min_order_amount", mode: "big-only" },
+  { collection: "promotions", field: "max_discount_amount", mode: "big-only" },
+  // ── all: ÷100 ทุกค่า — ไม่มีแถวใหม่หลัง 2026-10-01 และค่าสตางค์มีที่ต่ำกว่า 1,000 (เช่นวัตถุดิบ 2–15 สตางค์/หน่วย) ──
   { collection: "expenses", field: "amount", mode: "all" },
   { collection: "deliveryzones", field: "fee", mode: "all" },
   { collection: "ingredients", field: "cost_per_unit", mode: "all" },

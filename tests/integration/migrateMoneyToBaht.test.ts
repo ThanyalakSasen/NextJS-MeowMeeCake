@@ -32,7 +32,7 @@ describe("scripts/migrate-money-to-baht", () => {
     ]);
     await db().collection("orderitems").insertOne({
       _id: item, unit_price: 6000, total_price: 12000, cost_per_unit: 1655,
-      selected_options: [{ option_id: oid(), extra_price: 500 }, { option_id: oid(), extra_price: 0 }],
+      selected_options: [{ option_id: oid(), extra_price: 2500 }, { option_id: oid(), extra_price: 0 }],
     });
     await db().collection("ingredients").insertOne({ _id: ing, cost_per_unit: 15 }); // สตางค์ต่อกรัม
     await db().collection("promotions").insertMany([
@@ -57,7 +57,7 @@ describe("scripts/migrate-money-to-baht", () => {
     expect(await get("orders", bahtOrder)).toMatchObject({ subtotal: 55, total_amount: 55 });
     const it2 = (await get("orderitems", item))!;
     expect(it2).toMatchObject({ unit_price: 60, total_price: 120, cost_per_unit: 16.55 });
-    expect(it2.selected_options.map((o: { extra_price: number }) => o.extra_price)).toEqual([5, 0]);
+    expect(it2.selected_options.map((o: { extra_price: number }) => o.extra_price)).toEqual([25, 0]);
     expect((await get("ingredients", ing))!.cost_per_unit).toBe(0.15);
     expect(await get("promotions", promoAmt)).toMatchObject({ discount_value: 50, min_order_amount: 300 });
     expect(await get("promotions", promoPct)).toMatchObject({ discount_value: 10, max_discount_amount: 100 }); // % ไม่แตะ
@@ -72,5 +72,27 @@ describe("scripts/migrate-money-to-baht", () => {
     await db().collection("orders").insertOne({ _id: oid(), order_no: "WEB-1790317257577", subtotal: 5500, discount_amount: 0, delivery_fee: 65, total_amount: 5565 });
     const res = await runMigration();
     expect(res.review.map((r) => r.no)).toEqual(["WEB-1790317257577"]);
+  });
+
+  it("ค่าบาทที่เข้ามาหลังวางแผน (FrontOffice / หลังร้านโค้ดใหม่) ไม่ถูก ÷100 — ตรวจ 2026-10-04", async () => {
+    const [prod, variant, option, pre, promo, order] = Array.from({ length: 6 }, oid);
+    await db().collection("products").insertOne({ _id: prod, product_price: 35, sale_price: 29 });
+    await db().collection("productvariants").insertOne({ _id: variant, variant_price: 30 });
+    await db().collection("productoptions").insertOne({ _id: option, extra_price: 25 });
+    await db().collection("preorders").insertOne({ _id: pre, preorder_no: "PRE-1791013745988-RM33", subtotal: 275, discount_amount: 0, delivery_fee: 0, total_amount: 275 });
+    await db().collection("promotions").insertOne({ _id: promo, discount_type: "Percentage", discount_value: 50, min_order_amount: 50 });
+    await db().collection("orders").insertOne({ _id: order, order_no: "ORD-1791057213901-ILQN", subtotal: 279, discount_amount: 140, delivery_fee: 0, total_amount: 139 });
+
+    const res = await runMigration();
+    expect(res.planned).toEqual([]);
+    const get = (c: string, id: unknown) => db().collection(c).findOne({ _id: id as mongoose.Types.ObjectId });
+    dir = mkdtempSync(join(tmpdir(), "baht-"));
+    await runMigration({ apply: true, backupDir: dir });
+    expect(await get("products", prod)).toMatchObject({ product_price: 35, sale_price: 29 });
+    expect((await get("productvariants", variant))!.variant_price).toBe(30);
+    expect((await get("productoptions", option))!.extra_price).toBe(25);
+    expect(await get("preorders", pre)).toMatchObject({ subtotal: 275, total_amount: 275 });
+    expect(await get("promotions", promo)).toMatchObject({ discount_value: 50, min_order_amount: 50 });
+    expect(await get("orders", order)).toMatchObject({ discount_amount: 140 });
   });
 });
