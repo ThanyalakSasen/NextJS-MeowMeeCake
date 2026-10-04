@@ -46,5 +46,78 @@ npm run seed                   # สร้าง role / units / หมวดห�
 npm run backfill:product-codes # เติมรหัสสินค้า pos-/pre- ให้ของเดิม
 npm run sync-indexes           # ปรับ index ใน DB ให้ตรง schema (+ --fix เพื่อลบข้อมูลซ้ำ)
 npm run seed:preorder-rounds   # สร้างรอบพรีออเดอร์ตัวอย่าง (ซาวโดว์) 4 รอบ สำหรับเทสฝั่งลูกค้า
-npm run migrate:is-preorder    # แปลงประเภทสินค้าทุกรุ่น (product_type / product_types) → is_preorder — dry-run ก่อน, --apply เขียนจริง · รันก่อน deploy (BACKLOG2 §14)
+npm run migrate:is-preorder    # แปลงประเภทสินค้าทุกรุ่น (product_type / product_types) → is_preorder — ✅ รันบน DB จริงแล้ว 2026-10-01 ไม่ต้องรันซ้ำ
+npm run cleanup:legacy-product-fields  # ลบฟิลด์เก่าของสินค้า (product_type / delete_at) — dry-run ก่อน, --apply เขียนจริง
+npm run check:data-integrity   # ตรวจข้อมูลสินค้าผิดปกติ (อ่านอย่างเดียว) · --no-notify = ไม่ส่งแจ้งเตือน
+npm run backfill:payment-due   # เติมกำหนดชำระให้พรีออเดอร์เก่า — dry-run ก่อน, --apply เขียนจริง
+npm run cron:preorder-rounds   # เปิด/ปิดรอบตามเวลา + ยกเลิกคนไม่จ่าย (cron ทุก 15 นาที)
+npm run remind:preorders       # เตือนลูกค้าก่อนวันรับพรีออเดอร์ทาง LINE · --dry-run = ไม่ส่ง
+npm run summary:monthly        # สรุปยอดเดือนที่แล้วถึงเจ้าของร้าน · --dry-run = ไม่ส่ง
+npm run reset-owner-password   # ตั้งรหัสผ่าน owner ใหม่
 ```
+
+---
+
+## ก่อน deploy — คำสั่งที่ต้องรัน
+
+> ขั้นตอนเต็ม (เซิร์ฟเวอร์ · nginx · pm2 · cron · ลำดับ merge PR) → [`docs/DEPLOY.md`](docs/DEPLOY.md) ·
+> ตัวแปร environment → [`docs/env.md`](docs/env.md) · สคริปต์ที่แก้ข้อมูลจริง = **dry-run เป็นค่าเริ่มต้น** ต้องใส่ `-- --apply` ถึงจะเขียน
+
+### 1. ตรวจโค้ด (เครื่อง dev หรือ CI — ต้องผ่านทุกข้อก่อน merge/deploy)
+
+```bash
+npm ci                    # ติดตั้งตาม package-lock.json
+npm run lint              # ต้อง 0 error (warning ได้)
+npm run typecheck
+npm run typecheck:test
+npm run test:all          # unit + integration (ใช้ mongodb-memory-server — ไม่แตะ DB จริง)
+npm run build
+```
+
+### 2. เตรียมข้อมูลจริง (บนเซิร์ฟเวอร์ ก่อน build/reload — ใช้ `.env.local` ของ production)
+
+```bash
+# สำรอง DB ก่อนทุกครั้ง (หรือ snapshot ใน Atlas)
+mongodump --uri "<MONGODB_URI>" --out backup-$(date +%F)
+
+# อ่านอย่างเดียว — เก็บผลไว้เทียบหลัง deploy
+npm run check:data-integrity -- --no-notify
+
+# dry-run ดูแผนก่อน (ยังไม่เขียน)
+npm run cleanup:legacy-product-fields
+npm run backfill:payment-due
+```
+
+- ตรวจ `.env.local` ครบตาม [`docs/env.md`](docs/env.md) · secret ของ production ต้องคนละค่ากับ dev (`JWT_SECRET` · `SESSION_SECRET` · `NEXTAUTH_SECRET` · `CRON_SECRET`)
+- ตั้ง `ADMIN_APP_URL` = URL หลังร้าน (ลิงก์ 🔗 ในแจ้งเตือน LINE) · LINE Login callback URL ของโดเมนจริง ([`docs/LINE.md`](docs/LINE.md) §4)
+
+### 3. deploy
+
+```bash
+cd /srv/meowmeecake/app && git pull && npm ci && npm run build && pm2 reload meowmeecake-api
+curl -s http://127.0.0.1:3000/api/health   # → {"ok":true,"db":"connected"}
+```
+
+รัน **instance เดียว** เท่านั้น (ห้าม `pm2 -i max` / cluster — [`docs/DEPLOY.md`](docs/DEPLOY.md) ⑤)
+
+### 4. หลัง deploy
+
+```bash
+npm run cleanup:legacy-product-fields -- --apply   # ลบ product_type / delete_at ที่ค้าง (ไม่งั้นแจ้งเตือนทุกเช้า)
+npm run backfill:payment-due -- --apply            # เฉพาะถ้าข้อ 2 dry-run เจอรายการ
+npm run check:data-integrity -- --no-notify        # ไม่ควรมี price_too_high / price_too_low / sale_not_below_price
+npm run migrate:upload-files                       # หลัง merge PR #54 เท่านั้น — dry-run แล้วค่อย -- --apply
+npm run summary:monthly -- --dry-run               # ทดสอบข้อความ ไม่ส่ง
+npm run remind:preorders -- --dry-run
+```
+
+แล้วตั้ง cron 4 ตัว ([`docs/DEPLOY.md`](docs/DEPLOY.md) ⑧) และตรวจรับตาม ⑨
+
+### ⚠️ ห้ามรัน / ข้อควรระวัง
+
+| คำสั่ง | เหตุผล |
+|---|---|
+| `npm run migrate:is-preorder -- --apply` | รันบน DB จริงแล้ว 2026-10-01 |
+| `npm run sync-indexes` | **ห้ามรันระหว่างที่ backend ฝั่งลูกค้า (พอร์ต 4000) ยังใช้ DB เดียวกัน** — `syncIndexes()` ลบ index ที่ไม่มีใน schema ของโปรเจกต์นี้ = ลบ index ของฝั่งลูกค้าด้วย ([`docs/customer-backend-merge.md`](docs/customer-backend-merge.md)) |
+| สคริปต์เงินยุคสตางค์ (`fix-money-units` · `fix-orders-money` · `migrate-money-to-satang` ฯลฯ) | ระบบเก็บเงินเป็นบาทแล้ว — สคริปต์ถูกล็อกไว้ ([`docs/money-units.md`](docs/money-units.md)) |
+| deploy หลักโดยไม่ deploy ฝั่งลูกค้าขั้น 0 | ถ้า backend ฝั่งลูกค้ายังเป็นโค้ดเดิม จะเขียน `product_type` + ตั้งสต็อก 0 ตอนปิดรอบต่อ → ควร deploy ฝั่งลูกค้าที่แก้ขั้น 0 พร้อมกัน แล้วค่อยรัน `cleanup:legacy-product-fields -- --apply` ([`docs/customer-backend-merge.md`](docs/customer-backend-merge.md) §8.2) |

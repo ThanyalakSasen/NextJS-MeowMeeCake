@@ -40,7 +40,7 @@ describe("notification module → ป้ายภาษาไทยตอนแ�
     await notificationService.notify({ title: "b", message: "m", module: "finance", type: "info", line: false });
     const { items } = (await notificationService.list({
       pagination: { page: 1, limit: 20, skip: 0 },
-    } as Parameters<typeof notificationService.list>[0])) as { items: Array<{ _id: unknown; module_label: string }> };
+    } as Parameters<typeof notificationService.list>[0])) as unknown as { items: Array<{ _id: unknown; module_label: string }> };
     expect(items.map((i) => i.module_label).sort()).toEqual(["การผลิต", "การเงิน"].sort());
     const one = (await notificationService.getById(String(items[0]._id))) as { module_label: string };
     expect(one.module_label).toBeTruthy();
