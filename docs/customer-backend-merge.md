@@ -155,6 +155,10 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | ผูก LINE ลูกค้า | **`line_user_id`** + ย้ายค่า `lineId` เดิมมา | ไม่กระทบฝั่งเจ้าของร้าน (แจ้งเตือนร้านใช้ `LINE_TARGET_ID` · `/profile` + `/api/shop/me/line` ใช้ `line_user_id` อยู่แล้ว) · สคริปต์ย้าย = dry-run · ผู้ใช้รัน `--apply` เอง |
 | ค่าส่ง | **เก็บทั้งสอง** — ออเดอร์จากหน้าเว็บลูกค้าใช้ `ShippingZones` (+ จุดรับสินค้า/ตลาดนัด) · หลังร้าน/POS ใช้ `DeliveryZones` | ค่าส่งคนละตาราง — ต้องเลือกตารางตามช่องทางให้ชัดในโค้ด |
 | API เจ้าของร้านของฝั่งลูกค้า (`/api/owner/*`) | **ไม่ย้ายส่วนที่ซ้ำ** — ย้ายเฉพาะที่หลักไม่มีเข้า `/api/admin/*` | ตั้งค่าร้าน · รีวิวขั้นสูง · ชุดสินค้า · คำค้นเทียบเคียง · กลุ่มตัวเลือก ฯลฯ |
+| ยกเลิกออเดอร์ที่ชำระแล้ว | **แบบฝั่งลูกค้า** — ลูกค้ายกเลิกเองได้ (pending/confirmed) · "ยกเลิก + ชำระแล้ว" = รอโอนคืน ร้านกดคืนเงินเอง | §8.8 |
+| ส่งฟรีตามยอด (เว็บ) | **ไม่มี** (แบบฝั่งลูกค้า) — ส่งฟรีจากโปรโมชันเท่านั้น | §8.7 |
+| จุดรับสินค้า (takeaway เว็บ) | **ไม่บังคับ** — ส่งมาแล้วตรวจ · ไม่ส่ง = รับที่ร้านแบบเดิม | §8.7 |
+| แนบสลิปหลังหมดเวลา | **ย้ายมา** — เปิดออเดอร์กลับ (ตัดสต็อกใหม่ · ของไม่พอ = เปิดไม่ได้) | §8.8 |
 | ไม่จ่ายเงิน | **พรีออเดอร์ใช้ของหลัก** (กำหนดชำระ + ยกเลิกอัตโนมัติ) · **ออเดอร์ปกติจากเว็บ** เพิ่ม orderExpiry + นโยบายยกเลิกของฝั่งลูกค้า (ไม่ใช้กับ `POS-`) | |
 | ขั้น 0 (ด่วน) | **แก้โค้ดฝั่งลูกค้าเลย** (`Downloads/backend`) ระหว่างที่ยังรวมไม่เสร็จ | ใช้ `is_preorder` แทน `product_type` · เลิกเขียน `product_type: "ready"` + สต็อก 0 ตอนปิดรอบ · ผู้ใช้ deploy เอง (ต้องยืนยันว่าโค้ดชุดนี้ = ตัวที่รันจริง) |
 | ขอบเขตฟีเจอร์ลูกค้า | **ตามที่หน้าเว็บลูกค้าใช้จริง** — `Downloads/frontend/frontend` (§8.4) | ใช้เกือบครบ §7.1 → ขั้น 6 = ย้ายเกือบทั้งหมด |
@@ -176,8 +180,8 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | P1 | 2 | สคริปต์ย้าย `lineId` → `line_user_id` (dry-run · ผู้ใช้รัน `--apply`) | ผู้ใช้รัน `--apply` | ✅ สคริปต์พร้อม 2026-10-05 (§8.6) |
 | P1 | 3 | next-auth ใน backend หลัก · `/api/shop/*` รับ 2 แบบ · สมัคร/ยืนยันอีเมล/ลืมรหัสผ่าน/ตั้งรหัสใหม่ (nodemailer) | ตั้งค่า SMTP + `NEXTAUTH_SECRET` ใน env | ⏳ |
 | P1 | — | dashboard: `ORD-<timestamp>` นับเป็น "เว็บ" | — | ✅ เป็นอยู่แล้ว ไม่ต้องแก้ (§8.6) |
-| P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ⏳ |
-| P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ⏳ |
+| P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ✅ 2026-10-05 (§8.7) |
+| P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ✅ 2026-10-05 (§8.8) |
 | P2 | — | พรีออเดอร์: สินค้าเดียวกันหลายตัวเลือกในใบเดียว | — | ⏳ |
 | P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): แต้ม + แชร์แต้ม · คูปองส่วนตัว · ชุดสินค้า · รายการโปรด · แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้ · คำค้นเทียบเคียง · กระดิ่งแจ้งเตือน · ติดต่อร้าน · อัปโหลดรูปรีวิว · ข้อมูลร้าน/โลโก้ | ขั้น 3 (ต้องล็อกอินได้ก่อน) | ⏳ |
 | P4 | 7 | หลังร้าน: API ที่หน้าเว็บลูกค้าต้องใช้แต่ข้อมูลมาจากร้าน (ตั้งค่าร้าน · โซนค่าส่ง · ตลาดนัด · ชุดสินค้า · คำค้น · รีวิวขั้นสูง) เข้า `/api/admin/*` | ตัดสินใจ "หลังร้านตัวไหน" | ⏸ รอทีม |
@@ -251,3 +255,37 @@ Next 16 + next-auth + antd · `BACKEND_URL` (ค่าเริ่มต้น `
 
 **ช่องทางออเดอร์ (`orderChannelOf`)** — ไม่แก้โค้ด: `ORD-<timestamp>-xxxx` ของฝั่งลูกค้านับเป็น "เว็บ" อยู่แล้ว (ขึ้นต้น `ORD-`) ·
 ช่องเว็บ = `ORD-` เท่านั้น (ผู้ใช้เลือก 2026-10-05) · `PRE-` = พรีออเดอร์ (`orderChannelOf` คืน `preorder` · ยอดพรีออเดอร์ยังนับจาก collection `preorders`) · `WEB-<timestamp>` / `OP-` รุ่นเก่ายังเป็น "อื่น ๆ" · เทส `orderChannelOf` เอาเคส `WEB-` ออก
+
+### 8.7 ขั้น 4 — ค่าส่ง ShippingZones + จุดรับสินค้า (2026-10-05)
+
+ผู้ใช้เลือก: **เก็บทั้งสองระบบ** (เว็บ = ShippingZones · หลังร้าน/POS = DeliveryZones) · **ไม่มีส่งฟรีตามยอด** สำหรับเว็บ (ส่งฟรีจากโปรโมชันเท่านั้น) ·
+**จุดรับไม่บังคับ** (ส่งมาแล้วตรวจ — storefront ของทีม FrontEnd ไม่พัง)
+
+| เรื่อง | ทำอะไร |
+|---|---|
+| ค่าส่งออเดอร์/พรีออเดอร์เว็บ | `storefront: true` (ส่งจาก `/api/shop/orders` · `/api/shop/preorders`) → `shippingService.quoteStorefrontDelivery`: โซน A–D ตามจังหวัด (ไม่ตรง A/B/C = D) · ยังไม่มีโซนใน DB → สร้าง A40 / B60 / C80 / D100 ให้ |
+| ขอบเขตจัดส่ง | หมวดที่ `ships_nationwide` ไม่เปิด (ไม่ตั้ง = ดูชื่อหมวด "ซาวโดว์" = ทั่วประเทศ) → ส่งได้เฉพาะจังหวัดร้าน (`StoreSettings.province`) · นอกเขต = 400 |
+| จุดรับสินค้า | `StoreProfile.weekly_markets` ที่ `is_active` (ย้ายเวลาทำการเดิมเข้ามาครั้งเดียวแบบเดียวกับฝั่งลูกค้า) · ออเดอร์: วันที่จุดเปิดภายใน 14 วัน · พรีออเดอร์: วันรับของรอบ + 12 วัน เฉพาะวันที่จุดเปิด · บันทึก `pickup_date` + `pickup_point{point_id, point_name, address, note}` |
+| หลังร้าน | `ships_nationwide` แก้ได้ที่ `/api/admin/product-categories` · ค่าส่ง/โปรโมชันของหลังร้านใช้ DeliveryZones เหมือนเดิม |
+
+**API:** `GET /api/catalog/shipping-zones` · `GET /api/catalog/pickup-locations` (+ `schedule` · `order_pickup_dates`) ·
+`POST /api/shop/orders/delivery-quote` คืน `{ deliverable, message, fee, free, zone, zone_code, free_shipping_min: null }` (+ `product_ids?` สำหรับพรีออเดอร์) ·
+`POST /api/shop/orders` / `/api/shop/preorders` รับ `pickup_location_id` + `pickup_date` (YYYY-MM-DD)
+
+**ไฟล์:** `src/lib/shipping.ts` · `src/lib/pickupLocations.ts` · `src/services/shippingService.ts` · model `ShippingZones` / `StoreSettings` / `StoreProfile` (collection เดียวกับฝั่งลูกค้า) ·
+`ProductCategories.ships_nationwide` · `Orders/Preorders.pickup_date + pickup_point` · เทส `storefrontShipping.test.ts` 6 เคส
+
+### 8.8 ขั้น 5 — หมดเวลาชำระ · นโยบายยกเลิก · QR พร้อมเพย์ · ลิงก์ชำระเงิน (2026-10-05)
+
+| เรื่อง | ทำอะไร |
+|---|---|
+| หมดเวลาชำระ 30 นาที | ออเดอร์จากหน้าเว็บได้ `payment_due_at` = สั่ง + 30 นาที · เลยแล้วยังไม่ส่งสลิป → ยกเลิก (`cancelled_reason` = "หมดเวลาชำระเงิน (ระบบยกเลิกอัตโนมัติ)") + คืนสต็อก/สิทธิ์โปรโมชัน + แจ้งลูกค้า · cron `npm run cron:order-expiry` ทุก 5 นาที + lazy ตอนลูกค้าเปิดรายการ/รายละเอียด/หน้าชำระเงิน · POS / แอดมินสร้าง / ออเดอร์เก่า (ไม่มี `payment_due_at`) ไม่ถูกแตะ · พรีออเดอร์ใช้กำหนดชำระของหลักตามเดิม |
+| แนบสลิปย้อนหลัง (ผู้ใช้เลือกย้ายมา) | ออเดอร์ที่หมดเวลา + ยังไม่จ่าย → `POST /api/shop/payments` พร้อมสลิป (หรือแนบสลิปกับ payment เดิม) = **ตัดสต็อกใหม่** แล้วกลับเป็น pending รอตรวจ · ไม่แนบสลิป = 400 · ของไม่พอ = 409 (ไม่สร้าง payment) · แจ้งร้าน "เปิดออเดอร์กลับ" · ⚠️ สิทธิ์โปรโมชันที่คืนไปตอนยกเลิกไม่ถูกบันทึกซ้ำ |
+| นโยบายยกเลิก (แบบฝั่งลูกค้า) | `POST /api/shop/orders/[id]/cancel` → `cancelOrderByCustomer`: pending/confirmed เท่านั้น · POS- = 409 · **ชำระแล้วก็ยกเลิกได้** → "ยกเลิก + ชำระแล้ว" = รอโอนคืน (**ไม่**ตั้ง refunded อัตโนมัติ) + แจ้งร้าน (finance) · ร้านโอนคืนแล้วกด `POST /api/admin/payments/[id]/refund` · แอดมินยกเลิกยังคืนเงินอัตโนมัติแบบเดิม |
+| QR พร้อมเพย์ | `GET /api/shop/orders/[id]/payment` · `/api/shop/preorders/[id]/payment` → QR (data URL) ตามยอด + สถานะ + สลิปล่าสุด + `payment_due_at` + `server_time` + `late_upload` · เลขพร้อมเพย์จาก `StoreProfile.promptpay_id` ก่อน → env `PROMPTPAY_ID` · ไม่ตั้งทั้งคู่ = `qr_image: null` + `qr_error` · ส่งสลิปยังใช้ `/api/shop/payments` เดิม (ไม่ย้าย multipart ของฝั่งลูกค้า) |
+| ลิงก์ชำระเงินใช้ครั้งเดียว | `POST /api/shop/payment-link` `{ kind?, id }` → `{ token, expires_at }` (30 นาที) · `POST /api/shop/payment-link/redeem` `{ kind?, token }` → `{ kind, id, orderId }` · ใช้แล้ว/หมดอายุ/คนอื่น = 410 · DB เก็บ SHA-256 (`payment_link_token` select: false) |
+
+**ไฟล์:** `orderService` (`expireUnpaidOrders` · `reopenExpiredOrder` · `cancelOrderByCustomer` · `updateOrderStatus({ skipAutoRefund })`) · `paymentService` (`getPaymentPage` · late slip) ·
+`promptpayService` · `paymentLinkService` · `/api/cron/order-expiry` + `scripts/run-order-expiry.ts` · dependency `promptpay-qr` + `qrcode` · เทส `webOrderPayment.test.ts` 6 เคส
+
+**deploy:** cron ตัวที่ 5 (`*/5` — [`DEPLOY.md`](DEPLOY.md) ⑧) · ตั้งเลขพร้อมเพย์ (StoreProfile ผ่านหลังร้านฝั่งลูกค้า หรือ env `PROMPTPAY_ID`)

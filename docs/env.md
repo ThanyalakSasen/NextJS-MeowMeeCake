@@ -22,7 +22,8 @@ Next.js โหลด `.env.local` ให้อัตโนมัติตอน 
 | `JWT_COOKIE_EXPIRE` | ไม่ | `7` | `src/lib/session.ts` | อายุ cookie `session` เป็น**จำนวนวัน** (ตัวเลขล้วน) |
 | `NODE_ENV` | อัตโนมัติ | `development` | `src/lib/session.ts` | Next.js ตั้งให้เอง (`production` ตอน `next build`/`start`) · ใช้เปิด flag `Secure` ของ cookie เมื่อเป็น production |
 | `GOOGLE_CLIENT_ID` | เฉพาะ Google login | — | `src/services/authService.ts` | Client ID จาก Google Cloud Console · ใช้เป็น `audience` ตอน verify Google ID token ที่ `POST /api/auth/google` · ถ้าไม่ตั้ง endpoint นั้นจะตอบ error |
-| `DELIVERY_FREE_MIN` | ไม่ | `1500` | `src/services/deliveryService.ts` | ยอดสั่งซื้อ (บาท) ที่ถึงแล้วส่งฟรี (ใช้เสมอ ไม่ว่าโซนจะมาจาก DB หรือ fallback) |
+| `DELIVERY_FREE_MIN` | ไม่ | `1500` | `src/services/deliveryService.ts` | ยอดสั่งซื้อ (บาท) ที่ถึงแล้วส่งฟรี (ใช้เสมอ ไม่ว่าโซนจะมาจาก DB หรือ fallback) · **เฉพาะหลังร้าน/POS** — ออเดอร์จากหน้าเว็บคิดจาก ShippingZones ไม่มีส่งฟรีตามยอด (customer-backend-merge.md §8.7) |
+| `PROMPTPAY_ID` | ไม่ | — | `src/services/promptpayService.ts` | เลขพร้อมเพย์สำหรับ QR หน้าชำระเงินของลูกค้า — **ใช้เมื่อ `StoreProfile.promptpay_id` ยังไม่ได้ตั้ง** · ไม่ตั้งทั้งคู่ = หน้าชำระเงินไม่มี QR (`qr_error`) |
 | `DELIVERY_FEE_METRO` | ไม่ | `40` | `src/services/deliveryService.ts` | **fallback เท่านั้น** (BACKLOG §3.15) — ใช้ต่อเมื่อยังไม่มีโซนไหนตั้งไว้ใน `/api/admin/delivery-zones` เลย ปกติแอดมินแก้ค่าส่งผ่านหน้านั้นแทน ไม่ต้องแก้ env+redeploy แล้ว · ค่าส่ง กรุงเทพฯ + ปริมณฑล (นนทบุรี/ปทุมธานี/สมุทรปราการ/สมุทรสาคร/นครปฐม) |
 | `DELIVERY_FEE_UPCOUNTRY` | ไม่ | `80` | `src/services/deliveryService.ts` | **fallback เท่านั้น** เช่นเดียวกับข้างบน — ค่าส่งต่างจังหวัด (จังหวัดอื่นทั้งหมด) |
 | `DELIVERY_ZONE_CACHE_TTL_MS` | ไม่ | `60000` | `src/services/deliveryZoneService.ts` | อายุ cache ของโซนค่าจัดส่งจาก DB (มิลลิวินาที) — ตั้งเป็น `0` ปิด cache ได้ (ใช้ตอนเทส) |

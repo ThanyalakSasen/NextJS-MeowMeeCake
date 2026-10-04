@@ -33,7 +33,9 @@ export const unitUpdate = unitCreate.partial();
 // ── หมวดหมู่แบบชื่อล้วน (product / ingredient / component category) ──
 const nameOnly = (field: string, max = 100) => z.object({ [field]: z.string().trim().min(1).max(max) });
 
-export const productCategoryCreate = nameOnly("product_category_name");
+export const productCategoryCreate = nameOnly("product_category_name").extend({
+  ships_nationwide: z.boolean().optional(), // ออเดอร์เว็บ: ส่งทั่วประเทศได้ไหม (src/lib/shipping.ts)
+});
 export const productCategoryUpdate = productCategoryCreate.partial();
 
 export const ingredientCategoryCreate = nameOnly("ingredient_category_name");

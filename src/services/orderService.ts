@@ -32,12 +32,14 @@ import {
 } from "../lib/orderLifecycle";
 import orderModel from "../models/orderModel";
 import orderItemModel from "../models/orderItemModel";
+import paymentModel from "../models/paymentModel";
 import productModel from "../models/productModel";
 import userModel from "../models/userModel";
 import * as cartService from "./cartService";
 import * as promotionService from "./promotionService";
 import * as promotionUsageService from "./promotionUsageService";
 import * as deliveryService from "./deliveryService";
+import * as shippingService from "./shippingService";
 import * as recipeService from "./recipeService";
 import * as productService from "./productService";
 import {
@@ -120,6 +122,15 @@ export interface CreateOrderCommon {
   delivery_fee_override?: boolean;
   /** ช่องทางสำหรับตรวจ applicable_channels ของโปรโมชัน (ค่าเริ่มต้น "online") */
   channel?: "online" | "instore";
+  /**
+   * true = สั่งจากหน้าเว็บลูกค้า (/api/shop) — docs/customer-backend-merge.md §8.7–8.8:
+   * ค่าส่งคิดจาก ShippingZones (ไม่มีส่งฟรีตามยอด) + ตรวจขอบเขตจัดส่ง · มีกำหนดชำระ 30 นาที (payment_due_at)
+   * ไม่ระบุ = หลังร้าน/POS (DeliveryZones · ไม่มีกำหนดชำระ)
+   */
+  storefront?: boolean;
+  /** takeaway: จุดรับ (_id ของหน้าร้านประจำสัปดาห์) + วันรับ "YYYY-MM-DD" — ไม่ส่ง = รับที่ร้านแบบเดิม */
+  pickup_location_id?: string | null;
+  pickup_date?: string | null;
 }
 
 export interface CreateOrderFromCartInput extends CreateOrderCommon {
@@ -254,6 +265,12 @@ async function persistOrder(
       if (!addr[f]) throw badRequest(`delivery_address.${f} จำเป็นต้องระบุ`);
     }
   }
+  // takeaway + เลือกจุดรับ/วันรับ → ตรวจกับหน้าร้านประจำสัปดาห์ (ผิด = 400) · ไม่ส่ง = รับที่ร้านแบบเดิม
+  const pickup =
+    opts.order_type === "takeaway" && opts.pickup_location_id
+      ? await shippingService.resolvePickupSelection(opts.pickup_location_id, opts.pickup_date, { type: "order" })
+      : null;
+
   // ต้นทุนต่อหน่วย (snapshot จากสูตรล่าสุดของสินค้า) — ใส่ลง orderItem เพื่อคำนวณกำไรใน dashboard
   const costByProduct = await recipeService.getUnitCostByProduct(
     lines.map((l) => String(l.product_id))
@@ -274,6 +291,14 @@ async function persistOrder(
   if (opts.order_type === "delivery") {
     if (opts.delivery_fee_override && opts.delivery_fee != null) {
       delivery_fee = toSatang(Math.max(0, Number(opts.delivery_fee) || 0));
+    } else if (opts.storefront) {
+      // หน้าเว็บลูกค้า: ShippingZones + ขอบเขตจัดส่ง (ส่งไม่ได้ = 400) — shippingService
+      delivery_fee = (
+        await shippingService.quoteStorefrontDelivery({
+          province: opts.delivery_address?.province ?? null,
+          productIds: lines.map((l) => String(l.product_id)),
+        })
+      ).fee;
     } else {
       delivery_fee = toSatang(
         (
@@ -352,6 +377,9 @@ async function persistOrder(
           user_id: userId,
           order_type: opts.order_type,
           delivery_address: opts.order_type === "delivery" ? opts.delivery_address : null,
+          pickup_date: pickup?.pickup_date ?? null,
+          pickup_point: pickup?.pickup_point ?? null,
+          payment_due_at: opts.storefront ? new Date(Date.now() + ORDER_PAYMENT_WINDOW_MS) : null,
           subtotal,
           discount_amount,
           delivery_fee,
@@ -597,7 +625,15 @@ export async function getOrderByNo(orderNo: string) {
 export async function updateOrderStatus(
   id: string,
   next: OrderStatus,
-  opts: { cancelled_by?: string; cancelled_reason?: string } = {}
+  opts: {
+    cancelled_by?: string;
+    cancelled_reason?: string;
+    /**
+     * true = ยกเลิกออเดอร์ที่ชำระแล้วโดยไม่ตั้ง payment เป็น refunded อัตโนมัติ — ออเดอร์เป็น "ยกเลิก + ชำระแล้ว" = รอร้านโอนคืน
+     * แล้วร้านกดคืนเงินเอง (นโยบายฝั่งลูกค้า · cancelOrderByCustomer · docs/customer-backend-merge.md §8.8)
+     */
+    skipAutoRefund?: boolean;
+  } = {}
 ) {
   await dbConnect();
   assertObjectId(id);
@@ -640,14 +676,16 @@ export async function updateOrderStatus(
     // (BACKLOG 2.8) — BACKLOG3 §10: logic เหมือน preorderService เป๊ะ ย้ายไปใช้ร่วมกันที่
     // lib/orderLifecycle.ts แล้ว (คืนสต็อก/revoke-promo ด้านบนยังคงแยกเขียนเอง เพราะ cleanup
     // ตอนยกเลิกของ order/preorder ต่างกันจริง — preorder คืนโควตาต่อรายการแทน)
-    await registerAutoRefundOnCancel({
-      saga: cleanup,
-      entityKind: "order",
-      paymentFilter: { order_id: order._id },
-      currentPaymentStatus: order.payment_status,
-      cancelledBy: opts.cancelled_by,
-      entityId: order._id,
-    });
+    if (!opts.skipAutoRefund) {
+      await registerAutoRefundOnCancel({
+        saga: cleanup,
+        entityKind: "order",
+        paymentFilter: { order_id: order._id },
+        currentPaymentStatus: order.payment_status,
+        cancelledBy: opts.cancelled_by,
+        entityId: order._id,
+      });
+    }
 
     await cleanup.rollback();
 
@@ -670,6 +708,11 @@ export async function updateOrderStatus(
   );
   return presentOrderWithItems(order, cancelledItems);
 }
+
+/** ออเดอร์จากหน้าเว็บต้องชำระ (ส่งสลิป) ภายในกี่นาทีหลังสั่ง — เลยแล้วยกเลิกอัตโนมัติ (ผู้ใช้เลือก 30 นาที · §8.1) */
+export const ORDER_PAYMENT_WINDOW_MS = 30 * 60 * 1000;
+/** เหตุผลที่ระบบใส่ตอนยกเลิกเพราะหมดเวลาชำระ — ใช้แยกข้อความ + อนุญาตแนบสลิปย้อนหลังเพื่อเปิดออเดอร์กลับ */
+export const PAYMENT_EXPIRED_REASON = "หมดเวลาชำระเงิน (ระบบยกเลิกอัตโนมัติ)";
 
 /** สถานะที่ "ลูกค้า" ยกเลิกออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน */
 export const CUSTOMER_CANCELABLE_STATUSES: readonly OrderStatus[] = ["pending", "confirmed"];
@@ -729,4 +772,172 @@ export async function deleteOrder(id: string) {
     id,
     entityLabel: "ออเดอร์",
   });
+}
+
+// ── นโยบายยกเลิกของลูกค้า (ออเดอร์เว็บ) — docs/customer-backend-merge.md §8.8 ─────────────
+/**
+ * ลูกค้ายกเลิกออเดอร์ของตัวเอง (แบบฝั่งลูกค้า — ผู้ใช้เลือก 2026-10-05):
+ *   - pending / confirmed เท่านั้น (ร้านเริ่มเตรียมแล้ว = ติดต่อร้าน) · ออเดอร์หน้าร้าน (POS-) ยกเลิกผ่านร้านเท่านั้น
+ *   - ยังไม่ชำระ → ยกเลิก + คืนสต็อก/สิทธิ์โปรโมชัน
+ *   - ชำระแล้ว → ยกเลิกได้ด้วย แต่ **ไม่** ตั้ง payment เป็น refunded ให้ — ออเดอร์เป็น "ยกเลิก + ชำระแล้ว" = รอโอนคืน
+ *     แจ้งเจ้าของร้าน · ร้านโอนคืนแล้วกดคืนเงินเอง (POST /api/admin/payments/[id]/refund) ตัวเลขบัญชีจึงตรงความจริง
+ * ผู้เรียก (route) ต้องตรวจว่าเป็นเจ้าของออเดอร์แล้ว
+ */
+export async function cancelOrderByCustomer(id: string, userId: string, reason?: string | null) {
+  await dbConnect();
+  assertObjectId(id);
+  const doc = await orderModel
+    .findOne({ _id: id, deleted_at: null })
+    .select("order_no order_status payment_status total_amount")
+    .lean<{ order_no?: string; order_status: OrderStatus; payment_status?: string; total_amount: number } | null>();
+  if (!doc) throw notFound("ไม่พบออเดอร์ที่ระบุ");
+  if (String(doc.order_no ?? "").startsWith(`${orderNoPrefix("instore")}-`)) {
+    throw conflict("ออเดอร์หน้าร้านยกเลิกผ่านร้านเท่านั้น");
+  }
+  if (!CUSTOMER_CANCELABLE_STATUSES.includes(doc.order_status)) {
+    throw conflict(
+      `ยกเลิกออเดอร์เองได้เฉพาะตอนสถานะ ${CUSTOMER_CANCELABLE_STATUSES.join(" / ")} เท่านั้น ` +
+        `(สถานะปัจจุบัน: "${doc.order_status}") — หากต้องการยกเลิกกรุณาติดต่อร้าน`
+    );
+  }
+  const paid = doc.payment_status === "paid";
+  const result = await updateOrderStatus(id, "cancelled", {
+    cancelled_by: userId,
+    cancelled_reason: reason?.trim() || "ลูกค้ายกเลิกเอง",
+    skipAutoRefund: true,
+  });
+  if (paid) {
+    notificationService
+      .notify({
+        title: `ลูกค้ายกเลิกออเดอร์ที่ชำระแล้ว ${doc.order_no ?? ""} — รอโอนเงินคืน`.trim(),
+        message: `ยอด ${toBaht(doc.total_amount).toLocaleString("th-TH")} บาท · โอนคืนแล้วกด "คืนเงิน" ที่รายการชำระเงิน`,
+        module: "finance",
+        type: "warning",
+        link: adminLinks.order(id),
+      })
+      .catch((err) => log.error("order.customer_cancel_paid_notify_failed", { order_id: id, err }));
+  }
+  return result;
+}
+
+// ── หมดเวลาชำระ (ออเดอร์เว็บ 30 นาที) — docs/customer-backend-merge.md §8.8 ─────────────
+const EXPIRE_MAX_PER_RUN = 100;
+
+/** ส่งสลิปแล้ว (มี payment ที่รอตรวจและแนบสลิป) — ไม่นับว่าค้างจ่าย */
+async function hasSubmittedSlip(orderId: unknown): Promise<boolean> {
+  return !!(await paymentModel.exists({
+    order_id: orderId,
+    status: "pending",
+    slip_image_url: { $nin: [null, ""] },
+    deleted_at: null,
+  }));
+}
+
+/**
+ * ยกเลิกออเดอร์เว็บที่เลยกำหนดชำระ (payment_due_at) แล้วยังไม่ส่งสลิป → คืนสต็อก + สิทธิ์โปรโมชัน + แจ้งลูกค้า
+ * เรียกจาก cron (npm run cron:order-expiry ทุก 5 นาที) และแบบ lazy ก่อนลูกค้าเปิดรายการ/หน้าชำระเงิน (scope)
+ * ออเดอร์ที่ไม่มี payment_due_at (POS / แอดมินสร้าง / ออเดอร์เก่า) ไม่ถูกแตะ
+ */
+export async function expireUnpaidOrders(
+  scope: { userId?: string; orderId?: string; now?: Date } = {}
+): Promise<{ expired: string[] }> {
+  await dbConnect();
+  const filter: Record<string, unknown> = {
+    order_status: "pending",
+    payment_status: { $in: ["pending", "failed"] },
+    payment_due_at: { $lt: scope.now ?? new Date() },
+    deleted_at: null,
+  };
+  if (scope.userId) filter.user_id = scope.userId;
+  if (scope.orderId) filter._id = scope.orderId;
+  const candidates = await orderModel
+    .find(filter)
+    .select("_id order_no")
+    .limit(EXPIRE_MAX_PER_RUN)
+    .lean<Array<{ _id: unknown; order_no?: string }>>();
+
+  const expired: string[] = [];
+  for (const o of candidates) {
+    if (await hasSubmittedSlip(o._id)) continue;
+    try {
+      await updateOrderStatus(String(o._id), "cancelled", { cancelled_reason: PAYMENT_EXPIRED_REASON });
+      expired.push(String(o.order_no ?? o._id));
+    } catch (err) {
+      log.error("order.expire_failed", { order_id: String(o._id), err });
+    }
+  }
+  if (expired.length) log.info("order.expired_unpaid", { count: expired.length, orders: expired });
+  return { expired };
+}
+
+/** ออเดอร์นี้ถูกยกเลิกเพราะหมดเวลาชำระ และยังไม่ได้จ่าย → ลูกค้าแนบสลิปย้อนหลังเพื่อเปิดกลับได้ */
+export function canReopenWithLateSlip(order: {
+  order_status?: string | null;
+  payment_status?: string | null;
+  cancelled_reason?: string | null;
+}): boolean {
+  return (
+    order.order_status === "cancelled" &&
+    order.cancelled_reason === PAYMENT_EXPIRED_REASON &&
+    (order.payment_status === "pending" || order.payment_status === "failed")
+  );
+}
+
+/**
+ * แนบสลิปย้อนหลังหลังหมดเวลา (ผู้ใช้เลือกย้ายมา 2026-10-05): ตัดสต็อกใหม่ → กลับเป็น pending รอร้านตรวจสลิป
+ * ของไม่พอ = 409 เปิดกลับไม่ได้ (ไม่มีอะไรถูกตัดค้าง) · ได้กำหนดชำระใหม่ 30 นาที (ส่งสลิปแล้วจึงไม่ถูกยกเลิกซ้ำ)
+ * สิทธิ์โปรโมชันที่คืนไปตอนยกเลิก **ไม่ถูกบันทึกซ้ำ** (ส่วนลดในยอดออเดอร์ยังเท่าเดิม) — เรียกจาก paymentService ก่อนบันทึกสลิป
+ */
+export async function reopenExpiredOrder(id: string): Promise<void> {
+  await dbConnect();
+  assertObjectId(id);
+  const order = await orderModel
+    .findOne({ _id: id, deleted_at: null })
+    .select("order_no order_status payment_status cancelled_reason")
+    .lean<{ order_no?: string; order_status?: string; payment_status?: string; cancelled_reason?: string | null } | null>();
+  if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
+  if (!canReopenWithLateSlip(order)) throw conflict("ออเดอร์นี้ถูกยกเลิกแล้ว");
+
+  const items = await orderItemModel
+    .find({ order_id: id, deleted_at: null })
+    .select("product_id quantity")
+    .lean<Array<{ product_id: unknown; quantity: number }>>();
+  const stockItems = items.map((it) => ({ product_id: String(it.product_id), quantity: it.quantity }));
+  try {
+    await productService.deductStockForOrder(stockItems);
+  } catch (err) {
+    if ((err as { status?: number })?.status === 409) {
+      throw conflict("สินค้าบางรายการหมดแล้ว เปิดคำสั่งซื้อกลับไม่ได้ — กรุณาติดต่อร้านเพื่อขอคืนเงิน");
+    }
+    throw err;
+  }
+
+  const reopened = await orderModel.findOneAndUpdate(
+    { _id: id, order_status: "cancelled", cancelled_reason: PAYMENT_EXPIRED_REASON, deleted_at: null },
+    {
+      $set: {
+        order_status: "pending",
+        cancelled_at: null,
+        cancelled_by: null,
+        cancelled_reason: null,
+        payment_due_at: new Date(Date.now() + ORDER_PAYMENT_WINDOW_MS),
+      },
+    }
+  );
+  if (!reopened) {
+    // มีคนเปลี่ยนสถานะแทรกเข้ามา → คืนสต็อกที่เพิ่งตัด
+    await productService
+      .restockForOrder(stockItems)
+      .catch((err) => log.error("order.reopen_restock_failed", { order_id: id, err }));
+    throw conflict("สถานะคำสั่งซื้อเปลี่ยนไปแล้ว กรุณาโหลดหน้าใหม่");
+  }
+  notificationService
+    .notify({
+      title: `เปิดออเดอร์กลับ ${order.order_no ?? ""} — ลูกค้าแนบสลิปหลังหมดเวลา`.trim(),
+      message: "ตัดสต็อกใหม่แล้ว รอตรวจสลิป",
+      module: "order",
+      type: "info",
+      link: adminLinks.order(id),
+    })
+    .catch((err) => log.error("order.reopen_notify_failed", { order_id: id, err }));
 }

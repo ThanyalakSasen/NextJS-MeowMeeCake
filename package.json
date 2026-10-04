@@ -25,6 +25,7 @@
     "migrate:line-user-id": "tsx scripts/migrate-line-user-id.ts",
     "remind:preorders": "tsx scripts/send-preorder-reminders.ts",
     "cron:preorder-rounds": "tsx scripts/run-preorder-rounds.ts",
+    "cron:order-expiry": "tsx scripts/run-order-expiry.ts",
     "backfill:payment-due": "tsx scripts/backfill-payment-due.ts",
     "check:data-integrity": "tsx scripts/check-data-integrity.ts",
     "summary:monthly": "tsx scripts/send-monthly-summary.ts"
@@ -35,6 +36,8 @@
     "jose": "^5.10.0",
     "mongoose": "^9.9.4",
     "next": "^15.1.6",
+    "promptpay-qr": "^0.5.0",
+    "qrcode": "^1.5.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "sweetalert2": "^11.26.25",
@@ -43,6 +46,7 @@
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.7",
     "@types/node": "^22.10.7",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19.0.7",
     "@types/react-dom": "^19.0.3",
     "@vitest/coverage-v8": "^5.0.0",

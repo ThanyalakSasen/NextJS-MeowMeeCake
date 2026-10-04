@@ -40,6 +40,7 @@ import type { z } from "zod";
 // ใช้ร่วมกันได้เลย ไม่ต้องสร้างซ้ำ
 import type { updateDeliveryBody } from "../schemas/order";
 import { adminLinks } from "../lib/adminLinks";
+import * as shippingService from "./shippingService";
 import {
   assertCustomizationIds,
   getCustomizations,
@@ -96,6 +97,9 @@ export interface CreatePreorderInput {
   items: PreorderLineInput[];
   /** ส่วนลดกรอกมือ — มีผลเฉพาะเมื่อเรียกจากฝั่งแอดมิน (opts.allowManualDiscount) */
   discount_amount?: number;
+  /** takeaway: จุดรับ (_id ของหน้าร้านประจำสัปดาห์) + วันรับ "YYYY-MM-DD" (ช่วงวันของรอบ) — ไม่ส่ง = null */
+  pickup_location_id?: string | null;
+  pickup_date?: string | null;
 }
 
 export interface ListPreorderQuery {
@@ -130,7 +134,8 @@ async function quantityAlreadyOrdered(userId: string, roundId: unknown): Promise
 export async function createPreorder(
   userId: string,
   input: CreatePreorderInput,
-  opts: { allowManualDiscount?: boolean } = {}
+  /** storefront = สั่งจากหน้าเว็บลูกค้า → ค่าส่งจาก ShippingZones + ขอบเขตจัดส่ง (docs/customer-backend-merge.md §8.7) */
+  opts: { allowManualDiscount?: boolean; storefront?: boolean } = {}
 ) {
   await dbConnect();
   await assertRefExists(userModel, userId, "ผู้ใช้", "user_id");
@@ -157,6 +162,15 @@ export async function createPreorder(
     // (ไม่ได้ทำหน้าที่กัน mass-assignment ที่ต้องรอ route adopt zod เหมือน service อื่น)
     delivery_address = Object.fromEntries(ADDRESS_FIELDS.map((f) => [f, addr[f]]));
   }
+
+  // takeaway + เลือกจุดรับ/วันรับ → ตรวจกับหน้าร้านประจำสัปดาห์ (ช่วงวันของรอบ · ผิด = 400)
+  const pickup =
+    input.order_type === "takeaway" && input.pickup_location_id
+      ? await shippingService.resolvePickupSelection(input.pickup_location_id, input.pickup_date, {
+          type: "preorder",
+          roundPickupDate: round.pickup_date,
+        })
+      : null;
 
   // ── resolve รายการ + คิดราคา ──
   // BACKLOG2 §2: เดิมวน await ทีละรายการ (พรีออเดอร์ N รายการ = query ~2N ครั้งทยอยทีละรายการ ผ่าน
@@ -242,7 +256,14 @@ export async function createPreorder(
 
   // ── ค่าส่ง (server คิดเอง) ── deliveryService ยังทำงานเป็นบาท — แปลงข้ามโดเมนแค่จุดนี้
   let delivery_fee = 0;
-  if (input.order_type === "delivery") {
+  if (input.order_type === "delivery" && opts.storefront) {
+    delivery_fee = (
+      await shippingService.quoteStorefrontDelivery({
+        province: delivery_address?.province ?? null,
+        productIds: lines.map((l) => String(l.product_id)),
+      })
+    ).fee;
+  } else if (input.order_type === "delivery") {
     delivery_fee = toSatang(
       (
         await deliveryService.calcDeliveryFee({
@@ -288,6 +309,8 @@ export async function createPreorder(
           round_id: round._id,
           order_type: input.order_type,
           delivery_address,
+          pickup_date: pickup?.pickup_date ?? null,
+          pickup_point: pickup?.pickup_point ?? null,
           subtotal,
           discount_amount,
           delivery_fee,

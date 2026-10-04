@@ -25,6 +25,7 @@ import * as preorderService from "./preorderService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import type { PaymentStatus } from "./orderService";
 import { adminLinks } from "../lib/adminLinks";
+import { buildPromptPayQr } from "./promptpayService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -84,6 +85,8 @@ export async function createPayment(input: CreatePaymentInput) {
     throw badRequest("amount ต้องเป็นตัวเลขมากกว่า 0");
   }
 
+  // ออเดอร์เว็บที่ถูกยกเลิกเพราะหมดเวลาชำระ + แนบสลิปมา → เปิดกลับก่อนบันทึก (docs/customer-backend-merge.md §8.8)
+  let reopenOrder = false;
   if (hasOrder) {
     assertObjectId(input.order_id as string, "order_id");
     const order = await orderModel
@@ -94,7 +97,14 @@ export async function createPayment(input: CreatePaymentInput) {
       throw badRequest("ออเดอร์นี้ไม่ได้เป็นของผู้ใช้ที่ระบุ");
     }
     if (order.payment_status === "paid") throw conflict("ออเดอร์นี้ชำระเงินแล้ว");
-    if (order.order_status === "cancelled") throw conflict("ออเดอร์นี้ถูกยกเลิกแล้ว");
+    if (orderService.canReopenWithLateSlip(order)) {
+      if (!input.slip_image_url) {
+        throw badRequest("หมดเวลาชำระเงินแล้ว — แนบสลิปเพื่อขอเปิดคำสั่งซื้อกลับ");
+      }
+      reopenOrder = true;
+    } else if (order.order_status === "cancelled") {
+      throw conflict("ออเดอร์นี้ถูกยกเลิกแล้ว");
+    }
     if (Math.abs(amount - order.total_amount) > AMOUNT_TOLERANCE) {
       throw badRequest(`ยอดชำระต้องเท่ากับยอดออเดอร์ (${toBaht(order.total_amount)} บาท)`);
     }
@@ -126,6 +136,9 @@ export async function createPayment(input: CreatePaymentInput) {
       { payment_id: String(activePayment._id) }
     );
   }
+
+  // เปิดออเดอร์ที่หมดเวลากลับ (ตัดสต็อกใหม่ — ของไม่พอ = 409 ไม่สร้าง payment)
+  if (reopenOrder) await orderService.reopenExpiredOrder(String(input.order_id));
 
   let payment;
   try {
@@ -237,6 +250,19 @@ export async function submitSlip(
   if (payment.status === "paid") throw conflict("รายการนี้ได้รับการยืนยันแล้ว");
   if (payment.status === "refunded") throw conflict("รายการนี้ถูกคืนเงินแล้ว");
 
+  // ออเดอร์เว็บถูกยกเลิกเพราะหมดเวลาชำระ → แนบสลิปย้อนหลังเปิดกลับ (ตัดสต็อกใหม่ · ของไม่พอ = 409)
+  if (payment.order_id) {
+    const order = await orderModel
+      .findOne({ _id: payment.order_id, deleted_at: null })
+      .select("order_status payment_status cancelled_reason")
+      .lean<{ order_status?: string; payment_status?: string; cancelled_reason?: string | null } | null>();
+    if (order && orderService.canReopenWithLateSlip(order)) {
+      await orderService.reopenExpiredOrder(String(payment.order_id));
+    } else if (order?.order_status === "cancelled") {
+      throw conflict("ออเดอร์นี้ถูกยกเลิกแล้ว");
+    }
+  }
+
   payment.slip_image_url = input.slip_image_url;
   if (input.promptpay_ref !== undefined) payment.promptpay_ref = input.promptpay_ref;
   payment.status = "pending"; // ส่งใหม่หลังเคยถูกปฏิเสธ → กลับมารอตรวจ
@@ -319,6 +345,83 @@ export async function deletePayment(id: string) {
   payment.deleted_at = new Date();
   await payment.save();
   return { deleted: true, _id: payment._id };
+}
+
+// ── หน้าชำระเงินของลูกค้า: QR พร้อมเพย์ + สถานะ (docs/customer-backend-merge.md §8.8) ─────────
+export type PaymentPageKind = "order" | "preorder";
+
+/** ยังชำระเงิน/ส่งสลิปได้ไหม — null = ได้ */
+function paymentBlockedReason(doc: any, kind: PaymentPageKind): string | null {
+  if (doc.order_status === "cancelled") {
+    if (kind === "order" && orderService.canReopenWithLateSlip(doc)) {
+      return "หมดเวลาชำระเงินแล้ว คำสั่งซื้อนี้ถูกยกเลิกอัตโนมัติ — ถ้าโอนเงินไปแล้ว แนบสลิปเพื่อขอเปิดคำสั่งซื้อกลับ";
+    }
+    return "คำสั่งซื้อนี้ถูกยกเลิกแล้ว";
+  }
+  if (doc.order_status === "completed") return "คำสั่งซื้อนี้เสร็จสิ้นแล้ว";
+  if (doc.payment_status === "paid") return "คำสั่งซื้อนี้ชำระเงินเรียบร้อยแล้ว";
+  if (doc.payment_status === "refunded") return "คำสั่งซื้อนี้คืนเงินแล้ว";
+  return null;
+}
+
+/**
+ * GET /api/shop/{orders|preorders}/[id]/payment — ข้อมูลหน้าชำระเงินของเจ้าของคำสั่งซื้อ
+ *   ออเดอร์: ยกเลิกก่อนถ้าเลยกำหนดชำระแล้ว (lazy — orderService.expireUnpaidOrders) · พรีออเดอร์ใช้กติกาของหลัก (payment_due_at + cron)
+ *   QR ออกเฉพาะตอนยังต้องชำระ · หมดเวลาแล้ว (ออเดอร์) → late_upload = แนบสลิปย้อนหลังเพื่อเปิดกลับได้ (ไม่ออก QR ใหม่)
+ *   ร้านยังไม่ตั้งเลขพร้อมเพย์ → qr_image null + qr_error (ไม่ทำให้หน้าพัง)
+ */
+export async function getPaymentPage(kind: PaymentPageKind, id: string, userId: string) {
+  await dbConnect();
+  if (!isObjectId(id)) throw notFound("ไม่พบคำสั่งซื้อ");
+  if (kind === "order") await orderService.expireUnpaidOrders({ userId, orderId: id });
+
+  const model: any = kind === "order" ? orderModel : preorderModel;
+  const numberField = kind === "order" ? "order_no" : "preorder_no";
+  const doc = await model
+    .findOne({ _id: id, user_id: userId, deleted_at: null })
+    .select(`${numberField} order_status payment_status total_amount payment_id payment_due_at cancelled_reason`)
+    .lean();
+  if (!doc) throw notFound("ไม่พบคำสั่งซื้อ");
+
+  const payment = await paymentModel
+    .findOne({ [kind === "order" ? "order_id" : "preorder_id"]: doc._id, deleted_at: null })
+    .sort({ created_at: -1 })
+    .select("status slip_image_url")
+    .lean<{ _id: unknown; status: string; slip_image_url?: string | null } | null>();
+
+  const amount = toBaht(Number(doc.total_amount ?? 0));
+  const blocked = paymentBlockedReason(doc, kind);
+  const lateUpload = kind === "order" && orderService.canReopenWithLateSlip(doc);
+  let qr: { qr_image: string; account_name: string } | null = null;
+  let qrError: string | null = null;
+  if (!blocked && amount > 0) {
+    try {
+      qr = await buildPromptPayQr(amount);
+    } catch (err: any) {
+      qrError = err?.message ?? "สร้าง QR ไม่สำเร็จ";
+    }
+  }
+
+  return {
+    kind,
+    id: String(doc._id),
+    order_no: String(doc[numberField] ?? ""),
+    amount,
+    order_status: doc.order_status,
+    payment_status: doc.payment_status,
+    can_pay: !blocked,
+    blocked_reason: blocked,
+    late_upload: lateUpload,
+    qr_image: qr?.qr_image ?? null,
+    account_name: qr?.account_name ?? "",
+    qr_error: qrError,
+    payment_id: payment ? String(payment._id) : null,
+    payment_record_status: payment?.status ?? null,
+    slip_url: payment?.slip_image_url ?? null,
+    // หมดเขตชำระ + เวลา server — หน้าเว็บนับถอยหลังได้แม่นแม้นาฬิกาเครื่องลูกค้าเพี้ยน
+    payment_due_at: doc.payment_due_at ?? null,
+    server_time: new Date(),
+  };
 }
 
 // re-export ไว้ให้ route ใช้ตรวจ enum ได้สะดวก

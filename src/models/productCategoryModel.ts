@@ -5,6 +5,11 @@ const productCategorySchema = new mongoose.Schema({
     type: String,
     required: true,
   },
+  // ส่งได้ทั่วประเทศไหม (ออเดอร์เว็บ — src/lib/shipping.ts) · ปิด = ส่งได้เฉพาะในจังหวัดร้าน (StoreSettings.province)
+  // ไม่ใส่ default โดยตั้งใจ: หมวดที่ยังไม่เคยตั้งค่า fallback ไปดูชื่อหมวด (ซาวโดว์ = ทั่วประเทศ) ใน categoryShipsNationwide
+  ships_nationwide: {
+    type: Boolean,
+  },
   deleted_at: {
     type: Date,
     default: null,

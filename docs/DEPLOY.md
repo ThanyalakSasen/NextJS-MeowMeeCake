@@ -11,7 +11,7 @@
  ① เตรียมเซิร์ฟเวอร์ ─▶ ② เตรียมก่อนวัน deploy ─▶ ③ merge PR ─▶ ④ ตั้ง .env.local ─▶ ⑤ build + รัน (pm2)
      (ครั้งแรกครั้งเดียว)    (DNS, backup, LINE, secret)                                          │
                                                                                                     ▼
- ⑨ ตรวจรับ ◀── ⑧ ตั้ง cron 4 ตัว ◀── ⑦ งานข้อมูลหลัง deploy ◀── ⑥ nginx + HTTPS (ครั้งแรก)
+ ⑨ ตรวจรับ ◀── ⑧ ตั้ง cron 5 ตัว ◀── ⑦ งานข้อมูลหลัง deploy ◀── ⑥ nginx + HTTPS (ครั้งแรก)
 ```
 
 | องค์ประกอบ | ใช้อะไร |
@@ -253,7 +253,7 @@ PATCH https://api.example.com/api/admin/products/6a814a064b44d4bf31fb2c4b   { "i
 
 ---
 
-## ⑧ ตั้ง cron 4 ตัว
+## ⑧ ตั้ง cron 5 ตัว
 
 ```bash
 sudo -iu meowmee
@@ -268,6 +268,9 @@ PATH=/usr/bin:/bin:/usr/local/bin
 
 # วงจรรอบพรีออเดอร์ — เปิด/ปิดรอบตามเวลา · ยกเลิกคนไม่จ่ายเกินกำหนด · สร้างใบสั่งผลิตตอนปิดรอบ (preorder-round-flow.md §6)
 */15 * * * * cd /srv/meowmeecake/app && npm run -s cron:preorder-rounds >> /srv/meowmeecake/logs/preorder-rounds.log 2>&1
+
+# ยกเลิกออเดอร์เว็บที่เลยกำหนดชำระ 30 นาทีแล้วยังไม่ส่งสลิป + คืนสต็อก (customer-backend-merge.md §8.8)
+*/5 * * * * cd /srv/meowmeecake/app && npm run -s cron:order-expiry >> /srv/meowmeecake/logs/order-expiry.log 2>&1
 
 # เตือนลูกค้าก่อนวันรับพรีออเดอร์ทาง LINE (LINE.md §9.7)
 0 18 * * * cd /srv/meowmeecake/app && npm run -s remind:preorders >> /srv/meowmeecake/logs/preorder-reminders.log 2>&1

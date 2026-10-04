@@ -40,7 +40,9 @@ export const POST = withAuth(async (session, req) => {
     order_type: body.order_type,
     delivery_address,
     items: body.items,
-  });
+    pickup_location_id: body.pickup_location_id ?? null,
+    pickup_date: body.pickup_date ?? null,
+  }, { storefront: true });
   audit(req, {
     action: `สั่งพรีออเดอร์ ${preorder?.preorder_no ?? ""}`.trim(),
     action_type: "CREATE",
