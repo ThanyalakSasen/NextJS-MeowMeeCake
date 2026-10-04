@@ -26,6 +26,17 @@ const selectedOptionSchema = new mongoose.Schema(
   { _id: false } // ✅ ไม่ต้องสร้าง _id ให้ sub-document
 );
 
+// ตัวเลือกที่เลือกในแต่ละกลุ่ม (snapshot ชื่อ/ราคาตอนสั่ง — docs/customer-backend-merge.md §8)
+const selectedVariantSchema = new mongoose.Schema(
+  {
+    group_name: { type: String, default: "" },
+    variant_id: { type: mongoose.Schema.Types.ObjectId, ref: "ProductVariants", default: null },
+    variant_name: { type: String, required: true },
+    variant_price: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const cartItemSchema = new mongoose.Schema(
   {
     cart_id: {
@@ -42,6 +53,15 @@ const cartItemSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "ProductVariants",
       default: null,
+    },
+    selected_variants: {
+      type: [selectedVariantSchema],
+      default: [],
+    },
+    // key ของชุดตัวเลือก (ตัวเลือก + ออปชัน) — ใช้รวมรายการซ้ำในตะกร้า
+    customization_key: {
+      type: String,
+      default: "",
     },
     selected_options: {
       type: [selectedOptionSchema], // ✅ แก้ syntax array of objects

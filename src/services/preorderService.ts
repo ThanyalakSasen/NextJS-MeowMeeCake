@@ -40,6 +40,12 @@ import type { z } from "zod";
 // ใช้ร่วมกันได้เลย ไม่ต้องสร้างซ้ำ
 import type { updateDeliveryBody } from "../schemas/order";
 import { adminLinks } from "../lib/adminLinks";
+import {
+  assertCustomizationIds,
+  getCustomizations,
+  resolveCustomization,
+  type CustomizationInput,
+} from "./productCustomizationService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -77,7 +83,7 @@ const ADDRESS_FIELDS = [
 ] as const;
 
 // ── Types ────────────────────────────────────────────────────
-export interface PreorderLineInput {
+export interface PreorderLineInput extends CustomizationInput {
   round_item_id: string;
   quantity: number;
   special_request?: string | null;
@@ -166,6 +172,7 @@ export async function createPreorder(
       throw badRequest("มี round_item_id ซ้ำใน items — รวมจำนวนเป็นรายการเดียว");
     }
     seen.add(String(raw.round_item_id));
+    assertCustomizationIds(raw);
 
     const quantity = Number(raw.quantity);
     if (!Number.isInteger(quantity) || quantity < 1) {
@@ -182,6 +189,7 @@ export async function createPreorder(
   // docs/preorder-round-flow.md ปัญหา 2 — เดิม product.preorder_config (บังคับกรอก) ไม่ถูกใช้เลย
   // ยอดที่ลูกค้าคนนี้จองไว้แล้วในรอบเดียวกัน (พรีออเดอร์ที่ยังไม่ยกเลิก) ต่อ round_item — ใช้คุม max_order_qty ต่อคน
   const alreadyByRoundItem = await quantityAlreadyOrdered(userId, round._id);
+  const customizations = await getCustomizations(resolvedItems.map(({ product }) => String(product._id)));
 
   const lines = resolvedItems.map(({ item, product, unit_price }, idx) => {
     const quantity = quantities[idx];
@@ -205,14 +213,24 @@ export async function createPreorder(
     // BACKLOG §3.11 เฟส 5b — unit_price จาก preorderRoundService.getOrderableRoundItems() เป็นสตางค์
     // อยู่แล้ว (price_override/sale_price/product_price เป็นสตางค์ทั้งหมดตั้งแต่เฟส 5b) ไม่ต้องแปลง
     // อะไรเพิ่ม — ก่อนหน้านี้ (เฟส 1-5a) ยังต้อง toSatang() ตรงนี้เพราะฝั่งสินค้ายังเป็นบาทอยู่
-    const unitPriceSatang = unit_price;
+    // ราคารอบ (price_override / ราคาสินค้า) + ตัวเลือก/ออปชันที่เลือก
+    const custom = resolveCustomization(
+      customizations.get(String(product._id)) ?? { groups: [], options: [] },
+      input.items[idx],
+      product.product_name_th
+    );
+    const unitPriceSatang = toSatang(unit_price + custom.extra_price);
     return {
       round_item_id: item._id,
       product_id: product._id,
       product_snapshot: {
         product_name_th: product.product_name_th,
         product_name_eng: product.product_name_eng,
+        variant_name: custom.variant_name,
       },
+      variant_id: custom.variant_id,
+      selected_variants: custom.selected_variants,
+      selected_options: custom.selected_options,
       quantity,
       unit_price: unitPriceSatang,
       total_price: toSatang(unitPriceSatang * quantity),
@@ -290,6 +308,9 @@ export async function createPreorder(
         round_item_id: l.round_item_id,
         product_id: l.product_id,
         product_snapshot: l.product_snapshot,
+        variant_id: l.variant_id,
+        selected_variants: l.selected_variants,
+        selected_options: l.selected_options,
         pickup_date: round.pickup_date,
         special_request: l.special_request,
         quantity: l.quantity,

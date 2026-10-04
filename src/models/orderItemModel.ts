@@ -20,12 +20,25 @@ const selectedOptionSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// ตัวเลือกที่เลือกในแต่ละกลุ่ม (snapshot ชื่อ/ราคาตอนสั่ง — docs/customer-backend-merge.md §8)
+const selectedVariantSchema = new mongoose.Schema(
+  {
+    group_name: { type: String, default: "" },
+    variant_id: { type: mongoose.Schema.Types.ObjectId, ref: "ProductVariants", default: null },
+    variant_name: { type: String, required: true },
+    variant_price: { type: Number, default: 0 },
+  },
+  { _id: false }
+);
+
 const orderItemSchema = new mongoose.Schema(
   {
     order_id: { type: mongoose.Schema.Types.ObjectId, ref: "Orders", required: true },
     product_id: { type: mongoose.Schema.Types.ObjectId, ref: "Products", required: true },
     variant_id: { type: mongoose.Schema.Types.ObjectId, ref: "ProductVariants", default: null },
     product_snapshot: { type: productSnapshotSchema, required: true },
+    // variant_id = ตัวเลือกเดียว (แบบเดิม) · เลือกหลายอย่างดูที่ selected_variants · product_snapshot.variant_name = ข้อความรวม
+    selected_variants: { type: [selectedVariantSchema], default: [] },
     selected_options: { type: [selectedOptionSchema], default: [] },
     special_request: { type: String, default: null },
     quantity: { type: Number, required: true, min: 1 },

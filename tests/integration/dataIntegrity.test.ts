@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import productModel from "@/models/productModel";
 import notificationModel from "@/models/notificationModel";
 import { checkDataIntegrity } from "@/services/dataIntegrityService";
-import { makeProduct, makeVariant } from "./helpers";
+import { makeProduct } from "./helpers";
 
 /**
  * docs/BACKLOG4.md Y11 — ตรวจอาการของการเขียน DB ตรงนอกแอป (BACKLOG2 §16 + product_type "ready")
@@ -43,14 +43,5 @@ describe("dataIntegrityService (BACKLOG4 Y11)", () => {
     const n = await notificationModel.findOne().lean<{ title: string; module: string }>();
     expect(n!.title).toContain("6");
     expect(n!.module).toBe("system");
-  });
-
-  it("สต็อกสินค้า ≠ ผลรวม variant_stock → variant_stock_sum", async () => {
-    const cake = await makeProduct({ product_stock_quantity: 9 });
-    await makeVariant(String(cake._id), { variant_stock: 4 });
-    await makeVariant(String(cake._id), { variant_stock: 3 });
-    const res = await checkDataIntegrity();
-    expect(codesFor(res, cake._id)).toEqual(["variant_stock_sum"]);
-    expect(res.notified).toBe(false);
   });
 });

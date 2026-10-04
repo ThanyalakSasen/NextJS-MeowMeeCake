@@ -112,7 +112,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | 14 | จัดการรีวิวขั้นสูง | `/owner/reviews` (+ `bulk` · `analytics` · `dashboard` · `filter-options` · `products/[id]`) · `/owner/review-presets` | ตอบกลับ · ปักหมุด · สถานะ · แท็ก/โน้ตภายใน · อ่านแล้ว — หลักมีแค่ซ่อน + sentiment |
 | 15 | อัปโหลดรูป/วิดีโอในรีวิว | `/customer/reviews/upload` | |
 | 16 | หมวดรีวิว (aspect) แบบเต็ม | `/owner/aspects/reorder` | เรียงลำดับ · เปิด/ปิด · ไอคอน |
-| 17 | ตัวเลือกสินค้าแบบกลุ่ม | `/owner/products/[id]/customization` | `ProductVariantGroups` (เช่นเลือกครีมชีส/มะยงชิด) — ⚠️ ชนกับ Y9 ของหลัก (ตัวเลือกมีสต็อก) |
+| 17 | ✅ ตัวเลือกสินค้าแบบกลุ่ม — **ย้ายแล้ว (§8.3 ขั้น 1)** | `/owner/products/[id]/customization` | `ProductVariantGroups` (เช่นเลือกครีมชีส/มะยงชิด) · เลิก Y9 แล้ว |
 | 18 | แจ้งลูกค้าเมื่อเปิดรอบ/มีโปรใหม่ | (`customerBroadcast`) | `customer_notified_at` ของรอบ/โปรโมชัน |
 | 19 | dashboard รอบพรีออเดอร์ + รายชื่อลูกค้าในรอบ | `/owner/preorder-rounds/dashboard` · `/[id]/customers` | หลักกรองพรีออเดอร์ตามรอบได้ แต่ไม่มีหน้าสรุป |
 | 20 | ยกเลิกออเดอร์ทั่วไปที่ไม่จ่ายอัตโนมัติ + นโยบายยกเลิกของลูกค้า | (`orderExpiry` · `cancelPolicy`) | หลักมีกำหนดชำระเฉพาะพรีออเดอร์ |
@@ -140,3 +140,83 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 
 กำหนดชำระพรีออเดอร์ + ยกเลิกอัตโนมัติ · สร้างใบผลิตอัตโนมัติตอนปิดรอบ · เพิ่มสต็อกเมื่อผลิตเสร็จ · แจ้งเตือน LINE ถึงร้าน (+ ลิงก์ 🔗) ·
 สรุปยอดรายเดือน · ตรวจข้อมูลผิดปกติรายวัน · ลงเวลาทำงาน · สลิปเป็นไฟล์ส่วนตัว (#54) · สถานะจัดส่ง/เลขพัสดุ · dashboard แยกช่องทาง
+
+---
+
+## 8. เริ่มรวม (2026-10-05)
+
+### 8.1 ข้อตกลงจุดที่ทับกัน (ผู้ใช้ตอบแล้ว)
+
+| เรื่อง | ตัดสินใจ | ผล |
+|---|---|---|
+| path API ลูกค้า | ใช้ **`/api/shop/*` ของหลัก** | หน้าเว็บลูกค้าต้องเปลี่ยน path ที่เรียก (ไม่ใช่ `/api/customer/*` เดิม) |
+| ล็อกอิน | **เก็บทั้งสองไว้** (next-auth ของฝั่งลูกค้า + JWT ของหลัก) | ต้องให้ route `/api/shop/*` รู้จัก session ของ next-auth ด้วย (ขั้น 3) |
+| ตัวเลือกสินค้า | **กลุ่มตัวเลือกบวกราคา ไม่นับสต็อก** (แบบฝั่งลูกค้า) | เลิก Y9 (สต็อกต่อตัวเลือก) — ✅ ทำแล้ว §8.3 |
+| ผูก LINE ลูกค้า | **`line_user_id`** + ย้ายค่า `lineId` เดิมมา | ไม่กระทบฝั่งเจ้าของร้าน (แจ้งเตือนร้านใช้ `LINE_TARGET_ID` · `/profile` + `/api/shop/me/line` ใช้ `line_user_id` อยู่แล้ว) · สคริปต์ย้าย = dry-run · ผู้ใช้รัน `--apply` เอง |
+| ค่าส่ง | **เก็บทั้งสอง** — ออเดอร์จากหน้าเว็บลูกค้าใช้ `ShippingZones` (+ จุดรับสินค้า/ตลาดนัด) · หลังร้าน/POS ใช้ `DeliveryZones` | ค่าส่งคนละตาราง — ต้องเลือกตารางตามช่องทางให้ชัดในโค้ด |
+| API เจ้าของร้านของฝั่งลูกค้า (`/api/owner/*`) | **ไม่ย้ายส่วนที่ซ้ำ** — ย้ายเฉพาะที่หลักไม่มีเข้า `/api/admin/*` | ตั้งค่าร้าน · รีวิวขั้นสูง · ชุดสินค้า · คำค้นเทียบเคียง · กลุ่มตัวเลือก ฯลฯ |
+| ไม่จ่ายเงิน | **พรีออเดอร์ใช้ของหลัก** (กำหนดชำระ + ยกเลิกอัตโนมัติ) · **ออเดอร์ปกติจากเว็บ** เพิ่ม orderExpiry + นโยบายยกเลิกของฝั่งลูกค้า (ไม่ใช้กับ `POS-`) | |
+| ขั้น 0 (ด่วน) | **แก้โค้ดฝั่งลูกค้าเลย** (`Downloads/backend`) ระหว่างที่ยังรวมไม่เสร็จ | ใช้ `is_preorder` แทน `product_type` · เลิกเขียน `product_type: "ready"` + สต็อก 0 ตอนปิดรอบ · ผู้ใช้ deploy เอง (ต้องยืนยันว่าโค้ดชุดนี้ = ตัวที่รันจริง) |
+| ขอบเขตฟีเจอร์ลูกค้า | **ตามที่หน้าเว็บลูกค้าใช้จริง** — `Downloads/frontend/frontend` (§8.4) | ใช้เกือบครบ §7.1 → ขั้น 6 = ย้ายเกือบทั้งหมด |
+| next-auth | **ย้ายมาไว้ใน backend หลัก** (`/api/auth/[...nextauth]`) | `/api/shop/*` รับทั้ง cookie JWT เดิม + session next-auth · users ชุดเดียว |
+| หมดเวลาจ่าย (ออเดอร์เว็บ) | **30 นาที** (แบบฝั่งลูกค้า) | ยกเลิก + คืนสต็อก/คูปอง/แต้ม · ไม่ใช้กับ POS และออเดอร์ที่ส่งสลิปแล้ว |
+| ส่วนลดซ้อน | **แบบฝั่งลูกค้า** — คูปองส่วนตัว **หรือ** โค้ด 1 อย่าง + ใช้แต้มร่วมได้ | แต้ม: 25 บาท = 1 แต้ม · 10 แต้ม = 1 บาท · ลดได้ ≤ 30% ของยอดสินค้า · ขั้นต่ำ 100 แต้ม · อายุ 365 วัน |
+| แจ้งเตือนลูกค้า | **กระดิ่งในเว็บ + LINE** | ทุกคนเห็นในเว็บ (`CustomerNotifications`) · LINE ส่งผ่าน `customerNotifyService` ของหลักครั้งเดียว (มีตัวกันโควตา) — ไม่ส่งซ้ำ 2 ทาง |
+| รีวิว | **แสดงทันที** ร้านซ่อนทีหลังได้ | `status` เริ่มต้น `approved` · เพิ่มปักหมุด / ตอบกลับ / แท็ก-โน้ตภายใน / อ่านแล้ว |
+| ออเดอร์เก่า `ORD-<timestamp>` | **นับเป็น "เว็บ"** ใน dashboard + สรุปรายเดือน | แก้ตัวแยกช่องทาง ไม่แก้ข้อมูลใน DB |
+| พรีออเดอร์หลายตัวเลือก | **อยู่ใบเดียวได้** | เลิกห้าม `round_item_id` ซ้ำ ถ้าตัวเลือกต่างกัน · โควตารอบ / สูงสุดต่อคน นับรวมทุกแถว |
+| ⏳ **หลังร้านตัวไหน** | **ยังไม่ตัดสินใจ — ต้องคุยกับทีม** | หน้าเว็บลูกค้ามี `/owner` + `/employee` ครบชุด (เรียก `/api/owner/*` 43 เส้น + route ทั่วไป) ซ้อนกับ FrontEnd repo · ระหว่างนี้ทำเฉพาะฝั่งลูกค้า (`/api/shop/*`) · **ปิดพอร์ต 4000 ไม่ได้จนกว่าจะตัดสินใจ** |
+
+### 8.2 ลำดับงาน (จัดลำดับใหม่ 2026-10-05)
+
+| ลำดับ | ขั้น | งาน | ต้องรอ | สถานะ |
+|---|---|---|---|---|
+| — | 1 | กลุ่มตัวเลือก + ออปชัน (ตัวเลือกไม่มีสต็อก) · เลิก Y9 | — | ✅ 2026-10-05 (§8.3) |
+| **P0** | 0 | แก้ `Downloads/backend`: `product_type` → `is_preorder` (ตะกร้า · checkout · POS) · ตอนปิดรอบเลิกเขียน `product_type`/สต็อก 0 | ผู้ใช้ยืนยันว่าโค้ดตรงกับตัวที่รัน + deploy เอง | ⏳ |
+| P1 | 2 | สคริปต์ย้าย `lineId` → `line_user_id` (dry-run · ผู้ใช้รัน `--apply`) | — | ⏳ |
+| P1 | 3 | next-auth ใน backend หลัก · `/api/shop/*` รับ 2 แบบ · สมัคร/ยืนยันอีเมล/ลืมรหัสผ่าน/ตั้งรหัสใหม่ (nodemailer) | ตั้งค่า SMTP + `NEXTAUTH_SECRET` ใน env | ⏳ |
+| P1 | — | dashboard: `ORD-<timestamp>` นับเป็น "เว็บ" | — | ⏳ (เล็ก) |
+| P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ⏳ |
+| P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ⏳ |
+| P2 | — | พรีออเดอร์: สินค้าเดียวกันหลายตัวเลือกในใบเดียว | — | ⏳ |
+| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): แต้ม + แชร์แต้ม · คูปองส่วนตัว · ชุดสินค้า · รายการโปรด · แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้ · คำค้นเทียบเคียง · กระดิ่งแจ้งเตือน · ติดต่อร้าน · อัปโหลดรูปรีวิว · ข้อมูลร้าน/โลโก้ | ขั้น 3 (ต้องล็อกอินได้ก่อน) | ⏳ |
+| P4 | 7 | หลังร้าน: API ที่หน้าเว็บลูกค้าต้องใช้แต่ข้อมูลมาจากร้าน (ตั้งค่าร้าน · โซนค่าส่ง · ตลาดนัด · ชุดสินค้า · คำค้น · รีวิวขั้นสูง) เข้า `/api/admin/*` | ตัดสินใจ "หลังร้านตัวไหน" | ⏸ รอทีม |
+| P5 | 8 | ปิด backend พอร์ต 4000 | หน้าเว็บลูกค้าย้าย path ครบ + ตัดสินใจหลังร้าน | ⏸ |
+
+### 8.3 ขั้น 1 — กลุ่มตัวเลือก (ทำแล้ว 2026-10-05)
+
+| | ก่อน (Y9) | หลัง |
+|---|---|---|
+| ตัวเลือก | `variant_id` ตัวเดียว · มี `variant_stock` แยก | **กลุ่มตัวเลือก** (`ProductVariantGroups`: `min_select`/`max_select`) · เลือกได้หลายกลุ่ม/หลายอย่าง · ราคาบวกเพิ่มอย่างเดียว |
+| สต็อก | สต็อกสินค้า = ผลรวม `variant_stock` · ปรับที่ตัวสินค้า = 409 · ไม่เลือกตัวเลือก = 400 | สต็อกอยู่ที่ตัวสินค้าอย่างเดียว · `variant_stock` เลิกใช้ (ยังอยู่ใน DB · API ไม่รับแล้ว) · ปิดงานผลิตเพิ่มสต็อกสินค้าที่มีตัวเลือกได้ตามปกติ · ตัวตรวจรายวันไม่มี `variant_stock_sum` แล้ว |
+| ตัวเลือกเก่าไม่มีกลุ่ม | — | นับเป็นกลุ่ม "ตัวเลือก" เลือก 1 (บังคับ) — POS ที่ส่ง `variant_id` ตัวเดียวใช้ได้เหมือนเดิม |
+| ออปชันเสริม | ไม่ตรวจ `is_required` ของออปชันแบบเลือก · ข้อความว่างก็คิดเงิน | ออปชันบังคับต้องเลือก/กรอก · ข้อความว่าง = ไม่เลือก (ไม่คิดเงิน) · ตัดช่องว่างซ้ำ |
+
+**API**
+
+- `GET/PUT /api/admin/products/[id]/customization` (products.view / products.update) — PUT ทั้งชุด `{ groups: [{ _id?, group_name, min_select, max_select, variants: [{ _id?, variant_name, variant_price }] }], options: [{ _id?, option_name, is_text_input, max_text_length, extra_price, is_required }] }` · มี `_id` = แก้ · ไม่มี = เพิ่ม · หายไป = ลบ
+- `GET /api/catalog/products/[id]/customization` (สาธารณะ) — `{ groups, options }`
+- ตะกร้า / ออเดอร์ (เว็บ + POS) / พรีออเดอร์ รับ `variant_ids: [...]` (ทุกกลุ่ม) + `selected_options` · `variant_id` ตัวเดียวยังรับ
+- รายการเก็บ snapshot: `selected_variants[{ group_name, variant_id, variant_name, variant_price }]` · `product_snapshot.variant_name` = ข้อความรวม ("ขนาด: 2 ปอนด์ · รสชาติ: วานิลลา, มะยงชิด") · `variant_id` มีค่าเมื่อเลือกอย่างเดียว · ตะกร้ามี `customization_key` (รวมแถวชุดเดียวกัน)
+- `POST /api/admin/pos/scan` คืน `customization` เพิ่ม (`variants[]` ไม่มี `variant_stock` แล้ว)
+- พรีออเดอร์: ราคา = ราคารอบ + ตัวเลือก · ยังห้าม `round_item_id` ซ้ำในใบเดียว (สั่งรสต่างกันในรอบเดียว = แยกใบ — ถ้าต้องการรวมใบเดียวค่อยแก้)
+
+**ไฟล์:** `src/services/productCustomizationService.ts` (ใหม่) · `src/models/productVariantGroupModel.ts` (ใหม่) · `productVariantModel` (+`group_id`, `display_order`) ·
+`productOptionModel` (+`display_order`) · `cartItem/orderItem/preorderItem` (+`selected_variants`…) · `cartService` · `orderService` · `preorderService` · `productService` (ถอด Y9) ·
+`productVariantService` · `productionOrderService` · `dataIntegrityService` · เทส `productCustomization.test.ts` 10 เคส (แทน `variantStock.test.ts`)
+
+**frontend หลังร้าน:** POS — สินค้ามีกลุ่มตัวเลือก ให้เลือกตาม `scan.customization` แล้วส่ง `variant_ids` · ไม่ต้องแสดง/ปรับสต็อกต่อตัวเลือก · หน้าแก้สินค้าใช้ `/customization` แทน CRUD ตัวเลือกทีละตัว
+
+### 8.4 หน้าเว็บลูกค้าเรียก API อะไรบ้าง (สแกน `Downloads/frontend/frontend/src` 2026-10-05)
+
+Next 16 + next-auth + antd · `BACKEND_URL` (ค่าเริ่มต้น `http://localhost:4000`) · มี 3 ส่วน: `/customer` · `/owner` · `/employee` · รวม 131 path
+
+- **ลูกค้า (49):** addresses · banners · bundles · cart-items (+my-cart) · checkout · contact · coupons (+check/redeem) · favorites · ingredients ·
+  line (+email) · notifications · order-items · orders · payment-link (+redeem) · pickup-locations · points (+share) · preorder-round-items/storefront ·
+  preorder-rounds (+storefront) · preorders · product-categories · products (+detail/reviews/recommended) · recommendations (+similar) · review-aspects ·
+  reviews (+upload) · search-synonyms · shipping-zones · store-info · store-logo · store-settings · `/api/auth/forgot-password` · `/reset-password` ·
+  `/api/user/verify-email` · `/api/line/connect` · `/api/users/:id`
+- **หลังร้าน (`/owner` + `/employee`):** `/api/owner/*` 43 path (aspects · banners · ingredients · map-link · orders/items · payments · pos-checkout ·
+  preorder-rounds/items (+dashboard/customers) · products (+customization) · product-categories · reviews (+analytics/bulk/dashboard/filter-options/products) ·
+  search-synonyms · semantic-terms · shipping-zones · store-profile · store-settings) + route ทั่วไป (bundles · components · expenses · ingredient-* ·
+  notifications · permissions (+temporary) · production-* · promotions · recipes · reports/sales · roles · units · user-logs · users · weekly-markets · me/permissions)

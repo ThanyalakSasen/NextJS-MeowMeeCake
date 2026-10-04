@@ -4,7 +4,7 @@ import { productVariantCreate } from "@/schemas/catalog";
 import { productVariantService } from "@/services/productVariantService";
 
 export const { GET, POST } = collectionRoutes(productVariantService, {
-  sortable: ["created_at", "variant_name", "variant_price", "variant_stock"],
+  sortable: ["created_at", "variant_name", "variant_price"],
   defaultSort: "created_at",
   filterFromQuery: (sp) => ({ product_id: sp.get("product_id") ?? undefined }),
   auth: { menu: "products" },

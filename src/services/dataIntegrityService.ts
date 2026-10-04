@@ -16,7 +16,6 @@
  *   sale_not_below_price sale_price ≥ product_price
  *   code_prefix_mismatch รหัสสินค้า pos-/pre- ไม่ตรงกับ is_preorder
  *   stock_invalid        สต็อกสินค้าปกติติดลบ/ไม่ใช่จำนวนเต็ม
- *   variant_stock_sum    สต็อกสินค้า ≠ ผลรวม variant_stock (BACKLOG4 Y9)
  */
 import dbConnect from "../lib/dbConnect";
 import { log } from "../lib/logger";
@@ -35,8 +34,7 @@ export type IntegrityIssueCode =
   | "price_too_high"
   | "sale_not_below_price"
   | "code_prefix_mismatch"
-  | "stock_invalid"
-  | "variant_stock_sum";
+  | "stock_invalid";
 
 export interface IntegrityIssue {
   code: IntegrityIssueCode;
@@ -73,11 +71,6 @@ export async function checkDataIntegrity(opts: { notify?: boolean } = {}): Promi
   const variants = (await productVariantModel.collection.find({ deleted_at: null }).toArray()) as RawDoc[];
   const options = (await productOptionModel.collection.find({ deleted_at: null }).toArray()) as RawDoc[];
 
-  const variantSum = new Map<string, number>();
-  for (const v of variants) {
-    const key = String(v.product_id);
-    variantSum.set(key, (variantSum.get(key) ?? 0) + (typeof v.variant_stock === "number" ? v.variant_stock : 0));
-  }
   const productName = new Map(products.map((p) => [String(p._id), String(p.product_name_th ?? p._id)]));
 
   for (const p of products) {
@@ -117,10 +110,6 @@ export async function checkDataIntegrity(opts: { notify?: boolean } = {}): Promi
       const stock = p.product_stock_quantity;
       if (typeof stock === "number" && (stock < 0 || !Number.isInteger(stock))) {
         add("stock_invalid", `product_stock_quantity = ${stock}`);
-      }
-      const sum = variantSum.get(id);
-      if (sum !== undefined && (stock ?? 0) !== sum) {
-        add("variant_stock_sum", `สต็อกสินค้า ${String(stock ?? 0)} ≠ ผลรวมตัวเลือก ${sum}`);
       }
     }
   }

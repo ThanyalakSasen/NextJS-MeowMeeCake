@@ -15,6 +15,7 @@ import {
 import productModel from "../models/productModel";
 import productCategoryModel from "../models/productCategoryModel";
 import productVariantModel from "../models/productVariantModel";
+import { getProductCustomization } from "./productCustomizationService";
 import unitModel from "../models/unitModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
@@ -303,7 +304,8 @@ export async function getProductByCode(
 
 /**
  * resolveScan — ใช้กับการสแกนหน้าร้าน: รับได้ทั้งรหัสสินค้า (pos-/pre-...) หรือ _id ดิบ
- * คืนสินค้า + ราคาปัจจุบัน + สต็อก + variants (ถ้ามี ให้ POS เลือกก่อนเพิ่มลงบิล)
+ * คืนสินค้า + ราคาปัจจุบัน + สต็อก + variants + customization (กลุ่มตัวเลือก/ออปชัน — ถ้ามี ให้ POS เลือกก่อนเพิ่มลงบิล
+ * แล้วส่ง variant_ids + selected_options มากับรายการ · ตัวเลือกไม่มีสต็อกแยก)
  */
 export async function resolveScan(code: string) {
   await dbConnect();
@@ -319,16 +321,21 @@ export async function resolveScan(code: string) {
     throw new ProductError("รูปแบบรหัสที่สแกนไม่ถูกต้อง", 400);
   }
 
-  const variants = await productVariantModel
-    .find({ product_id: product._id, deleted_at: null })
-    .select("variant_name variant_price variant_stock unit_id")
-    .lean();
+  const [variants, customization] = await Promise.all([
+    productVariantModel
+      .find({ product_id: product._id, deleted_at: null })
+      .select("group_id variant_name variant_price unit_id display_order")
+      .sort({ display_order: 1, created_at: 1 })
+      .lean(),
+    getProductCustomization(String(product._id)),
+  ]);
 
   return {
     product,
     current_price: (product.sale_price as number | null) ?? (product.product_price as number),
     stock: (product.product_stock_quantity as number | null) ?? null,
     variants,
+    customization,
   };
 }
 
@@ -596,78 +603,6 @@ const STOCKABLE_MATCH = { is_preorder: { $ne: true } } as const;
 export interface StockItemInput {
   product_id: string;
   quantity: number;
-  /** ตัวเลือกสินค้า (ถ้ามี) — ตัด/คืน variant_stock ด้วย (docs/BACKLOG4.md Y9) */
-  variant_id?: string | null;
-}
-
-// ─────────────────────────────────────────────────────────────
-//  VARIANT STOCK (docs/BACKLOG4.md Y9 — ตัดสินใจ 2026-10-01)
-//  สินค้าที่มีตัวเลือก (variant ที่ยังไม่ถูกลบ ≥ 1): สต็อกแยกต่อ variant (variant_stock) และ
-//  product_stock_quantity = ผลรวม variant_stock เสมอ
-//    - ขาย/ยกเลิก: ตัด/คืนทั้ง variant และสินค้า (deductStockForOrder / restockForOrder)
-//    - ปรับสต็อก: ทำที่ variant (productVariantService) → เลื่อนสต็อกสินค้าตามส่วนต่าง
-//      (applyVariantStockDelta) · ปรับที่ตัวสินค้าตรง ๆ (setStock/adjustStock) ถูกปฏิเสธ
-// ─────────────────────────────────────────────────────────────
-
-/** สินค้านี้มีตัวเลือกที่ยังใช้อยู่ไหม (→ สต็อกต้องจัดการที่ระดับ variant) */
-export async function productHasVariants(productId: string): Promise<boolean> {
-  return !!(await productVariantModel.exists({ product_id: productId, deleted_at: null }));
-}
-
-/** สินค้า (ใน ids) ที่มีตัวเลือกที่ยังใช้อยู่ — ใช้ตรวจ "ต้องเลือกตัวเลือก" แบบ batch */
-export async function productIdsWithVariants(ids: string[]): Promise<Set<string>> {
-  if (ids.length === 0) return new Set();
-  const found = await productVariantModel.distinct("product_id", {
-    product_id: { $in: ids },
-    deleted_at: null,
-  });
-  return new Set(found.map(String));
-}
-
-/**
- * variant_stock เปลี่ยนไป delta (แอดมินตั้ง/เพิ่ม/ลบ/กู้คืน variant) → เลื่อน product_stock_quantity
- * ตามแบบ atomic ($inc) ให้ยังเท่าผลรวม — ข้ามสินค้าพรีออเดอร์ (ไม่มีสต็อก)
- */
-export async function applyVariantStockDelta(productId: string, delta: number): Promise<void> {
-  if (!delta) return;
-  await dbConnect();
-  const product = await productModel
-    .findOneAndUpdate(
-      { _id: productId, deleted_at: null, ...STOCKABLE_MATCH },
-      { $inc: { product_stock_quantity: delta } },
-      { returnDocument: "after" }
-    )
-    .lean<{ _id: unknown; product_name_th?: string; product_stock_quantity?: number | null } | null>();
-  if (!product) return;
-  const after = product.product_stock_quantity ?? 0;
-  notifyIfLowStockCrossed(product, after - delta, after);
-}
-
-/**
- * ตั้ง product_stock_quantity = ผลรวม variant_stock ของ variant ที่ยังใช้อยู่ (ไม่มี variant → ไม่แตะ)
- * ใช้ตอน variant ตัวแรกของสินค้าถูกสร้าง/กู้คืน และสคริปต์ตรวจข้อมูล (Y11) — คืนผลรวม หรือ null ถ้าไม่มี variant
- */
-export async function syncStockFromVariants(productId: string): Promise<number | null> {
-  await dbConnect();
-  const [agg] = await productVariantModel.aggregate<{ total: number; n: number }>([
-    { $match: { product_id: new Types.ObjectId(productId), deleted_at: null } },
-    { $group: { _id: null, total: { $sum: { $ifNull: ["$variant_stock", 0] } }, n: { $sum: 1 } } },
-  ]);
-  if (!agg || agg.n === 0) return null;
-  await productModel.updateOne(
-    { _id: productId, deleted_at: null, ...STOCKABLE_MATCH },
-    { $set: { product_stock_quantity: agg.total } }
-  );
-  return agg.total;
-}
-
-async function assertNoVariants(productId: string): Promise<void> {
-  if (await productHasVariants(productId)) {
-    throw new ProductError(
-      "สินค้านี้มีตัวเลือก (variant) — ปรับสต็อกที่ตัวเลือกแต่ละแบบแทน (สต็อกสินค้า = ผลรวมของตัวเลือก)",
-      409
-    );
-  }
 }
 
 export interface StockAdjustOptions {
@@ -708,7 +643,6 @@ export async function setStock(id: string, quantity: number) {
     throw new ProductError("quantity ต้องเป็นตัวเลขไม่ติดลบ", 400);
   }
   await loadStockableProduct(id);
-  await assertNoVariants(id);
 
   // findOneAndUpdate คืนค่า "ก่อน" อัปเดต (ไม่ส่ง new) — ได้ before ที่แม่นแบบ atomic ไว้เช็คข้ามเกณฑ์
   const previous = await productModel
@@ -736,7 +670,6 @@ export async function adjustStock(
     throw new ProductError("delta ต้องเป็นตัวเลขที่ไม่ใช่ 0", 400);
   }
   await loadStockableProduct(id);
-  await assertNoVariants(id);
 
   const filter: Filter = {
     _id: id,
@@ -788,7 +721,6 @@ export async function decreaseStock(
 }
 
 // ── ตรวจว่ามีสต็อกพอสำหรับหลายรายการหรือไม่ (ไม่ตัดสต็อก) ────
-//    มี variant_id → พอ ก็ต่อเมื่อทั้งสต็อกสินค้าและ variant_stock พอ (docs/BACKLOG4.md Y9)
 export async function checkStockAvailability(items: StockItemInput[]) {
   await dbConnect();
   if (!Array.isArray(items) || items.length === 0) {
@@ -796,10 +728,9 @@ export async function checkStockAvailability(items: StockItemInput[]) {
   }
 
   const results = await Promise.all(
-    items.map(async ({ product_id, quantity, variant_id }) => {
+    items.map(async ({ product_id, quantity }) => {
       assertObjectId(product_id, "product_id");
       assertPositiveQty(quantity);
-      if (variant_id) assertObjectId(variant_id, "variant_id");
       const product = await productModel
         .findOne({ _id: product_id, deleted_at: null })
         .select("product_name_th is_preorder product_stock_quantity")
@@ -817,20 +748,9 @@ export async function checkStockAvailability(items: StockItemInput[]) {
         // preorder ไม่จำกัดด้วยสต็อก
         return { product_id, requested: quantity, available: null, ok: true, reason: "preorder" };
       }
-      let available = product.product_stock_quantity ?? 0;
-      if (variant_id) {
-        const variant = await productVariantModel
-          .findOne({ _id: variant_id, product_id, deleted_at: null })
-          .select("variant_stock")
-          .lean<{ variant_stock?: number } | null>();
-        if (!variant) {
-          return { product_id, variant_id, requested: quantity, available: 0, ok: false, reason: "variant_not_found" };
-        }
-        available = Math.min(available, variant.variant_stock ?? 0);
-      }
+      const available = product.product_stock_quantity ?? 0;
       return {
         product_id,
-        ...(variant_id ? { variant_id } : {}),
         product_name_th: product.product_name_th,
         requested: quantity,
         available,
@@ -846,39 +766,25 @@ export async function checkStockAvailability(items: StockItemInput[]) {
   };
 }
 
-/** รวมจำนวนตามสินค้า และตาม variant (variant_id → { product_id, quantity }) */
-function mergeStockItems(items: StockItemInput[]) {
-  const products = new Map<string, number>();
-  const variants = new Map<string, { product_id: string; quantity: number }>();
-  for (const { product_id, quantity, variant_id } of items) {
-    assertObjectId(product_id, "product_id");
-    assertPositiveQty(quantity);
-    products.set(product_id, (products.get(product_id) ?? 0) + quantity);
-    if (variant_id) {
-      assertObjectId(variant_id, "variant_id");
-      const prev = variants.get(variant_id);
-      variants.set(variant_id, { product_id, quantity: (prev?.quantity ?? 0) + quantity });
-    }
-  }
-  return { products, variants };
-}
-
 // ── ตัดสต็อกหลายรายการพร้อมกัน (เช่น ตอนยืนยันออเดอร์) ───────
 //    ตัดทีละรายการแบบ atomic ถ้ามีรายการใดไม่พอจะคืนสต็อกที่ตัดไปแล้วกลับ
-//    รายการที่มี variant_id → ตัด variant_stock ด้วย (docs/BACKLOG4.md Y9)
 export async function deductStockForOrder(items: StockItemInput[]) {
   await dbConnect();
   if (!Array.isArray(items) || items.length === 0) {
     throw new ProductError("items ต้องเป็น array ที่ไม่ว่าง", 400);
   }
 
-  // รวมจำนวนของ product / variant ที่ซ้ำกันก่อน
-  const merged = mergeStockItems(items);
+  // รวมจำนวนของ product ที่ซ้ำกันก่อน
+  const merged = new Map<string, number>();
+  for (const { product_id, quantity } of items) {
+    assertObjectId(product_id, "product_id");
+    assertPositiveQty(quantity);
+    merged.set(product_id, (merged.get(product_id) ?? 0) + quantity);
+  }
 
   const applied: { product_id: string; quantity: number }[] = [];
-  const appliedVariants: { variant_id: string; quantity: number }[] = [];
   try {
-    for (const [product_id, quantity] of merged.products) {
+    for (const [product_id, quantity] of merged) {
       const product = await productModel.findOne({
         _id: product_id,
         deleted_at: null,
@@ -909,27 +815,6 @@ export async function deductStockForOrder(items: StockItemInput[]) {
       }
       applied.push({ product_id, quantity });
 
-      // ตัด variant ของสินค้านี้ (ถ้ามี) — ไม่พอ → throw แล้วชดเชยทั้งสินค้าและ variant ที่ตัดไปแล้ว
-      for (const [variant_id, v] of merged.variants) {
-        if (v.product_id !== product_id) continue;
-        const variantUpdated = await productVariantModel.findOneAndUpdate(
-          { _id: variant_id, product_id, deleted_at: null, variant_stock: { $gte: v.quantity } },
-          { $inc: { variant_stock: -v.quantity } }
-        );
-        if (!variantUpdated) {
-          const current = await productVariantModel
-            .findOne({ _id: variant_id, product_id, deleted_at: null })
-            .select("variant_name variant_stock")
-            .lean<{ variant_name: string; variant_stock?: number } | null>();
-          if (!current) throw new ProductError(`ไม่พบตัวเลือกสินค้า ${variant_id}`, 404);
-          throw new ProductError(
-            `สต็อกไม่พอสำหรับ ${product.product_name_th} (${current.variant_name}) (คงเหลือ ${current.variant_stock ?? 0}, ต้องการ ${v.quantity})`,
-            409
-          );
-        }
-        appliedVariants.push({ variant_id, quantity: v.quantity });
-      }
-
       notifyIfLowStockCrossed(
         product,
         product.product_stock_quantity ?? 0,
@@ -937,36 +822,37 @@ export async function deductStockForOrder(items: StockItemInput[]) {
       );
     }
   } catch (err) {
-    // ชดเชย: คืนสต็อกทุกตัวที่ตัดไปแล้ว (สินค้า + variant)
-    await Promise.all([
-      ...applied.map((a) =>
+    // ชดเชย: คืนสต็อกทุกตัวที่ตัดไปแล้ว
+    await Promise.all(
+      applied.map((a) =>
         productModel.updateOne(
           { _id: a.product_id },
           { $inc: { product_stock_quantity: a.quantity } }
         )
-      ),
-      ...appliedVariants.map((a) =>
-        productVariantModel.updateOne({ _id: a.variant_id }, { $inc: { variant_stock: a.quantity } })
-      ),
-    ]);
+      )
+    );
     throw err;
   }
 
-  return { ok: true, deducted: applied, deducted_variants: appliedVariants };
+  return { ok: true, deducted: applied };
 }
 
 // ── คืนสต็อกหลายรายการ (เช่น ยกเลิก / คืนสินค้า) ─────────────
-//    รายการที่มี variant_id → คืน variant_stock ด้วย (เฉพาะ variant ที่ยังไม่ถูกลบ และสินค้าที่มีสต็อก)
 export async function restockForOrder(items: StockItemInput[]) {
   await dbConnect();
   if (!Array.isArray(items) || items.length === 0) {
     throw new ProductError("items ต้องเป็น array ที่ไม่ว่าง", 400);
   }
 
-  const merged = mergeStockItems(items);
+  const merged = new Map<string, number>();
+  for (const { product_id, quantity } of items) {
+    assertObjectId(product_id, "product_id");
+    assertPositiveQty(quantity);
+    merged.set(product_id, (merged.get(product_id) ?? 0) + quantity);
+  }
 
   const restocked: { product_id: string; quantity: number }[] = [];
-  for (const [product_id, quantity] of merged.products) {
+  for (const [product_id, quantity] of merged) {
     const updated = await productModel.updateOne(
       { _id: product_id, deleted_at: null, ...STOCKABLE_MATCH },
       { $inc: { product_stock_quantity: quantity } }
@@ -976,26 +862,7 @@ export async function restockForOrder(items: StockItemInput[]) {
     }
   }
 
-  const restockedProducts = new Set(restocked.map((r) => r.product_id));
-  const restockedVariants: { variant_id: string; quantity: number }[] = [];
-  for (const [variant_id, v] of merged.variants) {
-    if (!restockedProducts.has(v.product_id)) continue; // พรีออเดอร์/สินค้าถูกลบ → ไม่มีสต็อกให้คืน
-    const updated = await productVariantModel.updateOne(
-      { _id: variant_id, product_id: v.product_id, deleted_at: null },
-      { $inc: { variant_stock: v.quantity } }
-    );
-    if (updated.modifiedCount > 0) {
-      restockedVariants.push({ variant_id, quantity: v.quantity });
-    } else if (await productHasVariants(v.product_id)) {
-      // variant ถูกลบไปแล้ว (สต็อกของมันถูกหักออกจากผลรวมตอนลบ) แต่สินค้ายังมี variant อื่น →
-      // ถอนส่วนที่เพิ่งคืนเข้าสินค้าออก ให้ product_stock_quantity ยังเท่าผลรวม variant ที่เหลือ
-      await productModel.updateOne({ _id: v.product_id }, { $inc: { product_stock_quantity: -v.quantity } });
-      const r = restocked.find((x) => x.product_id === v.product_id);
-      if (r) r.quantity -= v.quantity;
-    }
-  }
-
-  return { ok: true, restocked, restocked_variants: restockedVariants };
+  return { ok: true, restocked };
 }
 
 // ── ลิสต์สินค้าใกล้หมด / หมดสต็อก ───────────────────────────
@@ -1058,9 +925,6 @@ const productService = {
   checkStockAvailability,
   deductStockForOrder,
   restockForOrder,
-  productHasVariants,
-  applyVariantStockDelta,
-  syncStockFromVariants,
   getLowStockProducts,
 };
 

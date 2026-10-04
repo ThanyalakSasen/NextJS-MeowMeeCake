@@ -39,10 +39,10 @@ describe("schemas/catalog — productOption", () => {
 describe("schemas/catalog — productVariant", () => {
   const ok = { product_id: OID, variant_name: "ขนาด 2 ปอนด์" };
 
-  it("create: required + ราคา/สต็อกติดลบ → fail", () => {
+  it("create: required + ราคาติดลบ → fail · variant_stock เลิกใช้ (ถูกตัดทิ้ง)", () => {
     expect(productVariantCreate.parse(ok)).toMatchObject({ variant_name: "ขนาด 2 ปอนด์" });
     expect(productVariantCreate.safeParse({ ...ok, variant_price: -5 }).success).toBe(false);
-    expect(productVariantCreate.safeParse({ ...ok, variant_stock: -1 }).success).toBe(false);
+    expect(productVariantCreate.parse({ ...ok, variant_stock: 5 })).not.toHaveProperty("variant_stock");
   });
 
   it("create: unit_id ผิดรูป → fail · update: strip product_id", () => {

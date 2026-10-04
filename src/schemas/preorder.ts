@@ -8,6 +8,12 @@ import { objectId, deliveryAddress, phone } from "./common";
 const preorderLine = z.object({
   round_item_id: objectId,
   quantity: z.number().int().min(1),
+  // กลุ่มตัวเลือก + ออปชันเสริม (docs/customer-backend-merge.md §8)
+  variant_ids: z.array(objectId).max(50).nullish(),
+  variant_id: objectId.nullish(),
+  selected_options: z
+    .array(z.object({ option_id: objectId, text_value: z.string().max(500).nullish() }))
+    .default([]),
   special_request: z.string().max(500).nullish(),
 });
 

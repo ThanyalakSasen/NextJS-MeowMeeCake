@@ -151,7 +151,7 @@ describe("orderService.createOrder — resolveLines() batch resolve (BACKLOG §3
       const items = [];
       for (let i = 0; i < itemCount; i++) {
         const p = await makeProduct({ product_price: 50, product_stock_quantity: 10 });
-        const v = await makeVariant(String(p._id), { variant_price: 5, variant_stock: 10 }); // BACKLOG4 Y9 — ตัด variant_stock ด้วย
+        const v = await makeVariant(String(p._id), { variant_price: 5 });
         const o = await makeOption(String(p._id), { extra_price: 2 });
         items.push({
           product_id: String(p._id),
@@ -182,27 +182,31 @@ describe("orderService.createOrder — resolveLines() batch resolve (BACKLOG §3
     expect(with3Items).toEqual(with1Item);
   });
 
-  it("ไม่ query variant/option เลยถ้าไม่มีรายการไหนใช้เลย (กัน query เปล่าโดยไม่จำเป็น)", async () => {
+  it("ตัวเลือกของทุกรายการ query ครั้งเดียวต่อ collection (ต้องอ่านเสมอ — กลุ่มที่บังคับเลือก · §8 customer-backend-merge)", async () => {
     const user = await makeUser();
     const p = await makeProduct({ product_price: 50, product_stock_quantity: 10 });
+    const p2 = await makeProduct({ product_price: 60, product_stock_quantity: 10 });
 
     const variantFindSpy = vi.spyOn(productVariantModel, "find");
     const optionFindSpy = vi.spyOn(productOptionModel, "find");
 
     await orderService.createOrder(String(user._id), {
       order_type: "takeaway",
-      items: [{ product_id: String(p._id), quantity: 1 }],
+      items: [
+        { product_id: String(p._id), quantity: 1 },
+        { product_id: String(p2._id), quantity: 1 },
+      ],
     });
 
-    expect(variantFindSpy).not.toHaveBeenCalled();
-    expect(optionFindSpy).not.toHaveBeenCalled();
+    expect(variantFindSpy).toHaveBeenCalledTimes(1);
+    expect(optionFindSpy).toHaveBeenCalledTimes(1);
   });
 
   it("สินค้าเดียวกันสั่งซ้ำในออเดอร์เดียวคนละ variant/option → join ไม่ปนกัน คิดราคาถูกคนละบรรทัด", async () => {
     const user = await makeUser();
     const p = await makeProduct({ product_price: 100, product_stock_quantity: 10 });
-    const vSmall = await makeVariant(String(p._id), { variant_name: "เล็ก", variant_price: 0, variant_stock: 5 });
-    const vLarge = await makeVariant(String(p._id), { variant_name: "ใหญ่", variant_price: 30, variant_stock: 5 });
+    const vSmall = await makeVariant(String(p._id), { variant_name: "เล็ก", variant_price: 0 });
+    const vLarge = await makeVariant(String(p._id), { variant_name: "ใหญ่", variant_price: 30 });
 
     const order = await orderService.createOrder(String(user._id), {
       order_type: "takeaway",

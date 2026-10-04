@@ -35,6 +35,11 @@ const productOptionSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  // ลำดับการแสดง (น้อยแสดงก่อน)
+  display_order: {
+    type: Number,
+    default: 0,
+  },
   deleted_at: {
       type: Date,
       default: null,

@@ -6,6 +6,12 @@ const productVariantSchema = new mongoose.Schema({
     ref: "Products",
     required: true,
   },
+  // กลุ่มตัวเลือก (ProductVariantGroups) — null = ข้อมูลเก่าก่อนมีกลุ่ม (นับเป็นกลุ่ม "ตัวเลือก" เลือก 1)
+  group_id: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "ProductVariantGroups",
+    default: null,
+  },
   variant_name: {
     //ชื่อตัวเลือกที่มีเยอะ เช่น รสชาติ หรือขนาด
     type: String,
@@ -20,8 +26,8 @@ const productVariantSchema = new mongoose.Schema({
     default: 0,
     min: 0,
   },
+  // เลิกใช้แล้ว (docs/customer-backend-merge.md §8) — ตัวเลือกเป็นแค่ราคาเพิ่ม สต็อกอยู่ที่ตัวสินค้า · คงไว้ให้อ่านข้อมูลเก่าได้
   variant_stock: {
-    //จำนวนสินค้าตัวเลือกนี้
     type: Number,
     default: 0,
     min: 0,
@@ -30,6 +36,11 @@ const productVariantSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: "Units",
     required: false,
+  },
+  // ลำดับการแสดง (น้อยแสดงก่อน)
+  display_order: {
+    type: Number,
+    default: 0,
   },
   deleted_at: {
       type: Date,

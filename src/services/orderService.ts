@@ -33,8 +33,6 @@ import {
 import orderModel from "../models/orderModel";
 import orderItemModel from "../models/orderItemModel";
 import productModel from "../models/productModel";
-import productVariantModel from "../models/productVariantModel";
-import productOptionModel from "../models/productOptionModel";
 import userModel from "../models/userModel";
 import * as cartService from "./cartService";
 import * as promotionService from "./promotionService";
@@ -42,7 +40,12 @@ import * as promotionUsageService from "./promotionUsageService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
 import * as productService from "./productService";
-import { resolveSelectedOptions } from "./productOptionService";
+import {
+  assertCustomizationIds,
+  getCustomizations,
+  resolveCustomization,
+  type SelectedVariant,
+} from "./productCustomizationService";
 import { notificationService } from "./notificationService";
 import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
@@ -94,6 +97,9 @@ const ADDRESS_FIELDS = [
 // ── Types ────────────────────────────────────────────────────
 export interface OrderLineInput {
   product_id: string;
+  /** ตัวเลือกที่เลือกทุกกลุ่ม (กลุ่มตัวเลือก — productCustomizationService) */
+  variant_ids?: string[] | null;
+  /** แบบเดิม — ตัวเลือกเดียว */
   variant_id?: string | null;
   selected_options?: { option_id: string; text_value?: string | null }[];
   special_request?: string | null;
@@ -145,6 +151,7 @@ interface PricedLine {
     product_name_eng: string;
     variant_name: string | null;
   };
+  selected_variants: SelectedVariant[];
   selected_options: {
     option_id: any;
     option_name: string;
@@ -172,31 +179,17 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
       throw badRequest("quantity ของแต่ละรายการต้องเป็นจำนวนเต็มตั้งแต่ 1");
     }
     assertObjectId(input.product_id, "product_id");
-    if (input.variant_id) assertObjectId(input.variant_id, "variant_id");
-    for (const sel of input.selected_options ?? []) assertObjectId(sel.option_id, "option_id");
+    assertCustomizationIds(input);
     return quantity;
   });
 
-  // 2) รวบรวม id ที่ต้องใช้ทั้งหมดจากทุกรายการ แล้ว query แบบ `$in` ครั้งเดียวต่อ collection
+  // 2) query สินค้า + ตัวเลือกของทุกรายการครั้งเดียว (BACKLOG §3.18 กัน N+1)
   const productIds = [...new Set(inputs.map((i) => i.product_id))];
-  const variantIds = [...new Set(inputs.map((i) => i.variant_id).filter((v): v is string => !!v))];
-  const optionIds = [
-    ...new Set(inputs.flatMap((i) => (i.selected_options ?? []).map((s) => s.option_id))),
-  ];
-
-  const [products, variants, options, withVariants] = await Promise.all([
+  const [products, customizations] = await Promise.all([
     productModel.find({ _id: { $in: productIds }, deleted_at: null }).lean<any[]>(),
-    variantIds.length
-      ? productVariantModel.find({ _id: { $in: variantIds }, deleted_at: null }).lean<any[]>()
-      : Promise.resolve([]),
-    optionIds.length
-      ? productOptionModel.find({ _id: { $in: optionIds }, deleted_at: null }).lean<any[]>()
-      : Promise.resolve([]),
-    productService.productIdsWithVariants(productIds),
+    getCustomizations(productIds),
   ]);
   const productById = new Map(products.map((p) => [String(p._id), p]));
-  const variantById = new Map(variants.map((v) => [String(v._id), v]));
-  const optionById = new Map(options.map((o) => [String(o._id), o]));
 
   // 3) join ใน memory ทีละรายการ ตามลำดับเดิม — logic การ validate/error message เดิมทุกจุด
   return inputs.map((input, idx) => {
@@ -210,48 +203,25 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
       );
     }
 
-    let variant: any = null;
-    if (input.variant_id) {
-      const v = variantById.get(String(input.variant_id));
-      // ต้องเป็น variant ของ product_id นี้จริง (query เดิมกรอง product_id ไว้ในตัว — ที่นี่ query
-      // ด้วย _id ล้วนแล้วเช็คทีหลัง เพราะ $in ข้าม product_id ของแต่ละรายการไม่ได้ในคำสั่งเดียว)
-      variant = v && String(v.product_id) === String(input.product_id) ? v : null;
-      if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
-    } else if (withVariants.has(String(product._id))) {
-      // BACKLOG4 Y9 — สินค้ามีตัวเลือก สต็อกแยกต่อตัวเลือก → ต้องระบุว่าเอาแบบไหน
-      throw badRequest(`กรุณาเลือกตัวเลือกของสินค้า "${product.product_name_th}"`);
-    }
-
-    // BACKLOG3 §6 — logic ตรวจ/คิดราคา option ย้ายไป productOptionService.resolveSelectedOptions()
-    // แล้ว (ใช้ร่วมกับ cartService.resolveOptions()) — ที่นี่ยังคง batch query optionById ไว้เหมือนเดิม
-    // (BACKLOG §3.18 กัน N+1) แค่ไม่ต้องเขียน validate logic ซ้ำเอง
-    const selected = input.selected_options ?? [];
-    const resolvedOptions: PricedLine["selected_options"] = resolveSelectedOptions(
-      String(input.product_id),
-      selected,
-      optionById
+    // ตัวเลือกเป็นแค่ราคาเพิ่ม ไม่มีสต็อกแยก (docs/customer-backend-merge.md §8)
+    const custom = resolveCustomization(
+      customizations.get(String(product._id)) ?? { groups: [], options: [] },
+      input,
+      product.product_name_th
     );
-
-    // BACKLOG §3.11 เฟส 5b — basePrice/variant_price/extra_price ทั้งหมดมาจาก productModel/
-    // productVariantModel/productOptionModel ซึ่งเป็นสตางค์แล้วทั้งหมดตั้งแต่เฟส 5b (เดิมเฟส 1-4a เป็น
-    // บาท ต้องแปลงเป็นสตางค์ตอนจบด้วย toSatang() ตรงนี้ — "จุดข้ามโดเมน" นั้นไม่มีอยู่แล้วตอนนี้ เพราะ
-    // ทั้งฝั่งสินค้าและฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด unit_price ที่คำนวณตรงนี้จึงเป็นสตางค์อยู่แล้ว
-    // โดยอัตโนมัติ ไม่ต้องแปลงอะไรเพิ่ม)
     const basePrice = product.sale_price ?? product.product_price;
-    const unit_price = toSatang(
-      basePrice + (variant?.variant_price ?? 0) + resolvedOptions.reduce((s, o) => s + o.extra_price, 0)
-    );
+    const unit_price = toSatang(basePrice + custom.extra_price);
 
     return {
       product_id: product._id,
-      variant_id: variant?._id ?? null,
+      variant_id: custom.variant_id,
       product_snapshot: {
         product_name_th: product.product_name_th,
         product_name_eng: product.product_name_eng,
-        variant_name: variant?.variant_name ?? null,
+        variant_name: custom.variant_name,
       },
-      // extra_price เป็นสตางค์อยู่แล้ว (มาจาก productOptionModel) เก็บลง orderItem.selected_options ตรง ๆ
-      selected_options: resolvedOptions.map((o) => ({ ...o })),
+      selected_variants: custom.selected_variants,
+      selected_options: custom.selected_options,
       special_request: input.special_request?.trim() || null,
       quantity,
       unit_price,
@@ -363,7 +333,6 @@ async function persistOrder(
   const stockItems = lines.map((l) => ({
     product_id: String(l.product_id),
     quantity: l.quantity,
-    variant_id: l.variant_id ? String(l.variant_id) : null, // BACKLOG4 Y9 — ตัด variant_stock ด้วย
   }));
 
   // ── สร้างออเดอร์แบบ best-effort + ชดเชยผ่าน Saga (MongoDB standalone ไม่มี transaction) ──
@@ -482,8 +451,10 @@ export async function createOrderFromCart(
   const lineInputs: OrderLineInput[] = (detail.items as any[]).map((it) => {
     const product = it.product_id ?? {};
     const variant = it.variant_id ?? null;
+    const variantIds = (it.selected_variants ?? []).map((v: any) => v?.variant_id).filter(Boolean).map(String);
     return {
       product_id: String(product._id ?? it.product_id),
+      variant_ids: variantIds,
       variant_id: variant?._id ? String(variant._id) : null,
       selected_options: (it.selected_options ?? [])
         .filter((o: any) => o?.option_id != null)
@@ -657,7 +628,6 @@ export async function updateOrderStatus(
     const stockItems = items.map((it) => ({
       product_id: String(it.product_id),
       quantity: it.quantity,
-      variant_id: it.variant_id ? String(it.variant_id) : null, // BACKLOG4 Y9 — คืน variant_stock ด้วย
     }));
     if (stockItems.length) {
       cleanup.onRollback("restock", () => productService.restockForOrder(stockItems));
