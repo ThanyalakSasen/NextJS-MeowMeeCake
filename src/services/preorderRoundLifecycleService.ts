@@ -27,6 +27,7 @@ import productionOrderModel from "../models/productionOrderModel";
 import productionItemModel from "../models/productionItemModel";
 import recipeModel from "../models/recipeModel";
 import { notificationService } from "./notificationService";
+import { adminLinks } from "../lib/adminLinks";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -128,6 +129,8 @@ export async function productionDateForRound(round: { _id: unknown; close_date: 
 
 export interface AutoProductionResult {
   created: boolean;
+  /** ใช้ทำลิงก์ไปหน้าใบผลิต (adminLinks.production) */
+  production_id?: string;
   production_no?: string;
   production_date?: string;
   /** สร้างไม่ได้ (ไม่มีพรีออเดอร์ที่จ่ายแล้ว / สินค้าไม่มีสูตร / มีใบอยู่แล้ว) */
@@ -144,8 +147,13 @@ export async function autoCreateProduction(roundId: unknown): Promise<AutoProduc
       round_id: String(round._id),
       production_date: productionDate,
       production_note: `สร้างอัตโนมัติเมื่อปิดรอบ "${round.round_name}" — นับเฉพาะพรีออเดอร์ที่ชำระเงินแล้ว`,
-    })) as { production_no?: string };
-    return { created: true, production_no: order.production_no, production_date: bangkokDateString(productionDate) };
+    })) as { _id?: unknown; production_no?: string };
+    return {
+      created: true,
+      production_id: String(order._id),
+      production_no: order.production_no,
+      production_date: bangkokDateString(productionDate),
+    };
   } catch (err) {
     return { created: false, reason: err instanceof Error ? err.message : String(err) };
   }
@@ -183,7 +191,7 @@ export async function onRoundClosed(roundId: unknown): Promise<CloseRoundResult>
       message: lines.join("\n"),
       module: "production",
       type: production.created ? "info" : "warning",
-      link: null,
+      link: production.created && production.production_id ? adminLinks.production(production.production_id) : adminLinks.preorderRounds,
     })
     .catch((err) => log.error("preorder_lifecycle.close_notify_failed", { err }));
 
@@ -220,14 +228,20 @@ export async function onPreorderPaid(preorderId: string): Promise<LatePaymentOut
       await preorderModel.updateOne({ _id: pre._id }, { $set: { added_to_production_at: new Date() } });
       return "created-production";
     }
-    await notifyOwner(`พรีออเดอร์ ${pre.preorder_no} ชำระเงินหลังปิดรอบ แต่สร้างใบสั่งผลิตไม่ได้: ${res.reason}`);
+    await notifyOwner(
+      `พรีออเดอร์ ${pre.preorder_no} ชำระเงินหลังปิดรอบ แต่สร้างใบสั่งผลิตไม่ได้: ${res.reason}`,
+      undefined,
+      adminLinks.preorder(pre._id)
+    );
     return "skipped";
   }
 
   if (production.production_status !== "planned") {
     await notifyOwner(
       `พรีออเดอร์ ${pre.preorder_no} ชำระเงินหลังใบสั่งผลิต ${production.production_no} เริ่มผลิตแล้ว — ` +
-        "ระบบไม่ได้เพิ่มจำนวนให้ กรุณาเพิ่มรายการผลิตเอง"
+        "ระบบไม่ได้เพิ่มจำนวนให้ กรุณาเพิ่มรายการผลิตเอง",
+      undefined,
+      adminLinks.production(production._id)
     );
     return "production-started";
   }
@@ -260,7 +274,11 @@ export async function onPreorderPaid(preorderId: string): Promise<LatePaymentOut
       .sort({ created_at: -1, _id: -1 })
       .lean<any>();
     if (!recipe) {
-      await notifyOwner(`พรีออเดอร์ ${pre.preorder_no} ชำระเงินหลังสร้างใบผลิต แต่สินค้าไม่มีสูตร — เพิ่มเข้าใบผลิตไม่ได้`);
+      await notifyOwner(
+        `พรีออเดอร์ ${pre.preorder_no} ชำระเงินหลังสร้างใบผลิต แต่สินค้าไม่มีสูตร — เพิ่มเข้าใบผลิตไม่ได้`,
+        undefined,
+        adminLinks.production(production._id)
+      );
       return "no-recipe";
     }
     await addItems(String(production._id), [
@@ -275,11 +293,11 @@ export async function onPreorderPaid(preorderId: string): Promise<LatePaymentOut
 
   await notificationService
     .notify({
-      title: `เพิ่มยอดเข้าใบสั่งผลิต ${production.production_no}`,
+      title: `เพิ่มยอดสินค้าเข้าใบสั่งผลิต ${production.production_no}`,
       message: `พรีออเดอร์ ${pre.preorder_no} ชำระเงินหลังปิดรอบ — บวกจำนวนเข้าใบผลิตแล้ว`,
       module: "production",
       type: "info",
-      link: null,
+      link: adminLinks.production(production._id),
       line: false,
     })
     .catch((err) => log.error("preorder_lifecycle.late_notify_failed", { err }));
@@ -314,7 +332,8 @@ export async function onPreorderCancelled(preorderId: string, wasPaid: boolean):
     await notifyOwner(
       `พรีออเดอร์ ${pre.preorder_no} ถูกยกเลิกหลังใบสั่งผลิต ${production.production_no} เริ่มผลิตแล้ว — ` +
         "ระบบไม่ได้ลดจำนวนให้ ปรับรายการผลิตเองถ้าจำเป็น",
-      "พรีออเดอร์ถูกยกเลิกหลังเริ่มผลิต"
+      "พรีออเดอร์ถูกยกเลิกหลังเริ่มผลิต",
+      adminLinks.production(production._id)
     );
     return "production-started";
   }
@@ -346,20 +365,24 @@ export async function onPreorderCancelled(preorderId: string, wasPaid: boolean):
 
   await notificationService
     .notify({
-      title: `ลดยอดใบสั่งผลิต ${production.production_no}`,
+      title: `หักยอดสินค้าในใบสั่งผลิต ${production.production_no}`,
       message: `พรีออเดอร์ ${pre.preorder_no} ถูกยกเลิก — หักจำนวนออกจากใบผลิตแล้ว`,
       module: "production",
       type: "info",
-      link: null,
+      link: adminLinks.production(production._id),
       line: false,
     })
     .catch((err) => log.error("preorder_lifecycle.cancel_notify_failed", { err }));
   return "reduced";
 }
 
-async function notifyOwner(message: string, title = "พรีออเดอร์ชำระเงินหลังปิดรอบ"): Promise<void> {
+async function notifyOwner(
+  message: string,
+  title = "พรีออเดอร์ชำระเงินหลังปิดรอบ",
+  link: string | null = null
+): Promise<void> {
   await notificationService
-    .notify({ title, message, module: "production", type: "warning", link: null })
+    .notify({ title, message, module: "production", type: "warning", link })
     .catch((err) => log.error("preorder_lifecycle.owner_notify_failed", { err }));
 }
 

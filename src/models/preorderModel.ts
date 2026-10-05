@@ -14,6 +14,18 @@ const deliveryAddressSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// สำเนาจุดรับ (หน้าร้านประจำสัปดาห์ StoreProfile.weekly_markets) ณ เวลาสั่ง — โครงเดียวกับฝั่งลูกค้า
+// (docs/customer-backend-merge.md §8.7 · src/services/shippingService.ts)
+const pickupPointSnapshotSchema = new mongoose.Schema(
+  {
+    point_id: { type: mongoose.Schema.Types.ObjectId, required: true },
+    point_name: { type: String, required: true },
+    address: { type: String, default: "" },
+    note: { type: String, default: "" },
+  },
+  { _id: false }
+);
+
 const preorderSchema = new mongoose.Schema(
   {
     preorder_no: { type: String, required: true, unique: true },
@@ -23,13 +35,24 @@ const preorderSchema = new mongoose.Schema(
     order_status: { type: String, enum: ["pending", "confirmed", "preparing", "ready", "completed", "cancelled"], default: "pending" },
     payment_status: { type: String, enum: ["pending", "paid", "failed", "refunded"], default: "pending" },
     delivery_address: { type: deliveryAddressSchema, default: null },
-    // BACKLOG §3.11 — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (เหมือน orderModel — ดู src/lib/money.ts)
+    // รับเอง (takeaway) จากหน้าเว็บ — วันที่ลูกค้าเลือก (ช่วงวันของรอบ) + จุดรับ · ไม่ส่งมา = null (ใช้วันรับของรอบ)
+    pickup_date: { type: Date, default: null },
+    pickup_point: { type: pickupPointSnapshotSchema, default: null },
+    // subtotal / discount_amount / delivery_fee / total_amount: เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md)
     subtotal: { type: Number, required: true, min: 0 },
     discount_amount: { type: Number, default: 0 },
     delivery_fee: { type: Number, default: 0 },
     total_amount: { type: Number, required: true, min: 0 },
     promotion_id: { type: mongoose.Schema.Types.ObjectId, ref: "Promotions", default: null },
     payment_id: { type: mongoose.Schema.Types.ObjectId, ref: "Payments", default: null },
+    // แต้มสะสม + คูปองส่วนตัว (customer-backend-merge.md §8.11) — ส่วนลดรวมอยู่ใน discount_amount แล้ว
+    points_redeemed: { type: Number, default: 0, min: 0 },
+    points_discount: { type: Number, default: 0, min: 0 },
+    user_coupon_id: { type: mongoose.Schema.Types.ObjectId, ref: "UserCoupons", default: null },
+    coupon_discount: { type: Number, default: 0, min: 0 },
+    // ลิงก์หน้าชำระเงินแบบใช้ครั้งเดียว — เก็บ SHA-256 ของ token (src/services/paymentLinkService.ts) · select: false กันหลุดไปกับ API อื่น
+    payment_link_token: { type: String, default: null, select: false },
+    payment_link_expires_at: { type: Date, default: null, select: false },
     delivery_status: { type: String, enum: ["pending", "shipping", "delivered", "failed"], default: "pending" },
     tracking_no: { type: String, default: null },
     shipped_at: { type: Date, default: null },

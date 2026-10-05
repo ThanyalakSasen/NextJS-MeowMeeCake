@@ -22,7 +22,7 @@ import { assertObjectId } from "./objectId";
 import dbConnect from "./dbConnect";
 import { log } from "./logger";
 import paymentModel from "../models/paymentModel";
-import { customerMessages, notifyCustomerLater, type CustomerDocKind } from "../services/customerNotifyService";
+import { customerMessages, customerWeb, notifyCustomerLater, type CustomerDocKind } from "../services/customerNotifyService";
 
 type AnyModel = Model<unknown>;
 type Doc = Record<string, unknown>;
@@ -131,7 +131,11 @@ export async function setEntityPaymentStatus(opts: {
   }
 
   const { kind, docNo } = customerDocRef(doc);
-  notifyCustomerLater(doc.user_id, customerMessages.paymentStatus(kind, docNo, opts.status));
+  notifyCustomerLater(
+    doc.user_id,
+    customerMessages.paymentStatus(kind, docNo, opts.status),
+    customerWeb.paymentStatus(kind, doc._id, docNo, opts.status)
+  );
   return doc;
 }
 
@@ -168,7 +172,8 @@ export async function applyEntityDeliveryUpdate(opts: {
     const { kind, docNo } = customerDocRef(updated);
     notifyCustomerLater(
       updated.user_id,
-      customerMessages.deliveryStatus(kind, docNo, String(updated.delivery_status), updated.tracking_no as string | null)
+      customerMessages.deliveryStatus(kind, docNo, String(updated.delivery_status), updated.tracking_no as string | null),
+      customerWeb.deliveryStatus(kind, updated._id, docNo, String(updated.delivery_status), updated.tracking_no as string | null)
     );
   }
   return updated;

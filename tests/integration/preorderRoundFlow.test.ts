@@ -6,6 +6,7 @@ import paymentModel from "@/models/paymentModel";
 import * as preorderRoundService from "@/services/preorderRoundService";
 import * as preorderService from "@/services/preorderService";
 import { resetQuotaCache } from "@/lib/lineQuota";
+import { flushBackground } from "@/lib/backgroundTasks";
 import { makeUser, makeProduct } from "./helpers";
 
 /** docs/preorder-round-flow.md — ปัญหา 1, 2, 4, 6, 7 */
@@ -199,6 +200,8 @@ describe("ปัญหา 6 — เลื่อนวันรับ", () => {
     const { round, itemOf } = await openRound([p]);
     const u = await makeUser({ line_user_id: "U_NAME" });
     await order(u._id, round, itemOf(p)._id, 1);
+    // แจ้งเตือนตอนสั่ง (ร้าน + ลูกค้า) วิ่งเบื้องหลัง — รอให้จบก่อนล้างตัวนับ ไม่งั้น CI ที่ช้ากว่านับข้อความพวกนั้นเข้ามาด้วย
+    await flushBackground();
     fetchSpy.mockClear();
 
     await preorderRoundService.updateRound(String(round._id), { round_name: "ชื่อใหม่" });

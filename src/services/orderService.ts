@@ -16,6 +16,8 @@
  *  - ส่วนลดจากโปรโมชันคิดผ่าน promotionService.validateForOrder + discountEngine
  *    (ส่ง promotion_code/promotion_id มา ระบบคิดเอง — ไม่เชื่อ discount_amount จาก client เมื่อมีโปรโมชัน)
  */
+import mongoose from "mongoose";
+import { ORDER_PAYMENT_WINDOW_MS, PAYMENT_EXPIRED_REASON } from "../lib/paymentDeadline";
 import dbConnect from "../lib/dbConnect";
 import { log } from "../lib/logger";
 import { Saga } from "../lib/compensation";
@@ -32,23 +34,31 @@ import {
 } from "../lib/orderLifecycle";
 import orderModel from "../models/orderModel";
 import orderItemModel from "../models/orderItemModel";
+import paymentModel from "../models/paymentModel";
 import productModel from "../models/productModel";
-import productVariantModel from "../models/productVariantModel";
-import productOptionModel from "../models/productOptionModel";
 import userModel from "../models/userModel";
 import * as cartService from "./cartService";
 import * as promotionService from "./promotionService";
 import * as promotionUsageService from "./promotionUsageService";
 import * as deliveryService from "./deliveryService";
+import * as shippingService from "./shippingService";
+import * as couponService from "./couponService";
+import * as pointsService from "./pointsService";
 import * as recipeService from "./recipeService";
 import * as productService from "./productService";
-import { resolveSelectedOptions } from "./productOptionService";
+import {
+  assertCustomizationIds,
+  getCustomizations,
+  resolveCustomization,
+  type SelectedVariant,
+} from "./productCustomizationService";
 import { notificationService } from "./notificationService";
-import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
+import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { generateDocNo, isPreorderProduct } from "../lib/productCode";
 import type { z } from "zod";
 import type { updateDeliveryBody } from "../schemas/order";
+import { adminLinks } from "../lib/adminLinks";
 
 type UpdateDeliveryInput = z.infer<typeof updateDeliveryBody>;
 
@@ -93,6 +103,9 @@ const ADDRESS_FIELDS = [
 // ── Types ────────────────────────────────────────────────────
 export interface OrderLineInput {
   product_id: string;
+  /** ตัวเลือกที่เลือกทุกกลุ่ม (กลุ่มตัวเลือก — productCustomizationService) */
+  variant_ids?: string[] | null;
+  /** แบบเดิม — ตัวเลือกเดียว */
   variant_id?: string | null;
   selected_options?: { option_id: string; text_value?: string | null }[];
   special_request?: string | null;
@@ -113,6 +126,19 @@ export interface CreateOrderCommon {
   delivery_fee_override?: boolean;
   /** ช่องทางสำหรับตรวจ applicable_channels ของโปรโมชัน (ค่าเริ่มต้น "online") */
   channel?: "online" | "instore";
+  /**
+   * true = สั่งจากหน้าเว็บลูกค้า (/api/shop) — docs/customer-backend-merge.md §8.7–8.8:
+   * ค่าส่งคิดจาก ShippingZones (ไม่มีส่งฟรีตามยอด) + ตรวจขอบเขตจัดส่ง · มีกำหนดชำระ 30 นาที (payment_due_at)
+   * ไม่ระบุ = หลังร้าน/POS (DeliveryZones · ไม่มีกำหนดชำระ)
+   */
+  storefront?: boolean;
+  /** takeaway: จุดรับ (_id ของหน้าร้านประจำสัปดาห์) + วันรับ "YYYY-MM-DD" — ไม่ส่ง = รับที่ร้านแบบเดิม */
+  pickup_location_id?: string | null;
+  pickup_date?: string | null;
+  /** คูปองของฉัน (แลกด้วยแต้ม) — ใช้ร่วมกับ promotion_code/promotion_id ไม่ได้ (customer-backend-merge.md §8.11) */
+  user_coupon_id?: string | null;
+  /** ใช้แต้มเป็นส่วนลด (ทีละ 10 · ≤ 30% ของยอดสินค้าหลังหักคูปอง/โปร) — ใช้ร่วมกับคูปอง/โค้ดได้ */
+  points_to_redeem?: number | null;
 }
 
 export interface CreateOrderFromCartInput extends CreateOrderCommon {
@@ -144,6 +170,7 @@ interface PricedLine {
     product_name_eng: string;
     variant_name: string | null;
   };
+  selected_variants: SelectedVariant[];
   selected_options: {
     option_id: any;
     option_name: string;
@@ -171,30 +198,17 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
       throw badRequest("quantity ของแต่ละรายการต้องเป็นจำนวนเต็มตั้งแต่ 1");
     }
     assertObjectId(input.product_id, "product_id");
-    if (input.variant_id) assertObjectId(input.variant_id, "variant_id");
-    for (const sel of input.selected_options ?? []) assertObjectId(sel.option_id, "option_id");
+    assertCustomizationIds(input);
     return quantity;
   });
 
-  // 2) รวบรวม id ที่ต้องใช้ทั้งหมดจากทุกรายการ แล้ว query แบบ `$in` ครั้งเดียวต่อ collection
+  // 2) query สินค้า + ตัวเลือกของทุกรายการครั้งเดียว (BACKLOG §3.18 กัน N+1)
   const productIds = [...new Set(inputs.map((i) => i.product_id))];
-  const variantIds = [...new Set(inputs.map((i) => i.variant_id).filter((v): v is string => !!v))];
-  const optionIds = [
-    ...new Set(inputs.flatMap((i) => (i.selected_options ?? []).map((s) => s.option_id))),
-  ];
-
-  const [products, variants, options] = await Promise.all([
+  const [products, customizations] = await Promise.all([
     productModel.find({ _id: { $in: productIds }, deleted_at: null }).lean<any[]>(),
-    variantIds.length
-      ? productVariantModel.find({ _id: { $in: variantIds }, deleted_at: null }).lean<any[]>()
-      : Promise.resolve([]),
-    optionIds.length
-      ? productOptionModel.find({ _id: { $in: optionIds }, deleted_at: null }).lean<any[]>()
-      : Promise.resolve([]),
+    getCustomizations(productIds),
   ]);
   const productById = new Map(products.map((p) => [String(p._id), p]));
-  const variantById = new Map(variants.map((v) => [String(v._id), v]));
-  const optionById = new Map(options.map((o) => [String(o._id), o]));
 
   // 3) join ใน memory ทีละรายการ ตามลำดับเดิม — logic การ validate/error message เดิมทุกจุด
   return inputs.map((input, idx) => {
@@ -208,46 +222,25 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
       );
     }
 
-    let variant: any = null;
-    if (input.variant_id) {
-      const v = variantById.get(String(input.variant_id));
-      // ต้องเป็น variant ของ product_id นี้จริง (query เดิมกรอง product_id ไว้ในตัว — ที่นี่ query
-      // ด้วย _id ล้วนแล้วเช็คทีหลัง เพราะ $in ข้าม product_id ของแต่ละรายการไม่ได้ในคำสั่งเดียว)
-      variant = v && String(v.product_id) === String(input.product_id) ? v : null;
-      if (!variant) throw badRequest("ไม่พบตัวเลือกสินค้า (variant) ของสินค้านี้");
-    }
-
-    // BACKLOG3 §6 — logic ตรวจ/คิดราคา option ย้ายไป productOptionService.resolveSelectedOptions()
-    // แล้ว (ใช้ร่วมกับ cartService.resolveOptions()) — ที่นี่ยังคง batch query optionById ไว้เหมือนเดิม
-    // (BACKLOG §3.18 กัน N+1) แค่ไม่ต้องเขียน validate logic ซ้ำเอง
-    const selected = input.selected_options ?? [];
-    const resolvedOptions: PricedLine["selected_options"] = resolveSelectedOptions(
-      String(input.product_id),
-      selected,
-      optionById
+    // ตัวเลือกเป็นแค่ราคาเพิ่ม ไม่มีสต็อกแยก (docs/customer-backend-merge.md §8)
+    const custom = resolveCustomization(
+      customizations.get(String(product._id)) ?? { groups: [], options: [] },
+      input,
+      product.product_name_th
     );
-
-    // BACKLOG §3.11 เฟส 5b — basePrice/variant_price/extra_price ทั้งหมดมาจาก productModel/
-    // productVariantModel/productOptionModel ซึ่งเป็นสตางค์แล้วทั้งหมดตั้งแต่เฟส 5b (เดิมเฟส 1-4a เป็น
-    // บาท ต้องแปลงเป็นสตางค์ตอนจบด้วย toSatang() ตรงนี้ — "จุดข้ามโดเมน" นั้นไม่มีอยู่แล้วตอนนี้ เพราะ
-    // ทั้งฝั่งสินค้าและฝั่งออเดอร์เป็นสตางค์เหมือนกันหมด unit_price ที่คำนวณตรงนี้จึงเป็นสตางค์อยู่แล้ว
-    // โดยอัตโนมัติ ไม่ต้องแปลงอะไรเพิ่ม)
     const basePrice = product.sale_price ?? product.product_price;
-    const unit_price =
-      basePrice +
-      (variant?.variant_price ?? 0) +
-      resolvedOptions.reduce((s, o) => s + o.extra_price, 0);
+    const unit_price = toSatang(basePrice + custom.extra_price);
 
     return {
       product_id: product._id,
-      variant_id: variant?._id ?? null,
+      variant_id: custom.variant_id,
       product_snapshot: {
         product_name_th: product.product_name_th,
         product_name_eng: product.product_name_eng,
-        variant_name: variant?.variant_name ?? null,
+        variant_name: custom.variant_name,
       },
-      // extra_price เป็นสตางค์อยู่แล้ว (มาจาก productOptionModel) เก็บลง orderItem.selected_options ตรง ๆ
-      selected_options: resolvedOptions.map((o) => ({ ...o })),
+      selected_variants: custom.selected_variants,
+      selected_options: custom.selected_options,
       special_request: input.special_request?.trim() || null,
       quantity,
       unit_price,
@@ -280,19 +273,24 @@ async function persistOrder(
       if (!addr[f]) throw badRequest(`delivery_address.${f} จำเป็นต้องระบุ`);
     }
   }
+  // takeaway + เลือกจุดรับ/วันรับ → ตรวจกับหน้าร้านประจำสัปดาห์ (ผิด = 400) · ไม่ส่ง = รับที่ร้านแบบเดิม
+  const pickup =
+    opts.order_type === "takeaway" && opts.pickup_location_id
+      ? await shippingService.resolvePickupSelection(opts.pickup_location_id, opts.pickup_date, { type: "order" })
+      : null;
+
   // ต้นทุนต่อหน่วย (snapshot จากสูตรล่าสุดของสินค้า) — ใส่ลง orderItem เพื่อคำนวณกำไรใน dashboard
   const costByProduct = await recipeService.getUnitCostByProduct(
     lines.map((l) => String(l.product_id))
   );
 
-  // unit_price/total_price เป็นสตางค์แล้วตั้งแต่ resolveLine() — บวก/คูณ integer ตรงนี้ไม่มี
-  // rounding error เลย ต่างจากตอนเป็นบาท (float) ที่ต้อง round2() ปิดท้ายทุกจุด (BACKLOG §3.11)
+  // เงินเป็นบาท (float) — ปัด 2 ตำแหน่งทุกครั้งที่คูณ/รวม (src/lib/money.ts)
   const itemsPayload = lines.map((l) => ({
     ...l,
-    total_price: l.unit_price * l.quantity,
+    total_price: toSatang(l.unit_price * l.quantity),
     cost_per_unit: costByProduct.get(String(l.product_id)) ?? l.cost_per_unit ?? null,
   }));
-  const subtotal = itemsPayload.reduce((s, it) => s + it.total_price, 0);
+  const subtotal = toSatang(itemsPayload.reduce((s, it) => s + it.total_price, 0));
 
   // ── ค่าส่ง: คิดฝั่ง server เสมอ (เว้นแต่แอดมินสั่ง override) ──
   // deliveryService ยังทำงานเป็น "บาท" (ยังไม่แปลงในเฟสนี้) — แปลง subtotal เป็นบาทตอนส่งออก แล้ว
@@ -301,6 +299,14 @@ async function persistOrder(
   if (opts.order_type === "delivery") {
     if (opts.delivery_fee_override && opts.delivery_fee != null) {
       delivery_fee = toSatang(Math.max(0, Number(opts.delivery_fee) || 0));
+    } else if (opts.storefront) {
+      // หน้าเว็บลูกค้า: ShippingZones + ขอบเขตจัดส่ง (ส่งไม่ได้ = 400) — shippingService
+      delivery_fee = (
+        await shippingService.quoteStorefrontDelivery({
+          province: opts.delivery_address?.province ?? null,
+          productIds: lines.map((l) => String(l.product_id)),
+        })
+      ).fee;
     } else {
       delivery_fee = toSatang(
         (
@@ -320,8 +326,12 @@ async function persistOrder(
   // แปลงอินพุตเป็นบาทตอนเรียก แล้วแปลงผลลัพธ์ (บาท) กลับเป็นสตางค์ทันที
   let discount_amount = 0;
   let appliedPromotion: { promotion_id: string; discount_amount: number } | null = null;
+  if (opts.user_coupon_id && (opts.promotion_code || opts.promotion_id)) {
+    throw badRequest("ใช้คูปองของฉันกับโค้ดส่วนลดพร้อมกันไม่ได้ — เลือกอย่างใดอย่างหนึ่ง");
+  }
+  let discountLines: Array<{ product_id: string; category_id: string | null; quantity: number; line_total: number }> = [];
 
-  if (opts.promotion_code || opts.promotion_id) {
+  if (opts.promotion_code || opts.promotion_id || opts.user_coupon_id) {
     const prodIds = [...new Set(lines.map((l) => String(l.product_id)))];
     const prods = await productModel
       .find({ _id: { $in: prodIds } })
@@ -330,13 +340,15 @@ async function persistOrder(
     const catByProduct = new Map(
       prods.map((p) => [String(p._id), p.category_id ? String(p.category_id) : null])
     );
-    const discountLines = lines.map((l) => ({
+    discountLines = lines.map((l) => ({
       product_id: String(l.product_id),
       category_id: catByProduct.get(String(l.product_id)) ?? null,
       quantity: l.quantity,
       line_total: toBaht(l.unit_price * l.quantity),
     }));
+  }
 
+  if (opts.promotion_code || opts.promotion_id) {
     const result = await promotionService.validateForOrder({
       code: opts.promotion_code ?? undefined,
       promotion_id: opts.promotion_id ?? undefined,
@@ -348,14 +360,15 @@ async function persistOrder(
     });
     discount_amount = toSatang(result.discount_amount);
     appliedPromotion = { promotion_id: result.promotion_id, discount_amount };
-  } else {
+  } else if (!opts.user_coupon_id) {
     discount_amount = toSatang(Math.max(0, Number(opts.discount_amount) || 0));
   }
 
   if (discount_amount > subtotal + delivery_fee) {
     throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
   }
-  const total_amount = subtotal - discount_amount + delivery_fee;
+  let total_amount = toSatang(subtotal - discount_amount + delivery_fee);
+  const pointsToRedeem = Math.max(0, Number(opts.points_to_redeem) || 0);
 
   const stockItems = lines.map((l) => ({
     product_id: String(l.product_id),
@@ -366,7 +379,47 @@ async function persistOrder(
   const saga = new Saga();
   let order: any = null;
   let insertedItems: any[] = [];
+  // คูปอง/แต้มผูกกับ _id ของออเดอร์ → จองเลขไว้ก่อน (สร้างไม่สำเร็จ = saga คืนคูปอง/แต้ม)
+  const orderId = new mongoose.Types.ObjectId();
+  let orderNo = generateDocNo(orderNoPrefix(opts.channel));
+  let couponFields: { user_coupon_id: unknown; coupon_discount: number } = { user_coupon_id: null, coupon_discount: 0 };
+  let pointsFields = { points_redeemed: 0, points_discount: 0 };
+  let couponPromotionId: unknown = null;
   try {
+    // 0) คูปองของฉัน + แต้ม (customer-backend-merge.md §8.11) — หักคูปองก่อน แล้วคิดเพดานแต้มจากยอดสินค้าที่เหลือ
+    if (opts.user_coupon_id) {
+      const coupon = await couponService.applyUserCoupon({
+        userId,
+        userCouponId: opts.user_coupon_id,
+        lines: discountLines,
+        subtotal: toBaht(subtotal),
+        delivery_fee: toBaht(delivery_fee),
+        refType: "order",
+        refId: orderId,
+      });
+      saga.onRollback("release-coupon", coupon.undo);
+      discount_amount = toSatang(coupon.discount_amount);
+      couponFields = { user_coupon_id: coupon.user_coupon_id, coupon_discount: discount_amount };
+      couponPromotionId = coupon.promotion_id;
+      appliedPromotion = null;
+    }
+    if (pointsToRedeem > 0) {
+      const goodsDiscount = Math.min(discount_amount, subtotal); // ส่วนลดส่งฟรีไม่ลดฐานคิดแต้ม
+      const points_discount = await pointsService.redeemPoints({
+        userId,
+        points: pointsToRedeem,
+        subtotal: toBaht(subtotal - goodsDiscount),
+        refType: "order",
+        refId: orderId,
+        refNo: orderNo,
+      });
+      saga.onRollback("refund-points", () => pointsService.refundRedemption("order", String(orderId)));
+      pointsFields = { points_redeemed: pointsToRedeem, points_discount };
+      discount_amount = toSatang(discount_amount + points_discount);
+    }
+    if (discount_amount > subtotal + delivery_fee) throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
+    total_amount = toSatang(subtotal - discount_amount + delivery_fee);
+
     // 1) ตัดสต็อก (productService ข้าม preorder ให้เอง, คืนสต็อกอัตโนมัติถ้ารายการใดไม่พอ)
     await productService.deductStockForOrder(stockItems);
     saga.onRollback("restock", () => productService.restockForOrder(stockItems));
@@ -374,16 +427,23 @@ async function persistOrder(
     // 2) สร้างออเดอร์ (retry เมื่อเลขออเดอร์ชนกัน)
     for (let attempt = 0; attempt < 5 && !order; attempt++) {
       try {
+        if (attempt > 0) orderNo = generateDocNo(orderNoPrefix(opts.channel));
         order = await orderModel.create({
-          order_no: generateDocNo(orderNoPrefix(opts.channel)),
+          _id: orderId,
+          order_no: orderNo,
           user_id: userId,
           order_type: opts.order_type,
           delivery_address: opts.order_type === "delivery" ? opts.delivery_address : null,
+          pickup_date: pickup?.pickup_date ?? null,
+          pickup_point: pickup?.pickup_point ?? null,
+          payment_due_at: opts.storefront ? new Date(Date.now() + ORDER_PAYMENT_WINDOW_MS) : null,
           subtotal,
           discount_amount,
           delivery_fee,
           total_amount,
-          promotion_id: appliedPromotion?.promotion_id ?? opts.promotion_id ?? null,
+          promotion_id: appliedPromotion?.promotion_id ?? couponPromotionId ?? opts.promotion_id ?? null,
+          ...couponFields,
+          ...pointsFields,
         });
       } catch (err: any) {
         if (err?.code === 11000 && attempt < 4) continue;
@@ -433,14 +493,18 @@ async function persistOrder(
       message: `ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
       module: "order",
       type: "info",
-      link: `/owner/orders/manageOrders?id=${order._id}`,
+      link: adminLinks.order(order._id),
       line: !isPos || process.env.LINE_NOTIFY_POS_ORDERS === "true",
     })
     .catch((err) => log.error("order.notify_failed", { order_id: String(order._id), err }));
 
   // แจ้งลูกค้าทาง LINE (ถ้าผูกบัญชีไว้) — เฉพาะออเดอร์จากเว็บ หน้าร้าน (POS) ลูกค้ายืนอยู่ตรงนั้นแล้ว
   if (!isPos) {
-    notifyCustomerLater(userId, customerMessages.created("order", order.order_no, total_amount));
+    notifyCustomerLater(
+      userId,
+      customerMessages.created("order", order.order_no, total_amount),
+      customerWeb.created("order", order._id, order.order_no, total_amount)
+    );
   }
 
   return presentOrderWithItems(
@@ -478,8 +542,10 @@ export async function createOrderFromCart(
   const lineInputs: OrderLineInput[] = (detail.items as any[]).map((it) => {
     const product = it.product_id ?? {};
     const variant = it.variant_id ?? null;
+    const variantIds = (it.selected_variants ?? []).map((v: any) => v?.variant_id).filter(Boolean).map(String);
     return {
       product_id: String(product._id ?? it.product_id),
+      variant_ids: variantIds,
       variant_id: variant?._id ? String(variant._id) : null,
       selected_options: (it.selected_options ?? [])
         .filter((o: any) => o?.option_id != null)
@@ -622,7 +688,15 @@ export async function getOrderByNo(orderNo: string) {
 export async function updateOrderStatus(
   id: string,
   next: OrderStatus,
-  opts: { cancelled_by?: string; cancelled_reason?: string } = {}
+  opts: {
+    cancelled_by?: string;
+    cancelled_reason?: string;
+    /**
+     * true = ยกเลิกออเดอร์ที่ชำระแล้วโดยไม่ตั้ง payment เป็น refunded อัตโนมัติ — ออเดอร์เป็น "ยกเลิก + ชำระแล้ว" = รอร้านโอนคืน
+     * แล้วร้านกดคืนเงินเอง (นโยบายฝั่งลูกค้า · cancelOrderByCustomer · docs/customer-backend-merge.md §8.8)
+     */
+    skipAutoRefund?: boolean;
+  } = {}
 ) {
   await dbConnect();
   assertObjectId(id);
@@ -665,14 +739,16 @@ export async function updateOrderStatus(
     // (BACKLOG 2.8) — BACKLOG3 §10: logic เหมือน preorderService เป๊ะ ย้ายไปใช้ร่วมกันที่
     // lib/orderLifecycle.ts แล้ว (คืนสต็อก/revoke-promo ด้านบนยังคงแยกเขียนเอง เพราะ cleanup
     // ตอนยกเลิกของ order/preorder ต่างกันจริง — preorder คืนโควตาต่อรายการแทน)
-    await registerAutoRefundOnCancel({
-      saga: cleanup,
-      entityKind: "order",
-      paymentFilter: { order_id: order._id },
-      currentPaymentStatus: order.payment_status,
-      cancelledBy: opts.cancelled_by,
-      entityId: order._id,
-    });
+    if (!opts.skipAutoRefund) {
+      await registerAutoRefundOnCancel({
+        saga: cleanup,
+        entityKind: "order",
+        paymentFilter: { order_id: order._id },
+        currentPaymentStatus: order.payment_status,
+        cancelledBy: opts.cancelled_by,
+        entityId: order._id,
+      });
+    }
 
     await cleanup.rollback();
 
@@ -686,15 +762,36 @@ export async function updateOrderStatus(
 
   order.order_status = next;
   await order.save();
-  notifyCustomerLater(
-    order.user_id,
-    customerMessages.orderStatus("order", order.order_no, next, {
-      reason: order.cancelled_reason,
-      orderType: order.order_type,
-    })
-  );
+  // แต้ม + คูปอง (customer-backend-merge.md §8.11): completed = ให้แต้ม · cancelled = คืนแต้มที่ใช้/ดึงแต้มที่ได้ + คืนคูปอง
+  if (next === "completed" || next === "cancelled") {
+    await pointsService.syncOrderPoints("order", order.toObject());
+    if (next === "cancelled") {
+      await couponService.releaseCoupon("order", String(order._id)).catch((err) =>
+        log.error("order.release_coupon_failed", { order_id: String(order._id), err })
+      );
+    }
+  }
+  // ลูกค้ายกเลิกเองไม่ต้องแจ้งกลับ (เห็นผลในหน้าเว็บอยู่แล้ว · แบบฝั่งลูกค้า — §8.12)
+  const selfCancel = next === "cancelled" && !!opts.cancelled_by && String(opts.cancelled_by) === String(order.user_id);
+  if (!selfCancel) {
+    notifyCustomerLater(
+      order.user_id,
+      customerMessages.orderStatus("order", order.order_no, next, {
+        reason: order.cancelled_reason,
+        orderType: order.order_type,
+      }),
+      customerWeb.orderStatus("order", order._id, order.order_no, next, {
+        reason: order.cancelled_reason,
+        orderType: order.order_type,
+        paymentStatus: order.payment_status,
+      })
+    );
+  }
   return presentOrderWithItems(order, cancelledItems);
 }
+
+// กำหนดชำระออเดอร์เว็บ — ค่าคงที่อยู่ที่ src/lib/paymentDeadline.ts (ใช้ร่วมกับ customerNotifyService)
+export { ORDER_PAYMENT_WINDOW_MS, PAYMENT_EXPIRED_REASON };
 
 /** สถานะที่ "ลูกค้า" ยกเลิกออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน */
 export const CUSTOMER_CANCELABLE_STATUSES: readonly OrderStatus[] = ["pending", "confirmed"];
@@ -728,6 +825,13 @@ export async function setPaymentStatus(orderId: string, status: PaymentStatus, p
     paymentId,
     entityLabel: "ออเดอร์",
   });
+  // คืนเงินแล้ว → คืนแต้มที่ใช้ + ดึงแต้มที่ได้คืน + คืนคูปอง (แบบฝั่งลูกค้า · §8.11)
+  if (status === "refunded") {
+    await pointsService.syncOrderPoints("order", order as any);
+    await couponService.releaseCoupon("order", orderId).catch((err) =>
+      log.error("order.release_coupon_failed", { order_id: orderId, err })
+    );
+  }
   return presentOrder(order);
 }
 
@@ -754,4 +858,177 @@ export async function deleteOrder(id: string) {
     id,
     entityLabel: "ออเดอร์",
   });
+}
+
+// ── นโยบายยกเลิกของลูกค้า (ออเดอร์เว็บ) — docs/customer-backend-merge.md §8.8 ─────────────
+/**
+ * ลูกค้ายกเลิกออเดอร์ของตัวเอง (แบบฝั่งลูกค้า — ผู้ใช้เลือก 2026-10-05):
+ *   - pending / confirmed เท่านั้น (ร้านเริ่มเตรียมแล้ว = ติดต่อร้าน) · ออเดอร์หน้าร้าน (POS-) ยกเลิกผ่านร้านเท่านั้น
+ *   - ยังไม่ชำระ → ยกเลิก + คืนสต็อก/สิทธิ์โปรโมชัน
+ *   - ชำระแล้ว → ยกเลิกได้ด้วย แต่ **ไม่** ตั้ง payment เป็น refunded ให้ — ออเดอร์เป็น "ยกเลิก + ชำระแล้ว" = รอโอนคืน
+ *     แจ้งเจ้าของร้าน · ร้านโอนคืนแล้วกดคืนเงินเอง (POST /api/admin/payments/[id]/refund) ตัวเลขบัญชีจึงตรงความจริง
+ * ผู้เรียก (route) ต้องตรวจว่าเป็นเจ้าของออเดอร์แล้ว
+ */
+export async function cancelOrderByCustomer(id: string, userId: string, reason?: string | null) {
+  await dbConnect();
+  assertObjectId(id);
+  const doc = await orderModel
+    .findOne({ _id: id, deleted_at: null })
+    .select("order_no order_status payment_status total_amount")
+    .lean<{ order_no?: string; order_status: OrderStatus; payment_status?: string; total_amount: number } | null>();
+  if (!doc) throw notFound("ไม่พบออเดอร์ที่ระบุ");
+  if (String(doc.order_no ?? "").startsWith(`${orderNoPrefix("instore")}-`)) {
+    throw conflict("ออเดอร์หน้าร้านยกเลิกผ่านร้านเท่านั้น");
+  }
+  if (!CUSTOMER_CANCELABLE_STATUSES.includes(doc.order_status)) {
+    throw conflict(
+      `ยกเลิกออเดอร์เองได้เฉพาะตอนสถานะ ${CUSTOMER_CANCELABLE_STATUSES.join(" / ")} เท่านั้น ` +
+        `(สถานะปัจจุบัน: "${doc.order_status}") — หากต้องการยกเลิกกรุณาติดต่อร้าน`
+    );
+  }
+  const paid = doc.payment_status === "paid";
+  const result = await updateOrderStatus(id, "cancelled", {
+    cancelled_by: userId,
+    cancelled_reason: reason?.trim() || "ลูกค้ายกเลิกเอง",
+    skipAutoRefund: true,
+  });
+  if (paid) {
+    notificationService
+      .notify({
+        title: `ลูกค้ายกเลิกออเดอร์ที่ชำระแล้ว ${doc.order_no ?? ""} — รอโอนเงินคืน`.trim(),
+        message: `ยอด ${toBaht(doc.total_amount).toLocaleString("th-TH")} บาท · โอนคืนแล้วกด "คืนเงิน" ที่รายการชำระเงิน`,
+        module: "finance",
+        type: "warning",
+        link: adminLinks.order(id),
+      })
+      .catch((err) => log.error("order.customer_cancel_paid_notify_failed", { order_id: id, err }));
+  }
+  return result;
+}
+
+// ── หมดเวลาชำระ (ออเดอร์เว็บ 30 นาที) — docs/customer-backend-merge.md §8.8 ─────────────
+const EXPIRE_MAX_PER_RUN = 100;
+
+/** ส่งสลิปแล้ว (มี payment ที่รอตรวจและแนบสลิป) — ไม่นับว่าค้างจ่าย */
+async function hasSubmittedSlip(orderId: unknown): Promise<boolean> {
+  return !!(await paymentModel.exists({
+    order_id: orderId,
+    status: "pending",
+    slip_image_url: { $nin: [null, ""] },
+    deleted_at: null,
+  }));
+}
+
+/**
+ * ยกเลิกออเดอร์เว็บที่เลยกำหนดชำระ (payment_due_at) แล้วยังไม่ส่งสลิป → คืนสต็อก + สิทธิ์โปรโมชัน + แจ้งลูกค้า
+ * เรียกจาก cron (npm run cron:order-expiry ทุก 5 นาที) และแบบ lazy ก่อนลูกค้าเปิดรายการ/หน้าชำระเงิน (scope)
+ * ออเดอร์ที่ไม่มี payment_due_at (POS / แอดมินสร้าง / ออเดอร์เก่า) ไม่ถูกแตะ
+ */
+export async function expireUnpaidOrders(
+  scope: { userId?: string; orderId?: string; now?: Date } = {}
+): Promise<{ expired: string[] }> {
+  await dbConnect();
+  const filter: Record<string, unknown> = {
+    order_status: "pending",
+    payment_status: { $in: ["pending", "failed"] },
+    payment_due_at: { $lt: scope.now ?? new Date() },
+    deleted_at: null,
+  };
+  if (scope.userId) filter.user_id = scope.userId;
+  if (scope.orderId) filter._id = scope.orderId;
+  const candidates = await orderModel
+    .find(filter)
+    .select("_id order_no")
+    .limit(EXPIRE_MAX_PER_RUN)
+    .lean<Array<{ _id: unknown; order_no?: string }>>();
+
+  const expired: string[] = [];
+  for (const o of candidates) {
+    if (await hasSubmittedSlip(o._id)) continue;
+    try {
+      await updateOrderStatus(String(o._id), "cancelled", { cancelled_reason: PAYMENT_EXPIRED_REASON });
+      expired.push(String(o.order_no ?? o._id));
+    } catch (err) {
+      log.error("order.expire_failed", { order_id: String(o._id), err });
+    }
+  }
+  if (expired.length) log.info("order.expired_unpaid", { count: expired.length, orders: expired });
+  return { expired };
+}
+
+/** ออเดอร์นี้ถูกยกเลิกเพราะหมดเวลาชำระ และยังไม่ได้จ่าย → ลูกค้าแนบสลิปย้อนหลังเพื่อเปิดกลับได้ */
+export function canReopenWithLateSlip(order: {
+  order_status?: string | null;
+  payment_status?: string | null;
+  cancelled_reason?: string | null;
+  points_redeemed?: number | null;
+  user_coupon_id?: unknown;
+}): boolean {
+  return (
+    order.order_status === "cancelled" &&
+    order.cancelled_reason === PAYMENT_EXPIRED_REASON &&
+    (order.payment_status === "pending" || order.payment_status === "failed") &&
+    // ใช้แต้ม/คูปองแล้วถูกคืนตอนหมดเวลา → เปิดกลับไม่ได้ (ยอดในออเดอร์ยังหักส่วนลดนั้นอยู่) · ให้สั่งใหม่/ติดต่อร้าน
+    !(Number(order.points_redeemed) > 0) &&
+    !order.user_coupon_id
+  );
+}
+
+/**
+ * แนบสลิปย้อนหลังหลังหมดเวลา (ผู้ใช้เลือกย้ายมา 2026-10-05): ตัดสต็อกใหม่ → กลับเป็น pending รอร้านตรวจสลิป
+ * ของไม่พอ = 409 เปิดกลับไม่ได้ (ไม่มีอะไรถูกตัดค้าง) · ได้กำหนดชำระใหม่ 30 นาที (ส่งสลิปแล้วจึงไม่ถูกยกเลิกซ้ำ)
+ * สิทธิ์โปรโมชันที่คืนไปตอนยกเลิก **ไม่ถูกบันทึกซ้ำ** (ส่วนลดในยอดออเดอร์ยังเท่าเดิม) — เรียกจาก paymentService ก่อนบันทึกสลิป
+ */
+export async function reopenExpiredOrder(id: string): Promise<void> {
+  await dbConnect();
+  assertObjectId(id);
+  const order = await orderModel
+    .findOne({ _id: id, deleted_at: null })
+    .select("order_no order_status payment_status cancelled_reason points_redeemed user_coupon_id")
+    .lean<any>();
+  if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
+  if (!canReopenWithLateSlip(order)) throw conflict("ออเดอร์นี้ถูกยกเลิกแล้ว");
+
+  const items = await orderItemModel
+    .find({ order_id: id, deleted_at: null })
+    .select("product_id quantity")
+    .lean<Array<{ product_id: unknown; quantity: number }>>();
+  const stockItems = items.map((it) => ({ product_id: String(it.product_id), quantity: it.quantity }));
+  try {
+    await productService.deductStockForOrder(stockItems);
+  } catch (err) {
+    if ((err as { status?: number })?.status === 409) {
+      throw conflict("สินค้าบางรายการหมดแล้ว เปิดคำสั่งซื้อกลับไม่ได้ — กรุณาติดต่อร้านเพื่อขอคืนเงิน");
+    }
+    throw err;
+  }
+
+  const reopened = await orderModel.findOneAndUpdate(
+    { _id: id, order_status: "cancelled", cancelled_reason: PAYMENT_EXPIRED_REASON, deleted_at: null },
+    {
+      $set: {
+        order_status: "pending",
+        cancelled_at: null,
+        cancelled_by: null,
+        cancelled_reason: null,
+        payment_due_at: new Date(Date.now() + ORDER_PAYMENT_WINDOW_MS),
+      },
+    }
+  );
+  if (!reopened) {
+    // มีคนเปลี่ยนสถานะแทรกเข้ามา → คืนสต็อกที่เพิ่งตัด
+    await productService
+      .restockForOrder(stockItems)
+      .catch((err) => log.error("order.reopen_restock_failed", { order_id: id, err }));
+    throw conflict("สถานะคำสั่งซื้อเปลี่ยนไปแล้ว กรุณาโหลดหน้าใหม่");
+  }
+  notificationService
+    .notify({
+      title: `เปิดออเดอร์กลับ ${order.order_no ?? ""} — ลูกค้าแนบสลิปหลังหมดเวลา`.trim(),
+      message: "ตัดสต็อกใหม่แล้ว รอตรวจสลิป",
+      module: "order",
+      type: "info",
+      link: adminLinks.order(id),
+    })
+    .catch((err) => log.error("order.reopen_notify_failed", { order_id: id, err }));
 }

@@ -10,6 +10,7 @@
  *
  * ข้อจำกัด: ไม่มี transaction — ใช้ best-effort + ชดเชย (คืนโควตา/ลบเอกสาร) ผ่าน Saga เมื่อผิดพลาดกลางคัน
  */
+import mongoose from "mongoose";
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
 import { Saga } from "../lib/compensation";
@@ -24,12 +25,13 @@ import {
   softDeleteEntityWithItems,
 } from "../lib/orderLifecycle";
 import preorderModel from "../models/preorderModel";
+import productModel from "../models/productModel";
 import preorderItemModel from "../models/preorderItemModel";
 import userModel from "../models/userModel";
 import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
-import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
+import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 import { notificationService } from "./notificationService";
 import { computePaymentDueAt, onPreorderCancelled, onPreorderPaid } from "./preorderRoundLifecycleService";
 import { log } from "../lib/logger";
@@ -39,6 +41,18 @@ import type { z } from "zod";
 // BACKLOG2 §4 — schema เดียวกับ orderService.updateDelivery() ทุกฟิลด์ (generic ไม่มีอะไรเฉพาะ order)
 // ใช้ร่วมกันได้เลย ไม่ต้องสร้างซ้ำ
 import type { updateDeliveryBody } from "../schemas/order";
+import { adminLinks } from "../lib/adminLinks";
+import * as shippingService from "./shippingService";
+import * as couponService from "./couponService";
+import * as pointsService from "./pointsService";
+import * as promotionUsageService from "./promotionUsageService";
+import { trackBackground } from "../lib/backgroundTasks";
+import {
+  assertCustomizationIds,
+  getCustomizations,
+  resolveCustomization,
+  type CustomizationInput,
+} from "./productCustomizationService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -76,7 +90,7 @@ const ADDRESS_FIELDS = [
 ] as const;
 
 // ── Types ────────────────────────────────────────────────────
-export interface PreorderLineInput {
+export interface PreorderLineInput extends CustomizationInput {
   round_item_id: string;
   quantity: number;
   special_request?: string | null;
@@ -89,6 +103,12 @@ export interface CreatePreorderInput {
   items: PreorderLineInput[];
   /** ส่วนลดกรอกมือ — มีผลเฉพาะเมื่อเรียกจากฝั่งแอดมิน (opts.allowManualDiscount) */
   discount_amount?: number;
+  /** takeaway: จุดรับ (_id ของหน้าร้านประจำสัปดาห์) + วันรับ "YYYY-MM-DD" (ช่วงวันของรอบ) — ไม่ส่ง = null */
+  pickup_location_id?: string | null;
+  pickup_date?: string | null;
+  /** คูปองของฉัน (แลกด้วยแต้ม) + ใช้แต้มเป็นส่วนลด — หน้าเว็บลูกค้า (customer-backend-merge.md §8.11) */
+  user_coupon_id?: string | null;
+  points_to_redeem?: number | null;
 }
 
 export interface ListPreorderQuery {
@@ -123,7 +143,8 @@ async function quantityAlreadyOrdered(userId: string, roundId: unknown): Promise
 export async function createPreorder(
   userId: string,
   input: CreatePreorderInput,
-  opts: { allowManualDiscount?: boolean } = {}
+  /** storefront = สั่งจากหน้าเว็บลูกค้า → ค่าส่งจาก ShippingZones + ขอบเขตจัดส่ง (docs/customer-backend-merge.md §8.7) */
+  opts: { allowManualDiscount?: boolean; storefront?: boolean } = {}
 ) {
   await dbConnect();
   await assertRefExists(userModel, userId, "ผู้ใช้", "user_id");
@@ -151,6 +172,15 @@ export async function createPreorder(
     delivery_address = Object.fromEntries(ADDRESS_FIELDS.map((f) => [f, addr[f]]));
   }
 
+  // takeaway + เลือกจุดรับ/วันรับ → ตรวจกับหน้าร้านประจำสัปดาห์ (ช่วงวันของรอบ · ผิด = 400)
+  const pickup =
+    input.order_type === "takeaway" && input.pickup_location_id
+      ? await shippingService.resolvePickupSelection(input.pickup_location_id, input.pickup_date, {
+          type: "preorder",
+          roundPickupDate: round.pickup_date,
+        })
+      : null;
+
   // ── resolve รายการ + คิดราคา ──
   // BACKLOG2 §2: เดิมวน await ทีละรายการ (พรีออเดอร์ N รายการ = query ~2N ครั้งทยอยทีละรายการ ผ่าน
   // getOrderableRoundItem() ตัวเดียว) เปลี่ยนมา batch ผ่าน getOrderableRoundItems() (พหูพจน์) ครั้ง
@@ -158,13 +188,11 @@ export async function createPreorder(
   // จุดต่อรายการ ต่างแค่ "ลำดับ" ของ error เมื่อมีหลายรายการผิดพร้อมกัน (เช็ค id/quantity ของทุก
   // รายการก่อน แล้วค่อยเช็คสิ่งที่ต้องรู้ผลจาก DB — เหมือนที่ยอมรับไว้แล้วใน resolveLines ไม่มีเทสไหน
   // อิงลำดับ error ข้ามรายการอยู่แล้ว)
-  const seen = new Set<string>();
+  // สินค้าเดียวกัน (round_item_id ซ้ำ) ได้ถ้าตัวเลือกต่างกัน — แยกแถว · ตัวเลือกเหมือนกัน = รวมจำนวนเป็นแถวเดียว
+  // (ผู้ใช้เลือก 2026-10-05 · แบบฝั่งลูกค้า — docs/customer-backend-merge.md §8.10)
   const quantities = input.items.map((raw) => {
     assertObjectId(raw.round_item_id, "round_item_id");
-    if (seen.has(String(raw.round_item_id))) {
-      throw badRequest("มี round_item_id ซ้ำใน items — รวมจำนวนเป็นรายการเดียว");
-    }
-    seen.add(String(raw.round_item_id));
+    assertCustomizationIds(raw);
 
     const quantity = Number(raw.quantity);
     if (!Number.isInteger(quantity) || quantity < 1) {
@@ -181,19 +209,51 @@ export async function createPreorder(
   // docs/preorder-round-flow.md ปัญหา 2 — เดิม product.preorder_config (บังคับกรอก) ไม่ถูกใช้เลย
   // ยอดที่ลูกค้าคนนี้จองไว้แล้วในรอบเดียวกัน (พรีออเดอร์ที่ยังไม่ยกเลิก) ต่อ round_item — ใช้คุม max_order_qty ต่อคน
   const alreadyByRoundItem = await quantityAlreadyOrdered(userId, round._id);
+  const customizations = await getCustomizations(resolvedItems.map(({ product }) => String(product._id)));
 
-  const lines = resolvedItems.map(({ item, product, unit_price }, idx) => {
-    const quantity = quantities[idx];
+  // 1) คิดตัวเลือกต่อรายการ แล้วรวมรายการที่ round_item + ชุดตัวเลือกเดียวกัน (special_request ใช้ค่าล่าสุดที่ไม่ว่าง)
+  type Group = {
+    item: any;
+    product: any;
+    unit_price: number;
+    custom: ReturnType<typeof resolveCustomization>;
+    quantity: number;
+    special_request: string | null;
+  };
+  const groups = new Map<string, Group>();
+  resolvedItems.forEach(({ item, product, unit_price }, idx) => {
+    const custom = resolveCustomization(
+      customizations.get(String(product._id)) ?? { groups: [], options: [] },
+      input.items[idx],
+      product.product_name_th
+    );
+    const key = `${String(item._id)}#${custom.key}`;
+    const special = input.items[idx].special_request?.trim() || null;
+    const prev = groups.get(key);
+    if (prev) {
+      prev.quantity += quantities[idx];
+      prev.special_request = special ?? prev.special_request;
+    } else {
+      groups.set(key, { item, product, unit_price, custom, quantity: quantities[idx], special_request: special });
+    }
+  });
+
+  // 2) ตรวจขั้นต่ำต่อรายการ + สูงสุดต่อลูกค้า (รวมทุกแถวของสินค้าเดียวกัน + พรีออเดอร์เดิมในรอบ)
+  const orderedByRoundItem = new Map<string, number>();
+  const lines = [...groups.values()].map(({ item, product, unit_price, custom, quantity, special_request }) => {
     const cfg = product.preorder_config ?? {};
-    // ขั้นต่ำ = ค่าที่มากกว่าระหว่างรายการในรอบกับตัวสินค้า
+    // ขั้นต่ำ = ค่าที่มากกว่าระหว่างรายการในรอบกับตัวสินค้า (ต่อแถว — แบบฝั่งลูกค้า)
     const minQty = Math.max(item.min_order_qty ?? 1, cfg.min_order_qty ?? 1);
     if (quantity < minQty) {
       throw badRequest(`"${product.product_name_th}" สั่งขั้นต่ำ ${minQty} ชิ้นต่อรายการ`);
     }
-    // สูงสุดต่อลูกค้า 1 คนต่อรอบ (รวมพรีออเดอร์เดิมในรอบเดียวกัน) — กันคนเดียวกวาดโควตาทั้งรอบ
+    // สูงสุดต่อลูกค้า 1 คนต่อรอบ (รวมพรีออเดอร์เดิมในรอบเดียวกัน + ทุกตัวเลือกในใบนี้) — กันคนเดียวกวาดโควตาทั้งรอบ
+    const roundItemKey = String(item._id);
+    const inThisOrder = (orderedByRoundItem.get(roundItemKey) ?? 0) + quantity;
+    orderedByRoundItem.set(roundItemKey, inThisOrder);
     if (cfg.max_order_qty != null) {
-      const already = alreadyByRoundItem.get(String(item._id)) ?? 0;
-      if (already + quantity > cfg.max_order_qty) {
+      const already = alreadyByRoundItem.get(roundItemKey) ?? 0;
+      if (already + inThisOrder > cfg.max_order_qty) {
         throw badRequest(
           `"${product.product_name_th}" สั่งได้สูงสุด ${cfg.max_order_qty} ชิ้นต่อคนต่อรอบ` +
             (already > 0 ? ` (สั่งไว้แล้ว ${already} ชิ้น เหลือสั่งได้อีก ${Math.max(0, cfg.max_order_qty - already)})` : "")
@@ -201,29 +261,38 @@ export async function createPreorder(
       }
     }
 
-    // BACKLOG §3.11 เฟส 5b — unit_price จาก preorderRoundService.getOrderableRoundItems() เป็นสตางค์
-    // อยู่แล้ว (price_override/sale_price/product_price เป็นสตางค์ทั้งหมดตั้งแต่เฟส 5b) ไม่ต้องแปลง
-    // อะไรเพิ่ม — ก่อนหน้านี้ (เฟส 1-5a) ยังต้อง toSatang() ตรงนี้เพราะฝั่งสินค้ายังเป็นบาทอยู่
-    const unitPriceSatang = unit_price;
+    // ราคารอบ (price_override / ราคาสินค้า) + ตัวเลือก/ออปชันที่เลือก — เงินเป็นบาท (docs/money-units.md)
+    const unitPriceSatang = toSatang(unit_price + custom.extra_price);
     return {
       round_item_id: item._id,
       product_id: product._id,
       product_snapshot: {
         product_name_th: product.product_name_th,
         product_name_eng: product.product_name_eng,
+        variant_name: custom.variant_name,
       },
+      variant_id: custom.variant_id,
+      selected_variants: custom.selected_variants,
+      selected_options: custom.selected_options,
       quantity,
       unit_price: unitPriceSatang,
-      total_price: unitPriceSatang * quantity,
-      special_request: input.items[idx].special_request?.trim() || null,
+      total_price: toSatang(unitPriceSatang * quantity),
+      special_request,
     };
   });
 
-  const subtotal = lines.reduce((s, l) => s + l.total_price, 0);
+  const subtotal = toSatang(lines.reduce((s, l) => s + l.total_price, 0));
 
   // ── ค่าส่ง (server คิดเอง) ── deliveryService ยังทำงานเป็นบาท — แปลงข้ามโดเมนแค่จุดนี้
   let delivery_fee = 0;
-  if (input.order_type === "delivery") {
+  if (input.order_type === "delivery" && opts.storefront) {
+    delivery_fee = (
+      await shippingService.quoteStorefrontDelivery({
+        province: delivery_address?.province ?? null,
+        productIds: lines.map((l) => String(l.product_id)),
+      })
+    ).fee;
+  } else if (input.order_type === "delivery") {
     delivery_fee = toSatang(
       (
         await deliveryService.calcDeliveryFee({
@@ -235,13 +304,14 @@ export async function createPreorder(
   }
 
   // ── ส่วนลด (เฉพาะแอดมินกรอกมือ — input.discount_amount เป็นบาทจาก request) ──
-  const discount_amount = opts.allowManualDiscount
+  let discount_amount = opts.allowManualDiscount
     ? toSatang(Math.max(0, Number(input.discount_amount) || 0))
     : 0;
   if (discount_amount > subtotal + delivery_fee) {
     throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
   }
-  const total_amount = subtotal - discount_amount + delivery_fee;
+  let total_amount = toSatang(subtotal - discount_amount + delivery_fee);
+  const pointsToRedeem = Math.max(0, Number(input.points_to_redeem) || 0);
 
   // ── ต้นทุนต่อหน่วย (สแนปช็อตจากสูตรล่าสุด) ──
   const costByProduct = await recipeService.getUnitCostByProduct(
@@ -250,7 +320,55 @@ export async function createPreorder(
 
   // ── จองโควตา + สร้างเอกสาร — ชดเชยผ่าน Saga ถ้าพลาดกลางคัน ──
   const saga = new Saga();
+  // คูปอง/แต้มผูกกับ _id ของพรีออเดอร์ → จองเลขไว้ก่อน (สร้างไม่สำเร็จ = saga คืนคูปอง/แต้ม)
+  const preorderId = new mongoose.Types.ObjectId();
+  let preorderNo = generateDocNo("PRE");
+  let loyaltyFields = { user_coupon_id: null as unknown, coupon_discount: 0, points_redeemed: 0, points_discount: 0, promotion_id: null as unknown };
   try {
+    // คูปองของฉัน + แต้ม (customer-backend-merge.md §8.11) — หักคูปองก่อน แล้วคิดเพดานแต้มจากยอดสินค้าที่เหลือ
+    if (input.user_coupon_id) {
+      const categoryById = new Map(
+        (
+          await productModel
+            .find({ _id: { $in: lines.map((l) => l.product_id) } })
+            .select("category_id")
+            .lean<Array<{ _id: unknown; category_id?: unknown }>>()
+        ).map((p) => [String(p._id), p.category_id ? String(p.category_id) : null])
+      );
+      const coupon = await couponService.applyUserCoupon({
+        userId,
+        userCouponId: input.user_coupon_id,
+        lines: lines.map((l) => ({
+          product_id: String(l.product_id),
+          category_id: categoryById.get(String(l.product_id)) ?? null,
+          quantity: l.quantity,
+          line_total: toBaht(l.total_price),
+        })),
+        subtotal: toBaht(subtotal),
+        delivery_fee: toBaht(delivery_fee),
+        refType: "preorder",
+        refId: preorderId,
+      });
+      saga.onRollback("release-coupon", coupon.undo);
+      discount_amount = toSatang(discount_amount + coupon.discount_amount);
+      loyaltyFields = { ...loyaltyFields, user_coupon_id: coupon.user_coupon_id, coupon_discount: coupon.discount_amount, promotion_id: coupon.promotion_id };
+    }
+    if (pointsToRedeem > 0) {
+      const points_discount = await pointsService.redeemPoints({
+        userId,
+        points: pointsToRedeem,
+        subtotal: toBaht(subtotal - Math.min(discount_amount, subtotal)),
+        refType: "preorder",
+        refId: preorderId,
+        refNo: preorderNo,
+      });
+      saga.onRollback("refund-points", () => pointsService.refundRedemption("preorder", String(preorderId)));
+      loyaltyFields = { ...loyaltyFields, points_redeemed: pointsToRedeem, points_discount };
+      discount_amount = toSatang(discount_amount + points_discount);
+    }
+    if (discount_amount > subtotal + delivery_fee) throw badRequest("ส่วนลดมากกว่ายอดที่ต้องชำระ");
+    total_amount = toSatang(subtotal - discount_amount + delivery_fee);
+
     for (const l of lines) {
       const roundItemId = String(l.round_item_id);
       await preorderRoundService.commitQty(roundItemId, l.quantity);
@@ -263,16 +381,21 @@ export async function createPreorder(
     let preorder: any = null;
     for (let attempt = 0; attempt < 5 && !preorder; attempt++) {
       try {
+        if (attempt > 0) preorderNo = generateDocNo("PRE");
         preorder = await preorderModel.create({
-          preorder_no: generateDocNo("PRE"),
+          _id: preorderId,
+          preorder_no: preorderNo,
           user_id: userId,
           round_id: round._id,
           order_type: input.order_type,
           delivery_address,
+          pickup_date: pickup?.pickup_date ?? null,
+          pickup_point: pickup?.pickup_point ?? null,
           subtotal,
           discount_amount,
           delivery_fee,
           total_amount,
+          ...loyaltyFields,
           // docs/preorder-round-flow.md ประเด็น 3 — เลยกำหนดแล้วยังไม่จ่าย (ไม่มีสลิปรอตรวจ) → ยกเลิกอัตโนมัติ
           payment_due_at: computePaymentDueAt(new Date(), round.close_date),
         });
@@ -289,6 +412,9 @@ export async function createPreorder(
         round_item_id: l.round_item_id,
         product_id: l.product_id,
         product_snapshot: l.product_snapshot,
+        variant_id: l.variant_id,
+        selected_variants: l.selected_variants,
+        selected_options: l.selected_options,
         pickup_date: round.pickup_date,
         special_request: l.special_request,
         quantity: l.quantity,
@@ -305,17 +431,21 @@ export async function createPreorder(
     saga.commit();
 
     // แจ้งเจ้าของร้าน (DB + LINE) — คู่กับ orderService.persistOrder · best-effort ไม่ทำให้สร้างพรีออเดอร์ล้มเหลว
-    // link = null: ยังไม่มี path หน้าจัดการพรีออเดอร์ฝั่ง frontend ที่ยืนยันแล้ว (docs/LINE.md §9)
+    // link → หน้าพรีออเดอร์ (เปิด drawer ด้วย ?id= — frontend PR #16)
     notificationService
       .notify({
-        title: `พรีออเดอร์ใหม่ ${preorder.preorder_no}`,
+        title: `เปิดพรีออเดอร์รอบใหม่ ${preorder.preorder_no}`,
         message: `รอบ ${round.round_name ?? "-"} · ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
         module: "order",
         type: "info",
-        link: null,
+        link: adminLinks.preorder(preorder._id),
       })
       .catch((err) => log.error("preorder.notify_failed", { preorder_id: String(preorder._id), err }));
-    notifyCustomerLater(userId, customerMessages.created("preorder", preorder.preorder_no, total_amount));
+    notifyCustomerLater(
+      userId,
+      customerMessages.created("preorder", preorder.preorder_no, total_amount),
+      customerWeb.created("preorder", preorder._id, preorder.preorder_no, total_amount)
+    );
     return getPreorderById(String(preorder._id));
   } catch (err) {
     await saga.rollback();
@@ -483,13 +613,34 @@ export async function updatePreorderStatus(
 
   preorder.order_status = next;
   await preorder.save();
-  notifyCustomerLater(
-    preorder.user_id,
-    customerMessages.orderStatus("preorder", preorder.preorder_no, next, {
-      reason: preorder.cancelled_reason,
-      orderType: preorder.order_type,
-    })
-  );
+  // แต้ม + คูปอง (customer-backend-merge.md §8.11)
+  if (next === "completed" || next === "cancelled") {
+    await pointsService.syncOrderPoints("preorder", preorder.toObject());
+    if (next === "cancelled") {
+      await couponService.releaseCoupon("preorder", String(preorder._id)).catch((err) =>
+        log.error("preorder.release_coupon_failed", { preorder_id: String(preorder._id), err })
+      );
+      await promotionUsageService
+        .revokeUsage({ preorder_id: String(preorder._id) })
+        .catch((err) => log.error("preorder.revoke_usage_failed", { preorder_id: String(preorder._id), err }));
+    }
+  }
+  // ลูกค้ายกเลิกเองไม่ต้องแจ้งกลับ (§8.12)
+  const selfCancel = next === "cancelled" && !!opts.cancelled_by && String(opts.cancelled_by) === String(preorder.user_id);
+  if (!selfCancel) {
+    notifyCustomerLater(
+      preorder.user_id,
+      customerMessages.orderStatus("preorder", preorder.preorder_no, next, {
+        reason: preorder.cancelled_reason,
+        orderType: preorder.order_type,
+      }),
+      customerWeb.orderStatus("preorder", preorder._id, preorder.preorder_no, next, {
+        reason: preorder.cancelled_reason,
+        orderType: preorder.order_type,
+        paymentStatus: preorder.payment_status,
+      })
+    );
+  }
 
   // docs/BACKLOG4.md Y1 — ยกเลิกรายการที่ถูกนับเข้าใบผลิตแล้ว → ลดใบผลิต (best-effort ไม่ให้การยกเลิกล้ม)
   if (next === "cancelled") {
@@ -544,7 +695,14 @@ export async function setPaymentStatus(
   });
   // จ่ายหลังปิดรอบ/หลังสร้างใบผลิต → บวกเข้าใบผลิต (fire-and-forget — ไม่ให้การยืนยันชำระเงินล้มเพราะงานนี้)
   if (status === "paid") {
-    onPreorderPaid(preorderId).catch((err) => log.error("preorder.late_payment_sync_failed", { preorder_id: preorderId, err }));
+    trackBackground(onPreorderPaid(preorderId)).catch((err) => log.error("preorder.late_payment_sync_failed", { preorder_id: preorderId, err }));
+  }
+  // คืนเงินแล้ว → คืนแต้มที่ใช้ + ดึงแต้มที่ได้คืน + คืนคูปอง (§8.11)
+  if (status === "refunded") {
+    await pointsService.syncOrderPoints("preorder", preorder as any);
+    await couponService.releaseCoupon("preorder", preorderId).catch((err) =>
+      log.error("preorder.release_coupon_failed", { preorder_id: preorderId, err })
+    );
   }
   return presentPreorder(preorder);
 }

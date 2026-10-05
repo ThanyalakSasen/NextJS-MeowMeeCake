@@ -9,20 +9,20 @@
  */
 import type { NextRequest } from "next/server";
 import { ok, route } from "@/lib/apiResponse";
-import { requireAuth, requireRole } from "@/lib/authGuard";
+import { authenticate, requireRole } from "@/lib/authGuard";
 import { notificationService } from "@/services/notificationService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const PATCH = route(async (req: NextRequest, ctx: Ctx) => {
-  requireAuth(req);
+  await authenticate(req);
   const { id } = await ctx.params;
   const body = await req.json();
   return ok(await notificationService.update(id, { is_read: !!body.is_read }));
 });
 
 export const DELETE = route(async (req: NextRequest, ctx: Ctx) => {
-  const session = requireAuth(req);
+  const session = await authenticate(req);
   requireRole(session, "owner");
   const { id } = await ctx.params;
   return ok(await notificationService.remove(id));

@@ -1,46 +1,41 @@
 /**
- * money — แปลงเงินระหว่าง "บาท" (float ทศนิยม 2 ตำแหน่ง — ใช้ที่ API request/response เท่านั้น)
- * กับ "สตางค์" (integer — เก็บใน DB และคำนวณทุกอย่างด้วยหน่วยนี้)
+ * money — หน่วยเงินของระบบ = **บาท** (ทศนิยมไม่เกิน 2 ตำแหน่ง) ทั้งใน DB และที่ API รับ-ส่ง
  *
- * BACKLOG §3.11 — ก่อนแก้ ราคา/ยอดรวม/ส่วนลดทุกอย่างเก็บเป็น JS `number` หน่วยบาทตรง ๆ (float) มี
- * `round2()` ช่วยปัดตอนแสดงผล/บันทึกลง DB แต่ float สะสม error ได้จากการคูณ/บวกต่อเนื่องหลายจุด
- * (ราคา × จำนวน → รวมหลายบรรทัด → หักส่วนลด → บวกค่าส่ง) — เก็บเป็น integer สตางค์ตัดปัญหานี้ที่ต้นทาง
- * เพราะ integer บวก/ลบ/คูณกันไม่มี rounding error เลย (มีแค่ตอน "หาร" เท่านั้นที่ต้องปัดเอง เช่น
- * ส่วนลดเปอร์เซ็นต์ — ใช้ `Math.round` เสมอ ไม่ปล่อยทศนิยมค้าง)
+ * ประวัติ: BACKLOG §3.11 (2026-09-12) เคยเปลี่ยนให้ DB เก็บเป็น "สตางค์" (integer) ส่วน API ยังเป็นบาท
+ * **ยกเลิกแล้ว (docs/money-units.md — ตัดสินใจ 2026-10-01):** แอป FrontOffice อ่าน/เขียน MongoDB ตัวเดียวกัน
+ * โดยตรงเป็นบาท (`product_price: 35` = 35 บาท) → DB มีสองหน่วยปนกัน ราคาเพี้ยน ×100/÷100 ซ้ำ ๆ
+ * (BACKLOG2 §16, BACKLOG4 R7) — จึงกลับมาเก็บเป็นบาทให้ตรงกับ FrontOffice
  *
- * **ตัดสินใจร่วมกับผู้ใช้ (2026-09-12): API ยังรับ-ส่งเป็นทศนิยมบาทเหมือนเดิม** (ไม่ breaking change กับ
- * client ที่ใช้อยู่) — มีแค่ชั้น DB/service เท่านั้นที่เปลี่ยนหน่วยเป็นสตางค์ กติกา:
- *   1. แปลงเป็นสตางค์ "ให้เร็วที่สุด" ตอนรับ input (route parse body แล้วแปลงทันทีก่อนส่งเข้า service)
- *   2. คำนวณทุกอย่างเป็น integer สตางค์ตลอดทาง — **ห้ามผสมหน่วยกลางทางคำนวณเด็ดขาด**
- *   3. แปลงกลับเป็นบาทเฉพาะตอนสุดท้ายก่อนส่ง response กลับ (หรือแสดงผล)
+ * ชื่อฟังก์ชัน toSatang/toBaht คงไว้ (ใช้อยู่ ~130 จุด — เปลี่ยนชื่อ = diff/conflict ใหญ่โดยไม่จำเป็น)
+ * แต่ **ทั้งคู่แค่ปัดเป็นบาททศนิยม 2 ตำแหน่ง ไม่คูณ/หาร 100 แล้ว**:
+ *   toSatang(x)  = ค่าที่จะ "เก็บลง DB" (บาท ปัด 2 ตำแหน่ง)
+ *   toBaht(x)    = ค่าที่จะ "ส่งออก API" (บาท ปัด 2 ตำแหน่ง)
+ * กติกา: ปัดทุกครั้งที่คำนวณยอดเสร็จ (คูณราคา×จำนวน / รวมบรรทัด / หักส่วนลด) ก่อนเก็บหรือเทียบค่า —
+ * float บวกกันสะสม error ได้ (0.1 + 0.2)
  */
 
-/** บาท (float) → สตางค์ (integer) — ปัดเข้าใกล้ที่สุด กัน floating-point เช่น 19.99*100 = 1998.999... */
+/** ค่าที่จะเก็บลง DB — บาท ปัดทศนิยม 2 ตำแหน่ง (ชื่อเดิมจากสมัยเก็บสตางค์ — ดูหัวไฟล์) */
 export function toSatang(baht: number): number {
-  return Math.round(baht * 100);
+  return round2(baht);
 }
 
-/** สตางค์ (integer) → บาท (float ทศนิยม 2 ตำแหน่งเสมอ) — ใช้ตอนส่ง response กลับหรือแสดงผล */
-export function toBaht(satang: number): number {
-  return Math.round(satang) / 100;
+/** ค่าที่จะส่งออก API — บาท ปัดทศนิยม 2 ตำแหน่ง (DB เป็นบาทอยู่แล้ว ไม่ต้องหาร) */
+export function toBaht(value: number): number {
+  return round2(value);
 }
 
-/** คิดเปอร์เซ็นต์ของยอดสตางค์ แล้วปัดกลับเป็น integer สตางค์เสมอ (เช่น ส่วนลด 15% ของ 9999 สตางค์) */
-export function percentOfSatang(satang: number, percent: number): number {
-  return Math.round((satang * percent) / 100);
+/** คิดเปอร์เซ็นต์ของยอดเงิน (บาท) แล้วปัด 2 ตำแหน่ง */
+export function percentOfSatang(amount: number, percent: number): number {
+  return round2((amount * percent) / 100);
 }
 
-/**
- * ปัดค่า "บาท" (float) ให้เหลือทศนิยม 2 ตำแหน่งเสมอ — ใช้กับค่าที่เป็นบาทอยู่แล้วตอนคำนวณ/แสดงผล
- * (เช่นผลลัพธ์ที่ผ่าน `toBaht()` มาแล้ว, `avg_rating`) **ไม่ใช่** สำหรับปัดสตางค์ดิบ (สตางค์เป็น
- * integer อยู่แล้วไม่ต้องปัด — ใช้ `toBaht()`/`toSatang()` แทน)
- */
+/** ปัดค่าบาทให้เหลือทศนิยม 2 ตำแหน่ง (Number.EPSILON กัน 1.005 → 1.00) */
 export function round2(baht: number): number {
-  return Math.round(baht * 100) / 100;
+  return Math.round((baht + Number.EPSILON) * 100) / 100;
 }
 
 /**
- * แปลงทุก key ที่ระบุของ object จากบาท → สตางค์ (ใช้ที่ route/service boundary ตอนรับ input)
+ * ปัดทุก key เงินที่ระบุของ object (ตอนรับ input — ชื่อเดิมจากสมัยเก็บสตางค์)
  * ข้าม key ที่ค่าเป็น `null`/`undefined` ไว้เฉย ๆ (ไม่แปลง 0 → 0 เพราะ 0 ไม่มีปัญหา แปลงตรง ๆ ได้)
  */
 export function toSatangFields<T extends Record<string, unknown>>(
@@ -55,7 +50,7 @@ export function toSatangFields<T extends Record<string, unknown>>(
   return out;
 }
 
-/** ตรงข้ามกับ toSatangFields — ใช้ตอนแปลง document จาก DB (สตางค์) กลับเป็นบาทก่อนส่ง response */
+/** ปัดทุก key เงินที่ระบุก่อนส่ง response (ชื่อเดิมจากสมัยเก็บสตางค์) */
 export function toBahtFields<T extends Record<string, unknown>>(
   obj: T,
   keys: readonly (keyof T)[]

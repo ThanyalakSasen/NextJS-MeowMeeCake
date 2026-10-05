@@ -15,11 +15,14 @@ import {
 import productModel from "../models/productModel";
 import productCategoryModel from "../models/productCategoryModel";
 import productVariantModel from "../models/productVariantModel";
+import { getProductCustomization } from "./productCustomizationService";
+import * as searchSynonymService from "./searchSynonymService";
 import unitModel from "../models/unitModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
 import { deleteImages } from "../lib/upload";
 import { toSatang, toBahtFields } from "../lib/money";
+import { adminLinks } from "../lib/adminLinks";
 import {
   DEFAULT_LOW_STOCK_THRESHOLD,
   LOW_STOCK_EXPR,
@@ -43,11 +46,11 @@ function notifyIfLowStockCrossed(
   // หมายเหตุ: enum module ไม่มีหมวด "product" แยก — ใช้ "ingredient" ร่วมกัน (หมวดสต็อกสินค้าคงคลัง)
   notificationService
     .notify({
-      title: `สินค้าใกล้หมด: ${product.product_name_th}`,
+      title: `สินค้าใกล้จะหมด: ${product.product_name_th}`,
       message: `คงเหลือ ${after} ชิ้น (เกณฑ์แจ้งเตือน ${threshold})`,
       module: "ingredient",
       type: "warning",
-      link: "/owner/products",
+      link: adminLinks.product(product._id),
     })
     .catch((err) => log.error("product.notify_failed", { product_id: String(product._id), err }));
 }
@@ -104,6 +107,8 @@ export type UpdateProductInput = Partial<CreateProductInput>;
 export interface ListProductQuery {
   pagination: Pagination;
   search?: string;
+  /** true = ขยายคำค้นด้วยกลุ่มคำพ้อง (หน้าร้าน · searchSynonymService — customer-backend-merge.md §8.16) */
+  expandSynonyms?: boolean;
   category_id?: string;
   /** true = เฉพาะพรีออเดอร์ · false = เฉพาะสินค้าปกติ · ไม่ส่ง = ทั้งหมด */
   is_preorder?: boolean;
@@ -111,7 +116,24 @@ export interface ListProductQuery {
   includeDeleted?: boolean;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
+  /** field ที่อนุญาตให้เรียง (ค่าเริ่มต้น ADMIN_PRODUCT_SORTS) — หน้าร้านส่ง PUBLIC_PRODUCT_SORTS (BACKLOG5 Y5) */
+  sortable?: readonly string[];
 }
+
+/** field ที่หลังร้านเรียงได้ — นอกรายการ = 400 (เดิมรับชื่อ field อะไรก็ได้ · BACKLOG5 Y5) */
+export const ADMIN_PRODUCT_SORTS = [
+  "created_at",
+  "updated_at",
+  "product_id",
+  "product_name_th",
+  "product_name_eng",
+  "product_price",
+  "sale_price",
+  "purchase_cost",
+  "product_stock_quantity",
+  "avg_rating",
+  "review_count",
+] as const;
 
 // ── Errors ────────────────────────────────────────────────────
 /** error เฉพาะโดเมนสินค้า — สืบทอด HttpError กลาง เพื่อให้ route handler แปลงเป็น status code ได้เลย */
@@ -302,7 +324,8 @@ export async function getProductByCode(
 
 /**
  * resolveScan — ใช้กับการสแกนหน้าร้าน: รับได้ทั้งรหัสสินค้า (pos-/pre-...) หรือ _id ดิบ
- * คืนสินค้า + ราคาปัจจุบัน + สต็อก + variants (ถ้ามี ให้ POS เลือกก่อนเพิ่มลงบิล)
+ * คืนสินค้า + ราคาปัจจุบัน + สต็อก + variants + customization (กลุ่มตัวเลือก/ออปชัน — ถ้ามี ให้ POS เลือกก่อนเพิ่มลงบิล
+ * แล้วส่ง variant_ids + selected_options มากับรายการ · ตัวเลือกไม่มีสต็อกแยก)
  */
 export async function resolveScan(code: string) {
   await dbConnect();
@@ -318,16 +341,21 @@ export async function resolveScan(code: string) {
     throw new ProductError("รูปแบบรหัสที่สแกนไม่ถูกต้อง", 400);
   }
 
-  const variants = await productVariantModel
-    .find({ product_id: product._id, deleted_at: null })
-    .select("variant_name variant_price variant_stock unit_id")
-    .lean();
+  const [variants, customization] = await Promise.all([
+    productVariantModel
+      .find({ product_id: product._id, deleted_at: null })
+      .select("group_id variant_name variant_price unit_id display_order")
+      .sort({ display_order: 1, created_at: 1 })
+      .lean(),
+    getProductCustomization(String(product._id)),
+  ]);
 
   return {
     product,
     current_price: (product.sale_price as number | null) ?? (product.product_price as number),
     stock: (product.product_stock_quantity as number | null) ?? null,
     variants,
+    customization,
   };
 }
 
@@ -352,15 +380,20 @@ export async function getProducts(query: ListProductQuery) {
     filter.is_visible = query.is_visible;
   }
   if (query.search) {
-    const rx = new RegExp(escapeRegExp(query.search.trim()), "i");
-    filter.$or = [
-      { product_name_th: rx },
-      { product_name_eng: rx },
-      { product_description: rx },
-    ];
+    const words = query.expandSynonyms
+      ? await searchSynonymService.searchWordsFor(query.search)
+      : [query.search.trim()];
+    filter.$or = words.flatMap((w) => {
+      const rx = new RegExp(escapeRegExp(w), "i");
+      return [{ product_name_th: rx }, { product_name_eng: rx }, { product_description: rx }];
+    });
   }
 
   const sortField = query.sortBy || "created_at";
+  const sortable: readonly string[] = query.sortable ?? ADMIN_PRODUCT_SORTS;
+  if (!sortable.includes(sortField)) {
+    throw new ProductError(`sortBy ต้องเป็นหนึ่งใน: ${sortable.join(", ")}`, 400);
+  }
   const sortDir = query.sortOrder === "asc" ? 1 : -1;
 
   const [items, total] = await Promise.all([

@@ -22,8 +22,7 @@ const productOptionSchema = new mongoose.Schema({
     type: Number,
     default: null, // null ถ้า option ไม่ใช่ text input
   },
-  // BACKLOG §3.11 เฟส 5b — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (ดู src/lib/money.ts)
-  // API (productOptionService) ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม
+  // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md)
   extra_price: {
     //ราคาที่เพิ่มขึ้นจากราคาสินค้าหลัก
     type: Number,
@@ -35,6 +34,11 @@ const productOptionSchema = new mongoose.Schema({
     //ตัวเลือกนี้จำเป็นต้องเลือกหรือไม่ เช่น ถ้าเป็นการเขียนข้อความบนเค้ก อาจจะมีตัวเลือก "ไม่มีข้อความ" ที่ราคาเพิ่มขึ้น 0 บาท แต่ถ้าเป็นการเพิ่มข้อความบนเค้ก อาจจะมีตัวเลือก "มีข้อความ" ที่ราคาเพิ่มขึ้น 50 บาท และตัวเลือก "ไม่มีข้อความ" ที่ราคาเพิ่มขึ้น 0 บาท
     type: Boolean,
     default: false,
+  },
+  // ลำดับการแสดง (น้อยแสดงก่อน)
+  display_order: {
+    type: Number,
+    default: 0,
   },
   deleted_at: {
       type: Date,

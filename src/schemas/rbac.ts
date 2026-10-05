@@ -28,6 +28,7 @@ const MENU_KEYS = [
   "dashboard",
   "promotions",
   "reports",
+  "store_info",
 ] as const;
 
 const permissionFlags = {

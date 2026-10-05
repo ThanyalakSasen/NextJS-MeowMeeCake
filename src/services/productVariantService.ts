@@ -1,6 +1,7 @@
 /**
  * productVariantService — CRUD ตัวเลือกสินค้าแบบมีหลายแบบ (ProductVariants)
- * เช่น รสชาติ / ขนาด ที่มีราคาส่วนเพิ่มและสต็อกแยกของตัวเอง
+ * เช่น รสชาติ / ขนาด ที่มีราคาบวกเพิ่ม (ไม่มีสต็อกแยก — สต็อกอยู่ที่ตัวสินค้า · docs/customer-backend-merge.md §8)
+ * ตั้งทั้งชุดแบบกลุ่มได้ที่ productCustomizationService (/api/admin/products/[id]/customization)
  *
  * ต่อยอดจาก crudService + ตรวจว่า product_id (และ unit_id ถ้ามี) อ้างถึงเอกสารที่มีจริง
  */
@@ -8,6 +9,7 @@ import type { Model } from "mongoose";
 import productVariantModel from "../models/productVariantModel";
 import productModel from "../models/productModel";
 import unitModel from "../models/unitModel";
+import productVariantGroupModel from "../models/productVariantGroupModel";
 import { createCrudService } from "../lib/crudService";
 import { assertRefExists } from "../lib/refs";
 import { badRequest } from "../lib/httpError";
@@ -19,7 +21,7 @@ const WRITABLE = [
   "product_id",
   "variant_name",
   "variant_price",
-  "variant_stock",
+  "group_id",
   "unit_id",
 ] as const;
 
@@ -32,7 +34,7 @@ const base = createCrudService(productVariantModel as Model<any>, {
   label: "ตัวเลือกสินค้า",
   searchFields: ["variant_name"],
   createFields: WRITABLE,
-  updateFields: ["variant_name", "variant_price", "variant_stock", "unit_id"], // ห้ามย้าย product_id
+  updateFields: ["variant_name", "variant_price", "group_id", "unit_id"], // ห้ามย้าย product_id
   populate: [{ path: "unit_id", select: "unit_name unit_abbr" }],
   present: presentVariant, // BACKLOG3 §8 — ครอบ list/getById/create/update/remove/restore ให้เองในตัว
 });
@@ -47,8 +49,15 @@ async function assertRefs(input: Record<string, any>): Promise<void> {
   if (input.variant_price != null && Number(input.variant_price) < 0) {
     throw badRequest("variant_price ต้องไม่ติดลบ");
   }
-  if (input.variant_stock != null && Number(input.variant_stock) < 0) {
-    throw badRequest("variant_stock ต้องไม่ติดลบ");
+  if (input.group_id) {
+    const group = await productVariantGroupModel
+      .findOne({ _id: input.group_id, deleted_at: null })
+      .select("product_id")
+      .lean<{ product_id: unknown } | null>();
+    if (!group) throw badRequest("ไม่พบกลุ่มตัวเลือก (group_id)");
+    if (input.product_id && String(group.product_id) !== String(input.product_id)) {
+      throw badRequest("กลุ่มตัวเลือกไม่ใช่ของสินค้านี้");
+    }
   }
 }
 

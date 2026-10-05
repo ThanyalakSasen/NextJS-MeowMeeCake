@@ -14,11 +14,14 @@
  *  3. CSRF defense-in-depth: mutation (POST/PUT/PATCH/DELETE) ที่มี Origin ข้ามโดเมนนอก allowlist → 403
  *     (เสริม cookie `SameSite=Lax`/`None` ที่กัน cross-site cookie อยู่แล้ว — src/lib/session.ts)
  *  4. ตรวจลายเซ็น JWT ใน cookie → แนบข้อมูลผู้ใช้ลง header x-mmc-user
+ *     ไม่มี cookie `session` ของหลัก → ลอง session ของ next-auth (หน้าเว็บลูกค้า — customer-backend-merge.md §8.9)
+ *     แปลงเป็น SessionUser เดียวกัน (source: "nextauth") · สถานะบัญชีตรวจกับ DB ต่อใน authGuard
  *  5. กั้น namespace ตามตารางข้างบน (role_type อยู่ใน JWT → เช็คได้บน Edge ไม่ต้อง query DB)
  *
  * การตรวจ "สิทธิ์ละเอียด" (Permissions ต้อง query DB) ทำใน route handler ของ /api/admin/* เท่านั้น
  */
 import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 import { verifySession } from "@/lib/jwt";
 import { isCsrfSafe } from "@/lib/csrf";
 import { corsHeaders, isAllowedOrigin } from "@/lib/cors";
@@ -93,6 +96,26 @@ export async function middleware(req: NextRequest) {
       if (!isPublic(pathname)) {
         return respond(deny("SESSION_INVALID", "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่", 401, true));
       }
+    }
+  }
+
+  // next-auth (หน้าเว็บลูกค้า) — ใช้เมื่อไม่มี cookie ของหลัก · role "admin" ของฝั่งลูกค้าเดิม = owner
+  if (!user && !token && process.env.NEXTAUTH_SECRET) {
+    try {
+      const na = await getToken({ req, secret: process.env.NEXTAUTH_SECRET });
+      if (na?.id && na.role) {
+        user = {
+          user_id: String(na.id),
+          role_id: String(na.role_id ?? ""),
+          role_type: (na.role === "admin" ? "owner" : String(na.role)) as SessionUser["role_type"],
+          email: String(na.email ?? ""),
+          source: "nextauth",
+          auth_time: typeof na.auth_time === "number" ? na.auth_time : 0,
+        };
+        headers.set(USER_HEADER, JSON.stringify(user));
+      }
+    } catch {
+      // cookie ของ next-auth เสีย/หมดอายุ = ไม่มี session
     }
   }
 

@@ -389,6 +389,7 @@ export async function completeProduction(
  *   - จำนวน = actual_qty ถ้าส่ง use_actual และกรอกไว้ ไม่งั้น planned_qty (เดียวกับที่ใช้หักวัตถุดิบ)
  *   - ข้ามรายการที่ยกเลิก / จำนวน 0 · ครั้งเดียวต่อรายการ (จอง product_stock_added_at แบบ atomic)
  *   - เพิ่มผ่าน productService.increaseStock (atomic $inc เดียวกับการรับสินค้าเข้าสต็อก)
+ *   - สินค้าที่มีตัวเลือกก็เพิ่มที่ตัวสินค้า — ตัวเลือกเป็นแค่ราคาเพิ่ม ไม่มีสต็อกแยก (docs/customer-backend-merge.md §8)
  */
 async function addFinishedGoodsStock(orderId: string, opts: { use_actual?: boolean } = {}): Promise<void> {
   const items = await productionItemModel

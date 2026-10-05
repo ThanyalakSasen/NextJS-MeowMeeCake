@@ -1,4 +1,5 @@
 import "./_env"; // ต้องมาก่อน import ที่อ่าน env ตอนโหลดโมดูล
+import { blockLegacyMoneyScript } from "./_legacyMoney";
 
 import mongoose from "mongoose";
 import { pathToFileURL } from "node:url";
@@ -316,6 +317,7 @@ export async function runMigration(): Promise<Record<string, number | null>> {
 // import ไปใช้จากที่อื่น (เช่น integration test ที่ import runMigration() ไปเรียกเอง)
 const isDirectRun = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
+  blockLegacyMoneyScript("migrate-money-to-satang"); // docs/money-units.md — ระบบเก็บเงินเป็นบาทแล้ว
   runMigration()
     .catch((err) => {
       console.error("\nmigrate-money-to-satang ล้มเหลว:", err);

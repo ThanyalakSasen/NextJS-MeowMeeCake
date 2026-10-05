@@ -41,12 +41,12 @@ describe("ingredientService — cost_per_unit เก็บสตางค์ ค
     expect(created.cost_per_unit).toBe(12.5);
 
     const raw = await ingredientModel.findById(created._id).lean<{ cost_per_unit: number }>();
-    expect(raw!.cost_per_unit).toBe(1250);
+    expect(raw!.cost_per_unit).toBe(12.5);
 
     const updated = await ingredientService.update(String(created._id), { cost_per_unit: 15 });
     expect(updated.cost_per_unit).toBe(15);
     const rawAfter = await ingredientModel.findById(created._id).lean<{ cost_per_unit: number }>();
-    expect(rawAfter!.cost_per_unit).toBe(1500);
+    expect(rawAfter!.cost_per_unit).toBe(15);
   });
 
   it("list/getById คืนค่าเป็นบาทเสมอ", async () => {
@@ -88,7 +88,7 @@ describe("componentService — estimated_cost_per_batch เก็บสตาง
     const raw = await componentModel
       .findById((created as { _id: unknown })._id)
       .lean<{ estimated_cost_per_batch: number }>();
-    expect(raw!.estimated_cost_per_batch).toBe(8888);
+    expect(raw!.estimated_cost_per_batch).toBe(88.88);
   });
 
   it("create: ไม่กรอกต้นทุน → คิดอัตโนมัติจาก ingredients (satang ปัดเป็น integer ถูกต้อง)", async () => {
@@ -119,7 +119,7 @@ describe("componentService — estimated_cost_per_batch เก็บสตาง
     const raw = await componentModel
       .findById((created as { _id: unknown })._id)
       .lean<{ estimated_cost_per_batch: number }>();
-    expect(raw!.estimated_cost_per_batch).toBe(1499); // integer สตางค์ ไม่ใช่ 14.99 หรือ 1498.5
+    expect(raw!.estimated_cost_per_batch).toBe(14.99); // integer สตางค์ ไม่ใช่ 14.99 หรือ 1498.5
 
     expect((created as { estimated_cost_per_batch: number }).estimated_cost_per_batch).toBe(14.99);
   });
@@ -196,7 +196,7 @@ describe("recipeService — estimated_cost_per_batch เก็บสตางค
     const raw = await recipeModel
       .findById((recipe as { _id: unknown })._id)
       .lean<{ estimated_cost_per_batch: number }>();
-    expect(raw!.estimated_cost_per_batch).toBe(7000);
+    expect(raw!.estimated_cost_per_batch).toBe(70);
   });
 
   it("getExpanded: presenting ครบทั้ง ingredients.ingredient_id.cost_per_unit และ components.component_id.estimated_cost_per_batch", async () => {
@@ -262,7 +262,7 @@ describe("productService.purchase_cost — เก็บสตางค์ คื
     const raw = await productModel
       .findById((created as { _id: unknown })._id)
       .lean<{ purchase_cost: number | null }>();
-    expect(raw!.purchase_cost).toBe(850);
+    expect(raw!.purchase_cost).toBe(8.5);
 
     const updated = await productService.updateProduct(String((created as { _id: unknown })._id), {
       purchase_cost: 9,
@@ -271,7 +271,7 @@ describe("productService.purchase_cost — เก็บสตางค์ คื
     const rawAfter = await productModel
       .findById((created as { _id: unknown })._id)
       .lean<{ purchase_cost: number | null }>();
-    expect(rawAfter!.purchase_cost).toBe(900);
+    expect(rawAfter!.purchase_cost).toBe(9);
   });
 
   it("getProductById/getProducts: purchase_cost คืนเป็นบาท, ไม่มีค่า (null) ไม่พัง", async () => {
@@ -279,7 +279,7 @@ describe("productService.purchase_cost — เก็บสตางค์ คื
     const byId = await productService.getProductById(String(product._id));
     expect((byId as { purchase_cost: number | null }).purchase_cost).toBeNull();
 
-    const withCost = await makeProduct({ purchase_cost: 4200 }); // เขียนตรง (satang) ข้าม service
+    const withCost = await makeProduct({ purchase_cost: 42 }); // เขียนตรง (บาท) ข้าม service
     const { items } = await productService.getProducts({
       pagination: { page: 1, limit: 100, skip: 0 },
     });
@@ -322,7 +322,7 @@ describe("orderService × recipeService — cost_per_unit end-to-end เป็�
     const rawItem = await (
       await import("@/models/orderItemModel")
     ).default.findOne({ order_id: order._id }).lean<{ cost_per_unit: number }>();
-    expect(rawItem!.cost_per_unit).toBe(1200); // สตางค์ดิบใน DB
+    expect(rawItem!.cost_per_unit).toBe(12); // สตางค์ดิบใน DB
 
     const fetched = await orderService.getOrderById(String(order._id));
     expect((fetched.items[0] as { cost_per_unit: number }).cost_per_unit).toBe(12); // บาทจาก API

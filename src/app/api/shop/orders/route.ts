@@ -6,7 +6,9 @@
  *                  address_id? (จากสมุดที่อยู่ + recipient_name/recipient_phone) | delivery_address? (กรอกใหม่ทั้งก้อน),
  *                  promotion_code? | promotion_id?, items?, item_notes? }
  *          - ที่อยู่จัดส่ง: ระบุ address_id หรือ delivery_address อย่างใดอย่างหนึ่งเท่านั้น (BACKLOG §3.8)
- *          - ค่าส่ง (delivery_fee) คิดฝั่ง server จากที่อยู่ + ยอดสั่งซื้อ — ลูกค้ากรอกเองไม่ได้
+ *          - ค่าส่ง (delivery_fee) คิดฝั่ง server จาก ShippingZones ตามจังหวัด + ขอบเขตจัดส่ง — ลูกค้ากรอกเองไม่ได้
+ *          - takeaway: pickup_location_id + pickup_date (YYYY-MM-DD) ไม่บังคับ — ส่งมาแล้วตรวจกับจุดรับ
+ *          - ต้องชำระ (ส่งสลิป) ภายใน 30 นาที ไม่งั้นยกเลิกอัตโนมัติ (payment_due_at)
  *          - ส่วนลดคิดจากโปรโมชันที่ระบบตรวจเอง — กรอก discount_amount เองไม่ได้
  *          - พรีวิวค่าส่งก่อนกดสั่ง: POST /api/shop/orders/delivery-quote
  */
@@ -20,6 +22,8 @@ import * as orderService from "@/services/orderService";
 import * as addressService from "@/services/addressService";
 
 export const GET = withAuth(async (session, req) => {
+  // หมดเวลาชำระ 30 นาที — ยกเลิกออเดอร์ค้างจ่ายของคนนี้ก่อนแสดงรายการ (lazy · docs/customer-backend-merge.md §8.8)
+  await orderService.expireUnpaidOrders({ userId: session.user_id });
   const sp = req.nextUrl.searchParams;
   const q = parseQuery(sp, listOrderQuery);
   const result = await orderService.listOrders({
@@ -42,6 +46,13 @@ export const POST = withAuth(async (session, req) => {
     promotion_code: body.promotion_code ?? null,
     promotion_id: body.promotion_id ?? null,
     channel: "online" as const,
+    // หน้าเว็บลูกค้า: ค่าส่ง ShippingZones + กำหนดชำระ 30 นาที (docs/customer-backend-merge.md §8.7–8.8)
+    storefront: true,
+    pickup_location_id: body.pickup_location_id ?? null,
+    pickup_date: body.pickup_date ?? null,
+    // คูปองของฉัน + แต้ม (customer-backend-merge.md §8.11)
+    user_coupon_id: body.user_coupon_id ?? null,
+    points_to_redeem: body.points_to_redeem ?? 0,
     // ไม่รับ delivery_fee จากลูกค้า — orderService คิดเอง
   };
   const order =

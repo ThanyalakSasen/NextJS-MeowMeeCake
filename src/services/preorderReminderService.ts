@@ -17,8 +17,9 @@ import { bangkokDateString } from "../lib/datetime";
 import { log } from "../lib/logger";
 import preorderModel from "../models/preorderModel";
 import preorderRoundModel from "../models/preorderRoundModel";
-import { customerMessages, notifyCustomer } from "./customerNotifyService";
+import { customerMessages, customerWeb, notifyCustomer } from "./customerNotifyService";
 import { notificationService } from "./notificationService";
+import { adminLinks } from "../lib/adminLinks";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const DEFAULT_DAYS_BEFORE = 1;
@@ -110,18 +111,18 @@ export async function sendPickupReminders(
       unpaid: p.payment_status !== "paid",
     });
     // ทีละคน (ไม่ Promise.all) — ให้ตัวนับโควตาใน lib/lineQuota หยุดตรง reserve ได้แม่น
-    if (await notifyCustomer(p.user_id, text)) result.sent++;
+    if (await notifyCustomer(p.user_id, text, customerWeb.fromLineText("preorder", p._id, p.preorder_no, text))) result.sent++;
     else result.skipped++;
   }
 
   // สรุปให้ร้าน — หน้าแจ้งเตือนเว็บอย่างเดียว (line: false ไม่กินโควตา)
   await notificationService
     .notify({
-      title: `พรีออเดอร์ถึงวันรับ ${pickupDateStr}: ${due.length} รายการ`,
-      message: `เตือนลูกค้าทาง LINE แล้ว ${result.sent} ราย · ส่งไม่ถึง ${result.skipped} ราย (ไม่ได้ผูก LINE / โควตาใกล้หมด) — ${result.preorder_nos.join(", ")}`,
+      title: `เปิดรับพรีออเดอร์ถึงวันรับ ${pickupDateStr}: ${due.length} รายการ`,
+      message: `เตือนลูกค้าทาง LINE แล้ว จำนวน ${result.sent} ราย · ส่งไม่ถึงจำนวน ${result.skipped} ราย (ไม่ได้ผูก LINE / โควตาการส่งแจ้งเตือนใกล้หมด) — ${result.preorder_nos.join(", ")}`,
       module: "order",
       type: "info",
-      link: null,
+      link: adminLinks.preorderRounds,
       line: false,
     })
     .catch((err) => log.error("preorder_reminder.summary_failed", { err }));

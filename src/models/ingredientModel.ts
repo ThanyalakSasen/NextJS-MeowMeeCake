@@ -20,8 +20,7 @@ const ingredientSchema = new mongoose.Schema({
     type: Number,
     default: 0,
   },
-  // BACKLOG §3.11 เฟส 4 — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (ดู src/lib/money.ts)
-  // API (ingredientService) ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม
+  // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md)
   cost_per_unit: {
     type: Number,
     required: true,

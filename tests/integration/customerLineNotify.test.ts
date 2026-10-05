@@ -3,6 +3,7 @@ import userModel from "@/models/userModel";
 import * as preorderService from "@/services/preorderService";
 import * as userService from "@/services/userService";
 import { customerMessages, notifyCustomer } from "@/services/customerNotifyService";
+import { flushBackground } from "@/lib/backgroundTasks";
 import { makeUser, makePreorder } from "./helpers";
 
 /** LINE push ที่ถูกยิงหา `to` นี้ (อ่านจาก fetch spy) */
@@ -64,7 +65,7 @@ describe("hook เข้า lifecycle ของพรีออเดอร์", 
     }
 
     await vi.waitFor(() => expect(pushedTo(fetchSpy, "U_B")).toHaveLength(1));
-    await new Promise((r) => setTimeout(r, 100));
+    await flushBackground(); // รองานแจ้งเตือนเบื้องหลังจบจริง (แทนรอ 100ms)
     expect(pushedTo(fetchSpy, "U_B")).toHaveLength(1);
     expect(pushedTo(fetchSpy, "U_B")[0]).toContain("พร้อมรับที่ร้าน");
     expect(pushedTo(fetchSpy, "U_B")[0]).toContain(pre.preorder_no);
@@ -89,7 +90,7 @@ describe("hook เข้า lifecycle ของพรีออเดอร์", 
     expect(pushedTo(fetchSpy, "U_C")[0]).toContain("TH1");
 
     await preorderService.updateDelivery(String(pre._id), { delivery_status: "shipping", tracking_no: "TH2" });
-    await new Promise((r) => setTimeout(r, 100));
+    await flushBackground(); // รองานแจ้งเตือนเบื้องหลังจบจริง (แทนรอ 100ms)
     expect(pushedTo(fetchSpy, "U_C")).toHaveLength(1);
   });
 

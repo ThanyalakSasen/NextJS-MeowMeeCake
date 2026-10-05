@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { USER_HEADER } from "@/lib/session";
 
@@ -10,14 +10,22 @@ import { USER_HEADER } from "@/lib/session";
 // src/lib/jwt.ts (middleware import) throw ตั้งแต่ load ถ้าไม่มี JWT_SECRET — ตั้งก่อน dynamic import
 process.env.JWT_SECRET ??= "test-jwt-secret-unit-only";
 
+// unit test ไม่มี DB — ข้ามการตรวจบัญชีกับ DB (เทสแยกใน tests/integration/sessionValidation.test.ts)
+vi.mock("@/lib/authGuard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/authGuard")>()),
+  assertSessionStillValid: async (s: unknown) => s,
+}));
+
 type Handler = (req: NextRequest) => Promise<Response>;
 let callbackGET: Handler;
 let middleware: (req: NextRequest) => Promise<Response>;
 
+// import route + middleware (next-auth · mongoose models) ครั้งแรกหลัง npm ci ตอนรันพร้อมเทสอื่นใช้เวลาเกิน hookTimeout 10 วิ
+// เป็นครั้งคราว (ไฟล์ทั้งไฟล์ skip) — ให้เวลา 60 วิ
 beforeAll(async () => {
   callbackGET = (await import("@/app/api/shop/me/line/callback/route")).GET as Handler;
   middleware = (await import("@/middleware")).middleware;
-});
+}, 60_000);
 
 const ORIGINAL_RETURN = process.env.LINE_LINK_RETURN_URL;
 afterEach(() => {

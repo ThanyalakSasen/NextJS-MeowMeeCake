@@ -29,7 +29,7 @@ import type { z } from "zod";
 import { ok, okList, created, route } from "./apiResponse";
 import { parseBool, parsePagination, parseSort } from "./queryParams";
 import { parseBody } from "./validate";
-import { requireAuth, requirePermission, type PermAction } from "./authGuard";
+import { authenticate, requireAuth, requirePermission, type PermAction } from "./authGuard";
 import type { SessionUser } from "./session";
 import { audit } from "./audit";
 import type { MenuKey } from "../services/permissionService";
@@ -74,7 +74,7 @@ async function guard(
 ): Promise<void> {
   if (!auth) return;
   if (action === "view" && auth.publicRead) return;
-  const session = requireAuth(req);
+  const session = await authenticate(req);
   await requirePermission(session, auth.menu, action);
 }
 

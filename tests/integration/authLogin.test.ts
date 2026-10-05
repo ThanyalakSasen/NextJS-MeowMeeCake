@@ -25,6 +25,7 @@ async function makeLocalUser(role: { _id: unknown }, password: string, over: Rec
     password: hashed,
     auth_provider: "local",
     role_id: role._id,
+    is_email_verified: true, // ลูกค้าต้องยืนยันอีเมลก่อนล็อกอิน (customer-backend-merge.md §8.9)
     ...over,
   });
 }

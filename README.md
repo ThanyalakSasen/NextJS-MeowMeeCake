@@ -31,6 +31,8 @@
 - **สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก + Migration checklist → [`docs/BACKLOG.md`](docs/BACKLOG.md)**
 - **บั๊ก/ความเสี่ยงชุดใหม่ที่พบหลังปิด BACKLOG.md (แก้แล้ว) → [`docs/BACKLOG2.md`](docs/BACKLOG2.md)**
 - **Clean code: reuse/simplification/efficiency (ไม่ใช่บั๊ก) → [`docs/BACKLOG3.md`](docs/BACKLOG3.md)**
+- **ตรวจทั้งระบบรอบ 2026-10-01 (merge / deploy / ตัดสินใจ) → [`docs/BACKLOG4.md`](docs/BACKLOG4.md)**
+- **ตรวจทั้งโปรเจกต์หลังรวม backend ฝั่งลูกค้า (2026-10-05 — สิ่งที่ต้องแก้ต่อ) → [`docs/BACKLOG5.md`](docs/BACKLOG5.md)**
 - **สรุปงาน hardening §2 + §3 (พร้อม PR / ดัชนีเอกสาร) → [`docs/hardening-summary.md`](docs/hardening-summary.md)**
 - **มาตรฐาน API (envelope / status / list / auth) → [`docs/api-conventions.md`](docs/api-conventions.md)**
 - **แผนงานคุณภาพ / hardening (§3 ชั้น D) → [`docs/hardening-plan.md`](docs/hardening-plan.md)** · D3 → [`docs/hardening-d3-plan.md`](docs/hardening-d3-plan.md) · รอบ 4a → [`docs/hardening-4a-plan.md`](docs/hardening-4a-plan.md)
@@ -46,5 +48,105 @@ npm run seed                   # สร้าง role / units / หมวดห�
 npm run backfill:product-codes # เติมรหัสสินค้า pos-/pre- ให้ของเดิม
 npm run sync-indexes           # ปรับ index ใน DB ให้ตรง schema (+ --fix เพื่อลบข้อมูลซ้ำ)
 npm run seed:preorder-rounds   # สร้างรอบพรีออเดอร์ตัวอย่าง (ซาวโดว์) 4 รอบ สำหรับเทสฝั่งลูกค้า
-npm run migrate:is-preorder    # แปลงประเภทสินค้าทุกรุ่น (product_type / product_types) → is_preorder — dry-run ก่อน, --apply เขียนจริง · รันก่อน deploy (BACKLOG2 §14)
+npm run migrate:is-preorder    # แปลงประเภทสินค้าทุกรุ่น (product_type / product_types) → is_preorder — ✅ รันบน DB จริงแล้ว 2026-10-01 ไม่ต้องรันซ้ำ
+npm run cleanup:legacy-product-fields  # ลบฟิลด์เก่าของสินค้า (product_type / delete_at) — dry-run ก่อน, --apply เขียนจริง
+npm run migrate:line-user-id   # คัดลอก LINE ของลูกค้า users.lineId (ฝั่งลูกค้า) → line_user_id — dry-run ก่อน, --apply เขียนจริง · รันซ้ำได้
+npm run migrate:reviews        # เติม status ให้รีวิวเก่า + แก้ index ที่บล็อกรีวิวพรีออเดอร์ — dry-run ก่อน, --apply เขียนจริง · รันซ้ำได้
+npm run check:data-integrity   # ตรวจข้อมูลสินค้าผิดปกติ (อ่านอย่างเดียว) · --no-notify = ไม่ส่งแจ้งเตือน
+npm run backfill:payment-due   # เติมกำหนดชำระให้พรีออเดอร์เก่า — dry-run ก่อน, --apply เขียนจริง
+npm run cron:preorder-rounds   # เปิด/ปิดรอบตามเวลา + ยกเลิกคนไม่จ่าย (cron ทุก 15 นาที)
+npm run cron:order-expiry      # ยกเลิกออเดอร์เว็บที่เลยกำหนดชำระ 30 นาที + คืนสต็อก (cron ทุก 5 นาที)
+npm run cleanup:review-media   # ลบไฟล์รูป/วิดีโอรีวิวที่ค้างเกิน 24 ชม. (cron วันละครั้ง)
+npm run remind:preorders       # เตือนลูกค้าก่อนวันรับพรีออเดอร์ทาง LINE · --dry-run = ไม่ส่ง
+npm run summary:monthly        # สรุปยอดเดือนที่แล้วถึงเจ้าของร้าน · --dry-run = ไม่ส่ง
+npm run reset-owner-password   # ตั้งรหัสผ่าน owner ใหม่
 ```
+
+---
+
+## ก่อน deploy — คำสั่งที่ต้องรัน
+
+> ขั้นตอนเต็ม (เซิร์ฟเวอร์ · nginx · pm2 · cron · ลำดับ merge PR) → [`docs/DEPLOY.md`](docs/DEPLOY.md) ·
+> ตัวแปร environment → [`docs/env.md`](docs/env.md) · สคริปต์ที่แก้ข้อมูลจริง = **dry-run เป็นค่าเริ่มต้น** ต้องใส่ `-- --apply` ถึงจะเขียน
+
+### 1. ตรวจโค้ด (เครื่อง dev หรือ CI — ต้องผ่านทุกข้อก่อน merge/deploy)
+
+```bash
+npm ci                    # ติดตั้งตาม package-lock.json
+npm run lint              # ต้อง 0 error (warning ได้)
+npm run typecheck
+npm run typecheck:test
+npm run test:all          # unit + integration (ใช้ mongodb-memory-server — ไม่แตะ DB จริง)
+npm run build
+```
+
+### 2. เตรียมข้อมูลจริง (บนเซิร์ฟเวอร์ ก่อน build/reload — ใช้ `.env.local` ของ production)
+
+```bash
+# สำรอง DB ก่อนทุกครั้ง (หรือ snapshot ใน Atlas)
+mongodump --uri "<MONGODB_URI>" --out backup-$(date +%F)
+
+# อ่านอย่างเดียว — เก็บผลไว้เทียบหลัง deploy
+npm run check:data-integrity -- --no-notify
+
+# dry-run ดูแผนก่อน (ยังไม่เขียน) — ทุกตัวรันซ้ำได้ ไม่แตะข้อมูล
+npm run cleanup:legacy-product-fields
+npm run backfill:payment-due
+npm run migrate:line-user-id      # ดูรายชื่อลูกค้าที่จะคัดลอก LINE + รายการที่ขัดกัน (ต้องตรวจเอง)
+npm run migrate:reviews           # ดูจำนวนรีวิวที่ไม่มี status · index ที่บล็อกรีวิวพรีออเดอร์ · รีวิวซ้ำ (ถ้ามี ต้องจัดการก่อน)
+```
+
+- ตรวจ `.env.local` ครบตาม [`docs/env.md`](docs/env.md) · secret ของ production ต้องคนละค่ากับ dev (`JWT_SECRET` · `SESSION_SECRET` · `NEXTAUTH_SECRET` · `CRON_SECRET`)
+- ตั้ง `ADMIN_APP_URL` = URL หลังร้าน (ลิงก์ 🔗 ในแจ้งเตือน LINE) · LINE Login callback URL ของโดเมนจริง ([`docs/LINE.md`](docs/LINE.md) §4)
+
+### 3. deploy
+
+```bash
+cd /srv/meowmeecake/app && git pull && npm ci && npm run build && pm2 reload meowmeecake-api
+curl -s http://127.0.0.1:3000/api/health   # → {"ok":true,"db":"connected"}
+```
+
+รัน **instance เดียว** เท่านั้น (ห้าม `pm2 -i max` / cluster — [`docs/DEPLOY.md`](docs/DEPLOY.md) ⑤)
+
+### 4. หลัง deploy
+
+```bash
+npm run cleanup:legacy-product-fields -- --apply   # ลบ product_type / delete_at ที่ค้าง (ไม่งั้นแจ้งเตือนทุกเช้า)
+npm run backfill:payment-due -- --apply            # เฉพาะถ้าข้อ 2 dry-run เจอรายการ
+npm run migrate:line-user-id                       # dry-run ดูรายชื่อ → แล้ว -- --apply (ไม่ลบ lineId · ห้ามใส่ --remove-old จนกว่าจะปิดพอร์ต 4000)
+npm run migrate:reviews                            # dry-run → แล้ว -- --apply (ต้องรันก่อนเปิดรีวิวพรีออเดอร์ · ไม่ลบ index ของฝั่งลูกค้า)
+npm run check:data-integrity -- --no-notify        # ไม่ควรมี price_too_high / price_too_low / sale_not_below_price
+npm run migrate:upload-files                       # หลัง merge PR #54 เท่านั้น — dry-run แล้วค่อย -- --apply
+npm run summary:monthly -- --dry-run               # ทดสอบข้อความ ไม่ส่ง
+npm run remind:preorders -- --dry-run
+```
+
+### 5. ตั้ง cron 6 ตัว (ครั้งแรกครั้งเดียว — crontab เต็มอยู่ใน [`docs/DEPLOY.md`](docs/DEPLOY.md) ⑧)
+
+| เวลา (เวลาไทย) | คำสั่ง | ทำอะไร |
+|---|---|---|
+| ทุก 15 นาที | `npm run -s cron:preorder-rounds` | เปิด/ปิดรอบพรีออเดอร์ · ยกเลิกคนไม่จ่าย · สร้างใบสั่งผลิต |
+| ทุก 5 นาที | `npm run -s cron:order-expiry` | ยกเลิกออเดอร์เว็บที่เลยกำหนดชำระ 30 นาที + คืนสต็อก |
+| 04:15 ทุกวัน | `npm run -s cleanup:review-media` | ลบรูป/วิดีโอรีวิวที่ค้างเกิน 24 ชม. |
+| 07:30 ทุกวัน | `npm run -s check:data-integrity` | ตรวจข้อมูลสินค้าผิดปกติ แจ้งเจ้าของร้าน (exit 2 เมื่อพบปัญหา = ปกติ) |
+| 18:00 ทุกวัน | `npm run -s remind:preorders` | เตือนลูกค้าก่อนวันรับพรีออเดอร์ทาง LINE |
+| วันที่ 1 08:00 | `npm run -s summary:monthly` | สรุปยอดเดือนที่แล้วถึงเจ้าของร้าน |
+
+ตั้งเครื่องเป็นเวลาไทยก่อน: `sudo timedatectl set-timezone Asia/Bangkok` · แล้วตรวจรับตาม [`docs/DEPLOY.md`](docs/DEPLOY.md) ⑨
+
+### 6. ตั้งค่าในหลังร้าน (ไม่ใช่คำสั่ง แต่ต้องทำหลัง deploy)
+
+- **เลขพร้อมเพย์** — `PUT /api/admin/store-profile` (`promptpay_id` + `promptpay_account_name`) หรือ env `PROMPTPAY_ID` ไม่งั้นหน้าชำระเงินไม่มี QR
+- **ข้อมูลร้าน / โลโก้ / ที่อยู่ร้าน** — `/api/admin/store-profile` · `/api/admin/store-settings` (เจ้าของร้าน · [`docs/customer-backend-merge.md`](docs/customer-backend-merge.md) §8.19) — ยังไม่อัปโหลดโลโก้ = ใช้ไฟล์เดิมของหน้าเว็บ
+- **สิทธิ์พนักงาน** — สิทธิ์รีวิวหลังร้านย้ายจากเมนู `products` → **`reports`** (§8.20) · หน้าร้านประจำสัปดาห์ใช้เมนูใหม่ **`store_info`** (§8.19) → ให้สิทธิ์ใหม่กับพนักงานที่ดูแลงานเหล่านี้
+
+### ⚠️ ห้ามรัน / ข้อควรระวัง
+
+| คำสั่ง | เหตุผล |
+|---|---|
+| `npm run migrate:is-preorder -- --apply` | รันบน DB จริงแล้ว 2026-10-01 |
+| `npm run migrate:line-user-id -- --apply --remove-old` | **ห้ามจนกว่าจะปิด backend ฝั่งลูกค้า (พอร์ต 4000)** — ฝั่งลูกค้ายังอ่าน `lineId` ส่ง LINE อยู่ · ใช้ `-- --apply` อย่างเดียว |
+| เปิดให้ลูกค้ารีวิวพรีออเดอร์ก่อน `migrate:reviews -- --apply` | index เดิม `order_item_id_1` (ถ้าเป็น unique) ทำให้รีวิวพรีออเดอร์ชิ้นที่ 2 บันทึกไม่ได้ · รีวิวเก่าที่ไม่มี status ไม่แสดงที่ฝั่งลูกค้า |
+| `npm run sync-indexes` | **ห้ามรันระหว่างที่ backend ฝั่งลูกค้า (พอร์ต 4000) ยังใช้ DB เดียวกัน** — `syncIndexes()` ลบ index ที่ไม่มีใน schema ของโปรเจกต์นี้ = ลบ index ของฝั่งลูกค้าด้วย ([`docs/customer-backend-merge.md`](docs/customer-backend-merge.md)) |
+| สคริปต์เงินยุคสตางค์ (`fix-money-units` · `fix-orders-money` · `migrate-money-to-satang` ฯลฯ) | ระบบเก็บเงินเป็นบาทแล้ว — สคริปต์ถูกล็อกไว้ ([`docs/money-units.md`](docs/money-units.md)) |
+| deploy หลักโดยไม่ deploy ฝั่งลูกค้าขั้น 0 | ถ้า backend ฝั่งลูกค้ายังเป็นโค้ดเดิม จะเขียน `product_type` + ตั้งสต็อก 0 ตอนปิดรอบต่อ → ควร deploy ฝั่งลูกค้าที่แก้ขั้น 0 พร้อมกัน แล้วค่อยรัน `cleanup:legacy-product-fields -- --apply` ([`docs/customer-backend-merge.md`](docs/customer-backend-merge.md) §8.2) |

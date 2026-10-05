@@ -35,7 +35,7 @@ describe("orderService.createOrder → persistOrder (integration)", () => {
     // (BACKLOG §3.11 — ต่างจาก order.* ด้านบนที่มาจาก getOrderById ซึ่งแปลงกลับเป็นบาทให้แล้ว)
     const items = await orderItemModel.find({ order_id: order._id }).lean();
     const byProduct = new Map(items.map((it) => [String(it.product_id), it]));
-    expect(byProduct.get(String(p2._id))!.unit_price).toBe(6000);
+    expect(byProduct.get(String(p2._id))!.unit_price).toBe(60);
   });
 
   it("เลขออเดอร์ตามช่องทาง: เว็บไซต์ (online / ไม่ระบุ) = ORD- , หน้าร้าน (instore) = POS-", async () => {
@@ -58,7 +58,7 @@ describe("orderService.createOrder → persistOrder (integration)", () => {
     const p = await makeProduct({ product_price: 100, product_stock_quantity: 20 });
     // อัปเดตตรงผ่าน model (ข้าม makeProduct()'s auto-convert) — 15000 สตางค์ = 150 บาท
     // (BACKLOG §3.11 เฟส 5b — productModel.product_price เก็บเป็นสตางค์แล้ว)
-    await productModel.updateOne({ _id: p._id }, { $set: { product_price: 15000 } });
+    await productModel.updateOne({ _id: p._id }, { $set: { product_price: 150 } });
 
     const order = await orderService.createOrder(String(user._id), {
       order_type: "takeaway",
@@ -106,16 +106,15 @@ describe("orderService.createOrder → persistOrder (integration)", () => {
     expect(order.subtotal).toBe(89.7);
     expect(order.total_amount).toBe(89.7);
 
-    // ยืนยันค่าที่เก็บจริงใน DB เป็นสตางค์ integer เป๊ะ ทั้งระดับออเดอร์และระดับรายการ
+    // ยืนยันค่าที่เก็บจริงใน DB เป็นบาทปัด 2 ตำแหน่งเป๊ะ ทั้งระดับออเดอร์และระดับรายการ
     const rawOrder = await orderModel.findById(order._id).lean<{ subtotal: number }>();
-    expect(rawOrder!.subtotal).toBe(8970);
-    expect(Number.isInteger(rawOrder!.subtotal)).toBe(true);
+    expect(rawOrder!.subtotal).toBe(89.7);
+    // เก็บเป็นบาทปัด 2 ตำแหน่งแล้ว ไม่มีเศษ float ค้าง (docs/money-units.md)
 
     const rawItem = await orderItemModel
       .findOne({ order_id: order._id })
       .lean<{ total_price: number }>();
-    expect(rawItem!.total_price).toBe(8970); // ไม่ใช่ 89.69999999999999 แบบที่ float ดิบจะให้
-    expect(Number.isInteger(rawItem!.total_price)).toBe(true);
+    expect(rawItem!.total_price).toBe(89.7); // ไม่ใช่ 89.69999999999999 แบบที่ float ดิบจะให้ (ปัดด้วย toSatang)
   });
 
   it("preorder product → reject (ต้องสั่งผ่านระบบ preorder)", async () => {
@@ -183,20 +182,24 @@ describe("orderService.createOrder — resolveLines() batch resolve (BACKLOG §3
     expect(with3Items).toEqual(with1Item);
   });
 
-  it("ไม่ query variant/option เลยถ้าไม่มีรายการไหนใช้เลย (กัน query เปล่าโดยไม่จำเป็น)", async () => {
+  it("ตัวเลือกของทุกรายการ query ครั้งเดียวต่อ collection (ต้องอ่านเสมอ — กลุ่มที่บังคับเลือก · §8 customer-backend-merge)", async () => {
     const user = await makeUser();
     const p = await makeProduct({ product_price: 50, product_stock_quantity: 10 });
+    const p2 = await makeProduct({ product_price: 60, product_stock_quantity: 10 });
 
     const variantFindSpy = vi.spyOn(productVariantModel, "find");
     const optionFindSpy = vi.spyOn(productOptionModel, "find");
 
     await orderService.createOrder(String(user._id), {
       order_type: "takeaway",
-      items: [{ product_id: String(p._id), quantity: 1 }],
+      items: [
+        { product_id: String(p._id), quantity: 1 },
+        { product_id: String(p2._id), quantity: 1 },
+      ],
     });
 
-    expect(variantFindSpy).not.toHaveBeenCalled();
-    expect(optionFindSpy).not.toHaveBeenCalled();
+    expect(variantFindSpy).toHaveBeenCalledTimes(1);
+    expect(optionFindSpy).toHaveBeenCalledTimes(1);
   });
 
   it("สินค้าเดียวกันสั่งซ้ำในออเดอร์เดียวคนละ variant/option → join ไม่ปนกัน คิดราคาถูกคนละบรรทัด", async () => {
@@ -217,8 +220,8 @@ describe("orderService.createOrder — resolveLines() batch resolve (BACKLOG §3
     expect(order.subtotal).toBe(230);
     const items = await orderItemModel.find({ order_id: order._id }).lean<{ variant_id: unknown; unit_price: number }[]>();
     const byVariant = new Map(items.map((it) => [String(it.variant_id), it.unit_price]));
-    expect(byVariant.get(String(vSmall._id))).toBe(10000); // 100 บาท = 10000 สตางค์
-    expect(byVariant.get(String(vLarge._id))).toBe(13000); // 130 บาท = 13000 สตางค์
+    expect(byVariant.get(String(vSmall._id))).toBe(100); // บาท
+    expect(byVariant.get(String(vLarge._id))).toBe(130); // บาท
   });
 
   it("variant_id เป็นของสินค้าอื่น (ไม่ใช่ product_id ที่ระบุ) → reject ไม่พบ variant", async () => {
