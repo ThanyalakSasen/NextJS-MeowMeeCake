@@ -70,13 +70,13 @@ export function stripSecrets<T extends Record<string, any>>(doc: T): Partial<T> 
   return clone as Partial<T>;
 }
 
-function assertPasswordStrength(pw: string): void {
+export function assertPasswordStrength(pw: string): void {
   if (typeof pw !== "string" || pw.length < MIN_PASSWORD_LENGTH) {
     throw badRequest(`รหัสผ่านต้องยาวอย่างน้อย ${MIN_PASSWORD_LENGTH} ตัวอักษร`);
   }
 }
 
-function hashPassword(pw: string): Promise<string> {
+export function hashPassword(pw: string): Promise<string> {
   return bcrypt.hash(pw, BCRYPT_ROUNDS);
 }
 
@@ -181,7 +181,7 @@ export async function updateUser(id: string, input: UpdateUserBody) {
   try {
     const user = await userModel
       .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: payload }, {
-        new: true,
+        returnDocument: "after",
         runValidators: true,
       })
       .select(SELECT_PUBLIC)
@@ -204,7 +204,7 @@ export async function updateProfile(id: string, input: UpdateProfileInput) {
   const payload = { ...input };
   const user = await userModel
     .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: payload }, {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     })
     .select(SELECT_PUBLIC)
@@ -233,6 +233,7 @@ export async function changePassword(
 
   assertPasswordStrength(newPassword);
   user.password = await hashPassword(newPassword);
+  user.password_changed_at = new Date(); // session next-auth เดิมหลุด (authGuard)
   user.reset_password_token = null;
   user.reset_password_token_expiry = null;
   await user.save();
@@ -252,13 +253,14 @@ export async function adminSetPassword(id: string, newPassword: string) {
       {
         $set: {
           password: hashed,
+          password_changed_at: new Date(), // session next-auth เดิมหลุด (authGuard)
           failed_login_attempts: 0,
           lockout_until: null,
           reset_password_token: null,
           reset_password_token_expiry: null,
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     )
     .select(SELECT_PUBLIC)
     .lean();
@@ -321,8 +323,11 @@ export async function verifyCredentials(email: string, password: string) {
       "FORBIDDEN"
     );
   }
-  if (user.auth_provider !== "local" || !user.password) {
-    throw badRequest("บัญชีนี้ต้องเข้าสู่ระบบด้วย Google");
+  // ไม่ดู auth_provider — บัญชีที่สมัครด้วยรหัสผ่านแล้วผูก Google/LINE ทีหลังยังใช้รหัสผ่านได้ (แบบฝั่งลูกค้า)
+  if (!user.password) {
+    throw badRequest(
+      user.auth_provider === "line" ? "บัญชีนี้ต้องเข้าสู่ระบบด้วย LINE" : "บัญชีนี้ต้องเข้าสู่ระบบด้วย Google"
+    );
   }
 
   const matched = await bcrypt.compare(password, user.password);
@@ -335,6 +340,15 @@ export async function verifyCredentials(email: string, password: string) {
     }
     await userModel.updateOne({ _id: user._id }, { $set: update });
     throw unauthorized("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
+  }
+
+  // ลูกค้าต้องยืนยันอีเมลก่อนล็อกอิน (ผู้ใช้เลือก 2026-10-05 · customer-backend-merge.md §8.9) — เช็คหลังรหัสถูก
+  // (ไม่บอกสถานะบัญชีกับคนที่ไม่รู้รหัส) · เจ้าของร้าน/พนักงานไม่บังคับ
+  const roleType = (user.role_id as any)?.role_type;
+  if (roleType === "customer" && user.is_email_verified !== true) {
+    throw new HttpError("กรุณายืนยันอีเมลก่อนเข้าสู่ระบบ (ขอส่งอีเมลยืนยันใหม่ได้)", 403, "FORBIDDEN", {
+      reason: "EMAIL_NOT_VERIFIED",
+    });
   }
 
   // BACKLOG3 §4 — sync ค่าที่เพิ่ง update ลง doc ในหน่วยความจำด้วย (ไม่ใช่แค่ DB) เพื่อให้
@@ -360,8 +374,39 @@ export async function unlockUser(id: string) {
     .findByIdAndUpdate(
       id,
       { $set: { failed_login_attempts: 0, lockout_until: null } },
-      { new: true }
+      { returnDocument: "after" }
     )
+    .select(SELECT_PUBLIC)
+    .lean();
+  if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
+  return user;
+}
+
+// ── ผูก / ยกเลิกผูกบัญชี LINE (แจ้งเตือนลูกค้า — src/lib/lineLogin.ts) ──
+/**
+ * เก็บ LINE userId ลงบัญชีนี้ · LINE เดียวผูกได้ทีละบัญชี — ถ้าเคยผูกกับบัญชีอื่นจะย้ายมาที่นี่
+ * (กันข้อความของอีกบัญชีเด้งเข้า LINE คนเดียวกันต่อ หลังเจ้าของ LINE เปลี่ยนมาใช้บัญชีใหม่)
+ */
+export async function linkLineAccount(id: string, lineUserId: string) {
+  await dbConnect();
+  assertObjectId(id);
+  await userModel.updateMany(
+    { line_user_id: lineUserId, _id: { $ne: id } },
+    { $set: { line_user_id: null } }
+  );
+  const user = await userModel
+    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { line_user_id: lineUserId } }, { returnDocument: "after" })
+    .select(SELECT_PUBLIC)
+    .lean();
+  if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
+  return user;
+}
+
+export async function unlinkLineAccount(id: string) {
+  await dbConnect();
+  assertObjectId(id);
+  const user = await userModel
+    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { line_user_id: null } }, { returnDocument: "after" })
     .select(SELECT_PUBLIC)
     .lean();
   if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");

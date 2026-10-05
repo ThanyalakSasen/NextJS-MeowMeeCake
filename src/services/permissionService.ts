@@ -35,6 +35,7 @@ export const MENU_KEYS = [
   "dashboard",
   "promotions",
   "reports",
+  "store_info",
 ] as const;
 export type MenuKey = (typeof MENU_KEYS)[number];
 
@@ -190,7 +191,7 @@ export async function updatePermission(id: string, input: UpdatePermissionInput)
     .findOneAndUpdate(
       { _id: id, deleted_at: null },
       { $set: payload },
-      { new: true, runValidators: true }
+      { returnDocument: "after", runValidators: true }
     )
     .lean();
   if (!doc) throw notFound("ไม่พบสิทธิ์ที่ระบุ");

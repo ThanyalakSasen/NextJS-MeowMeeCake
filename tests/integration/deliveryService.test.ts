@@ -169,7 +169,7 @@ describe("deliveryZoneService / deliveryService — fee เก็บสตาง
     const raw = await deliveryZoneModel
       .findById((zone as { _id: unknown })._id)
       .lean<{ fee: number }>();
-    expect(raw!.fee).toBe(4550);
+    expect(raw!.fee).toBe(45.5);
   });
 
   it("update: fee ใหม่แปลงเป็นสตางค์ถูกต้อง", async () => {
@@ -182,7 +182,7 @@ describe("deliveryZoneService / deliveryService — fee เก็บสตาง
     const raw = await deliveryZoneModel
       .findById((zone as { _id: unknown })._id)
       .lean<{ fee: number }>();
-    expect(raw!.fee).toBe(6500);
+    expect(raw!.fee).toBe(65);
   });
 
   it("list/getById (หน้าแอดมิน) คืนค่าเป็นบาทเสมอ", async () => {

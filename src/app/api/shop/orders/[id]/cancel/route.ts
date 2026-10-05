@@ -1,11 +1,11 @@
 /**
  * POST /api/shop/orders/[id]/cancel — ลูกค้ายกเลิกออเดอร์ของตัวเอง
  *   body: { reason? }
- *   ลูกค้ายกเลิกเองได้เฉพาะสถานะ pending / confirmed (CUSTOMER_CANCELABLE_STATUSES)
- *   และเฉพาะออเดอร์ที่ยังไม่ได้ชำระเงิน (payment_status != "paid") —
- *   พอร้านเริ่มเตรียม (preparing ขึ้นไป) หรือจ่ายเงินแล้ว ต้องให้แอดมินยกเลิก + คืนเงิน
- *   ผ่าน /api/admin/orders/[id]/status + paymentService.refundPayment
- *   service คืนสต็อก + คืนสิทธิ์โปรโมชันให้อัตโนมัติ
+ *   นโยบายฝั่งลูกค้า (docs/customer-backend-merge.md §8.8 — orderService.cancelOrderByCustomer):
+ *   - ยกเลิกเองได้เฉพาะสถานะ pending / confirmed · ออเดอร์หน้าร้าน (POS-) ยกเลิกผ่านร้านเท่านั้น
+ *   - ชำระแล้วก็ยกเลิกได้ → "ยกเลิก + ชำระแล้ว" = รอร้านโอนคืน (ไม่ตั้ง refunded ให้อัตโนมัติ) + แจ้งเจ้าของร้าน
+ *     ร้านโอนคืนแล้วกดคืนเงินเอง (POST /api/admin/payments/[id]/refund)
+ *   - คืนสต็อก + คืนสิทธิ์โปรโมชันให้อัตโนมัติ
  */
 import { ok } from "@/lib/apiResponse";
 import { withAuth, requireOwner } from "@/lib/authGuard";
@@ -20,11 +20,7 @@ export const POST = withAuth(async (session, req, ctx: Ctx) => {
   requireOwner(session, order.user_id);
 
   const body = await req.json().catch(() => ({}));
-  const result = await orderService.cancelOrder(id, {
-    cancelled_by: session.user_id,
-    cancelled_reason: body.reason ?? "ลูกค้ายกเลิกเอง",
-    allowedFrom: orderService.CUSTOMER_CANCELABLE_STATUSES,
-  });
+  const result = await orderService.cancelOrderByCustomer(id, session.user_id, body.reason ?? null);
   audit(req, {
     action: "ลูกค้ายกเลิกออเดอร์",
     action_type: "UPDATE",

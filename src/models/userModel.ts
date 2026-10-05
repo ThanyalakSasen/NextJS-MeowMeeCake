@@ -6,7 +6,11 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, lowercase: true, trim: true },
     password: { type: String, default: null },
     googleId: { type: String, default: null },
-    auth_provider: { type: String, enum: ["local", "google"], required: true },
+    // LINE userId จากการผูกบัญชีผ่าน LINE Login (src/lib/lineLogin.ts) — ใช้ push แจ้งเตือนหาลูกค้า
+    // (customerNotifyService) · null = ยังไม่ผูก / ยกเลิกผูกแล้ว
+    line_user_id: { type: String, default: null },
+    // line = สมัครด้วย LINE Login ผ่าน next-auth (customer-backend-merge.md §8.9)
+    auth_provider: { type: String, enum: ["local", "google", "line"], required: true },
     role_id: { type: mongoose.Schema.Types.ObjectId, ref: "Roles", required: true },
     user_birthdate: { type: Date, default: null },
     user_phone: { type: String, default: null },
@@ -27,6 +31,8 @@ const userSchema = new mongoose.Schema(
     reset_password_token: { type: String, default: null },
     reset_password_token_expiry: { type: Date, default: null },
     last_login_at: { type: Date, default: null },
+    // เปลี่ยนรหัสผ่านล่าสุด — session next-auth ที่ล็อกอินก่อนเวลานี้ใช้ไม่ได้ (authGuard · ฟิลด์เดียวกับฝั่งลูกค้า)
+    password_changed_at: { type: Date, default: null },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }

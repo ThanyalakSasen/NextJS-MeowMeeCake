@@ -10,7 +10,8 @@
  */
 import { Types } from "mongoose";
 import dbConnect from "../lib/dbConnect";
-import { badRequest, notFound } from "../lib/httpError";
+import { badRequest, conflict, notFound } from "../lib/httpError";
+import { resolveAspectIconKey } from "../lib/aspectIcons";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { createCrudService } from "../lib/crudService";
@@ -24,12 +25,99 @@ import reviewModel from "../models/reviewModel";
 export const SENTIMENT_LABELS = ["Positive", "Negative", "Neutral"] as const;
 export type SentimentLabel = (typeof SENTIMENT_LABELS)[number];
 
-// ── Aspects (CRUD ตรง ๆ) ───────────────────────────────────
-export const aspectService = createCrudService(aspectModel as any, {
+// ── Aspects ────────────────────────────────────────────────
+// ใช้ทั้ง NLP และฟอร์มรีวิว "ชอบ / ควรปรับปรุง" (customer-backend-merge.md §8.20):
+// ชุดเริ่มต้น 4 ด้าน seed ครั้งแรก · ชื่อไทยห้ามซ้ำ · สูงสุด 20 · เพิ่มใหม่ต่อท้ายลำดับ · แก้ชื่อไทย → อัปเดตชื่อในรีวิวเดิมด้วย
+const MAX_ASPECTS = 20;
+const DEFAULT_ASPECTS = [
+  { aspect_name_th: "ราคา", aspect_name_eng: "Price", placeholder_text: "เช่น คุ้มค่ามาก, ราคาเหมาะสมกับปริมาณ" },
+  { aspect_name_th: "รสชาติ", aspect_name_eng: "Taste", placeholder_text: "เช่น หวานกำลังดี, สดใหม่มาก" },
+  { aspect_name_th: "บรรจุภัณฑ์", aspect_name_eng: "Packaging", placeholder_text: "เช่น กล่องแน่นหนา ขนมไม่เสียหาย" },
+  { aspect_name_th: "อื่นๆ", aspect_name_eng: "Others", placeholder_text: "เช่น บริการดี จัดส่งรวดเร็ว" },
+];
+
+/** ยังไม่เคยมีแง่มุมเลย (นับรวมที่ลบแล้ว) → สร้างชุดเริ่มต้น — ลบหมดแล้วชุดเริ่มต้นจะไม่โผล่กลับมาเอง */
+export async function ensureDefaultAspects(): Promise<void> {
+  await dbConnect();
+  if ((await aspectModel.countDocuments({})) > 0) return;
+  await aspectModel.insertMany(DEFAULT_ASPECTS.map((a, i) => ({ ...a, display_order: i, is_active: true })));
+}
+
+async function assertUniqueAspectName(nameTh: string, excludeId?: string) {
+  const others = await aspectModel
+    .find({ deleted_at: null, ...(excludeId ? { _id: { $ne: excludeId } } : {}) })
+    .select("aspect_name_th")
+    .lean<Array<{ aspect_name_th: string }>>();
+  if (others.some((a) => String(a.aspect_name_th).trim().toLowerCase() === nameTh.trim().toLowerCase())) {
+    throw conflict(`มีแง่มุม "${nameTh.trim()}" อยู่แล้ว`);
+  }
+}
+
+const ASPECT_FIELDS = ["aspect_name_th", "aspect_name_eng", "aspect_desc", "is_active", "icon", "placeholder_text"] as const;
+const aspectBase = createCrudService(aspectModel as any, {
   label: "แง่มุมการวิเคราะห์",
   searchFields: ["aspect_name_th", "aspect_name_eng"],
-  createFields: ["aspect_name_th", "aspect_name_eng", "aspect_desc"],
+  createFields: [...ASPECT_FIELDS, "display_order"],
+  updateFields: ASPECT_FIELDS,
 });
+
+export const aspectService = {
+  ...aspectBase,
+  async list(args: Parameters<typeof aspectBase.list>[0]) {
+    await ensureDefaultAspects();
+    return aspectBase.list(args);
+  },
+  async create(input: Record<string, any>) {
+    await ensureDefaultAspects();
+    const active = await aspectModel.find({ deleted_at: null }).select("display_order").lean<Array<{ display_order?: number }>>();
+    if (active.length >= MAX_ASPECTS) throw badRequest(`เพิ่มแง่มุมได้สูงสุด ${MAX_ASPECTS} แง่มุม`);
+    await assertUniqueAspectName(String(input.aspect_name_th ?? ""));
+    const nextOrder = active.reduce((max, a) => Math.max(max, Number(a.display_order) || 0), -1) + 1;
+    return aspectBase.create({ ...input, aspect_name_eng: input.aspect_name_eng || input.aspect_name_th, display_order: nextOrder });
+  },
+  async update(id: string, input: Record<string, any>) {
+    if (input.aspect_name_th !== undefined) await assertUniqueAspectName(String(input.aspect_name_th), id);
+    const doc = await aspectBase.update(id, input);
+    if (input.aspect_name_th !== undefined) {
+      await reviewModel.updateMany(
+        { "aspect_feedback.aspect_id": doc._id },
+        { $set: { "aspect_feedback.$[f].aspect_name_th": doc.aspect_name_th } },
+        { arrayFilters: [{ "f.aspect_id": doc._id }] }
+      );
+    }
+    return doc;
+  },
+};
+
+/** เรียงลำดับใหม่ทั้งชุด (ตามลำดับใน orderedIds · id ที่ไม่มี/ถูกลบข้าม) → แง่มุมทั้งหมดตามลำดับใหม่ */
+export async function reorderAspects(orderedIds: unknown) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) throw badRequest("กรุณาส่ง orderedIds");
+  if (orderedIds.length > 100) throw badRequest("orderedIds ยาวเกินไป");
+  await dbConnect();
+  const ops = orderedIds
+    .map(String)
+    .filter((id) => Types.ObjectId.isValid(id))
+    .map((id, index) => ({ updateOne: { filter: { _id: id, deleted_at: null }, update: { $set: { display_order: index } } } }));
+  if (ops.length > 0) await aspectModel.bulkWrite(ops);
+  return aspectModel.find({ deleted_at: null }).sort({ display_order: 1, created_at: 1 }).lean();
+}
+
+/** แง่มุมที่เปิดใช้งานสำหรับฟอร์มรีวิว (สาธารณะ) — ไอคอนแปลงเป็น key ที่หน้าเว็บรู้จักเสมอ */
+export async function listActiveAspects() {
+  await ensureDefaultAspects();
+  const aspects = await aspectModel
+    .find({ deleted_at: null, is_active: { $ne: false } })
+    .sort({ display_order: 1, created_at: 1 })
+    .select("aspect_name_th aspect_name_eng placeholder_text icon")
+    .lean<any[]>();
+  return aspects.map((a) => ({
+    _id: String(a._id),
+    aspect_name_th: a.aspect_name_th,
+    aspect_name_eng: a.aspect_name_eng,
+    placeholder_text: a.placeholder_text ?? null,
+    icon: resolveAspectIconKey(a.icon, a.aspect_name_eng),
+  }));
+}
 
 // ── SemanticTerms (CRUD + validate aspect_id) ──────────────
 const semanticBase = createCrudService(semanticTermModel as any, {

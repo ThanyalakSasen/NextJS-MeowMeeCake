@@ -43,7 +43,7 @@ export async function makeProduct(over: Record<string, unknown> = {}) {
     category_id: oid(),
     unit_id: oid(),
     product_price: 100,
-    product_type: "inStore",
+    is_preorder: false,
     product_stock_quantity: 50,
     ...over,
   };
@@ -63,7 +63,7 @@ export async function makeUnit(over: Record<string, unknown> = {}) {
   });
 }
 
-/** cost_per_unit เป็นสตางค์ (integer) — ค่าเริ่มต้น 1000 = 10.00 บาท (BACKLOG §3.11 เฟส 4) */
+/** cost_per_unit เป็นบาท (docs/money-units.md) — ค่าเริ่มต้น 10 บาท */
 export async function makeIngredient(over: Record<string, unknown> = {}) {
   seq++;
   const unit = await makeUnit();
@@ -72,7 +72,7 @@ export async function makeIngredient(over: Record<string, unknown> = {}) {
     ingredient_category_id: oid(),
     unit_id: unit._id,
     current_stock: 0,
-    cost_per_unit: 1000,
+    cost_per_unit: 10,
     reorder_point: 5,
     ...over,
   });
@@ -104,7 +104,7 @@ export async function makeOption(productId: string, over: Record<string, unknown
   return productOptionModel.create(merged);
 }
 
-/** estimated_cost_per_batch เป็นสตางค์ (integer) — ค่าเริ่มต้น 10000 = 100.00 บาท (BACKLOG §3.11 เฟส 4) */
+/** estimated_cost_per_batch เป็นบาท — ค่าเริ่มต้น 100 บาท */
 export async function makeRecipe(productId: string, over: Record<string, unknown> = {}) {
   seq++;
   return recipeModel.create({
@@ -112,7 +112,7 @@ export async function makeRecipe(productId: string, over: Record<string, unknown
     product_id: productId,
     yield_qty: 10,
     yield_unit_id: oid(),
-    estimated_cost_per_batch: 10000,
+    estimated_cost_per_batch: 100,
     created_by: oid(),
     ...over,
   });
@@ -132,7 +132,7 @@ export async function makeAddress(userId: string, over: Record<string, unknown> 
 }
 
 /** สร้าง preorder ตรง ๆ ผ่าน model (ไม่ผ่าน preorderService — ไม่ต้องมีรอบ/โควตาจริงสำหรับเทส payment) */
-/** subtotal/total_amount เป็นสตางค์ (integer) — ค่าเริ่มต้น 10000 = 100 บาท (BACKLOG §3.11) */
+/** subtotal/total_amount เป็นบาท — ค่าเริ่มต้น 100 บาท */
 export async function makePreorder(userId: string, over: Record<string, unknown> = {}) {
   seq++;
   return preorderModel.create({
@@ -140,8 +140,8 @@ export async function makePreorder(userId: string, over: Record<string, unknown>
     user_id: userId,
     round_id: oid(),
     order_type: "takeaway",
-    subtotal: 10000,
-    total_amount: 10000,
+    subtotal: 100,
+    total_amount: 100,
     ...over,
   });
 }

@@ -33,6 +33,8 @@ export default defineConfig({
             NODE_ENV: "test",
             DELIVERY_ZONE_CACHE_TTL_MS: "0",
             PERMISSION_CACHE_TTL_MS: "0",
+            // ระบบแนะนำสินค้า cache แคตตาล็อก 3 นาที — ปิดในเทส (customer-backend-merge.md §8.15)
+            RECOMMENDATION_CACHE_TTL_MS: "0",
             JWT_SECRET: "test-jwt-secret-integration-only",
           },
           setupFiles: ["tests/integration/setup.ts"], // เริ่ม mongodb-memory-server + ตั้ง MONGODB_URI

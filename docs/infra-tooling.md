@@ -162,6 +162,10 @@ log.error("order.auto_refund_failed", { order_id, err });   // err: Error → { 
 - `setup.ts` — top-level await เริ่ม `MongoMemoryServer` → ตั้ง `MONGODB_URI` + `mongoose.connect` +
   pre-populate `global._mongoose` (cache ของ `dbConnect`) · `afterEach` เคลียร์ทุก collection ·
   binary โหลดอัตโนมัติครั้งแรก (cache ไว้)
+- **งานเบื้องหลัง (2026-10-05):** แจ้งเตือนร้าน/ลูกค้าที่ service ปล่อยทำแบบไม่รอผล (`notificationService.notify` ·
+  `notifyCustomerLater` · `onPreorderPaid`) ลงทะเบียนผ่าน `src/lib/backgroundTasks.ts` (`trackBackground`) · `afterEach`/`afterAll`
+  เรียก `flushBackground()` ก่อนล้าง DB/ปิด connection — เดิมงานยังวิ่งหลังเทสจบ: log `order.notify_failed: MongoNotConnectedError`
+  และเขียนแจ้งเตือนลง DB หลังล้างแล้ว (รั่วไปเทสถัดไปได้) · fire-and-forget ใหม่ที่แตะ DB ให้ห่อด้วย `trackBackground` เหมือนกัน
 - `promotionUsage.test.ts` (5) — §2.9: atomic claim / ถึง limit → 422 / **ยิงพร้อมกัน 8 กับ limit=3 → สำเร็จ 3** / per-user rollback / revoke
 - `persistOrder.test.ts` (4) — happy path / re-price / **compensation: สต็อกไม่พอ → ไม่มีออเดอร์** / preorder reject
 - `cancelOrder.test.ts` (4) — cancel ไม่จ่าย (restock+status) / cancel + โปรฯ (revoke → `used_count` กลับ) / cancel จ่ายแล้ว (auto-refund) / ลูกค้ายกเลิกจ่ายแล้ว → 409

@@ -47,14 +47,13 @@ const productSchema = new mongoose.Schema(
       ref: "ProductCategories",
       required: true,
     },
-    // BACKLOG §3.11 เฟส 5b — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 (ดู src/lib/money.ts)
-    // API (productService) ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม
+    // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md)
     product_price: {
       type: Number,
       required: true,
       min: 0,
     },
-    // BACKLOG §3.11 เฟส 5b — เก็บเป็นสตางค์เช่นกัน (เหตุผลเดียวกับ product_price)
+    // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md)
     sale_price: {
       // ราคาโปรโมชัน — null = ไม่มีการลดราคา ใช้ product_price ตามปกติ
       type: Number,
@@ -86,12 +85,7 @@ const productSchema = new mongoose.Schema(
     // ต้นทุนต่อหน่วยที่กรอกมือ (BACKLOG §3.16) — fallback ให้ recipeService.getUnitCostByProduct()
     // ใช้เฉพาะสินค้าที่ "ซื้อมาขายต่อ" ไม่มีสูตรการผลิต (recipeModel) ให้คำนวณต้นทุนเองได้
     // ถ้าสินค้ามีสูตรอยู่แล้ว ต้นทุนจากสูตรจะมาก่อนเสมอ (ดูลำดับความสำคัญใน recipeService)
-    // BACKLOG §3.11 เฟส 4 — เก็บเป็น "สตางค์" (integer) ตั้งแต่ 2026-09-12 — ต้องแปลงพร้อม
-    // recipeModel/componentModel/ingredientModel เพราะ getUnitCostByProduct() ผสมค่าจากทั้งสองแหล่ง
-    // เข้าด้วยกัน (สูตรมาก่อนเสมอ, purchase_cost เป็น fallback) ถ้าปล่อย purchase_cost เป็นบาทไว้ตาม
-    // Product pricing อื่น (เฟส 5b) จะได้ Map ที่หน่วยปนกัน (บาง productId เป็นสตางค์จากสูตร บาง
-    // productId เป็นบาทจาก fallback) โดยไม่มีทางรู้จากภายนอกว่าค่าไหนมาจากไหน — API (productService)
-    // ยังรับ-ส่งเป็นบาททศนิยมเหมือนเดิม ส่วน product_price/sale_price แปลงเป็นสตางค์แล้วในเฟส 5b
+    // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md) — ต้นทุนซื้อมาขายต่อ ใช้เป็น fallback ของ getUnitCostByProduct() เมื่อไม่มีสูตร
     purchase_cost: {
       type: Number,
       default: null,
@@ -102,18 +96,27 @@ const productSchema = new mongoose.Schema(
       ref: "Units",
       required: true,
     },
-    product_type: {
-      type: String,
-      // inStore = สินค้าหน้าร้าน , online = สินค้าออนไลน์ , preorder = สินค้าพรีออเดอร์
-      enum: ["inStore", "online", "preorder"],
+    is_preorder: {
+      // true = สินค้าพรีออเดอร์ (รหัส pre- · ไม่มีสต็อก · ขายผ่านรอบพรีออเดอร์ต้องมี preorder_config)
+      // false = สินค้าปกติ (รหัส pos- · มีสต็อก · ขายได้ทั้งเว็บและหน้าร้าน — ซ่อนจากเว็บด้วย is_visible)
+      // docs/BACKLOG2.md §14 (2026-09-30) — แทน product_types (array inStore/online/preorder) ช่องทางขายดูจากออเดอร์แทน
+      // ข้อมูลเก่าต้องรัน scripts/migrate-is-preorder.ts ก่อน (ไม่งั้นสินค้าพรีออเดอร์เดิมจะถูกอ่านเป็น false)
+      type: Boolean,
       required: true,
+      default: false,
     },
     product_stock_quantity: {
-      // มีค่าเมื่อ product_type = "inStore" หรือ "online"
-      // product_type = "preorder" → null
+      // สินค้าปกติ (is_preorder: false) → มีค่า · พรีออเดอร์ → null
       type: Number,
       min: 0,
       default: 0,
+    },
+    // เกณฑ์ "สินค้าใกล้หมด" รายสินค้า (เทียบ reorder_point ของวัตถุดิบ) — null = ใช้ค่าเริ่มต้น 5
+    // (src/lib/lowStock.ts) · ใช้ทั้งแจ้งเตือน LINE, /api/admin/products/low-stock และ dashboard
+    low_stock_threshold: {
+      type: Number,
+      min: 0,
+      default: null,
     },
     avg_rating: {
       type: mongoose.Schema.Types.Decimal128,
@@ -127,7 +130,7 @@ const productSchema = new mongoose.Schema(
       default: 0,
     },
     preorder_config: {
-      // null ถ้า product_type = "inStore" หรือ "online" (ใช้เฉพาะ preorder)
+      // ใช้เฉพาะสินค้าพรีออเดอร์ (is_preorder: true) · สินค้าปกติ = null
       type: preorderConfigSchema,
       default: null,
     },
@@ -151,8 +154,7 @@ const productSchema = new mongoose.Schema(
 // (ให้รัน scripts/backfill-product-codes.ts เติมรหัสให้ของเดิม)
 productSchema.index({ product_id: 1 }, { unique: true, sparse: true });
 productSchema.index({ category_id: 1 });
-productSchema.index({ product_type: 1 });
-productSchema.index({ product_type: 1, deleted_at: 1 });
+productSchema.index({ is_preorder: 1, deleted_at: 1 });
 productSchema.index({ avg_rating: -1 });
 productSchema.index({ deleted_at: 1 });
 

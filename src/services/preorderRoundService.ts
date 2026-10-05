@@ -1,13 +1,14 @@
 /**
  * preorderRoundService — รอบพรีออเดอร์ (PreorderRounds + PreorderRoundItems)
  *
- * รอบพรีออเดอร์ = ช่วงเวลาเปิดรับสั่งล่วงหน้าสำหรับสินค้า product_type = "preorder"
+ * รอบพรีออเดอร์ = ช่วงเวลาเปิดรับสั่งล่วงหน้าสำหรับสินค้าพรีออเดอร์ (is_preorder: true)
  *   open_date..close_date = ช่วงเปิดรับ ; pickup_date = วันนัดรับ / เริ่มจัดส่ง
  *
  * round_status (state machine):
- *   scheduled → open → closed          (เดินหน้าตามลำดับ)
+ *   scheduled → open → closed          (เดินหน้าตามลำดับ) · closed → open (ยังไม่มีใบสั่งผลิต)
  *   scheduled | open → cancelled       (ยกเลิกรอบ)
- *   ระบบไม่เลื่อนสถานะอัตโนมัติตามเวลา — แอดมินเป็นคนกด ส่วนตอนลูกค้าสั่งจะเช็ค isRoundOrderable() อีกชั้น
+ *   เปิด/ปิดอัตโนมัติตามเวลาผ่าน cron (preorderRoundLifecycleService.runRoundScheduler) หรือแอดมินกดเอง ·
+ *   ปิดรอบ → ยกเลิกคนไม่จ่าย + สร้างใบสั่งผลิต (onRoundClosed) · ตอนลูกค้าสั่งเช็ค assertRoundOrderable() อีกชั้น
  *
  * PreorderRoundItems = สินค้าพรีออเดอร์ที่เปิดขายในรอบ + เพดานจำนวนรวม (max_qty_total) + ยอดจองปัจจุบัน (current_qty)
  *   commitQty/releaseQty ใช้ $inc แบบมีเงื่อนไข กันจองเกินโควตา (best-effort ไม่มี transaction)
@@ -21,11 +22,15 @@ import { restoreDoc } from "../lib/crudService";
 import preorderRoundModel from "../models/preorderRoundModel";
 import preorderRoundItemModel from "../models/preorderRoundItemModel";
 import preorderModel from "../models/preorderModel";
+import preorderItemModel from "../models/preorderItemModel";
+import productionOrderModel from "../models/productionOrderModel";
 import productModel from "../models/productModel";
 import userModel from "../models/userModel";
 import type { z } from "zod";
 import type { updateRoundBody, updateRoundItemBody } from "../schemas/preorderRound";
 import { toSatang, toBahtFields } from "../lib/money";
+import { isPreorderProduct } from "../lib/productCode";
+import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -39,12 +44,13 @@ export type RoundStatus = (typeof ROUND_STATUSES)[number];
 const NEXT_ROUND_STATUS: Record<RoundStatus, RoundStatus[]> = {
   scheduled: ["open", "cancelled"],
   open: ["closed", "cancelled"],
-  closed: [],
+  // เปิดกลับได้ถ้ายังไม่มีใบสั่งผลิต (docs/preorder-round-flow.md ประเด็น 8) — ตรวจเพิ่มใน updateRoundStatus
+  closed: ["open"],
   cancelled: [],
 };
 
 const PRODUCT_SELECT =
-  "product_name_th product_name_eng product_price sale_price product_img product_type preorder_config";
+  "product_name_th product_name_eng product_price sale_price product_img is_preorder preorder_config";
 
 // BACKLOG §3.11 เฟส 5b — price_override เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
 // ต้องแปลง "ซ้อน" เข้าไปในผลลัพธ์ populate (product_id.product_price/sale_price) ด้วย เพราะ populate
@@ -107,6 +113,30 @@ function assertDateOrder(open: Date, close: Date, pickup: Date): void {
   }
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * lead_time_days ของสินค้า = จำนวนวันที่ต้องใช้ผลิตหลังปิดรับ (docs/preorder-round-flow.md ปัญหา 2 — เดิมไม่ถูกใช้)
+ * บังคับ: pickup_date − close_date ≥ lead_time_days ของทุกสินค้าในรอบ
+ * ตรวจตอนใส่สินค้าเข้ารอบ (createRound / addRoundItem) และตอนเลื่อน close/pickup (updateRound)
+ */
+function assertLeadTime(
+  closeDate: Date,
+  pickupDate: Date,
+  products: Array<{ product_name_th?: string; preorder_config?: { lead_time_days?: number } | null }>
+): void {
+  const gapDays = (new Date(pickupDate).getTime() - new Date(closeDate).getTime()) / DAY_MS;
+  for (const p of products) {
+    const lead = p.preorder_config?.lead_time_days;
+    if (lead != null && gapDays < lead) {
+      throw badRequest(
+        `"${p.product_name_th ?? "สินค้า"}" ต้องใช้เวลาผลิต ${lead} วันหลังปิดรับ ` +
+          `แต่รอบนี้ปิดรับถึงวันรับห่างกัน ${Math.floor(gapDays * 10) / 10} วัน — เลื่อนวันรับหรือปิดรับให้เร็วขึ้น`
+      );
+    }
+  }
+}
+
 function assertMaxQty(n: unknown): number {
   const v = Number(n);
   if (!Number.isInteger(v) || v < 1) throw badRequest("max_qty_total ต้องเป็นจำนวนเต็มตั้งแต่ 1");
@@ -150,12 +180,13 @@ export async function createRound(input: CreateRoundInput, createdBy: string) {
       seen.add(String(it.product_id));
       const product = await productModel
         .findOne({ _id: it.product_id, deleted_at: null })
-        .select("product_type product_name_th")
+        .select("is_preorder product_name_th preorder_config")
         .lean<any>();
       if (!product) throw notFound(`ไม่พบสินค้า ${it.product_id}`);
-      if (product.product_type !== "preorder") {
-        throw badRequest(`สินค้า "${product.product_name_th}" ไม่ใช่สินค้าพรีออเดอร์ (product_type ต้องเป็น "preorder")`);
+      if (!isPreorderProduct(product)) {
+        throw badRequest(`สินค้า "${product.product_name_th}" ไม่ใช่สินค้าพรีออเดอร์ (is_preorder ต้องเป็น true)`);
       }
+      assertLeadTime(close_date, pickup_date, [product]);
       resolvedItems.push({
         product_id: product._id,
         // BACKLOG §3.11 เฟส 5b — price_override เป็นบาทจาก request เสมอ (API contract) แปลงเป็น
@@ -290,13 +321,119 @@ export async function updateRound(id: string, input: UpdateRoundInput) {
   if (payload.close_date !== undefined) payload.close_date = close_date;
   if (payload.pickup_date !== undefined) payload.pickup_date = pickup_date;
 
+  // เลื่อน close/pickup → ช่วงผลิตต้องยังพอสำหรับทุกสินค้าในรอบ (lead_time_days)
+  if (payload.close_date !== undefined || payload.pickup_date !== undefined) {
+    const itemProductIds = await preorderRoundItemModel
+      .find({ round_id: round._id, deleted_at: null })
+      .distinct("product_id");
+    const products = itemProductIds.length
+      ? await productModel.find({ _id: { $in: itemProductIds } }).select("product_name_th preorder_config").lean<any[]>()
+      : [];
+    assertLeadTime(close_date, pickup_date, products);
+  }
+
+  const pickupChanged =
+    payload.pickup_date !== undefined && new Date(round.pickup_date).getTime() !== pickup_date.getTime();
+
   Object.assign(round, payload);
   await round.save();
+
+  if (pickupChanged) await syncPickupDateChange(round._id, pickup_date);
+  if (payload.close_date !== undefined) await recomputePaymentDueDates(round._id, close_date);
   return getRoundDetail(id);
 }
 
+/**
+ * วันรับของรอบเปลี่ยน (docs/preorder-round-flow.md ปัญหา 6) — เดิมไม่มีใครรู้:
+ *   - preorderItems.pickup_date เป็นสแนปช็อตตอนสั่ง → อัปเดตตามให้ตรงรอบ (เฉพาะพรีออเดอร์ที่ยังค้าง)
+ *   - แจ้งลูกค้าทาง LINE ทีละพรีออเดอร์ (ผ่านกลไกโควตา — ส่งไม่ถึงไม่ทำให้การแก้รอบล้ม)
+ *   - ล้าง pickup_reminded_at ให้ระบบเตือนก่อนวันรับ (preorderReminderService) เตือนใหม่ตามวันใหม่
+ */
+/**
+ * เลื่อน close_date → คำนวณกำหนดชำระใหม่ของรายการที่ยังไม่จ่ายในรอบ = min(สั่ง + N ชม., ปิดรอบใหม่)
+ * (docs/preorder-round-flow.md ประเด็น 3 — เลื่อนปิดออกไปแล้วคนที่ถูกจำกัดด้วยเวลาปิดเดิมได้เวลาเพิ่ม)
+ */
+async function recomputePaymentDueDates(roundId: unknown, closeDate: Date): Promise<void> {
+  const { computePaymentDueAt } = await import("./preorderRoundLifecycleService");
+  const unpaid = await preorderModel
+    .find({
+      round_id: roundId,
+      deleted_at: null,
+      order_status: { $nin: ["cancelled", "completed"] },
+      payment_status: { $in: ["pending", "failed"] },
+    })
+    .select("_id created_at")
+    .lean<Array<{ _id: unknown; created_at: Date }>>();
+  for (const p of unpaid) {
+    await preorderModel.updateOne({ _id: p._id }, { $set: { payment_due_at: computePaymentDueAt(p.created_at, closeDate) } });
+  }
+}
+
+async function syncPickupDateChange(roundId: unknown, pickupDate: Date): Promise<void> {
+  const active = await preorderModel
+    .find({ round_id: roundId, deleted_at: null, order_status: { $nin: ["cancelled", "completed"] } })
+    .select("_id preorder_no user_id order_type")
+    .lean<Array<{ _id: unknown; preorder_no: string; user_id: unknown; order_type: string }>>();
+  if (active.length === 0) return;
+
+  const ids = active.map((p) => p._id);
+  await preorderItemModel.updateMany({ preorder_id: { $in: ids }, deleted_at: null }, { $set: { pickup_date: pickupDate } });
+  await preorderModel.updateMany({ _id: { $in: ids } }, { $set: { pickup_reminded_at: null } });
+
+  for (const p of active) {
+    const text = customerMessages.pickupDateChanged(p.preorder_no, pickupDate, p.order_type);
+    notifyCustomerLater(p.user_id, text, customerWeb.fromLineText("preorder", p._id, p.preorder_no, text, "warning"));
+  }
+}
+
+export interface RoundCancelCascade {
+  /** พรีออเดอร์ที่ยกเลิกสำเร็จ (คืนโควตา + คืนเงินอัตโนมัติถ้าจ่ายแล้ว + แจ้งลูกค้าทาง LINE — ผ่าน cancelPreorder) */
+  cancelled: string[];
+  /** ยกเลิกไม่สำเร็จ — ต้องจัดการมือ (รอบถูกยกเลิกไปแล้ว ลูกค้าสั่งเพิ่มไม่ได้) */
+  failed: Array<{ preorder_no: string; error: string }>;
+}
+
+/**
+ * ยกเลิกพรีออเดอร์ที่ยังค้างทุกรายการในรอบที่ถูกยกเลิก (docs/preorder-round-flow.md ปัญหา 1)
+ * ทีละรายการผ่าน preorderService.cancelPreorder — ได้ cleanup ครบเหมือนแอดมินกดยกเลิกเอง
+ * รายการที่พังไม่หยุดรายการอื่น (best-effort) · dynamic import กัน circular (preorderService import ไฟล์นี้)
+ */
+async function cancelPreordersOfRound(
+  roundId: unknown,
+  roundName: string,
+  cancelledBy?: string
+): Promise<RoundCancelCascade> {
+  const { cancelPreorder } = await import("./preorderService");
+  const active = await preorderModel
+    .find({ round_id: roundId, deleted_at: null, order_status: { $nin: ["cancelled", "completed"] } })
+    .select("_id preorder_no")
+    .lean<Array<{ _id: unknown; preorder_no: string }>>();
+
+  const result: RoundCancelCascade = { cancelled: [], failed: [] };
+  for (const p of active) {
+    try {
+      await cancelPreorder(String(p._id), {
+        cancelled_by: cancelledBy,
+        cancelled_reason: `ร้านยกเลิกรอบพรีออเดอร์ "${roundName}"`,
+      });
+      result.cancelled.push(p.preorder_no);
+    } catch (err) {
+      result.failed.push({ preorder_no: p.preorder_no, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+  return result;
+}
+
 // ── UPDATE STATUS (state machine) ───────────────────────────
-export async function updateRoundStatus(id: string, next: RoundStatus) {
+/**
+ * `cancelled` → ยกเลิกพรีออเดอร์ที่ค้างในรอบให้ด้วย (cancelPreordersOfRound) — ต้องส่ง opts.by (ผู้กด) เพื่อให้
+ * คืนเงินอัตโนมัติได้ (registerAutoRefundOnCancel ต้องมีผู้ยืนยันการคืนเงิน)
+ */
+export async function updateRoundStatus(
+  id: string,
+  next: RoundStatus,
+  opts: { by?: string; close_date?: string | Date } = {}
+) {
   await dbConnect();
   assertObjectId(id);
   if (!ROUND_STATUSES.includes(next)) {
@@ -312,8 +449,41 @@ export async function updateRoundStatus(id: string, next: RoundStatus) {
     throw conflict(`เปลี่ยนสถานะรอบจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
 
+  // ประเด็น 8 — เปิดรอบที่ปิดแล้วกลับ: ต้องยังไม่มีใบสั่งผลิต และ close_date ต้องอยู่ในอนาคต (ไม่งั้นตัวตั้งเวลาปิดซ้ำทันที)
+  // รอบที่ปิดแล้วแก้วันที่ผ่าน updateRound ไม่ได้ → รับ close_date ใหม่มาพร้อมคำสั่งเปิดกลับได้เลย
+  if (current === "closed" && next === "open") {
+    const production = await productionOrderModel.countDocuments({
+      round_id: round._id,
+      deleted_at: null,
+      production_status: { $ne: "cancelled" },
+    });
+    if (production > 0) {
+      throw conflict("รอบนี้มีใบสั่งผลิตแล้ว เปิดกลับไม่ได้ (ยกเลิกใบสั่งผลิตก่อนถ้าจำเป็นต้องเปิดรับเพิ่ม)");
+    }
+    if (opts.close_date !== undefined) {
+      const close = toDate(opts.close_date, "close_date");
+      assertDateOrder(round.open_date, close, round.pickup_date);
+      round.close_date = close;
+    }
+    if (new Date(round.close_date).getTime() <= Date.now()) {
+      throw conflict("close_date ผ่านไปแล้ว — ส่ง close_date ใหม่ (ในอนาคต) มาพร้อมคำสั่งเปิดรอบกลับ");
+    }
+  }
+
+  // เปลี่ยนสถานะรอบก่อน — ลูกค้าสั่งเพิ่มไม่ได้ทันที (assertRoundOrderable) ระหว่างไล่ยกเลิกพรีออเดอร์ข้างล่าง
   round.round_status = next;
   await round.save();
+
+  // ปิดรอบ → ยกเลิกคนไม่จ่าย + สร้างใบสั่งผลิตอัตโนมัติ (docs/preorder-round-flow.md §6) — dynamic import กัน circular
+  if (next === "closed") {
+    const { onRoundClosed } = await import("./preorderRoundLifecycleService");
+    return { ...(await getRoundDetail(id)), close_result: await onRoundClosed(round._id) };
+  }
+
+  if (next === "cancelled") {
+    const cascade = await cancelPreordersOfRound(round._id, round.round_name, opts.by);
+    return { ...(await getRoundDetail(id)), cancel_cascade: cascade };
+  }
   return getRoundDetail(id);
 }
 
@@ -333,19 +503,42 @@ export async function deleteRound(id: string) {
     throw conflict(`ยังมีพรีออเดอร์ที่ค้างอยู่ในรอบนี้ ${activePreorders} รายการ — จัดการให้เสร็จก่อนจึงจะลบรอบได้`);
   }
 
-  round.deleted_at = new Date();
+  // ใช้เวลาเดียวกันทั้งรอบและรายการ — restoreRound ใช้จับคู่ว่ารายการไหนถูกลบ "พร้อมรอบ" (ต่างจากที่ลบเองทีละตัวก่อนหน้า)
+  const now = new Date();
+  round.deleted_at = now;
   await round.save();
   await preorderRoundItemModel.updateMany(
     { round_id: round._id, deleted_at: null },
-    { $set: { deleted_at: new Date() } }
+    { $set: { deleted_at: now } }
   );
   return { deleted: true, _id: round._id };
 }
 
-// BACKLOG3 §9 — pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน (deleteRound ด้านบนมี
-// pre-check + cascade ที่ไม่เข้ากับ primitive แบบง่าย ๆ เลยยังคงเขียนเองต่อไป)
+/** ข้อมูลที่ลบก่อนแก้ (รอบกับรายการได้ deleted_at คนละ new Date() ห่างกันไม่กี่ ms) — ยอมให้คลาดได้เท่านี้ */
+const CASCADE_DELETE_TOLERANCE_MS = 5_000;
+
+/**
+ * กู้คืนรอบ + รายการสินค้าที่ถูกลบไปพร้อมรอบ (docs/preorder-round-flow.md ปัญหา 4 — เดิมกู้แค่รอบ ได้รอบเปล่า)
+ * รายการที่แอดมินลบเองทีละตัวก่อนลบรอบ (deleted_at ต่างจากรอบ) ไม่ถูกกู้ตาม
+ */
 export async function restoreRound(id: string) {
-  return restoreDoc(preorderRoundModel, id, { notFoundMsg: "ไม่พบรอบพรีออเดอร์ที่ถูกลบไว้" });
+  await dbConnect();
+  assertObjectId(id);
+  const round = await preorderRoundModel.findOne({ _id: id, deleted_at: { $ne: null } });
+  if (!round) throw notFound("ไม่พบรอบพรีออเดอร์ที่ถูกลบไว้");
+
+  const deletedAt = new Date(round.deleted_at).getTime();
+  const itemRes = await preorderRoundItemModel.updateMany(
+    {
+      round_id: round._id,
+      // ข้อมูลเก่า: deleteRound เดิมตั้ง deleted_at ของรอบก่อน แล้วค่อยของรายการ → รายการที่ลบ "พร้อมรอบ" มีเวลา
+      // เท่ากับหรือหลังรอบเสมอ · รายการที่แอดมินลบเองก่อนหน้า (แม้แค่ไม่กี่ ms) อยู่ก่อนเวลารอบ → ไม่ถูกกู้
+      deleted_at: { $gte: new Date(deletedAt), $lte: new Date(deletedAt + CASCADE_DELETE_TOLERANCE_MS) },
+    },
+    { $set: { deleted_at: null } }
+  );
+  const restored = await restoreDoc(preorderRoundModel, id, { notFoundMsg: "ไม่พบรอบพรีออเดอร์ที่ถูกลบไว้" });
+  return { ...(restored as Record<string, unknown>), restored_items: itemRes.modifiedCount };
 }
 
 // ── ROUND ITEMS ────────────────────────────────────────────
@@ -379,12 +572,13 @@ export async function addRoundItem(roundId: string, input: RoundItemInput) {
   assertObjectId(input.product_id, "product_id");
   const product = await productModel
     .findOne({ _id: input.product_id, deleted_at: null })
-    .select("product_type product_name_th")
+    .select("is_preorder product_name_th preorder_config")
     .lean<any>();
   if (!product) throw notFound("ไม่พบสินค้าที่ระบุ");
-  if (product.product_type !== "preorder") {
+  if (!isPreorderProduct(product)) {
     throw badRequest(`สินค้า "${product.product_name_th}" ไม่ใช่สินค้าพรีออเดอร์`);
   }
+  assertLeadTime(round.close_date, round.pickup_date, [product]);
 
   try {
     const doc = await preorderRoundItemModel.create({
@@ -413,6 +607,12 @@ export async function updateRoundItem(itemId: string, input: UpdateRoundItemInpu
 
   const item = await preorderRoundItemModel.findOne({ _id: itemId, deleted_at: null });
   if (!item) throw notFound("ไม่พบรายการสินค้าในรอบที่ระบุ");
+
+  // เหมือน addRoundItem — รอบที่ปิด/ยกเลิกแล้วแก้รายการไม่ได้ (docs/preorder-round-flow.md ปัญหา 7)
+  const round = await preorderRoundModel.findOne({ _id: item.round_id }).select("round_status").lean<any>();
+  if (round && (round.round_status === "closed" || round.round_status === "cancelled")) {
+    throw conflict(`รอบสถานะ "${round.round_status}" แก้ไขรายการสินค้าไม่ได้`);
+  }
 
   const payload: Record<string, any> = { ...input };
   if (payload.price_override !== undefined && payload.price_override !== null) {
@@ -495,7 +695,7 @@ export async function getOrderableRoundItems(roundItemIds: string[], roundId: st
   const products = productIds.length
     ? await productModel
         .find({ _id: { $in: productIds }, deleted_at: null })
-        .select("product_name_th product_name_eng product_price sale_price product_type")
+        .select("product_name_th product_name_eng product_price sale_price is_preorder preorder_config")
         .lean<any[]>()
     : [];
   const productById = new Map(products.map((p) => [String(p._id), p]));

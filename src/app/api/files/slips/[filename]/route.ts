@@ -9,7 +9,7 @@
  */
 import type { NextRequest } from "next/server";
 import { route } from "@/lib/apiResponse";
-import { requireAuth, requirePermission } from "@/lib/authGuard";
+import { authenticate, requirePermission } from "@/lib/authGuard";
 import { forbidden, notFound } from "@/lib/httpError";
 import dbConnect from "@/lib/dbConnect";
 import { PRIVATE_URL_PREFIX, isSafeFilename, readPrivateFile } from "@/lib/privateFiles";
@@ -19,7 +19,7 @@ import paymentModel from "@/models/paymentModel";
 type Ctx = { params: Promise<{ filename: string }> };
 
 export const GET = route(async (req: NextRequest, ctx: Ctx) => {
-  const session = requireAuth(req);
+  const session = await authenticate(req); // ตรวจบัญชีกับ DB ด้วย (BACKLOG5 Y1)
   const { filename } = await ctx.params;
   if (!isSafeFilename(filename)) throw notFound("ไม่พบไฟล์");
 

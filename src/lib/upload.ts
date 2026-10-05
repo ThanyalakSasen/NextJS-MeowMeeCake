@@ -32,8 +32,17 @@ export interface SavedFile {
   size: number;
 }
 
+/** ชนิดไฟล์ที่รับ — image (ค่าเริ่มต้น) · video (วิดีโอรีวิว — customer-backend-merge.md §8.18) */
+export type MediaKind = "image" | "video";
+
+export interface SaveOptions {
+  kind?: MediaKind;
+  /** ขึ้นต้นชื่อไฟล์ (a-z0-9 เท่านั้น) เช่น user id — ใช้ยืนยันเจ้าของไฟล์ตอนลบ */
+  prefix?: string;
+}
+
 export interface UploadDriver {
-  save(files: File[], dir: string): Promise<SavedFile[]>;
+  save(files: File[], dir: string, opts?: SaveOptions): Promise<SavedFile[]>;
   /** ลบไฟล์จาก url ที่ save() เคยคืนมา — ไม่ throw (caller คาดหวัง best-effort เสมอ ดู deleteImages) */
   delete(url: string): Promise<void>;
 }
@@ -62,6 +71,24 @@ function sniffImageExt(buf: Buffer): string | null {
   return null;
 }
 
+/** ตรวจลายเซ็นวิดีโอจริง → .mp4 / .mov / .webm หรือ null */
+function sniffVideoExt(buf: Buffer): string | null {
+  if (buf.length < 12) return null;
+  // WebM / Matroska: EBML header 1A 45 DF A3
+  if (buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3) return ".webm";
+  // ISO BMFF: "ftyp" ที่ offset 4 — แยก QuickTime (qt) ออกจาก MP4 · ตัด AVIF (รูป) ออก
+  if (buf.toString("ascii", 4, 8) === "ftyp") {
+    const brand = buf.toString("ascii", 8, 12);
+    if (brand === "avif" || brand === "avis") return null;
+    return brand === "qt  " ? ".mov" : ".mp4";
+  }
+  return null;
+}
+
+const VIDEO_MAX_BYTES = 30 * 1024 * 1024; // 30 MB (เท่าฝั่งลูกค้า)
+const VIDEO_EXT = new Set([".mp4", ".mov", ".webm"]);
+const VIDEO_CONTENT_TYPE: Record<string, string> = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm" };
+
 export interface ValidatedFile {
   buf: Buffer;
   ext: string;
@@ -69,7 +96,8 @@ export interface ValidatedFile {
 }
 
 /** ตรวจไฟล์ 3 ชั้น (ใช้ร่วมกันทุก driver — ไม่ให้ driver ไหนหลุดการตรวจ · export ให้ privateFiles.ts ใช้ด้วย) */
-export async function validateFiles(files: File[]): Promise<ValidatedFile[]> {
+export async function validateFiles(files: File[], kind: MediaKind = "image"): Promise<ValidatedFile[]> {
+  if (kind === "video") return validateVideos(files);
   if (!Array.isArray(files) || files.length === 0) {
     throw badRequest("ไม่พบไฟล์ที่อัปโหลด");
   }
@@ -103,21 +131,45 @@ export async function validateFiles(files: File[]): Promise<ValidatedFile[]> {
   return out;
 }
 
-export function randomFilename(ext: string): string {
-  return `${Date.now()}-${randomBytes(6).toString("hex")}${ext}`;
+/** วิดีโอ: 1 ไฟล์ต่อครั้ง · ≤ 30 MB · นามสกุล + ลายเซ็นจริงต้องเป็น mp4/mov/webm */
+async function validateVideos(files: File[]): Promise<ValidatedFile[]> {
+  const list = (Array.isArray(files) ? files : []).filter((f) => f instanceof File);
+  if (list.length === 0) throw badRequest("ไม่พบไฟล์ที่อัปโหลด");
+  if (list.length > 1) throw badRequest("อัปโหลดวิดีโอได้ครั้งละ 1 ไฟล์");
+  const file = list[0];
+  if (file.size > VIDEO_MAX_BYTES) throw badRequest(`วิดีโอใหญ่เกิน ${VIDEO_MAX_BYTES / 1024 / 1024} MB`);
+  const nameExt = extname(file.name).toLowerCase();
+  if (nameExt && !VIDEO_EXT.has(nameExt)) {
+    throw badRequest(`นามสกุลไฟล์ไม่รองรับ: "${nameExt}" (รองรับ ${[...VIDEO_EXT].join(", ")})`);
+  }
+  const buf = Buffer.from(await file.arrayBuffer());
+  const realExt = sniffVideoExt(buf);
+  if (!realExt) throw badRequest(`ไฟล์ "${file.name}" ไม่ใช่วิดีโอที่รองรับ (MP4 / MOV / WEBM)`);
+  return [{ buf, ext: realExt, originalSize: file.size }];
+}
+
+export function randomFilename(ext: string, prefix?: string): string {
+  const p = (prefix ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
+  return `${p ? `${p}-` : ""}${Date.now()}-${randomBytes(6).toString("hex")}${ext}`;
+}
+
+function contentTypeOf(ext: string): string {
+  if (VIDEO_CONTENT_TYPE[ext]) return VIDEO_CONTENT_TYPE[ext];
+  const extNoDot = ext.slice(1);
+  return `image/${extNoDot === "jpg" ? "jpeg" : extNoDot}`;
 }
 
 // ── driver: local disk (ดีฟอลต์ — self-host เท่านั้น) ──────────
 const localDiskDriver: UploadDriver = {
-  async save(files, dir) {
-    const validated = await validateFiles(files);
+  async save(files, dir, opts = {}) {
+    const validated = await validateFiles(files, opts.kind);
     const safeDir = dir.replace(/[^a-z0-9_-]/gi, "") || "misc";
     const targetDir = join(process.cwd(), "public", "uploads", safeDir);
     await mkdir(targetDir, { recursive: true });
 
     const saved: SavedFile[] = [];
     for (const v of validated) {
-      const filename = randomFilename(v.ext);
+      const filename = randomFilename(v.ext, opts.prefix);
       await writeFile(join(targetDir, filename), v.buf);
       saved.push({ url: `/uploads/${safeDir}/${filename}`, filename, size: v.originalSize });
     }
@@ -163,8 +215,8 @@ function createS3Driver(): UploadDriver {
   }
 
   return {
-    async save(files, dir) {
-      const validated = await validateFiles(files);
+    async save(files, dir, opts = {}) {
+      const validated = await validateFiles(files, opts.kind);
       const bucket = process.env.S3_BUCKET;
       if (!bucket) throw new Error("UPLOAD_DRIVER=s3 ต้องตั้ง env S3_BUCKET");
       const base = (process.env.S3_PUBLIC_URL_BASE || "").replace(/\/$/, "");
@@ -179,15 +231,14 @@ function createS3Driver(): UploadDriver {
 
       const saved: SavedFile[] = [];
       for (const v of validated) {
-        const filename = randomFilename(v.ext);
+        const filename = randomFilename(v.ext, opts.prefix);
         const key = `${safeDir}/${filename}`;
-        const extNoDot = v.ext.slice(1);
         await client.send(
           new PutObjectCommand({
             Bucket: bucket,
             Key: key,
             Body: v.buf,
-            ContentType: `image/${extNoDot === "jpg" ? "jpeg" : extNoDot}`,
+            ContentType: contentTypeOf(v.ext),
           })
         );
         saved.push({ url: base ? `${base}/${key}` : key, filename, size: v.originalSize });
@@ -219,8 +270,8 @@ function getDriver(): UploadDriver {
  * คืนรายการ url
  * @param dir โฟลเดอร์ย่อย/prefix (จะถูก sanitize เหลือ [a-z0-9_-])
  */
-export async function saveImages(files: File[], dir: string): Promise<SavedFile[]> {
-  return getDriver().save(files, dir);
+export async function saveImages(files: File[], dir: string, opts: SaveOptions = {}): Promise<SavedFile[]> {
+  return getDriver().save(files, dir, opts);
 }
 
 /**

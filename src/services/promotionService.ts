@@ -162,7 +162,7 @@ export async function updatePromotion(id: string, input: UpdatePromotionInput) {
   try {
     const doc = await promotionModel
       .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: payload }, {
-        new: true,
+        returnDocument: "after",
         runValidators: true,
       })
       .lean();
@@ -217,6 +217,10 @@ export async function validateForOrder(input: ValidateForOrderInput): Promise<Di
   if (!promo) throw notFound("ไม่พบโปรโมชันนี้");
 
   if (promo.is_active === false) throw unprocessable("โปรโมชันนี้ถูกปิดใช้งาน");
+  // โปรที่แลกด้วยแต้ม ใช้ผ่าน "คูปองของฉัน" เท่านั้น (couponService · customer-backend-merge.md §8.11)
+  if (promo.points_cost > 0) {
+    throw unprocessable('โค้ดนี้ต้องแลกด้วยแต้มที่หน้าสมาชิกก่อน แล้วเลือกจาก "คูปองของฉัน"');
+  }
 
   const now = Date.now();
   if (promo.start_date && new Date(promo.start_date).getTime() > now) {

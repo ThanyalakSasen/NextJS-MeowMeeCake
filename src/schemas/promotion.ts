@@ -23,6 +23,8 @@ const base = z.object({
   max_discount_amount: z.number().nonnegative().nullish(),
   usage_limit: z.number().int().positive().nullish(),
   max_user_per_user: z.number().int().positive().nullish(),
+  // แต้มที่ใช้แลกเป็นคูปองส่วนตัว (null = ไม่เปิดให้แลก · customer-backend-merge.md §8.11)
+  points_cost: z.number().int().positive().nullish(),
   start_date: z.coerce.date(),
   end_date: z.coerce.date(),
 });

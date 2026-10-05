@@ -20,7 +20,8 @@ const notificationSchema = new mongoose.Schema(
     module: {
       // โมดูลต้นทางของการแจ้งเตือน ใช้กรอง/จัดกลุ่มฝั่ง frontend
       type: String,
-      enum: ["order", "ingredient", "production", "employee", "finance", "system"],
+      // "employee" เลิกใช้แล้ว (2026-10-01) — เอกสารเก่าที่มีค่านี้ยังอ่าน/ทำเครื่องหมายอ่านได้ (validator ตรวจเฉพาะฟิลด์ที่แก้)
+      enum: ["order", "ingredient", "production", "finance", "customer", "system"],
       required: true,
     },
     is_read: {

@@ -15,7 +15,7 @@ async function makePromo(over: Record<string, unknown> = {}) {
     promotion_code: "C" + Math.random().toString(36).slice(2, 8).toUpperCase(),
     promotion_name: "cancel test",
     discount_type: "Amount",
-    discount_value: 2000,
+    discount_value: 20,
     start_date: new Date(Date.now() - 86_400_000),
     end_date: new Date(Date.now() + 86_400_000),
     created_by: new mongoose.Types.ObjectId(),

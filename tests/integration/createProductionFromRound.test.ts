@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import productionOrderModel from "@/models/productionOrderModel";
 import productionItemModel from "@/models/productionItemModel";
+import preorderModel from "@/models/preorderModel";
+import preorderRoundModel from "@/models/preorderRoundModel";
 import * as productionOrderService from "@/services/productionOrderService";
 import * as preorderRoundService from "@/services/preorderRoundService";
 import * as preorderService from "@/services/preorderService";
@@ -15,11 +17,24 @@ import { makeUser, makeProduct, makeRecipe } from "./helpers";
  *  - สร้างได้แค่ 1 ใบต่อรอบ
  */
 describe("productionOrderService.createProductionFromRound", () => {
+  /**
+   * ปิดรอบตรงใน DB (ไม่ผ่าน updateRoundStatus ที่จะรัน onRoundClosed — ยกเลิกคนไม่จ่าย + สร้างใบผลิตอัตโนมัติ)
+   * + ทำให้พรีออเดอร์ที่ยังไม่ยกเลิกเป็น "paid" — เทสนี้ทดสอบ createProductionFromRound ตรง ๆ
+   * (ใบผลิตนับเฉพาะที่ชำระเงินแล้ว — docs/preorder-round-flow.md ประเด็น 3)
+   */
+  async function closeRoundPaidOnly(roundId: unknown) {
+    await preorderModel.updateMany(
+      { round_id: roundId, order_status: { $ne: "cancelled" } },
+      { $set: { payment_status: "paid" } }
+    );
+    await preorderRoundModel.updateOne({ _id: roundId }, { $set: { round_status: "closed" } });
+  }
+
   async function setupClosedRoundWithOrders() {
     const admin = await makeUser();
     const customerA = await makeUser();
     const customerB = await makeUser();
-    const product = await makeProduct({ product_type: "preorder", product_price: 100 });
+    const product = await makeProduct({ is_preorder: true, product_price: 100 });
     const recipe = await makeRecipe(String(product._id));
 
     const now = Date.now();
@@ -54,7 +69,7 @@ describe("productionOrderService.createProductionFromRound", () => {
     });
     await preorderService.updatePreorderStatus(String(preorderCancelled._id), "cancelled");
 
-    await preorderRoundService.updateRoundStatus(String(round._id), "closed");
+    await closeRoundPaidOnly(round._id);
 
     return { round, product, recipe, roundItemId, preorderA, preorderB, preorderCancelled };
   }
@@ -98,7 +113,7 @@ describe("productionOrderService.createProductionFromRound", () => {
 
   it("รอบยังไม่ปิดรับ (open) → 409 ปฏิเสธ ไม่สร้างใบสั่งผลิต", async () => {
     const admin = await makeUser();
-    const product = await makeProduct({ product_type: "preorder" });
+    const product = await makeProduct({ is_preorder: true });
     await makeRecipe(String(product._id));
     const now = Date.now();
     const round = await preorderRoundService.createRound(
@@ -126,7 +141,7 @@ describe("productionOrderService.createProductionFromRound", () => {
   it("มีสินค้าที่สั่งแล้วยังไม่มีสูตรผูก → 400 ปฏิเสธ ไม่เหลือใบสั่งผลิตค้าง", async () => {
     const admin = await makeUser();
     const customer = await makeUser();
-    const product = await makeProduct({ product_type: "preorder" }); // ตั้งใจไม่สร้างสูตรให้
+    const product = await makeProduct({ is_preorder: true }); // ตั้งใจไม่สร้างสูตรให้
     const now = Date.now();
     const round = await preorderRoundService.createRound(
       {
@@ -145,7 +160,7 @@ describe("productionOrderService.createProductionFromRound", () => {
       order_type: "takeaway",
       items: [{ round_item_id: roundItemId, quantity: 1 }],
     });
-    await preorderRoundService.updateRoundStatus(String(round._id), "closed");
+    await closeRoundPaidOnly(round._id);
 
     const countBefore = await productionOrderModel.countDocuments({});
     await expect(
@@ -160,7 +175,7 @@ describe("productionOrderService.createProductionFromRound", () => {
   it("สินค้ามีสูตรที่ยังไม่ถูกลบมากกว่า 1 สูตร → ใช้สูตรล่าสุด (created_at ใหม่สุด, docs/BACKLOG2.md §12.2)", async () => {
     const admin = await makeUser();
     const customer = await makeUser();
-    const product = await makeProduct({ product_type: "preorder" });
+    const product = await makeProduct({ is_preorder: true });
     const oldRecipe = await makeRecipe(String(product._id)); // สร้างก่อน
     const newRecipe = await makeRecipe(String(product._id)); // สร้างทีหลัง — ต้องถูกเลือก
 
@@ -182,7 +197,7 @@ describe("productionOrderService.createProductionFromRound", () => {
       order_type: "takeaway",
       items: [{ round_item_id: roundItemId, quantity: 4 }],
     });
-    await preorderRoundService.updateRoundStatus(String(round._id), "closed");
+    await closeRoundPaidOnly(round._id);
 
     const order = await productionOrderService.createProductionFromRound({
       round_id: String(round._id),

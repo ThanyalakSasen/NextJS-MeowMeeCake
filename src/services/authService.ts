@@ -55,38 +55,7 @@ export async function login(email: string, password: string, ctx: { ip?: string 
   return { user, token, session };
 }
 
-// ── REGISTER (ลูกค้าสมัครเอง) ──────────────────────────────
-export interface RegisterInput {
-  user_fullname: string;
-  email: string;
-  password: string;
-  user_phone?: string | null;
-}
-
-export async function register(input: RegisterInput, ctx: { ip?: string | null } = {}) {
-  const role = await roleModel.findOne({ role_name: "customer", deleted_at: null }).lean<any>();
-  if (!role) throw badRequest("ระบบยังไม่ได้ตั้งค่าบทบาท 'customer' (รัน npm run seed)");
-
-  const user = await userService.createUser({
-    user_fullname: input.user_fullname,
-    email: input.email,
-    password: input.password,
-    user_phone: input.user_phone ?? null,
-    auth_provider: "local",
-    role_id: String(role._id),
-  });
-
-  const { session, token } = await issue({ ...user, role_id: role });
-  await userLogService.writeLog({
-    user_id: session.user_id,
-    action: "สมัครสมาชิก",
-    action_type: "CREATE",
-    entity: "User",
-    entity_id: session.user_id,
-    ip_address: ctx.ip ?? null,
-  });
-  return { user, token, session };
-}
+// ── REGISTER — ย้ายไป accountService.signup() (ยืนยันอีเมลก่อน · ไม่ล็อกอินให้ — customer-backend-merge.md §8.9) ──
 
 export async function me(session: SessionUser) {
   return userService.getUserById(session.user_id);

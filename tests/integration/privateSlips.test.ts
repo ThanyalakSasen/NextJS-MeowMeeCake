@@ -37,7 +37,13 @@ afterAll(() => {
   rmSync(privateDir, { recursive: true, force: true });
 });
 
-function as(user: { _id: unknown; role_id: unknown }, roleType: "owner" | "staff" | "customer", filename: string) {
+async function as(user: { _id: unknown; role_id: unknown }, roleType: "owner" | "staff" | "customer", filename: string) {
+  // authGuard ตรวจ role กับ DB (docs/BACKLOG5.md Y1) — makeUser() ใส่ role_id สุ่มที่ไม่มีจริง → สร้าง role ตามประเภทที่เทสอ้าง
+  await roleModel.updateOne(
+    { _id: user.role_id },
+    { $setOnInsert: { role_name: `${roleType}-${String(user.role_id)}`, role_type: roleType, is_active: true } },
+    { upsert: true }
+  );
   const session = { user_id: String(user._id), role_id: String(user.role_id), role_type: roleType, email: "x@y.z" };
   return GET(
     new NextRequest(`http://localhost:3000/api/files/slips/${filename}`, { headers: { [USER_HEADER]: JSON.stringify(session) } }),

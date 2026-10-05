@@ -20,6 +20,7 @@ import userModel from "../models/userModel";
 import productionItemModel from "../models/productionItemModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
+import { adminLinks } from "../lib/adminLinks";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -130,11 +131,11 @@ export async function createTransaction(input: CreateTransactionInput) {
     if (before > reorderPoint && after <= reorderPoint) {
       notificationService
         .notify({
-          title: `วัตถุดิบใกล้หมด: ${ingredient.ingredient_name}`,
+          title: `วัตถุดิบใกล้จะหมด: ${ingredient.ingredient_name}`,
           message: `คงเหลือ ${after} (จุดสั่งซื้อ ${reorderPoint})`,
           module: "ingredient",
           type: "warning",
-          link: "/owner/ingredients",
+          link: adminLinks.ingredients,
         })
         .catch((err) => log.error("ingredient.notify_failed", { ingredient_id: String(ingredient._id), err }));
     }

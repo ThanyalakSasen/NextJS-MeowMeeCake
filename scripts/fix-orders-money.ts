@@ -1,4 +1,5 @@
 import "./_env"; // ต้องมาก่อน import ที่อ่าน env ตอนโหลดโมดูล
+import { blockLegacyMoneyScript } from "./_legacyMoney";
 
 import mongoose from "mongoose";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -44,6 +45,7 @@ const REPORT = "scripts/audit-orders-money.report.json";
 const MARKER = "money_fix_orders_applied";
 
 async function main() {
+  blockLegacyMoneyScript("fix-orders-money"); // docs/money-units.md — ระบบเก็บเงินเป็นบาทแล้ว
   const report = JSON.parse(readFileSync(REPORT, "utf8")) as { generated_at: string; window: OrderRow[] };
   const ageH = (Date.now() - new Date(report.generated_at).getTime()) / 3_600_000;
   if (ageH > 24) throw new Error(`report เก่า ${ageH.toFixed(1)} ชม. — รัน audit-orders-money.ts ใหม่ก่อน`);

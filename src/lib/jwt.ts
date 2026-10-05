@@ -33,5 +33,8 @@ export async function verifySession(token: string): Promise<SessionUser> {
     role_id: String(payload.role_id),
     role_type: payload.role_type as SessionUser["role_type"],
     email: String(payload.email),
+    source: "jwt",
+    // เวลาออก token — authGuard เทียบกับ password_changed_at (เปลี่ยนรหัส/แอดมินตั้งรหัสใหม่ = session เดิมหลุด)
+    auth_time: typeof payload.iat === "number" ? payload.iat * 1000 : 0,
   };
 }

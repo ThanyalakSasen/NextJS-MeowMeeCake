@@ -1,6 +1,6 @@
 /**
  * /api/shop/reviews/[id]  (รีวิวของตัวเอง)
- *   PATCH  — แก้รีวิว  body: { rating?, review_text?, image? }
+ *   PATCH  — แก้รีวิว  body: { rating?, review_text?, image?, video?, aspect_feedback? }
  *   DELETE — ลบรีวิวของตัวเอง (soft)
  */
 import { ok } from "@/lib/apiResponse";
@@ -19,6 +19,8 @@ export const PATCH = withAuth(async (session, req, ctx: Ctx) => {
       rating: data.rating,
       review_text: data.review_text,
       image: data.image,
+      video: data.video,
+      aspect_feedback: data.aspect_feedback,
     })
   );
 });

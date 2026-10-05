@@ -22,9 +22,17 @@ import { assertObjectId } from "./objectId";
 import dbConnect from "./dbConnect";
 import { log } from "./logger";
 import paymentModel from "../models/paymentModel";
+import { customerMessages, customerWeb, notifyCustomerLater, type CustomerDocKind } from "../services/customerNotifyService";
 
 type AnyModel = Model<unknown>;
 type Doc = Record<string, unknown>;
+
+/** order มี order_no · preorder มี preorder_no — ใช้แยกชนิด + เลขเอกสารสำหรับข้อความแจ้งลูกค้า */
+function customerDocRef(doc: Doc): { kind: CustomerDocKind; docNo: string } {
+  return doc.preorder_no
+    ? { kind: "preorder", docNo: String(doc.preorder_no) }
+    : { kind: "order", docNo: String(doc.order_no ?? "") };
+}
 
 /**
  * ลงทะเบียน auto-refund ใน Saga ถ้า entity จ่ายเงินแล้วตอนกำลังจะถูกยกเลิก (BACKLOG §2.8/§2b.3) —
@@ -113,7 +121,7 @@ export async function setEntityPaymentStatus(opts: {
   if (opts.paymentId) set.payment_id = opts.paymentId;
 
   const doc = await opts.model
-    .findOneAndUpdate({ _id: opts.id, deleted_at: null }, { $set: set }, { new: true })
+    .findOneAndUpdate({ _id: opts.id, deleted_at: null }, { $set: set }, { returnDocument: "after" })
     .lean<Doc | null>();
   if (!doc) throw notFound(`ไม่พบ${opts.entityLabel}ที่ระบุ`);
 
@@ -121,6 +129,13 @@ export async function setEntityPaymentStatus(opts: {
     await opts.model.updateOne({ _id: opts.id }, { $set: { order_status: "confirmed" } });
     doc.order_status = "confirmed";
   }
+
+  const { kind, docNo } = customerDocRef(doc);
+  notifyCustomerLater(
+    doc.user_id,
+    customerMessages.paymentStatus(kind, docNo, opts.status),
+    customerWeb.paymentStatus(kind, doc._id, docNo, opts.status)
+  );
   return doc;
 }
 
@@ -148,9 +163,20 @@ export async function applyEntityDeliveryUpdate(opts: {
     payload.delivered_at = new Date();
   }
 
-  return opts.model
-    .findByIdAndUpdate(opts.id, { $set: payload }, { new: true, runValidators: true })
+  const updated = await opts.model
+    .findByIdAndUpdate(opts.id, { $set: payload }, { returnDocument: "after", runValidators: true })
     .lean<Doc | null>();
+
+  // แจ้งลูกค้าเฉพาะตอนสถานะจัดส่งเปลี่ยนจริง (แก้แค่ tracking_no/note ไม่แจ้งซ้ำ)
+  if (updated && payload.delivery_status && payload.delivery_status !== doc.delivery_status) {
+    const { kind, docNo } = customerDocRef(updated);
+    notifyCustomerLater(
+      updated.user_id,
+      customerMessages.deliveryStatus(kind, docNo, String(updated.delivery_status), updated.tracking_no as string | null),
+      customerWeb.deliveryStatus(kind, updated._id, docNo, String(updated.delivery_status), updated.tracking_no as string | null)
+    );
+  }
+  return updated;
 }
 
 /** soft-delete เอนทิตี + cascade รายการลูก — เฉพาะเมื่อสถานะเป็น completed/cancelled แล้วเท่านั้น */

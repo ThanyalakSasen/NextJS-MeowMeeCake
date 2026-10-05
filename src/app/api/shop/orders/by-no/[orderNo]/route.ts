@@ -1,4 +1,4 @@
-/** GET /api/shop/orders/by-no/[orderNo] — ค้นออเดอร์ของตัวเองด้วยเลขออเดอร์ (เช่น OP-20260831-A1B2C3) */
+/** GET /api/shop/orders/by-no/[orderNo] — ค้นออเดอร์ของตัวเองด้วยเลขออเดอร์ (เช่น ORD-20260924-A1B2C3) */
 import { ok } from "@/lib/apiResponse";
 import { withAuth, requireOwner } from "@/lib/authGuard";
 import * as orderService from "@/services/orderService";

@@ -21,6 +21,9 @@ const productionItemSchema = new mongoose.Schema(
     item_status: { type: String, enum: ["pending", "in_progress", "done", "cancelled"], default: "pending" },
     stock_impact: { type: [stockImpactSchema], default: [] },
     stock_updated_at: { type: Date, default: null },
+    // เพิ่มสต็อกสินค้าสำเร็จรูปแล้วเมื่อปิดงานผลิต (docs/BACKLOG4.md Y2) — กันเพิ่มซ้ำ · null = ยังไม่เพิ่ม/เป็นพรีออเดอร์
+    product_stock_added_at: { type: Date, default: null },
+    product_stock_added_qty: { type: Number, default: null },
     notes: { type: String, default: null },
     deleted_at: { type: Date, default: null },
   },

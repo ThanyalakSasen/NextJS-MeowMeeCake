@@ -33,7 +33,9 @@ export const unitUpdate = unitCreate.partial();
 // ── หมวดหมู่แบบชื่อล้วน (product / ingredient / component category) ──
 const nameOnly = (field: string, max = 100) => z.object({ [field]: z.string().trim().min(1).max(max) });
 
-export const productCategoryCreate = nameOnly("product_category_name");
+export const productCategoryCreate = nameOnly("product_category_name").extend({
+  ships_nationwide: z.boolean().optional(), // ออเดอร์เว็บ: ส่งทั่วประเทศได้ไหม (src/lib/shipping.ts)
+});
 export const productCategoryUpdate = productCategoryCreate.partial();
 
 export const ingredientCategoryCreate = nameOnly("ingredient_category_name");
@@ -71,12 +73,12 @@ export const productOptionCreate = z.object({
 // update: ห้ามย้าย product_id (ตรงกับ updateFields ใน service)
 export const productOptionUpdate = productOptionCreate.omit({ product_id: true }).partial();
 
-// ── Product variant (รสชาติ / ขนาด — มีราคาเพิ่ม + สต็อกแยก) ──
+// ── Product variant (รสชาติ / ขนาด — ราคาบวกเพิ่มอย่างเดียว ไม่มีสต็อกแยก · ตั้งแบบกลุ่มที่ /products/[id]/customization) ──
 export const productVariantCreate = z.object({
   product_id: objectId,
   variant_name: z.string().trim().min(1).max(120),
   variant_price: z.coerce.number().min(0).optional(),
-  variant_stock: z.coerce.number().min(0).optional(),
+  group_id: objectId.nullish(),
   unit_id: objectId.optional(),
 });
 // update: ห้ามย้าย product_id (ตรงกับ updateFields ใน service)
