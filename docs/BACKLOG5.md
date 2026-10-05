@@ -195,20 +195,22 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 - [ ] cron 6 ตัว · nginx `/uploads/` · Atlas แยก DB user + เปลี่ยนรหัส user เดิม
 - [ ] หลังร้าน: เลขพร้อมเพย์ · ข้อมูลร้าน/โลโก้ · สิทธิ์ `reports` (รีวิว) และ `store_info` (หน้าร้านประจำสัปดาห์) ให้พนักงาน
 - [ ] ออเดอร์ค้าง `ORD-1790786142302-M2PY` · `WEB-1790317257577` (BACKLOG4 §8.3)
-- [ ] **เงินที่ยังเป็นสตางค์ใน DB จริง 168 ค่า** ([`money-units.md`](money-units.md) §3–§4 ข้อ 2 — ต้องแก้ก่อน deploy) — dry-run 2026-10-06 ยังเจอ
-  `sale_not_below_price` 7 ตัว (เช่น ชิโอะปัง `pos-0126264` ราคาลด 4000 / ราคา 45) · **ผู้ใช้เลือกแก้ด้วยสคริปต์:** `npm run fix:satang-money`
-  (dry-run บน DB จริงได้ 168 ค่าตรงทุกกลุ่ม + ตัดสินไม่ได้ 4 ค่า ไม่แตะ) → `-- --apply`
+- [x] ~~**เงินที่ยังเป็นสตางค์ใน DB จริง 168 ค่า**~~ — **apply แล้ว 2026-10-06** (DB จริง · PR #64): `npm run fix:satang-money -- --apply`
+  เขียนสำเร็จ 168 · ข้าม 0 · รันซ้ำ = ไม่มีอะไรต้องแก้ · `check:data-integrity` ไม่เจอ `sale_not_below_price` แล้ว ([`money-units.md`](money-units.md) §3) ·
+  backup `scripts/backups/satang-money-2026-10-05T22-29-25-450Z.json` (อยู่ในเครื่องที่รันเท่านั้น — ไม่อยู่ใน git) ·
+  ตัดสินหน่วยไม่ได้ 4 ค่า ไม่แตะ (ตะกร้า 3 รายการที่ถูกลบแล้ว · ชำระเงิน 100 ของ 2026-08-25 สถานะ pending)
 - [ ] **`product_type` กลับมา 33 ตัว** — backend ฝั่งลูกค้าโค้ดเดิมเขียนกลับ · `cleanup:legacy-product-fields` ลบแค่ `delete_at` ·
   `migrate:is-preorder` (ตัวที่ลบ `product_type`) ห้าม `--apply` ซ้ำตาม README → ต้องกำหนดวิธีลบหลัง deploy ฝั่งลูกค้าขั้น 0
 - [ ] `backfill:payment-due` — dry-run 2026-10-06: พรีออเดอร์ค้างจ่ายไม่มีกำหนดชำระ 4 ใบ **เลยกำหนดแล้วทั้งหมด** (`PRE-1791013745988-RM33` ·
   `PRE-1791067754534-H2YA` · `PRE-1791068589123-ST4R` · `PRE-1791112996109-W4B1`) → `--apply` = เลื่อนเป็นเวลารัน + 24 ชม. (`--grace-hours=`) ·
   ผู้ใช้เลือกยกเลิก → เพิ่ม `--cancel-overdue` (ยกเลิกแทนการเลื่อน · ข้ามที่มีสลิปรอตรวจ) · **แต่ทั้ง 4 ใบมีสลิปแนบแล้ว (ยอดตรง) รอแอดมินตรวจ** →
-  ระบบไม่ยกเลิกให้ — ต้องตรวจสลิปในหลังร้านก่อน (ผ่าน = จ่ายแล้ว · ไม่ผ่าน = ยกเลิกได้)
+  ระบบไม่ยกเลิกให้ — ต้องตรวจสลิปในหลังร้านก่อน (ผ่าน = จ่ายแล้ว · ไม่ผ่าน = ยกเลิกได้) · ยังไม่ได้ทำอะไรกับ 4 ใบนี้ (2026-10-06)
 - [ ] `code_prefix_mismatch` 2 ตัว — บราวนี่มัทฉะ `pos-1626338` · เค้กสตรอว์เบอร์รีครีม `pos-1626294` รหัส `pos-` แต่ `is_preorder = true` → ตรวจในหลังร้าน
 
 **ผล dry-run กับ DB จริง 2026-10-06** (README ข้อ 2 · ไม่เขียน DB · ไม่ส่ง LINE): `check:data-integrity -- --no-notify` = 42 รายการ
 (`legacy_fields` 33 · `sale_not_below_price` 7 · `code_prefix_mismatch` 2) · `cleanup:legacy-product-fields` = ลบ `delete_at: null` ได้ 4 ตัว
 (`pos-0126264` · `pos-2826088` · `pos-2726067` · `pos-2626624` — รอ deploy ฝั่งลูกค้าขั้น 0 ก่อน apply)
+· **หลัง `fix:satang-money` (2026-10-06):** `check:data-integrity` = 35 รายการ (`legacy_fields` 33 · `code_prefix_mismatch` 2) — `sale_not_below_price` หมดแล้ว
 
 ---
 
