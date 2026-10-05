@@ -413,7 +413,7 @@ Next 16 + antd + i18n ที่ทำถึง D0.5 · ตามหลัง mai
 | 4 | `npm run cleanup:legacy-product-fields -- --apply` (ลบ `delete_at: null` 4 ตัว) | §7.15 |
 | 5 | PATCH `is_preorder: true` สินค้า 2 ตัวที่รหัสยังเป็น `pos-` | DEPLOY §⑦ ข้อ 3 |
 | 6 | `npm run check:data-integrity -- --no-notify` → ไม่พบข้อมูลผิดปกติ | Y11 |
-| 7 | ตั้ง cron 5 ตัว (รอบพรีออเดอร์ 15 นาที · ออเดอร์เว็บหมดเวลาชำระ 5 นาที · เตือนวันรับ 18:00 · ตรวจข้อมูล 07:30 · สรุปรายเดือน วันที่ 1 08:00) | DEPLOY §⑧ |
+| 7 | ตั้ง cron 6 ตัว (รอบพรีออเดอร์ 15 นาที · ออเดอร์เว็บหมดเวลาชำระ 5 นาที · ไฟล์รีวิวค้าง 04:15 · เตือนวันรับ 18:00 · ตรวจข้อมูล 07:30 · สรุปรายเดือน วันที่ 1 08:00) | DEPLOY §⑧ |
 | 8 | Atlas: แยก DB user (`meowmee-app` / `meowmee-frontoffice` / `meowmee-readonly`) + เปลี่ยนรหัสผ่าน user เดิม | DEPLOY §สำรองข้อมูล |
 | 9 | ตรวจรับตาม checklist (รวมตรวจหน่วยเงินหลังย้าย) | DEPLOY §⑨ |
 | — | หมุน `LINE_LOGIN_CHANNEL_SECRET` (เคยวางในแชต) · nginx `/uploads/` (R6) · env/โดเมนจริง (`ALLOWED_ORIGINS`, `COOKIE_DOMAIN`, LINE callback/return URL, `ADMIN_APP_URL` สำหรับลิงก์ 🔗 ใน LINE — LINE.md §9.12) | R4 · R6 · LINE.md §8.3 |

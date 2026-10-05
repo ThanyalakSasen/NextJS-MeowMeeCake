@@ -37,6 +37,10 @@ const reviewSchema = new mongoose.Schema({
             required: false,
         }
     ,
+    video: { //วิดีโอประกอบรีวิว 1 คลิป (ถ้ามี) — URL จาก /api/shop/reviews/upload (customer-backend-merge.md §8.18)
+        type: String,
+        default: null,
+    },
     is_analyzed: { //สถานะการวิเคราะห์รีวิวนี้โดยระบบ (เช่น วิเคราะห์ความรู้สึก, ตรวจจับคำหยาบคาย เป็นต้น)
         type: Boolean,
         default: false,

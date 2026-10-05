@@ -7,6 +7,7 @@
  */
 import { Types } from "mongoose";
 import dbConnect from "../lib/dbConnect";
+import * as pointsService from "./pointsService";
 import { badRequest, conflict, forbidden, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { buildMeta, type Pagination } from "../lib/queryParams";
@@ -39,6 +40,7 @@ export interface CreateReviewInput {
   rating: number;
   review_text?: string | null;
   image?: string[];
+  video?: string | null;
 }
 
 export async function createReview(input: CreateReviewInput) {
@@ -77,11 +79,28 @@ export async function createReview(input: CreateReviewInput) {
     rating,
     review_text: input.review_text ?? null,
     image: Array.isArray(input.image) ? input.image : [],
+    video: input.video ?? null,
     is_analyzed: false,
     is_visible: true,
   });
 
   await recomputeProductRating(String(orderItem.product_id));
+  // แต้มรีวิว (แบบฝั่งลูกค้า · customer-backend-merge.md §8.18): ไม่มีรูป 15 / มีรูป 20 · เฉพาะออเดอร์ที่ชำระแล้ว ·
+  // ครั้งเดียวต่อรายการในออเดอร์ (ลบรีวิวแล้วเขียนใหม่ไม่ได้แต้มซ้ำ) · แต้มไม่ใช่ขั้นตอนหลัก — พังแค่ log
+  if (order.payment_status === "paid") {
+    const withPhoto = (doc.image?.length ?? 0) > 0;
+    await pointsService.safely("review", () =>
+      pointsService.awardPoints({
+        userId: String(input.user_id),
+        source: withPhoto ? "review_photo" : "review",
+        points: withPhoto ? pointsService.POINT_RULES.REVIEW_PHOTO : pointsService.POINT_RULES.REVIEW,
+        dedupeKey: `review:item:${String(input.order_item_id)}`,
+        description: withPhoto ? "เขียนรีวิวสินค้าพร้อมรูปถ่าย" : "เขียนรีวิวสินค้า",
+        refType: "review",
+        refId: doc._id,
+      })
+    );
+  }
   return doc.toObject();
 }
 
@@ -167,7 +186,7 @@ export async function getProductReviewSummary(productId: string) {
 export async function updateReview(
   id: string,
   userId: string,
-  input: { rating?: number; review_text?: string | null; image?: string[] }
+  input: { rating?: number; review_text?: string | null; image?: string[]; video?: string | null }
 ) {
   await dbConnect();
   assertObjectId(id);
@@ -185,6 +204,7 @@ export async function updateReview(
   }
   if (input.review_text !== undefined) review.review_text = input.review_text;
   if (input.image !== undefined) review.image = Array.isArray(input.image) ? input.image : [];
+  if (input.video !== undefined) review.video = input.video;
   review.is_analyzed = false; // เนื้อหาเปลี่ยน ต้องวิเคราะห์ใหม่
 
   await review.save();

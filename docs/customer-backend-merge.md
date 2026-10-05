@@ -110,7 +110,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | 12 | ✅ ติดต่อร้าน — **ย้ายแล้ว (§8.17)** · ✏️ แก้ข้อมูล: ฝั่งลูกค้า**ไม่ได้ส่งอีเมล** แจ้งเตือนหลังร้าน | `/customer/contact` | — |
 | 13 | ยืนยันอีเมล / ลืมรหัสผ่าน / ตั้งรหัสใหม่ | `/user/verify-email` · `/auth/forgot-password` · `/auth/reset-password` | หลักมี field ใน user model แต่ไม่มี route |
 | 14 | จัดการรีวิวขั้นสูง | `/owner/reviews` (+ `bulk` · `analytics` · `dashboard` · `filter-options` · `products/[id]`) · `/owner/review-presets` | ตอบกลับ · ปักหมุด · สถานะ · แท็ก/โน้ตภายใน · อ่านแล้ว — หลักมีแค่ซ่อน + sentiment |
-| 15 | อัปโหลดรูป/วิดีโอในรีวิว | `/customer/reviews/upload` | |
+| 15 | ✅ อัปโหลดรูป/วิดีโอในรีวิว + แต้มรีวิว — **ย้ายแล้ว (§8.18)** | `/customer/reviews/upload` | |
 | 16 | หมวดรีวิว (aspect) แบบเต็ม | `/owner/aspects/reorder` | เรียงลำดับ · เปิด/ปิด · ไอคอน |
 | 17 | ✅ ตัวเลือกสินค้าแบบกลุ่ม — **ย้ายแล้ว (§8.3 ขั้น 1)** | `/owner/products/[id]/customization` | `ProductVariantGroups` (เช่นเลือกครีมชีส/มะยงชิด) · เลิก Y9 แล้ว |
 | 18 | แจ้งลูกค้าเมื่อเปิดรอบ/มีโปรใหม่ | (`customerBroadcast`) | `customer_notified_at` ของรอบ/โปรโมชัน |
@@ -186,7 +186,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ✅ 2026-10-05 (§8.7) |
 | P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ✅ 2026-10-05 (§8.8) |
 | P2 | — | พรีออเดอร์: สินค้าเดียวกันหลายตัวเลือกในใบเดียว | — | ✅ 2026-10-05 (§8.10) |
-| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · ~~แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้~~ ✅ (§8.15) · ~~คำค้นเทียบเคียง~~ ✅ (§8.16) · ~~ติดต่อร้าน~~ ✅ (§8.17) · อัปโหลดรูปรีวิว (+ แต้มรีวิว) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
+| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · ~~แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้~~ ✅ (§8.15) · ~~คำค้นเทียบเคียง~~ ✅ (§8.16) · ~~ติดต่อร้าน~~ ✅ (§8.17) · ~~อัปโหลดรูปรีวิว (+ แต้มรีวิว)~~ ✅ (§8.18) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
 | P4 | 7 | หลังร้าน: API ที่หน้าเว็บลูกค้าต้องใช้แต่ข้อมูลมาจากร้าน (ตั้งค่าร้าน · โซนค่าส่ง · ตลาดนัด · ชุดสินค้า · คำค้น · รีวิวขั้นสูง) เข้า `/api/admin/*` | ตัดสินใจ "หลังร้านตัวไหน" | ⏸ รอทีม |
 | P5 | 8 | ปิด backend พอร์ต 4000 | หน้าเว็บลูกค้าย้าย path ครบ + ตัดสินใจหลังร้าน | ⏸ |
 
@@ -353,7 +353,7 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
 ออเดอร์/พรีออเดอร์บันทึก `points_redeemed` · `points_discount` · `user_coupon_id` · `coupon_discount` (รวมอยู่ใน `discount_amount`)
 
 **ต่างจากฝั่งลูกค้า:** ส่วนลดคูปองส่งฟรีนับใน `discount_amount` (แบบโปรของหลัก) ไม่ใช่ลด `delivery_fee` — ยอดรวมเท่ากัน ·
-แต้มรีวิว (15/20) ยังไม่ทำ (ไปพร้อมกลุ่มรีวิว)
+แต้มรีวิว (15/20) ทำแล้วใน §8.18
 
 **ไฟล์:** `src/services/pointsService.ts` · `src/services/couponService.ts` · model `PointTransactions` / `UserCoupons` · `Promotions.points_cost` ·
 `orderService` / `preorderService` (checkout + sync ตอน completed/cancelled/refunded) · `promotionService.validateForOrder` (กันโค้ดของโปรแลกแต้ม) ·
@@ -446,3 +446,17 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
 - **API:** `POST /api/shop/contact` `{ topic, message }` · `GET /api/catalog/contact-topics` → `{ topics, max_length }`
 - `NotificationModule` + enum ของ `Notifications` เพิ่ม `customer` (ป้าย "ลูกค้า" · `?module=customer` หรือ `?module=ลูกค้า`) — **หน้าแจ้งเตือนของ FrontEnd ควรเพิ่มตัวกรองนี้**
 - **ไฟล์:** `src/lib/contactTopics.ts` · `src/services/contactService.ts` · route 2 เส้น · `notificationService` / `notificationModel` · เทส `contact.test.ts` 2 เคส
+
+### 8.18 ขั้น 6 — รูป/วิดีโอประกอบรีวิว + แต้มรีวิว (2026-10-05)
+
+| เรื่อง | ทำอะไร |
+|---|---|
+| อัปโหลด | `POST /api/shop/reviews/upload` multipart `{ file, type: image | video }` → `{ url, type }` · ใช้ `src/lib/upload.ts` ของหลัก (localDisk / S3 ตาม `UPLOAD_DRIVER`) · **ตรวจลายเซ็นไฟล์จริง** (ฝั่งลูกค้าดูแค่นามสกุล) · รูป ≤ 5 MB (jpg/png/webp/avif) · วิดีโอ ≤ 30 MB (mp4/mov/webm · ใหม่ใน upload.ts) · ชื่อไฟล์ขึ้นต้นด้วย user id · 30 ไฟล์/10 นาที/บัญชี |
+| ลบไฟล์ค้าง | `DELETE /api/shop/reviews/upload` `{ urls }` → `{ deleted }` — เฉพาะไฟล์ของตัวเองที่ยังไม่มีรีวิวอ้างถึง (รวมรีวิวที่ถูก soft delete) · ไม่ผ่านข้ามเงียบ ๆ |
+| เก็บกวาด | `npm run cleanup:review-media` — ไฟล์ใน `public/uploads/reviews` ที่ไม่มีรีวิวอ้างถึงและเก่ากว่า 24 ชม. (localDisk · S3 ใช้ lifecycle rule ของ bucket) · cron วันละครั้ง (ฝั่งลูกค้าตั้งเวลาใน instrumentation) |
+| รีวิว | `Reviews.video` (1 คลิป) · `POST /api/shop/reviews` / `PATCH /[id]` รับ `video` · รูปไม่เกิน 5 รูป/รีวิว |
+| แต้มรีวิว | ไม่มีรูป **15** · มีรูป **20** — เฉพาะออเดอร์ completed **และชำระแล้ว** ของผู้รีวิว · ครั้งเดียวต่อรายการในออเดอร์ (dedupe `review:item:<id>` — ลบแล้วเขียนใหม่ไม่ได้ซ้ำ · ตรงกับ key ของฝั่งลูกค้า) |
+
+**ยังไม่ครอบคลุม:** รีวิวสินค้าพรีออเดอร์ (`preorder_order_item_id`) — หลักยังรีวิวได้เฉพาะรายการในออเดอร์ปกติ (ไปพร้อมกลุ่มรีวิวขั้นสูง §7.1 ข้อ 14)
+**หน้าเว็บลูกค้าเปลี่ยน path:** `/api/customer/reviews/upload` → `/api/shop/reviews/upload` · url รูปเป็น `/uploads/reviews/<userId>-…` (ฝั่งลูกค้า `review-image-<userId>-…`)
+**ไฟล์:** `src/lib/upload.ts` (วิดีโอ + prefix) · `src/services/reviewMediaService.ts` · `reviewService` (video + แต้ม) · `scripts/cleanup-review-media.ts` · เทส `reviewMediaPoints.test.ts` 5 เคส

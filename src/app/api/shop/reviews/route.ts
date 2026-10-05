@@ -1,7 +1,8 @@
 /**
  * /api/shop/reviews
  *   GET  — รีวิวของตัวเอง (?product_id= ?page= ?limit=)
- *   POST — เขียนรีวิว  body: { order_item_id, rating, review_text?, image? }
+ *   POST — เขียนรีวิว  body: { order_item_id, rating, review_text?, image? (≤ 5), video? }
+ *          รูป/วิดีโออัปโหลดก่อนที่ POST /api/shop/reviews/upload แล้วส่ง url มา · ออเดอร์ชำระแล้วได้แต้ม 15 (มีรูป 20)
  *          รีวิวได้เฉพาะสินค้าที่ออเดอร์ completed แล้ว และ 1 รีวิว/order_item
  */
 import { ok, created } from "@/lib/apiResponse";
@@ -30,6 +31,7 @@ export const POST = withAuth(async (session, req) => {
       rating: data.rating,
       review_text: data.review_text ?? null,
       image: data.image ?? [],
+      video: data.video ?? null,
     })
   );
 });

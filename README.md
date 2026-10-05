@@ -53,6 +53,7 @@ npm run check:data-integrity   # ตรวจข้อมูลสินค้�
 npm run backfill:payment-due   # เติมกำหนดชำระให้พรีออเดอร์เก่า — dry-run ก่อน, --apply เขียนจริง
 npm run cron:preorder-rounds   # เปิด/ปิดรอบตามเวลา + ยกเลิกคนไม่จ่าย (cron ทุก 15 นาที)
 npm run cron:order-expiry      # ยกเลิกออเดอร์เว็บที่เลยกำหนดชำระ 30 นาที + คืนสต็อก (cron ทุก 5 นาที)
+npm run cleanup:review-media   # ลบไฟล์รูป/วิดีโอรีวิวที่ค้างเกิน 24 ชม. (cron วันละครั้ง)
 npm run remind:preorders       # เตือนลูกค้าก่อนวันรับพรีออเดอร์ทาง LINE · --dry-run = ไม่ส่ง
 npm run summary:monthly        # สรุปยอดเดือนที่แล้วถึงเจ้าของร้าน · --dry-run = ไม่ส่ง
 npm run reset-owner-password   # ตั้งรหัสผ่าน owner ใหม่
@@ -114,7 +115,7 @@ npm run summary:monthly -- --dry-run               # ทดสอบข้อค
 npm run remind:preorders -- --dry-run
 ```
 
-แล้วตั้ง cron 5 ตัว ([`docs/DEPLOY.md`](docs/DEPLOY.md) ⑧) และตรวจรับตาม ⑨ · ตั้งเลขพร้อมเพย์ (`StoreProfile.promptpay_id` หรือ env `PROMPTPAY_ID`) ไม่งั้นหน้าชำระเงินไม่มี QR
+แล้วตั้ง cron 6 ตัว ([`docs/DEPLOY.md`](docs/DEPLOY.md) ⑧) และตรวจรับตาม ⑨ · ตั้งเลขพร้อมเพย์ (`StoreProfile.promptpay_id` หรือ env `PROMPTPAY_ID`) ไม่งั้นหน้าชำระเงินไม่มี QR
 
 ### ⚠️ ห้ามรัน / ข้อควรระวัง
 

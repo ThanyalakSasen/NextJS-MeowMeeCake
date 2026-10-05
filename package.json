@@ -26,6 +26,7 @@
     "remind:preorders": "tsx scripts/send-preorder-reminders.ts",
     "cron:preorder-rounds": "tsx scripts/run-preorder-rounds.ts",
     "cron:order-expiry": "tsx scripts/run-order-expiry.ts",
+    "cleanup:review-media": "tsx scripts/cleanup-review-media.ts",
     "backfill:payment-due": "tsx scripts/backfill-payment-due.ts",
     "check:data-integrity": "tsx scripts/check-data-integrity.ts",
     "summary:monthly": "tsx scripts/send-monthly-summary.ts"

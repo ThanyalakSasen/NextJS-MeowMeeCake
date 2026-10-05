@@ -19,6 +19,7 @@ export const PATCH = withAuth(async (session, req, ctx: Ctx) => {
       rating: data.rating,
       review_text: data.review_text,
       image: data.image,
+      video: data.video,
     })
   );
 });
