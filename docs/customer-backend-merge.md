@@ -159,6 +159,9 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | ส่งฟรีตามยอด (เว็บ) | **ไม่มี** (แบบฝั่งลูกค้า) — ส่งฟรีจากโปรโมชันเท่านั้น | §8.7 |
 | จุดรับสินค้า (takeaway เว็บ) | **ไม่บังคับ** — ส่งมาแล้วตรวจ · ไม่ส่ง = รับที่ร้านแบบเดิม | §8.7 |
 | แนบสลิปหลังหมดเวลา | **ย้ายมา** — เปิดออเดอร์กลับ (ตัดสต็อกใหม่ · ของไม่พอ = เปิดไม่ได้) | §8.8 |
+| สมัครสมาชิก | **แบบฝั่งลูกค้า** — ยืนยันอีเมลก่อน ไม่ล็อกอินให้ (`/api/auth/register` path เดิม) | §8.9 |
+| บังคับยืนยันอีเมล | **เฉพาะลูกค้า** — เจ้าของร้าน/พนักงานล็อกอินได้ตามเดิม | §8.9 |
+| LINE login (next-auth) | **ย้ายมา** — หา/สร้างบัญชีจาก `line_user_id` | §8.9 |
 | ไม่จ่ายเงิน | **พรีออเดอร์ใช้ของหลัก** (กำหนดชำระ + ยกเลิกอัตโนมัติ) · **ออเดอร์ปกติจากเว็บ** เพิ่ม orderExpiry + นโยบายยกเลิกของฝั่งลูกค้า (ไม่ใช้กับ `POS-`) | |
 | ขั้น 0 (ด่วน) | **แก้โค้ดฝั่งลูกค้าเลย** (`Downloads/backend`) ระหว่างที่ยังรวมไม่เสร็จ | ใช้ `is_preorder` แทน `product_type` · เลิกเขียน `product_type: "ready"` + สต็อก 0 ตอนปิดรอบ · ผู้ใช้ deploy เอง (ต้องยืนยันว่าโค้ดชุดนี้ = ตัวที่รันจริง) |
 | ขอบเขตฟีเจอร์ลูกค้า | **ตามที่หน้าเว็บลูกค้าใช้จริง** — `Downloads/frontend/frontend` (§8.4) | ใช้เกือบครบ §7.1 → ขั้น 6 = ย้ายเกือบทั้งหมด |
@@ -178,7 +181,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | — | 1 | กลุ่มตัวเลือก + ออปชัน (ตัวเลือกไม่มีสต็อก) · เลิก Y9 | — | ✅ 2026-10-05 (§8.3) |
 | **P0** | 0 | แก้ `Downloads/backend`: `product_type` → `is_preorder` (ตะกร้า · checkout · POS) · ตอนปิดรอบเลิกเขียน `product_type`/สต็อก 0 | ผู้ใช้ deploy เอง | 🟡 แก้แล้ว 2026-10-05 รอ deploy (§8.5) |
 | P1 | 2 | สคริปต์ย้าย `lineId` → `line_user_id` (dry-run · ผู้ใช้รัน `--apply`) | ผู้ใช้รัน `--apply` | ✅ สคริปต์พร้อม 2026-10-05 (§8.6) |
-| P1 | 3 | next-auth ใน backend หลัก · `/api/shop/*` รับ 2 แบบ · สมัคร/ยืนยันอีเมล/ลืมรหัสผ่าน/ตั้งรหัสใหม่ (nodemailer) | ตั้งค่า SMTP + `NEXTAUTH_SECRET` ใน env | ⏳ |
+| P1 | 3 | next-auth ใน backend หลัก · `/api/shop/*` รับ 2 แบบ · สมัคร/ยืนยันอีเมล/ลืมรหัสผ่าน/ตั้งรหัสใหม่ (nodemailer) | ตั้งค่า SMTP + `NEXTAUTH_SECRET` ใน env ตอน deploy | ✅ 2026-10-05 (§8.9) |
 | P1 | — | dashboard: `ORD-<timestamp>` นับเป็น "เว็บ" | — | ✅ เป็นอยู่แล้ว ไม่ต้องแก้ (§8.6) |
 | P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ✅ 2026-10-05 (§8.7) |
 | P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ✅ 2026-10-05 (§8.8) |
@@ -289,3 +292,33 @@ Next 16 + next-auth + antd · `BACKEND_URL` (ค่าเริ่มต้น `
 `promptpayService` · `paymentLinkService` · `/api/cron/order-expiry` + `scripts/run-order-expiry.ts` · dependency `promptpay-qr` + `qrcode` · เทส `webOrderPayment.test.ts` 6 เคส
 
 **deploy:** cron ตัวที่ 5 (`*/5` — [`DEPLOY.md`](DEPLOY.md) ⑧) · ตั้งเลขพร้อมเพย์ (StoreProfile ผ่านหลังร้านฝั่งลูกค้า หรือ env `PROMPTPAY_ID`)
+
+### 8.9 ขั้น 3 — next-auth ใน backend หลัก + ยืนยันอีเมล + ลืมรหัสผ่าน (2026-10-05)
+
+ผู้ใช้เลือก: **next-auth ย้ายมาไว้ในหลัก** (เก็บทั้งสองระบบ) · **สมัครแบบฝั่งลูกค้า** (ยืนยันอีเมลก่อน ไม่ล็อกอินให้) ·
+**บังคับยืนยันอีเมลเฉพาะลูกค้า** (เจ้าของร้าน/พนักงานไม่กระทบ) · **ย้าย LINE login** (เก็บที่ `line_user_id`)
+
+| เรื่อง | ทำอะไร |
+|---|---|
+| ล็อกอิน 2 ระบบ | cookie `session` ของหลัก (`/api/auth/login`) เหมือนเดิม + next-auth `/api/auth/[...nextauth]` (credentials · Google · LINE — provider ที่ไม่ได้ตั้ง id/secret ไม่เปิด) · middleware ไม่มี cookie ของหลัก → อ่าน token next-auth (Edge `getToken`) แปลงเป็น SessionUser เดียวกัน (`source: "nextauth"` · role `admin` เดิม = owner) |
+| ตัด session next-auth | `withAuth` / `withPermission` ตรวจ DB ทุก request (แบบฝั่งลูกค้า): บัญชีถูกลบ/ปิด หรือล็อกอินก่อน `password_changed_at` = 401 · token เก่าจากฝั่งลูกค้าที่ไม่มี `role_id` → เติมจาก DB · เปลี่ยน/รีเซ็ตรหัสผ่าน (ทุกทาง) ตั้ง `password_changed_at` |
+| สมัคร `POST /api/auth/register` | รับ body ทั้งสองแบบ (+ `user_birthday`/`user_birthdate` · `user_allergies`) · สร้างบัญชียังไม่ยืนยัน + ส่งลิงก์ (24 ชม.) · **ไม่เซ็ต cookie แล้ว** · ส่งอีเมลไม่ได้ = 502 + ยกเลิกการสมัคร (สมัครใหม่ใช้เอกสารเดิม) |
+| ยืนยันอีเมล | `GET/POST /api/auth/verify-email` (ฝั่งลูกค้าเดิม `/api/user/verify-email`) · `POST /api/auth/resend-verification` (ตอบเหมือนกันทุกกรณี — สำหรับลูกค้าเก่าที่สมัครก่อนบังคับยืนยันด้วย) |
+| ล็อกอินลูกค้ายังไม่ยืนยัน | 403 `details.reason = "EMAIL_NOT_VERIFIED"` (ทั้ง `/api/auth/login` และ next-auth) — เช็คหลังรหัสถูกเท่านั้น · บัญชีที่มีรหัสผ่านใช้ล็อกอินได้แม้ผูก Google/LINE |
+| ลืมรหัสผ่าน | `POST /api/auth/forgot-password` (1 ชม. · ไม่บอกว่ามีอีเมลไหม · บัญชี Google/LINE ไม่มีรหัส = 400) · `GET /api/auth/reset-password?token=` (เช็คลิงก์) · `POST /api/auth/reset-password` `{ token, newPassword }` (ใช้ครั้งเดียว · ห้ามรหัสเดิม · ปลดล็อก) |
+| Google (next-auth) | หาจากอีเมล → ผูก `googleId` ให้บัญชีเดิม (ไม่เปลี่ยน auth_provider) · ไม่มี = สร้างลูกค้า (ยืนยันแล้ว) · บัญชีสมัครไม่สำเร็จ → ใช้เอกสารเดิม ล้างรหัสผ่าน |
+| LINE (next-auth) | หาจาก `line_user_id` เท่านั้น · อีเมลจาก LINE ซ้ำบัญชีอื่น = ให้ล็อกอินวิธีเดิมแล้วกดเชื่อมต่อ LINE · ไม่มีอีเมล → `line-…@line-user.invalid` แล้วตั้งอีเมลจริงที่ `GET/POST /api/shop/me/email` · `auth_provider: "line"` |
+| อีเมล | `src/lib/mailer.ts` (nodemailer 10) · ผู้ส่ง = ชื่อร้าน (StoreProfile) · Reply-To = อีเมลติดต่อร้าน · ลิงก์ไป `STOREFRONT_URL` (ไม่ตั้ง = `NEXTAUTH_URL`) `/customer/verify-email` · `/customer/reset-password` · token เก็บ SHA-256 (ยังรับ token ดิบที่ฝั่งลูกค้าออกไว้) |
+
+**ไฟล์:** `src/lib/nextAuth.ts` · `src/app/api/auth/[...nextauth]` · `src/middleware.ts` · `src/lib/authGuard.ts` (`assertSessionStillValid`) · `src/lib/mailer.ts` ·
+`src/services/accountService.ts` · `src/services/oauthService.ts` · `userService.verifyCredentials` (กติกาลูกค้ายืนยันอีเมล) · `userModel` (+`password_changed_at` · auth_provider `line`) ·
+`authService.register` เอาออก · dependency `next-auth@4` + `nodemailer@10` (peer optional ของ next-auth = ^7 — ใช้แค่ Email provider ซึ่งไม่ได้เปิด) ·
+เทส `accountFlows.test.ts` 8 เคส · smoke test บน `next start` จริง: cookie next-auth ผ่าน `/api/shop` (200) · cookie เสีย / ก่อนเปลี่ยนรหัส = 401 · ลูกค้าเข้า `/api/admin` = 403
+
+**ต้องตั้งตอน deploy:** `NEXTAUTH_SECRET` (ใช้ค่าเดียวกับฝั่งลูกค้าถ้าอยากให้ลูกค้าที่ล็อกอินอยู่ไม่หลุดตอนสลับ) · `NEXTAUTH_URL` = URL หน้าเว็บลูกค้า (เบราว์เซอร์เรียก /api ผ่าน rewrites ของหน้าเว็บ) ·
+`STOREFRONT_URL` · `EMAIL_USER` / `EMAIL_PASS` (+ `EMAIL_SERVICE` หรือ `EMAIL_HOST`/`EMAIL_PORT`) · `GOOGLE_CLIENT_SECRET` ·
+callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/callback/google` · `/api/auth/callback/line`
+
+**frontend:**
+- หน้าเว็บลูกค้า: `/api/user/verify-email` → `/api/auth/verify-email` · `/api/customer/line/email` → `/api/shop/me/email` · ที่เหลือ path เดิม
+- storefront ของทีม FrontEnd (`/api/auth/register`): สมัครแล้ว**ไม่ได้ล็อกอินอัตโนมัติ** — แสดง "ตรวจอีเมล" · ล็อกอินแล้วได้ 403 `EMAIL_NOT_VERIFIED` → ปุ่มส่งอีเมลยืนยันใหม่

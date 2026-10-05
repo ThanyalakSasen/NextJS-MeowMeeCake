@@ -23,6 +23,12 @@ Next.js โหลด `.env.local` ให้อัตโนมัติตอน 
 | `NODE_ENV` | อัตโนมัติ | `development` | `src/lib/session.ts` | Next.js ตั้งให้เอง (`production` ตอน `next build`/`start`) · ใช้เปิด flag `Secure` ของ cookie เมื่อเป็น production |
 | `GOOGLE_CLIENT_ID` | เฉพาะ Google login | — | `src/services/authService.ts` | Client ID จาก Google Cloud Console · ใช้เป็น `audience` ตอน verify Google ID token ที่ `POST /api/auth/google` · ถ้าไม่ตั้ง endpoint นั้นจะตอบ error |
 | `DELIVERY_FREE_MIN` | ไม่ | `1500` | `src/services/deliveryService.ts` | ยอดสั่งซื้อ (บาท) ที่ถึงแล้วส่งฟรี (ใช้เสมอ ไม่ว่าโซนจะมาจาก DB หรือ fallback) · **เฉพาะหลังร้าน/POS** — ออเดอร์จากหน้าเว็บคิดจาก ShippingZones ไม่มีส่งฟรีตามยอด (customer-backend-merge.md §8.7) |
+| `NEXTAUTH_SECRET` | สำหรับหน้าเว็บลูกค้า | — | `src/lib/nextAuth.ts` · `src/middleware.ts` | กุญแจเซ็น session ของ next-auth · ไม่ตั้ง = middleware ไม่อ่าน session next-auth (ล็อกอินผ่านหน้าเว็บลูกค้าไม่ได้) · ใช้ค่าเดียวกับ backend ฝั่งลูกค้าถ้าไม่อยากให้ลูกค้าหลุดตอนสลับ (customer-backend-merge.md §8.9) |
+| `NEXTAUTH_URL` | สำหรับหน้าเว็บลูกค้า | — | next-auth | URL ที่เบราว์เซอร์เห็น (หน้าเว็บลูกค้า — เรียก /api ผ่าน rewrites) · callback OAuth = `{NEXTAUTH_URL}/api/auth/callback/{google,line}` |
+| `GOOGLE_CLIENT_SECRET` | ถ้าเปิด Google ใน next-auth | — | `src/lib/nextAuth.ts` | คู่กับ `GOOGLE_CLIENT_ID` · ไม่ตั้ง = next-auth ไม่มีปุ่ม Google (`/api/auth/google` แบบ ID-token ของหลักยังใช้ได้) |
+| `STOREFRONT_URL` | ไม่ | `NEXTAUTH_URL` | `src/lib/mailer.ts` | URL หน้าเว็บลูกค้าในลิงก์อีเมล (`/customer/verify-email` · `/customer/reset-password`) |
+| `EMAIL_USER`, `EMAIL_PASS` | สมัคร/ลืมรหัสผ่าน | — | `src/lib/mailer.ts` | บัญชีส่งอีเมล (Gmail ใช้ App Password) · ไม่ตั้ง = สมัครสมาชิก/ลืมรหัสผ่านตอบ 502 |
+| `EMAIL_SERVICE` หรือ `EMAIL_HOST` + `EMAIL_PORT` | ไม่ | `gmail` | `src/lib/mailer.ts` | ผู้ให้บริการของ nodemailer หรือ SMTP เอง (port 465 = TLS) |
 | `PROMPTPAY_ID` | ไม่ | — | `src/services/promptpayService.ts` | เลขพร้อมเพย์สำหรับ QR หน้าชำระเงินของลูกค้า — **ใช้เมื่อ `StoreProfile.promptpay_id` ยังไม่ได้ตั้ง** · ไม่ตั้งทั้งคู่ = หน้าชำระเงินไม่มี QR (`qr_error`) |
 | `DELIVERY_FEE_METRO` | ไม่ | `40` | `src/services/deliveryService.ts` | **fallback เท่านั้น** (BACKLOG §3.15) — ใช้ต่อเมื่อยังไม่มีโซนไหนตั้งไว้ใน `/api/admin/delivery-zones` เลย ปกติแอดมินแก้ค่าส่งผ่านหน้านั้นแทน ไม่ต้องแก้ env+redeploy แล้ว · ค่าส่ง กรุงเทพฯ + ปริมณฑล (นนทบุรี/ปทุมธานี/สมุทรปราการ/สมุทรสาคร/นครปฐม) |
 | `DELIVERY_FEE_UPCOUNTRY` | ไม่ | `80` | `src/services/deliveryService.ts` | **fallback เท่านั้น** เช่นเดียวกับข้างบน — ค่าส่งต่างจังหวัด (จังหวัดอื่นทั้งหมด) |
@@ -61,10 +67,8 @@ GOOGLE_CLIENT_ID=556882585770-xxxxxxxx.apps.googleusercontent.com
 
 | ตัวแปร | ไว้ทำอะไร (ในอนาคต) |
 |---|---|
-| `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` | ~~สำหรับ OAuth redirect/code flow~~ — **ไม่ต้องตั้ง** · `/api/auth/google` ใช้ **ID-token flow** (Google Identity Services) ต้องการแค่ `GOOGLE_CLIENT_ID` · ลบออกจาก `.env.example` แล้ว (2026-09-11, §3.9) — ถ้าจะทำ code flow ในอนาคตค่อยเพิ่มกลับ |
+| `GOOGLE_CALLBACK_URL` | ไม่ใช้ — next-auth กำหนด callback เอง (`{NEXTAUTH_URL}/api/auth/callback/google`) |
 | `SESSION_SECRET` | เผื่อระบบ session แบบเก่า (express-session ฯลฯ) · โค้ดปัจจุบันใช้ JWT ล้วน — **ควรตั้งเป็นค่าสุ่ม** เผื่อใช้ทีหลัง |
-| `NEXTAUTH_SECRET`, `NEXTAUTH_URL` | เผื่อย้ายไปใช้ NextAuth.js · **ควรตั้งเป็นค่าสุ่ม** |
-| `EMAIL_SERVICE`, `EMAIL_USER`, `EMAIL_PASS` | ส่งอีเมลยืนยัน / reset password (ยังไม่ทำ) |
 | `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_TARGET_ID` | แจ้งเตือนผ่าน LINE (เจ้าของร้าน + ลูกค้า) — ดู [`LINE.md`](LINE.md) |
 | `LINE_LOGIN_CHANNEL_ID`, `LINE_LOGIN_CHANNEL_SECRET`, `LINE_LOGIN_CALLBACK_URL`, `LINE_LINK_RETURN_URL` | ลูกค้าผูกบัญชี LINE (LINE Login) — ดู [`LINE.md`](LINE.md) |
 | `ADMIN_APP_URL` | ไม่บังคับ — URL เว็บหลังร้าน (เช่น `https://app.example.com`) · ตั้งแล้วข้อความ LINE ถึงเจ้าของร้านแนบลิงก์ `🔗` ไปหน้าออเดอร์/สินค้า/วัตถุดิบที่เกี่ยวข้อง · ไม่ตั้ง = ไม่แนบ (docs/LINE.md §9.12) |

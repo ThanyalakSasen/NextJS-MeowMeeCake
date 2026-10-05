@@ -65,6 +65,9 @@ sudo -iu meowmee git clone https://github.com/ThanyalakSasen/NextJS-MeowMeeCake.
 - [ ] **สำรอง DB:** Atlas → Backup/Snapshot หรือ `mongodump --uri "<MONGODB_URI>" --out backup-$(date +%F)`
 - [ ] **LINE Developers Console:** LINE Login channel `2011804283` → แท็บ **LINE Login** → Callback URL เพิ่ม
       `https://api.example.com/api/shop/me/line/callback` (เก็บ localhost ไว้ใช้ dev ได้) — [`LINE.md`](LINE.md) §4, §6.1
+      + `{NEXTAUTH_URL}/api/auth/callback/line` (ล็อกอินด้วย LINE ของหน้าเว็บลูกค้า — customer-backend-merge.md §8.9)
+- [ ] **Google Cloud Console:** OAuth client → Authorized redirect URI `{NEXTAUTH_URL}/api/auth/callback/google`
+- [ ] **อีเมล (สมัคร/ลืมรหัสผ่าน):** `EMAIL_USER` + `EMAIL_PASS` (Gmail = App Password) · `STOREFRONT_URL` — ไม่ตั้ง = สมัครสมาชิกไม่ได้ (502)
 - [ ] **สร้าง secret ใหม่** (คนละค่ากับ dev ทุกตัว): `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
       → `JWT_SECRET`, `SESSION_SECRET`, `NEXTAUTH_SECRET`, `CRON_SECRET`
 - [ ] แจ้งทีม frontend: `NEXT_PUBLIC_API_URL` (หรือชื่อที่ใช้) = `https://api.example.com` + งานฝั่ง frontend ใน [`BACKLOG4.md`](BACKLOG4.md) §4
@@ -106,8 +109,11 @@ JWT_SECRET=<สุ่มใหม่>
 JWT_EXPIRE=7d
 JWT_COOKIE_EXPIRE=7
 SESSION_SECRET=<สุ่มใหม่>
-NEXTAUTH_SECRET=<สุ่มใหม่>
-NEXTAUTH_URL=https://api.example.com
+NEXTAUTH_SECRET=<สุ่มใหม่ — หรือค่าเดียวกับ backend ฝั่งลูกค้า ถ้าไม่อยากให้ลูกค้าที่ล็อกอินอยู่หลุดตอนสลับ (customer-backend-merge.md §8.9)>
+NEXTAUTH_URL=https://<โดเมนหน้าเว็บลูกค้า>
+STOREFRONT_URL=https://<โดเมนหน้าเว็บลูกค้า>
+EMAIL_USER=<บัญชีส่งอีเมล>
+EMAIL_PASS=<App Password>
 
 # ── frontend / cookie (docs/security-hardening.md §3) ──
 ALLOWED_ORIGINS=https://app.example.com

@@ -18,6 +18,10 @@ export interface SessionUser {
   role_id: string;
   role_type: RoleType;
   email: string;
+  /** มาจาก cookie ไหน — jwt = cookie `session` ของหลัก · nextauth = next-auth ของหน้าเว็บลูกค้า (customer-backend-merge.md §8.9) */
+  source?: "jwt" | "nextauth";
+  /** next-auth: เวลาที่ล็อกอินจริง (ms) — authGuard เทียบกับ password_changed_at */
+  auth_time?: number;
 }
 
 export const SESSION_COOKIE = "session";

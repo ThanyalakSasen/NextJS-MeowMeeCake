@@ -15,6 +15,8 @@ import { forbidden, unauthorized } from "./httpError";
 import { route } from "./apiResponse";
 import { getSession, type RoleType, type SessionUser } from "./session";
 import { getEffectivePermissions } from "../services/permissionService";
+import dbConnect from "./dbConnect";
+import userModel from "../models/userModel";
 import type { MenuKey } from "../services/permissionService";
 
 export type PermAction = "view" | "create" | "update" | "delete" | "approve";
@@ -93,9 +95,28 @@ type GuardedHandler<A extends unknown[]> = (
   ...rest: A
 ) => Promise<Response> | Response;
 
+/**
+ * session จาก next-auth (หน้าเว็บลูกค้า) อยู่ได้ 7 วัน — ตรวจกับ DB ทุก request (แบบฝั่งลูกค้า) ให้การปิด/ลบบัญชี
+ * และการเปลี่ยนรหัสผ่านมีผลทันที · token ที่ออกโดย backend ฝั่งลูกค้าเดิมไม่มี role_id → เติมจาก DB
+ * (cookie `session` ของหลักไม่ผ่านตรงนี้ — พฤติกรรมเดิม)
+ */
+export async function assertSessionStillValid(session: SessionUser): Promise<SessionUser> {
+  if (session.source !== "nextauth") return session;
+  await dbConnect();
+  const user = await userModel
+    .findById(session.user_id)
+    .select("is_active deleted_at password_changed_at role_id")
+    .lean<{ is_active?: boolean; deleted_at?: Date | null; password_changed_at?: Date | null; role_id?: unknown } | null>();
+  if (!user || user.deleted_at || user.is_active === false) throw unauthorized("เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
+  if (user.password_changed_at && (session.auth_time ?? 0) < new Date(user.password_changed_at).getTime()) {
+    throw unauthorized("เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่");
+  }
+  return session.role_id ? session : { ...session, role_id: String(user.role_id ?? "") };
+}
+
 export function withAuth<A extends unknown[]>(handler: GuardedHandler<A>) {
   return route(async (req: NextRequest, ...rest: A) => {
-    const session = requireAuth(req);
+    const session = await assertSessionStillValid(requireAuth(req));
     return handler(session, req, ...rest);
   });
 }
@@ -106,7 +127,7 @@ export function withPermission<A extends unknown[]>(
   handler: GuardedHandler<A>
 ) {
   return route(async (req: NextRequest, ...rest: A) => {
-    const session = requireAuth(req);
+    const session = await assertSessionStillValid(requireAuth(req));
     await requirePermission(session, menu, action);
     return handler(session, req, ...rest);
   });
