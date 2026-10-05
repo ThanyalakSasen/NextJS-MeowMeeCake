@@ -4,7 +4,7 @@
  * ผู้ใช้เลือก "เก็บทั้งสองระบบ": หลังร้าน/storefront เดิมใช้ JWT cookie `session` ของหลัก (/api/auth/login) ·
  * หน้าเว็บลูกค้าใช้ next-auth (/api/auth/[...nextauth]) — middleware รับได้ทั้งสองแบบ แล้วแปลงเป็น SessionUser เดียวกัน
  *
- * providers: อีเมล+รหัสผ่าน (userService.verifyCredentials — กติกาเดียวกับ /api/auth/login: ล็อกบัญชี 5 ครั้ง ·
+ * providers: อีเมล+รหัสผ่าน (userService.verifyCredentials — กติกาเดียวกับ /api/auth/login: 10 ครั้ง/นาที/IP (โควตาเดียวกัน) · ล็อกบัญชี 5 ครั้ง ·
  * ลูกค้าต้องยืนยันอีเมล) · Google · LINE (line_user_id) — provider ที่ไม่ได้ตั้ง client id/secret จะไม่ถูกเปิด
  * token: id · role (role_type) · role_id · email · auth_time (เวลาล็อกอินจริง — เทียบ password_changed_at ใน authGuard)
  *
@@ -17,6 +17,8 @@ import GoogleProvider from "next-auth/providers/google";
 import LineProvider from "next-auth/providers/line";
 import { isHttpError } from "./httpError";
 import { log } from "./logger";
+import { rateLimit } from "./rateLimit";
+import { clientIpFromHeaders } from "./request";
 import * as userService from "../services/userService";
 import { OAuthAccountError, signInWithGoogle, signInWithLine, type OAuthUser } from "../services/oauthService";
 
@@ -35,9 +37,16 @@ function providers(): NextAuthOptions["providers"] {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         if (!credentials?.email || !credentials?.password) throw new Error("กรุณากรอกอีเมลและรหัสผ่าน");
         try {
+          // จำกัดต่อ IP โควตาเดียวกับ POST /api/auth/login (กันสุ่มรหัสหลายบัญชีจาก IP เดียว — docs/BACKLOG5.md Y4)
+          const headers = (req?.headers ?? {}) as Record<string, string | string[] | undefined>;
+          const header = (name: string) => {
+            const v = headers[name];
+            return Array.isArray(v) ? v[0] : v;
+          };
+          rateLimit(clientIpFromHeaders(header), "auth:login", { limit: 10, windowMs: 60_000 });
           const user: any = await userService.verifyCredentials(credentials.email, credentials.password);
           const roleType = user.role_id?.role_type === "admin" ? "owner" : user.role_id?.role_type;
           return {

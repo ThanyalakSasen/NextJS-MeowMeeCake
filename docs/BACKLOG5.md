@@ -13,7 +13,7 @@
 | ระดับ | จำนวน | สรุป |
 |---|---|---|
 | 🔴 ต้องแก้ก่อนใช้งานจริง | 1 (✅ R1 แก้แล้ว 2026-10-06) | ~~ต้นทุนสินค้า + สูตรหลุดทาง API สาธารณะ~~ |
-| 🟡 ควรแก้ | 5 (✅ Y1 · Y5 แก้แล้ว 2026-10-06) | ~~session แบบ cookie หลักไม่ตรวจบัญชีกับ DB~~ · `.env.example` ขาดตัวแปรใหม่ · `npm audit` · ล็อกอินผ่าน next-auth ไม่มี rate limit ต่อ IP · ~~sortBy สาธารณะไม่จำกัด field~~ |
+| 🟡 ควรแก้ | 5 (✅ Y1 · Y2 · Y4 · Y5 แก้แล้ว 2026-10-06 · เหลือ Y3 ตอน merge #56) | ~~session แบบ cookie หลักไม่ตรวจบัญชีกับ DB~~ · ~~`.env.example` ขาดตัวแปรใหม่~~ · `npm audit` · ~~ล็อกอินผ่าน next-auth ไม่มี rate limit ต่อ IP~~ · ~~sortBy สาธารณะไม่จำกัด field~~ |
 | 🟢 เล็กน้อย / เก็บกวาด | 6 | คอมเมนต์ยุคสตางค์ค้าง 54 บรรทัด · หน้าแนะนำสินค้าโหลดทั้งร้านทุกครั้ง · ตัวกรองรีวิวที่ยังดู `is_visible` อย่างเดียว ฯลฯ |
 | ⏸ รอ FrontEnd / ทีม | 4 | ปิด `product_stock_quantity` ใน PATCH · R5 แดชบอร์ดรีวิว · P4/P5 หลังร้าน + ปิดพอร์ต 4000 · FrontOffice เขียน DB ตรง |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | §6 |
@@ -85,7 +85,14 @@
 - **แก้:** ให้ `assertSessionStillValid` ตรวจทั้งสองแบบ (query เบา ๆ `is_active deleted_at password_changed_at role_id` — มีอยู่แล้ว) ·
   JWT ใส่ `iat` เทียบ `password_changed_at` · role_id ใช้ค่าจาก DB (ไม่ใช่จาก token) · พิจารณา cache สั้น ๆ ถ้ากังวลจำนวน query
 
-### Y2. `.env.example` ขาดตัวแปรที่เพิ่มในรอบรวม backend
+### Y2. ✅ `.env.example` ขาดตัวแปรที่เพิ่มในรอบรวม backend — แก้แล้ว 2026-10-06
+
+**ทำแล้ว:** เพิ่มหมวด next-auth (`NEXTAUTH_SECRET` · `NEXTAUTH_URL` · `STOREFRONT_URL`) · `GOOGLE_CLIENT_SECRET` (แก้คอมเมนต์ Google ที่บอกว่าไม่ต้องใช้ SECRET — ล้าสมัยตั้งแต่ next-auth) ·
+`EMAIL_HOST` / `EMAIL_PORT` · `PROMPTPAY_ID` · ค่าปรับแต่ง (`DELIVERY_FEE_*` · `DELIVERY_FREE_MIN` · cache TTL 3 ตัว) · `UPLOAD_DRIVER` + `S3_*` (คอมเมนต์ไว้) ·
+ตรวจซ้ำ: ตัวแปรทุกตัวที่โค้ดอ่านมีใน `.env.example` แล้ว ยกเว้นที่แพลตฟอร์มตั้งให้เอง (`NODE_ENV` · `NEXT_RUNTIME` · `VERCEL` · `NODE_APP_INSTANCE`) ·
+เพิ่มกลางไฟล์ + ท้ายไฟล์ — ตอน merge #54 ถ้าชนที่ท้ายไฟล์ให้เก็บทั้งสองฝั่ง (#54 ไม่มี S3 ใน `.env.example` จึงไม่ซ้ำ)
+
+ปัญหาเดิม:
 
 ในโค้ดใช้แต่ `.env.example` ไม่มี: `NEXTAUTH_SECRET` · `NEXTAUTH_URL` · `STOREFRONT_URL` · `EMAIL_HOST` · `EMAIL_PORT` ·
 `GOOGLE_CLIENT_SECRET` · `PROMPTPAY_ID` · `RECOMMENDATION_CACHE_TTL_MS` · `PERMISSION_CACHE_TTL_MS` · `DELIVERY_ZONE_CACHE_TTL_MS` ·
@@ -103,7 +110,13 @@
 
 ไม่กระทบ runtime ของ API (dev ทั้งหมด ยกเว้น postcss ที่ใช้ตอน build) · แก้รวมตอน merge #56 แล้วรัน `npm audit` ซ้ำ
 
-### Y4. ล็อกอินผ่าน next-auth (credentials) ไม่มี rate limit ต่อ IP
+### Y4. ✅ ล็อกอินผ่าน next-auth (credentials) ไม่มี rate limit ต่อ IP — แก้แล้ว 2026-10-06
+
+**ทำแล้ว:** `authorize(credentials, req)` เรียก `rateLimit(ip, "auth:login", 10/นาที)` — **โควตาเดียวกับ `POST /api/auth/login`** (สลับ endpoint ไม่ช่วยให้ยิงได้มากขึ้น) ·
+IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/request.ts` — ใช้ร่วมกับ `clientIp`) · เกินโควตา = หน้าเว็บได้ข้อความ "คำขอถี่เกินไป …" ·
+เทส `tests/integration/nextAuthRateLimit.test.ts`
+
+ปัญหาเดิม:
 
 `POST /api/auth/login` มี `rateLimit(ip, "auth:login", 10/นาที)` แต่ `src/lib/nextAuth.ts:38` (`authorize`) เรียก `userService.verifyCredentials`
 ตรง ๆ — มีแค่ล็อกบัญชีหลังผิด 5 ครั้ง (ต่อบัญชี) · ยิงสุ่มหลายบัญชีจาก IP เดียว (credential stuffing) ได้ไม่จำกัด และใช้ล็อกบัญชีคนอื่นเล่นได้
@@ -186,5 +199,5 @@
 
 1. ~~**R1** (ต้นทุน/สูตรหลุด) + **Y5** (sortBy)~~ ✅ 2026-10-06
 2. ~~**Y1** (session cookie ตรวจ DB)~~ ✅ 2026-10-06
-3. **Y2** (`.env.example`) + **Y4** (rate limit next-auth) — เล็ก ทำพร้อมกันได้
+3. ~~**Y2** (`.env.example`) + **Y4** (rate limit next-auth)~~ ✅ 2026-10-06
 4. **Y3** ตอน merge #56 · **G1–G5** หลัง merge ชุดใหญ่ (กัน conflict)
