@@ -24,6 +24,7 @@
     "cleanup:legacy-product-fields": "tsx scripts/cleanup-legacy-product-fields.ts",
     "migrate:line-user-id": "tsx scripts/migrate-line-user-id.ts",
     "migrate:reviews": "tsx scripts/migrate-reviews.ts",
+    "check:aspect-names": "tsx scripts/check-aspect-names.ts",
     "remind:preorders": "tsx scripts/send-preorder-reminders.ts",
     "cron:preorder-rounds": "tsx scripts/run-preorder-rounds.ts",
     "cron:order-expiry": "tsx scripts/run-order-expiry.ts",

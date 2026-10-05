@@ -37,11 +37,20 @@ const DEFAULT_ASPECTS = [
   { aspect_name_th: "อื่นๆ", aspect_name_eng: "Others", placeholder_text: "เช่น บริการดี จัดส่งรวดเร็ว" },
 ];
 
-/** ยังไม่เคยมีแง่มุมเลย (นับรวมที่ลบแล้ว) → สร้างชุดเริ่มต้น — ลบหมดแล้วชุดเริ่มต้นจะไม่โผล่กลับมาเอง */
+/**
+ * ยังไม่เคยมีแง่มุมเลย (นับรวมที่ลบแล้ว) → สร้างชุดเริ่มต้น — ลบหมดแล้วชุดเริ่มต้นจะไม่โผล่กลับมาเอง
+ * เรียกพร้อมกันครั้งแรก (เช่น หน้าฟอร์มรีวิว + หลังร้าน): unique index ชื่อ (G5) ทำให้คำขอที่สองชน 11000 → ข้าม
+ * (ordered: false = ตัวที่ไม่ซ้ำยังเข้าได้) · ถ้ายังไม่ได้สร้าง index บน DB จริง โอกาสซ้ำยังมี — ดู npm run check:aspect-names
+ */
 export async function ensureDefaultAspects(): Promise<void> {
   await dbConnect();
   if ((await aspectModel.countDocuments({})) > 0) return;
-  await aspectModel.insertMany(DEFAULT_ASPECTS.map((a, i) => ({ ...a, display_order: i, is_active: true })));
+  await aspectModel
+    .insertMany(DEFAULT_ASPECTS.map((a, i) => ({ ...a, display_order: i, is_active: true })), { ordered: false })
+    .catch((err: any) => {
+      const dupOnly = err?.code === 11000 || (Array.isArray(err?.writeErrors) && err.writeErrors.every((e: any) => (e?.code ?? e?.err?.code) === 11000));
+      if (!dupOnly) throw err;
+    });
 }
 
 async function assertUniqueAspectName(nameTh: string, excludeId?: string) {

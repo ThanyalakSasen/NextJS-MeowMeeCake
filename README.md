@@ -52,6 +52,7 @@ npm run migrate:is-preorder    # แปลงประเภทสินค้�
 npm run cleanup:legacy-product-fields  # ลบฟิลด์เก่าของสินค้า (product_type / delete_at) — dry-run ก่อน, --apply เขียนจริง
 npm run migrate:line-user-id   # คัดลอก LINE ของลูกค้า users.lineId (ฝั่งลูกค้า) → line_user_id — dry-run ก่อน, --apply เขียนจริง · รันซ้ำได้
 npm run migrate:reviews        # เติม status ให้รีวิวเก่า + แก้ index ที่บล็อกรีวิวพรีออเดอร์ — dry-run ก่อน, --apply เขียนจริง · รันซ้ำได้
+npm run check:aspect-names    # ตรวจชื่อแง่มุมรีวิวซ้ำ (อ่านอย่างเดียว) · --apply = สร้าง unique index ชื่อ (เฉพาะเมื่อไม่มีชื่อซ้ำ)
 npm run check:data-integrity   # ตรวจข้อมูลสินค้าผิดปกติ (อ่านอย่างเดียว) · --no-notify = ไม่ส่งแจ้งเตือน
 npm run backfill:payment-due   # เติมกำหนดชำระให้พรีออเดอร์เก่า — dry-run ก่อน, --apply เขียนจริง
 npm run cron:preorder-rounds   # เปิด/ปิดรอบตามเวลา + ยกเลิกคนไม่จ่าย (cron ทุก 15 นาที)
@@ -94,6 +95,7 @@ npm run cleanup:legacy-product-fields
 npm run backfill:payment-due
 npm run migrate:line-user-id      # ดูรายชื่อลูกค้าที่จะคัดลอก LINE + รายการที่ขัดกัน (ต้องตรวจเอง)
 npm run migrate:reviews           # ดูจำนวนรีวิวที่ไม่มี status · index ที่บล็อกรีวิวพรีออเดอร์ · รีวิวซ้ำ (ถ้ามี ต้องจัดการก่อน)
+npm run check:aspect-names        # ชื่อแง่มุมรีวิวซ้ำ (ถ้ามี แก้ชื่อ/ลบตัวที่ไม่ใช้ในหลังร้านก่อน — BACKLOG5 G5)
 ```
 
 - ตรวจ `.env.local` ครบตาม [`docs/env.md`](docs/env.md) · secret ของ production ต้องคนละค่ากับ dev (`JWT_SECRET` · `SESSION_SECRET` · `NEXTAUTH_SECRET` · `CRON_SECRET`)
@@ -115,6 +117,7 @@ npm run cleanup:legacy-product-fields -- --apply   # ลบ product_type / delet
 npm run backfill:payment-due -- --apply            # เฉพาะถ้าข้อ 2 dry-run เจอรายการ
 npm run migrate:line-user-id                       # dry-run ดูรายชื่อ → แล้ว -- --apply (ไม่ลบ lineId · ห้ามใส่ --remove-old จนกว่าจะปิดพอร์ต 4000)
 npm run migrate:reviews                            # dry-run → แล้ว -- --apply (ต้องรันก่อนเปิดรีวิวพรีออเดอร์ · ไม่ลบ index ของฝั่งลูกค้า)
+npm run check:aspect-names -- --apply             # สร้าง unique index ชื่อแง่มุม (ข้อ 2 ต้องไม่เจอชื่อซ้ำก่อน)
 npm run check:data-integrity -- --no-notify        # ไม่ควรมี price_too_high / price_too_low / sale_not_below_price
 npm run migrate:upload-files                       # หลัง merge PR #54 เท่านั้น — dry-run แล้วค่อย -- --apply
 npm run summary:monthly -- --dry-run               # ทดสอบข้อความ ไม่ส่ง

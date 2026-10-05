@@ -258,6 +258,7 @@ PATCH https://api.example.com/api/admin/products/6a814a064b44d4bf31fb2c4b   { "i
 - **รีวิว ([`customer-backend-merge.md`](customer-backend-merge.md) §8.20):** `npm run migrate:reviews` (dry-run) → `-- --apply` — เติม `status` ให้รีวิวเก่า
   (ไม่เติม = ฝั่งลูกค้าไม่แสดง) · ลบ index `order_item_id_1` เฉพาะถ้าเป็น unique (บล็อกรีวิวพรีออเดอร์) · สร้าง index ใหม่ · ต้องรันก่อนเปิดรีวิวพรีออเดอร์
   · ⚠️ สิทธิ์รีวิวหลังร้านย้ายจากเมนู `products` → `reports` — ให้สิทธิ์ reports กับพนักงานที่ดูแลรีวิว
+- **ชื่อแง่มุมรีวิว ([`BACKLOG5.md`](BACKLOG5.md) G5):** `npm run check:aspect-names` → มีชื่อซ้ำให้แก้ชื่อ/ลบตัวที่ไม่ใช้ในหลังร้าน → `-- --apply` สร้าง unique index
 - ตรวจข้อมูลสินค้า (BACKLOG4 Y11): `npm run check:data-integrity -- --no-notify` → ต้องได้ "ไม่พบข้อมูลผิดปกติ" ก่อนเปิดร้าน
 - ⚠️ **หน่วยเงิน (BACKLOG4 R7 · [`money-units.md`](money-units.md) §3):** เอาสคริปต์ย้ายหน่วยออกแล้ว (2026-10-04) — ข้อมูลที่ยังเป็นสตางค์ต้องแก้ด้วยวิธีอื่น
   ```bash
