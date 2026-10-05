@@ -83,3 +83,25 @@ describe("pushLineMessage", () => {
     expect(body.messages[0].text.length).toBe(5000);
   });
 });
+
+describe("pushLineMessage — ส่งหาลูกค้า (to)", () => {
+  it("ส่ง to มา → ใช้ปลายทางนั้นแทน LINE_TARGET_ID", async () => {
+    process.env.LINE_CHANNEL_ACCESS_TOKEN = "token123";
+    process.env.LINE_TARGET_ID = "U_OWNER";
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const result = await pushLineMessage("hi", "U_CUSTOMER");
+
+    expect(result.ok).toBe(true);
+    expect(JSON.parse(fetchSpy.mock.calls[0][1].body).to).toBe("U_CUSTOMER");
+  });
+
+  it("ส่ง to มาแต่ไม่มี LINE_TARGET_ID → ยังส่งได้ (target ของร้านไม่จำเป็นต่อการแจ้งลูกค้า)", async () => {
+    process.env.LINE_CHANNEL_ACCESS_TOKEN = "token123";
+    delete process.env.LINE_TARGET_ID;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true }));
+
+    expect((await pushLineMessage("hi", "U_CUSTOMER")).ok).toBe(true);
+  });
+});

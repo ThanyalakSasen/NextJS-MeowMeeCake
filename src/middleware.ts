@@ -3,6 +3,7 @@
  *
  * โครง path:
  *   /api/auth/*     , /api/health , /api/catalog/*  → สาธารณะ (ไม่ต้องล็อกอิน)
+ *   /api/cron/*                                     → ไม่ใช้ session — route ตรวจ CRON_SECRET เอง
  *   /api/shop/*                                     → ต้องล็อกอิน (ลูกค้า/พนักงานก็ได้)
  *   /api/admin/*                                    → ต้องล็อกอิน + role_type ∈ {owner, staff}
  *
@@ -23,10 +24,20 @@ import { isCsrfSafe } from "@/lib/csrf";
 import { corsHeaders, isAllowedOrigin } from "@/lib/cors";
 import { SESSION_COOKIE, USER_HEADER, clearSession, type SessionUser } from "@/lib/session";
 
-const PUBLIC_PREFIXES = ["/api/auth/", "/api/health", "/api/catalog/"];
+// /api/cron/* ไม่ใช้ session — route ตรวจ CRON_SECRET เอง (src/lib/cronAuth.ts)
+const PUBLIC_PREFIXES = ["/api/auth/", "/api/health", "/api/catalog/", "/api/cron/"];
+
+/**
+ * path ใต้ namespace ที่ต้องล็อกอิน แต่ route ตรวจ session เองและตอบแบบของตัวเองตอนไม่มี session
+ * (ไม่ให้ middleware ตัดด้วย JSON 401) — ยังแนบ x-mmc-user ให้ตามปกติถ้า cookie ถูกต้อง
+ *   /api/shop/me/line/callback — เบราว์เซอร์ถูก LINE redirect มา ต้องพากลับหน้าโปรไฟล์เสมอ (docs/LINE.md §9.8)
+ */
+const SELF_AUTH_PATHS = new Set(["/api/shop/me/line/callback"]);
 
 function isPublic(pathname: string): boolean {
-  return PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p));
+  return (
+    SELF_AUTH_PATHS.has(pathname) || PUBLIC_PREFIXES.some((p) => pathname === p || pathname.startsWith(p))
+  );
 }
 
 function deny(code: string, message: string, status: number, clearCookie = false) {
@@ -90,7 +101,7 @@ export async function middleware(req: NextRequest) {
     if (user.role_type !== "owner" && user.role_type !== "staff") {
       return respond(deny("FORBIDDEN", "ส่วนนี้สำหรับพนักงานเท่านั้น", 403));
     }
-  } else if (pathname.startsWith("/api/shop/")) {
+  } else if (pathname.startsWith("/api/shop/") && !SELF_AUTH_PATHS.has(pathname)) {
     if (!user) return respond(deny("UNAUTHORIZED", "กรุณาเข้าสู่ระบบ", 401));
   }
 

@@ -29,6 +29,9 @@ import userModel from "../models/userModel";
 import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
+import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
+import { notificationService } from "./notificationService";
+import { log } from "../lib/logger";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { generateDocNo } from "../lib/productCode";
 import type { z } from "zod";
@@ -268,6 +271,19 @@ export async function createPreorder(
 
     // ทุกขั้นสำเร็จ → ทิ้ง undo ก่อนอ่านผลลัพธ์ (getPreorderById อาจ throw โดยไม่ต้อง rollback)
     saga.commit();
+
+    // แจ้งเจ้าของร้าน (DB + LINE) — คู่กับ orderService.persistOrder · best-effort ไม่ทำให้สร้างพรีออเดอร์ล้มเหลว
+    // link = null: ยังไม่มี path หน้าจัดการพรีออเดอร์ฝั่ง frontend ที่ยืนยันแล้ว (docs/LINE.md §9)
+    notificationService
+      .notify({
+        title: `พรีออเดอร์ใหม่ ${preorder.preorder_no}`,
+        message: `รอบ ${round.round_name ?? "-"} · ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
+        module: "order",
+        type: "info",
+        link: null,
+      })
+      .catch((err) => log.error("preorder.notify_failed", { preorder_id: String(preorder._id), err }));
+    notifyCustomerLater(userId, customerMessages.created("preorder", preorder.preorder_no, total_amount));
     return getPreorderById(String(preorder._id));
   } catch (err) {
     await saga.rollback();
@@ -432,6 +448,13 @@ export async function updatePreorderStatus(
 
   preorder.order_status = next;
   await preorder.save();
+  notifyCustomerLater(
+    preorder.user_id,
+    customerMessages.orderStatus("preorder", preorder.preorder_no, next, {
+      reason: preorder.cancelled_reason,
+      orderType: preorder.order_type,
+    })
+  );
   return presentPreorderWithItems(preorder, cancelledItems);
 }
 

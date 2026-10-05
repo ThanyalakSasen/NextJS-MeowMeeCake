@@ -20,9 +20,37 @@ import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
 import { deleteImages } from "../lib/upload";
 import { toSatang, toBahtFields } from "../lib/money";
+import {
+  DEFAULT_LOW_STOCK_THRESHOLD,
+  LOW_STOCK_EXPR,
+  crossedLowStock,
+  effectiveLowStockThreshold,
+} from "../lib/lowStock";
 
-/** เกณฑ์ "สต็อกเหลือน้อย" ของสินค้า (ตรงกับดีฟอลต์ของ getLowStockProducts) */
-const LOW_STOCK_THRESHOLD = 5;
+/**
+ * แจ้งเจ้าของร้าน (DB + LINE) ตอนสต็อกสินค้า "เพิ่งข้าม" เกณฑ์ใกล้หมดของสินค้านั้นลงมา — กัน spam ทุกครั้งที่ต่ำอยู่แล้ว
+ * เกณฑ์ = products.low_stock_threshold (ไม่ตั้ง = 5 — src/lib/lowStock.ts)
+ * ใช้ร่วมทุกทางที่ลดสต็อก: ขาย (deductStockForOrder) + ปรับเอง (setStock/adjustStock — นับสต็อก/ตัดของเสีย)
+ * best-effort ไม่ throw (docs/LINE.md §9.2, §9.5)
+ */
+function notifyIfLowStockCrossed(
+  product: { _id: unknown; product_name_th?: string; low_stock_threshold?: number | null },
+  before: number,
+  after: number
+): void {
+  const threshold = effectiveLowStockThreshold(product);
+  if (!crossedLowStock(threshold, before, after)) return;
+  // หมายเหตุ: enum module ไม่มีหมวด "product" แยก — ใช้ "ingredient" ร่วมกัน (หมวดสต็อกสินค้าคงคลัง)
+  notificationService
+    .notify({
+      title: `สินค้าใกล้หมด: ${product.product_name_th}`,
+      message: `คงเหลือ ${after} ชิ้น (เกณฑ์แจ้งเตือน ${threshold})`,
+      module: "ingredient",
+      type: "warning",
+      link: "/owner/products",
+    })
+    .catch((err) => log.error("product.notify_failed", { product_id: String(product._id), err }));
+}
 
 // BACKLOG §3.11 — purchase_cost เก็บเป็นสตางค์ตั้งแต่เฟส 4 (ดู recipeService.getUnitCostByProduct
 // comment สำหรับเหตุผลที่ต้องแปลงก่อน product_price/sale_price อื่น) ส่วน product_price/sale_price
@@ -66,6 +94,8 @@ export interface CreateProductInput {
   /** ต้นทุนต่อหน่วยกรอกมือ (BACKLOG §3.16) — ใช้เฉพาะสินค้าที่ไม่มีสูตรการผลิต ดู recipeService.getUnitCostByProduct */
   purchase_cost?: number | null;
   product_stock_quantity?: number | null;
+  /** เกณฑ์สินค้าใกล้หมดรายสินค้า (จำนวนเต็ม ≥ 0) · null/ไม่ส่ง = ใช้ค่าเริ่มต้น 5 (src/lib/lowStock.ts) */
+  low_stock_threshold?: number | null;
   preorder_config?: PreorderConfigInput | null;
 }
 
@@ -91,6 +121,14 @@ export class ProductError extends HttpError {
       status === 404 ? "NOT_FOUND" : status === 409 ? "CONFLICT" : "BAD_REQUEST";
     super(message, status, code);
     this.name = "ProductError";
+  }
+}
+
+/** low_stock_threshold: null = ใช้ค่าเริ่มต้น · ไม่งั้นต้องเป็นจำนวนเต็ม ≥ 0 */
+function assertLowStockThreshold(value: unknown): void {
+  if (value == null) return;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new ProductError("low_stock_threshold ต้องเป็นจำนวนเต็มไม่ติดลบ (หรือ null = ใช้ค่าเริ่มต้น)", 400);
   }
 }
 
@@ -195,6 +233,7 @@ export async function createProduct(input: CreateProductInput) {
   if (input.purchase_cost != null && input.purchase_cost < 0) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
+  assertLowStockThreshold(input.low_stock_threshold);
 
   await assertCategoryExists(input.category_id);
   await assertUnitExists(input.unit_id);
@@ -216,6 +255,8 @@ export async function createProduct(input: CreateProductInput) {
     unit_id: input.unit_id,
     is_preorder: isPreorder,
     product_stock_quantity: isPreorder ? null : input.product_stock_quantity ?? 0,
+    // พรีออเดอร์ไม่มีสต็อก → ไม่มีเกณฑ์ใกล้หมด
+    low_stock_threshold: isPreorder ? null : input.low_stock_threshold ?? null,
     preorder_config: isPreorder ? input.preorder_config : null,
   };
 
@@ -385,6 +426,7 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   if (input.purchase_cost != null && input.purchase_cost < 0) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
+  assertLowStockThreshold(input.low_stock_threshold);
   // BACKLOG §3.11 — input.purchase_cost/product_price/sale_price เป็นบาทจาก request เสมอ (API
   // contract) แปลงเป็นสตางค์ก่อนให้ loop `updatable` ด้านล่างเขียนลง existing.* (ซึ่งเป็นสตางค์ใน DB แล้ว)
   if (input.purchase_cost != null) {
@@ -452,8 +494,12 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     } else if (existing.product_stock_quantity == null) {
       existing.product_stock_quantity = 0;
     }
+    if (input.low_stock_threshold !== undefined) {
+      existing.low_stock_threshold = input.low_stock_threshold;
+    }
   } else {
     existing.product_stock_quantity = null;
+    existing.low_stock_threshold = null;
     if (input.preorder_config !== undefined) {
       existing.preorder_config = input.preorder_config;
     }
@@ -590,18 +636,19 @@ export async function setStock(id: string, quantity: number) {
   }
   await loadStockableProduct(id);
 
-  const product = await productModel
+  // findOneAndUpdate คืนค่า "ก่อน" อัปเดต (ไม่ส่ง new) — ได้ before ที่แม่นแบบ atomic ไว้เช็คข้ามเกณฑ์
+  const previous = await productModel
     .findOneAndUpdate(
       { _id: id, deleted_at: null, ...STOCKABLE_MATCH },
-      { $set: { product_stock_quantity: quantity } },
-      { new: true }
+      { $set: { product_stock_quantity: quantity } }
     )
-    .lean();
+    .lean<{ _id: unknown; product_name_th?: string; product_stock_quantity?: number } | null>();
 
-  if (!product) {
+  if (!previous) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
-  return product;
+  notifyIfLowStockCrossed(previous, previous.product_stock_quantity ?? 0, quantity);
+  return { ...previous, product_stock_quantity: quantity };
 }
 
 // ── ปรับสต็อกด้วยส่วนต่าง (+ รับเข้า / - ตัดออก) ──────────────
@@ -644,6 +691,8 @@ export async function adjustStock(
     }
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
+  const after = (product as { product_stock_quantity?: number }).product_stock_quantity ?? 0;
+  notifyIfLowStockCrossed(product as { _id: unknown; product_name_th?: string }, after - delta, after);
   return product;
 }
 
@@ -758,21 +807,11 @@ export async function deductStockForOrder(items: StockItemInput[]) {
       }
       applied.push({ product_id, quantity });
 
-      // แจ้งเตือนตอนสต็อกเพิ่งข้าม LOW_STOCK_THRESHOLD ลงมา (กัน spam ทุกครั้งที่ต่ำอยู่แล้ว)
-      const before = product.product_stock_quantity ?? 0;
-      const after = updated.product_stock_quantity ?? 0;
-      if (before > LOW_STOCK_THRESHOLD && after <= LOW_STOCK_THRESHOLD) {
-        // หมายเหตุ: enum module ไม่มีหมวด "product" แยก — ใช้ "ingredient" ร่วมกัน (หมวดสต็อกสินค้าคงคลัง)
-        notificationService
-          .notify({
-            title: `สินค้าใกล้หมด: ${product.product_name_th}`,
-            message: `คงเหลือ ${after} ชิ้น`,
-            module: "ingredient",
-            type: "warning",
-            link: "/owner/products",
-          })
-          .catch((err) => log.error("product.notify_failed", { product_id, err }));
-      }
+      notifyIfLowStockCrossed(
+        product,
+        product.product_stock_quantity ?? 0,
+        updated.product_stock_quantity ?? 0
+      );
     }
   } catch (err) {
     // ชดเชย: คืนสต็อกทุกตัวที่ตัดไปแล้ว
@@ -819,12 +858,16 @@ export async function restockForOrder(items: StockItemInput[]) {
 }
 
 // ── ลิสต์สินค้าใกล้หมด / หมดสต็อก ───────────────────────────
+/**
+ * threshold ไม่ส่ง (ค่าเริ่มต้น) = ใช้เกณฑ์ของแต่ละสินค้า (low_stock_threshold ?? 5 — src/lib/lowStock.ts)
+ * ส่งตัวเลขมา = ใช้เกณฑ์เดียวกันทุกสินค้า (พฤติกรรมเดิม — ยังรองรับ ?threshold= ของ route)
+ */
 export async function getLowStockProducts(
-  threshold = 5,
+  threshold?: number,
   options: { includeOutOfStock?: boolean; limit?: number } = {}
 ) {
   await dbConnect();
-  if (typeof threshold !== "number" || threshold < 0) {
+  if (threshold !== undefined && (typeof threshold !== "number" || threshold < 0)) {
     throw new ProductError("threshold ต้องเป็นตัวเลขไม่ติดลบ", 400);
   }
   const limit = Math.min(200, Math.max(1, Number(options.limit) || 100));
@@ -834,16 +877,26 @@ export async function getLowStockProducts(
     .find({
       deleted_at: null,
       ...STOCKABLE_MATCH,
-      product_stock_quantity: { $gte: min, $lte: threshold },
+      ...(threshold === undefined
+        ? { product_stock_quantity: { $gte: min }, ...LOW_STOCK_EXPR }
+        : { product_stock_quantity: { $gte: min, $lte: threshold } }),
     })
     .sort({ product_stock_quantity: 1 })
     .limit(limit)
-    .select("product_name_th product_name_eng product_stock_quantity category_id unit_id is_visible")
+    .select(
+      "product_name_th product_name_eng product_stock_quantity low_stock_threshold category_id unit_id is_visible"
+    )
     .populate("category_id", "product_category_name")
     .populate("unit_id", "unit_name unit_abbr")
     .lean();
 
-  return { threshold, count: items.length, items };
+  return {
+    // per_product = true: แต่ละรายการใช้ low_stock_threshold ของตัวเอง (null = ค่าเริ่มต้นด้านล่าง)
+    threshold: threshold ?? DEFAULT_LOW_STOCK_THRESHOLD,
+    per_product: threshold === undefined,
+    count: items.length,
+    items,
+  };
 }
 
 const productService = {
