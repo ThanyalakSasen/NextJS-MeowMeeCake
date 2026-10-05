@@ -50,7 +50,7 @@ export async function recordUsage(input: RecordUsageInput) {
         ],
       },
       { $inc: { used_count: 1 } },
-      { new: true }
+      { returnDocument: "after" }
     )
     .lean<any>();
 

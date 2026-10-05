@@ -87,6 +87,17 @@ export const customerMessages = {
     const pay = opts.unpaid ? "\n⚠️ ยังไม่ได้ชำระเงิน กรุณาชำระก่อนวันรับ" : "";
     return `${header("preorder", preorderNo)}\n⏰ ${what}${pay}`;
   },
+  /** ร้านเลื่อนวันรับของรอบพรีออเดอร์ (preorderRoundService.updateRound — docs/preorder-round-flow.md ปัญหา 6) */
+  pickupDateChanged(preorderNo: string, newPickupDate: Date, orderType?: string | null): string {
+    const day = newPickupDate.toLocaleDateString("th-TH", {
+      timeZone: "Asia/Bangkok",
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+    });
+    const what = orderType === "delivery" ? "วันเริ่มจัดส่ง" : "วันรับสินค้า";
+    return `${header("preorder", preorderNo)}\n📅 ร้านเปลี่ยน${what}เป็น${day}`;
+  },
   paymentStatus(kind: CustomerDocKind, docNo: string, status: string): string | null {
     const text = PAYMENT_STATUS_TEXT[status];
     return text ? `${header(kind, docNo)}\n${text}` : null;

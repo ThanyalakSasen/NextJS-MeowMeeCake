@@ -121,7 +121,7 @@ export async function setEntityPaymentStatus(opts: {
   if (opts.paymentId) set.payment_id = opts.paymentId;
 
   const doc = await opts.model
-    .findOneAndUpdate({ _id: opts.id, deleted_at: null }, { $set: set }, { new: true })
+    .findOneAndUpdate({ _id: opts.id, deleted_at: null }, { $set: set }, { returnDocument: "after" })
     .lean<Doc | null>();
   if (!doc) throw notFound(`ไม่พบ${opts.entityLabel}ที่ระบุ`);
 
@@ -160,7 +160,7 @@ export async function applyEntityDeliveryUpdate(opts: {
   }
 
   const updated = await opts.model
-    .findByIdAndUpdate(opts.id, { $set: payload }, { new: true, runValidators: true })
+    .findByIdAndUpdate(opts.id, { $set: payload }, { returnDocument: "after", runValidators: true })
     .lean<Doc | null>();
 
   // แจ้งลูกค้าเฉพาะตอนสถานะจัดส่งเปลี่ยนจริง (แก้แค่ tracking_no/note ไม่แจ้งซ้ำ)

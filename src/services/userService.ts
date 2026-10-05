@@ -181,7 +181,7 @@ export async function updateUser(id: string, input: UpdateUserBody) {
   try {
     const user = await userModel
       .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: payload }, {
-        new: true,
+        returnDocument: "after",
         runValidators: true,
       })
       .select(SELECT_PUBLIC)
@@ -204,7 +204,7 @@ export async function updateProfile(id: string, input: UpdateProfileInput) {
   const payload = { ...input };
   const user = await userModel
     .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: payload }, {
-      new: true,
+      returnDocument: "after",
       runValidators: true,
     })
     .select(SELECT_PUBLIC)
@@ -258,7 +258,7 @@ export async function adminSetPassword(id: string, newPassword: string) {
           reset_password_token_expiry: null,
         },
       },
-      { new: true }
+      { returnDocument: "after" }
     )
     .select(SELECT_PUBLIC)
     .lean();
@@ -360,7 +360,7 @@ export async function unlockUser(id: string) {
     .findByIdAndUpdate(
       id,
       { $set: { failed_login_attempts: 0, lockout_until: null } },
-      { new: true }
+      { returnDocument: "after" }
     )
     .select(SELECT_PUBLIC)
     .lean();
@@ -381,7 +381,7 @@ export async function linkLineAccount(id: string, lineUserId: string) {
     { $set: { line_user_id: null } }
   );
   const user = await userModel
-    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { line_user_id: lineUserId } }, { new: true })
+    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { line_user_id: lineUserId } }, { returnDocument: "after" })
     .select(SELECT_PUBLIC)
     .lean();
   if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
@@ -392,7 +392,7 @@ export async function unlinkLineAccount(id: string) {
   await dbConnect();
   assertObjectId(id);
   const user = await userModel
-    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { line_user_id: null } }, { new: true })
+    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { line_user_id: null } }, { returnDocument: "after" })
     .select(SELECT_PUBLIC)
     .lean();
   if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");

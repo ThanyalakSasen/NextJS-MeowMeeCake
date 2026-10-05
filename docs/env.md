@@ -70,6 +70,7 @@ GOOGLE_CLIENT_ID=556882585770-xxxxxxxx.apps.googleusercontent.com
 | `LINE_OWNER_QUOTA_RESERVE` | จำนวนข้อความ LINE ที่กันไว้ให้เจ้าของร้านต่อเดือน (ค่าเริ่มต้น 30) — โควตาเหลือเท่านี้แล้วหยุดส่งหาลูกค้า — ดู [`LINE.md`](LINE.md) §9.6 |
 | `CRON_SECRET` | secret ของ `/api/cron/*` (header `Authorization: Bearer …`) · ไม่ตั้ง = ปิด endpoint — ดู [`LINE.md`](LINE.md) §9.7 |
 | `PREORDER_REMINDER_DAYS_BEFORE` | เตือนลูกค้าก่อนวันรับพรีออเดอร์กี่วัน (ค่าเริ่มต้น 1 · 0 = วันรับ) — ดู [`LINE.md`](LINE.md) §9.7 |
+| `PREORDER_PAYMENT_DEADLINE_HOURS` | ชั่วโมงที่ต้องชำระเงินหลังสั่งพรีออเดอร์ (ค่าเริ่มต้น 24 · ไม่เกินเวลาปิดรอบ) เลยแล้วยกเลิกอัตโนมัติ — ดู [`preorder-round-flow.md`](preorder-round-flow.md) §6 |
 
 ---
 

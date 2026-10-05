@@ -91,7 +91,7 @@ export async function setDefault(userId: string, id: string) {
     { $set: { is_default: false } }
   );
   const doc = await addressModel
-    .findByIdAndUpdate(id, { $set: { is_default: true } }, { new: true })
+    .findByIdAndUpdate(id, { $set: { is_default: true } }, { returnDocument: "after" })
     .lean();
   return doc;
 }

@@ -40,6 +40,13 @@ const preorderSchema = new mongoose.Schema(
     cancelled_at: { type: Date, default: null },
     // เวลาที่ส่งเตือนลูกค้าก่อนวันรับแล้ว (preorderReminderService) — ใช้กันส่งซ้ำ · null = ยังไม่เคยเตือน
     pickup_reminded_at: { type: Date, default: null },
+    // กำหนดชำระเงิน = min(สั่ง + PREORDER_PAYMENT_DEADLINE_HOURS, ปิดรอบ) — เลยแล้วยังไม่จ่าย (และไม่มีสลิปรอตรวจ)
+    // → ยกเลิกอัตโนมัติ (preorderRoundLifecycleService — docs/preorder-round-flow.md ประเด็น 3) · null = ข้อมูลก่อนมีฟิลด์นี้
+    payment_due_at: { type: Date, default: null },
+    // เวลาที่ถูกบวกเข้าใบสั่งผลิตของรอบหลังจ่ายช้า (จ่ายหลังสร้างใบผลิตแล้ว) — กันบวกซ้ำ
+    added_to_production_at: { type: Date, default: null },
+    // เวลาที่ถูกหักออกจากใบสั่งผลิตหลังถูกยกเลิก (docs/BACKLOG4.md Y1) — กันหักซ้ำ
+    removed_from_production_at: { type: Date, default: null },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }
