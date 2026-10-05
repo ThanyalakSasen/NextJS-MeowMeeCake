@@ -15,6 +15,7 @@ import productModel from "../../models/productModel";
 import recipeModel from "../../models/recipeModel";
 import ingredientModel from "../../models/ingredientModel";
 import "../../models/productCategoryModel";
+import { toPublicProduct } from "../../lib/publicProduct";
 import {
   getRecommendations,
   getSimilarProducts,
@@ -65,13 +66,13 @@ export async function personalized(opts: {
 }): Promise<RecommendationsResult> {
   await dbConnect();
   try {
-    return await withTimeout(getRecommendations(opts), ENGINE_TIMEOUT_MS);
+    return sanitizeResult(await withTimeout(getRecommendations(opts), ENGINE_TIMEOUT_MS));
   } catch (err) {
     const timedOut = err instanceof Error && err.message === "ENGINE_TIMEOUT";
     if (!(err instanceof RecommendationError) && (timedOut || opts.strategy === "hybrid")) {
       log.warn("recommendation.fallback_popular", { user_id: opts.userId, timedOut, err });
       try {
-        return await getRecommendations({ ...opts, strategy: "popular" });
+        return sanitizeResult(await getRecommendations({ ...opts, strategy: "popular" }));
       } catch (fallbackErr) {
         throw toHttp(fallbackErr);
       }
@@ -85,7 +86,13 @@ function toNum(v: unknown): number {
   if (v == null) return 0;
   return typeof (v as any).toNumber === "function" ? Number((v as any).toNumber()) : Number(v) || 0;
 }
-const sanitize = (products: any[]) => products.map((p) => ({ ...p, avg_rating: toNum(p.avg_rating) }));
+/** สินค้าที่ส่งออก API (สาธารณะ/ลูกค้า) — เฉพาะ field สาธารณะ (ไม่มีต้นทุน/สูตร · docs/BACKLOG5.md R1) */
+const publicProduct = (p: any) => toPublicProduct({ ...p, avg_rating: toNum(p.avg_rating) });
+const sanitize = (products: any[]) => products.map(publicProduct);
+const sanitizeResult = <T extends { recommendations: Array<{ product: any }> }>(result: T): T => ({
+  ...result,
+  recommendations: result.recommendations.map((r) => ({ ...r, product: publicProduct(r.product) })),
+});
 
 /** สินค้าแนะนำหน้าแรก — { products } (ไม่ล็อกอิน / engine ล้ม = เรียงตามคะแนนรีวิว) */
 export async function recommendedProducts(userId: string | null): Promise<{ products: any[] }> {
@@ -102,7 +109,14 @@ export async function recommendedProducts(userId: string | null): Promise<{ prod
       .lean<any[]>();
     const recipeByProduct = new Map(recipes.map((r) => [String(r.product_id), r]));
     const ranked = products
-      .map((p) => ({ ...p, recipe_id: recipeByProduct.get(String(p._id)) ?? null }))
+      // ชื่อวัตถุดิบ (เตือนแพ้อาหาร) เท่านั้น — เดิมแนบสูตรทั้งก้อน (ปริมาณวัตถุดิบ) ไปกับ response สาธารณะ
+      .map((p) => ({
+        ...p,
+        category_name: p.category_id?.product_category_name ?? "",
+        ingredientNames: ((recipeByProduct.get(String(p._id))?.ingredients ?? []) as any[])
+          .map((i) => i?.ingredient_id?.ingredient_name)
+          .filter((n): n is string => typeof n === "string" && n.length > 0),
+      }))
       .sort((a, b) => toNum(b.avg_rating) - toNum(a.avg_rating));
     return { products: sanitize(ranked.slice(0, 10)) };
   };
@@ -123,7 +137,8 @@ export async function recommendedProducts(userId: string | null): Promise<{ prod
 export async function similar(productId: string, limit: number, userId?: string) {
   await dbConnect();
   try {
-    return { recommendations: await getSimilarProducts({ productId, limit, userId }) };
+    const recommendations = await getSimilarProducts({ productId, limit, userId });
+    return { recommendations: recommendations.map((r: any) => ({ ...r, product: publicProduct(r.product) })) };
   } catch (err) {
     throw toHttp(err);
   }

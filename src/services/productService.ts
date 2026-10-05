@@ -116,7 +116,24 @@ export interface ListProductQuery {
   includeDeleted?: boolean;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
+  /** field ที่อนุญาตให้เรียง (ค่าเริ่มต้น ADMIN_PRODUCT_SORTS) — หน้าร้านส่ง PUBLIC_PRODUCT_SORTS (BACKLOG5 Y5) */
+  sortable?: readonly string[];
 }
+
+/** field ที่หลังร้านเรียงได้ — นอกรายการ = 400 (เดิมรับชื่อ field อะไรก็ได้ · BACKLOG5 Y5) */
+export const ADMIN_PRODUCT_SORTS = [
+  "created_at",
+  "updated_at",
+  "product_id",
+  "product_name_th",
+  "product_name_eng",
+  "product_price",
+  "sale_price",
+  "purchase_cost",
+  "product_stock_quantity",
+  "avg_rating",
+  "review_count",
+] as const;
 
 // ── Errors ────────────────────────────────────────────────────
 /** error เฉพาะโดเมนสินค้า — สืบทอด HttpError กลาง เพื่อให้ route handler แปลงเป็น status code ได้เลย */
@@ -373,6 +390,10 @@ export async function getProducts(query: ListProductQuery) {
   }
 
   const sortField = query.sortBy || "created_at";
+  const sortable: readonly string[] = query.sortable ?? ADMIN_PRODUCT_SORTS;
+  if (!sortable.includes(sortField)) {
+    throw new ProductError(`sortBy ต้องเป็นหนึ่งใน: ${sortable.join(", ")}`, 400);
+  }
   const sortDir = query.sortOrder === "asc" ? 1 : -1;
 
   const [items, total] = await Promise.all([
