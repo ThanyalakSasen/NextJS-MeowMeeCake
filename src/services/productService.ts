@@ -9,9 +9,8 @@ import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import {
   generateProductCode,
   isProductCode,
-  isStockProductType,
-  PRODUCT_TYPES,
-  type ProductType,
+  isPreorderProduct,
+  productCodePrefix,
 } from "../lib/productCode";
 import productModel from "../models/productModel";
 import productCategoryModel from "../models/productCategoryModel";
@@ -53,7 +52,11 @@ export interface CreateProductInput {
   category_id: string;
   product_price: number;
   unit_id: string;
-  product_type: ProductType; // "inStore" | "online" | "preorder"
+  /**
+   * true = สินค้าพรีออเดอร์ (รหัส pre-, ต้องมี preorder_config, ไม่มีสต็อก) · false/ไม่ส่ง = สินค้าปกติ (รหัส pos-, มีสต็อก)
+   * ช่องทางขาย (เว็บ/หน้าร้าน) ไม่ได้ผูกกับสินค้าแล้ว — ดูจากออเดอร์ (ORD-/POS-) · ซ่อนจากเว็บใช้ is_visible
+   */
+  is_preorder?: boolean;
   sale_price?: number | null;
   is_visible?: boolean;
   product_img?: string[];
@@ -72,7 +75,8 @@ export interface ListProductQuery {
   pagination: Pagination;
   search?: string;
   category_id?: string;
-  product_type?: ProductType;
+  /** true = เฉพาะพรีออเดอร์ · false = เฉพาะสินค้าปกติ · ไม่ส่ง = ทั้งหมด */
+  is_preorder?: boolean;
   is_visible?: boolean;
   includeDeleted?: boolean;
   sortBy?: string;
@@ -111,64 +115,62 @@ async function assertUnitExists(unitId: string): Promise<void> {
 }
 
 /**
- * ตรวจความสอดคล้องระหว่าง product_type กับฟิลด์ที่เกี่ยวข้อง
- * - inStore / online : ต้องมี product_stock_quantity, ห้ามมี preorder_config
- * - preorder         : ต้องมี preorder_config ที่ถูกต้อง, product_stock_quantity ต้องเป็น null
+ * ตรวจความสอดคล้องระหว่าง is_preorder กับฟิลด์ที่เกี่ยวข้อง
+ * - สินค้าปกติ (is_preorder: false) — ห้ามมี preorder_config
+ * - พรีออเดอร์ (is_preorder: true) — ต้องมี preorder_config ที่ถูกต้อง, product_stock_quantity ต้องเป็น null
  */
-function validateTypeConsistency(
-  type: ProductType | undefined,
-  data: UpdateProductInput
-): void {
-  if (!type) return;
-
-  if (isStockProductType(type)) {
+function validateTypeConsistency(isPreorder: boolean, data: UpdateProductInput): void {
+  if (!isPreorder) {
     if (data.preorder_config != null) {
+      throw new ProductError("สินค้าปกติ (is_preorder: false) ต้องไม่มี preorder_config", 400);
+    }
+    return;
+  }
+
+  const cfg = data.preorder_config;
+  if (!cfg) {
+    throw new ProductError("สินค้าพรีออเดอร์ (is_preorder: true) ต้องระบุ preorder_config", 400);
+  }
+  if (cfg.min_order_qty == null || cfg.max_order_qty == null || cfg.lead_time_days == null) {
+    throw new ProductError("preorder_config ต้องมี min_order_qty, max_order_qty และ lead_time_days", 400);
+  }
+  if (cfg.min_order_qty < 1 || cfg.max_order_qty < 1 || cfg.lead_time_days < 1) {
+    throw new ProductError("ค่าใน preorder_config ต้องมากกว่าหรือเท่ากับ 1", 400);
+  }
+  if (cfg.max_order_qty < cfg.min_order_qty) {
+    throw new ProductError("max_order_qty ต้องไม่น้อยกว่า min_order_qty", 400);
+  }
+  if (data.product_stock_quantity != null) {
+    throw new ProductError("สินค้าพรีออเดอร์ (is_preorder: true) ต้องไม่มี product_stock_quantity", 400);
+  }
+}
+
+/**
+ * เตรียมฟิลด์ประเภทจาก request ก่อน validate — ปฏิเสธฟิลด์เก่าชัด ๆ (ถ้าปล่อยผ่าน mongoose จะทิ้งเงียบ ๆ
+ * เพราะไม่อยู่ใน schema → client ที่ยังส่งแบบเดิมจะแก้ประเภทไม่ได้โดยไม่รู้ตัว):
+ *   product_type (string, รุ่นแรก) / product_types (array, รุ่น 2026-09-24) → 400 ให้ส่ง is_preorder แทน
+ * is_preorder ต้องเป็น boolean
+ */
+function normalizeTypesInput(input: UpdateProductInput): void {
+  const raw = input as Record<string, unknown>;
+  for (const legacy of ["product_type", "product_types"]) {
+    if (legacy in raw) {
       throw new ProductError(
-        `สินค้าประเภท "${type}" ต้องไม่มี preorder_config`,
+        `ฟิลด์ ${legacy} เลิกใช้แล้ว — ส่ง is_preorder (true = พรีออเดอร์ / false = สินค้าปกติ) แทน ` +
+          "ช่องทางขาย (เว็บ/หน้าร้าน) ดูจากออเดอร์ ไม่ได้ผูกกับสินค้าแล้ว",
         400
       );
     }
   }
-
-  if (type === "preorder") {
-    const cfg = data.preorder_config;
-    if (!cfg) {
-      throw new ProductError(
-        'สินค้าประเภท "preorder" ต้องระบุ preorder_config',
-        400
-      );
-    }
-    if (
-      cfg.min_order_qty == null ||
-      cfg.max_order_qty == null ||
-      cfg.lead_time_days == null
-    ) {
-      throw new ProductError(
-        "preorder_config ต้องมี min_order_qty, max_order_qty และ lead_time_days",
-        400
-      );
-    }
-    if (cfg.min_order_qty < 1 || cfg.max_order_qty < 1 || cfg.lead_time_days < 1) {
-      throw new ProductError("ค่าใน preorder_config ต้องมากกว่าหรือเท่ากับ 1", 400);
-    }
-    if (cfg.max_order_qty < cfg.min_order_qty) {
-      throw new ProductError(
-        "max_order_qty ต้องไม่น้อยกว่า min_order_qty",
-        400
-      );
-    }
-    if (data.product_stock_quantity != null) {
-      throw new ProductError(
-        'สินค้าประเภท "preorder" ต้องไม่มี product_stock_quantity',
-        400
-      );
-    }
+  if (input.is_preorder !== undefined && typeof input.is_preorder !== "boolean") {
+    throw new ProductError("is_preorder ต้องเป็น true หรือ false", 400);
   }
 }
 
 // ── CREATE ────────────────────────────────────────────────────
 export async function createProduct(input: CreateProductInput) {
   await dbConnect();
+  normalizeTypesInput(input);
 
   const required: (keyof CreateProductInput)[] = [
     "product_name_th",
@@ -176,13 +178,13 @@ export async function createProduct(input: CreateProductInput) {
     "category_id",
     "product_price",
     "unit_id",
-    "product_type",
   ];
   for (const field of required) {
     if (input[field] === undefined || input[field] === null || input[field] === "") {
       throw new ProductError(`กรุณาระบุ ${field}`, 400);
     }
   }
+  const isPreorder = input.is_preorder === true;
 
   if (input.product_price < 0) {
     throw new ProductError("product_price ต้องไม่ติดลบ", 400);
@@ -193,16 +195,10 @@ export async function createProduct(input: CreateProductInput) {
   if (input.purchase_cost != null && input.purchase_cost < 0) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
-  if (!PRODUCT_TYPES.includes(input.product_type)) {
-    throw new ProductError(
-      `product_type ต้องเป็นหนึ่งใน: ${PRODUCT_TYPES.join(", ")}`,
-      400
-    );
-  }
 
   await assertCategoryExists(input.category_id);
   await assertUnitExists(input.unit_id);
-  validateTypeConsistency(input.product_type, input);
+  validateTypeConsistency(isPreorder, input);
 
   const payload = {
     product_name_th: input.product_name_th,
@@ -218,12 +214,9 @@ export async function createProduct(input: CreateProductInput) {
     yield_per_batch: input.yield_per_batch ?? null,
     purchase_cost: input.purchase_cost != null ? toSatang(Number(input.purchase_cost)) : null,
     unit_id: input.unit_id,
-    product_type: input.product_type,
-    product_stock_quantity: isStockProductType(input.product_type)
-      ? input.product_stock_quantity ?? 0
-      : null,
-    preorder_config:
-      input.product_type === "preorder" ? input.preorder_config : null,
+    is_preorder: isPreorder,
+    product_stock_quantity: isPreorder ? null : input.product_stock_quantity ?? 0,
+    preorder_config: isPreorder ? input.preorder_config : null,
   };
 
   // สร้างรหัสสินค้า (product_id) แบบสุ่ม + retry เมื่อชนกับที่มีอยู่
@@ -233,7 +226,7 @@ export async function createProduct(input: CreateProductInput) {
     try {
       doc = await productModel.create({
         ...payload,
-        product_id: generateProductCode(input.product_type),
+        product_id: generateProductCode(isPreorder),
       });
     } catch (err) {
       const code = (err as { code?: number }).code;
@@ -310,8 +303,9 @@ export async function getProducts(query: ListProductQuery) {
     assertObjectId(query.category_id, "category_id");
     filter.category_id = query.category_id;
   }
-  if (query.product_type) {
-    filter.product_type = query.product_type;
+  if (typeof query.is_preorder === "boolean") {
+    // $ne: true (ไม่ใช่ false ตรง ๆ) — นับเอกสารที่ยังไม่มีฟิลด์นี้เป็นสินค้าปกติ ให้ตรงกับ STOCKABLE_MATCH
+    filter.is_preorder = query.is_preorder ? true : { $ne: true };
   }
   if (typeof query.is_visible === "boolean") {
     filter.is_visible = query.is_visible;
@@ -375,6 +369,7 @@ export async function getProductById(
 export async function updateProduct(id: string, input: UpdateProductInput) {
   await dbConnect();
   assertObjectId(id);
+  normalizeTypesInput(input);
 
   const existing = await productModel.findOne({ _id: id, deleted_at: null });
   if (!existing) {
@@ -409,11 +404,11 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   }
 
   // ประเภทหลังอัปเดต (ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นใช้ค่าเดิม)
-  const nextType = (input.product_type ?? existing.product_type) as ProductType;
+  const nextIsPreorder = input.is_preorder !== undefined ? input.is_preorder : isPreorderProduct(existing);
 
-  if (input.product_type || input.preorder_config !== undefined ||
+  if (input.is_preorder !== undefined || input.preorder_config !== undefined ||
       input.product_stock_quantity !== undefined) {
-    validateTypeConsistency(nextType, {
+    validateTypeConsistency(nextIsPreorder, {
       preorder_config:
         input.preorder_config !== undefined
           ? input.preorder_config
@@ -441,7 +436,7 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     "yield_per_batch",
     "purchase_cost",
     "unit_id",
-    "product_type",
+    "is_preorder",
   ];
   for (const field of updatable) {
     if (input[field] !== undefined) {
@@ -449,8 +444,8 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     }
   }
 
-  // ปรับฟิลด์ที่ผูกกับ product_type ให้สอดคล้องเสมอ
-  if (isStockProductType(nextType)) {
+  // ปรับฟิลด์ที่ผูกกับ is_preorder ให้สอดคล้องเสมอ
+  if (!nextIsPreorder) {
     existing.preorder_config = null;
     if (input.product_stock_quantity !== undefined) {
       existing.product_stock_quantity = input.product_stock_quantity;
@@ -464,7 +459,34 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     }
   }
 
-  await existing.save();
+  // docs/BACKLOG2.md §14 — ส่ง is_preorder มา (เปลี่ยนหรือส่งค่าเดิมซ้ำก็ได้) แล้ว prefix ของ product_id
+  // (pos-/pre-) ไม่ตรงกับประเภท → สร้างรหัสใหม่ให้ตรงทันที · ใช้แก้สินค้าที่รหัสค้างผิดประเภทได้ด้วยการ
+  // PATCH { is_preorder: <ค่าเดิม> } (⚠️ รหัสสินค้าเปลี่ยน — บาร์โค้ด/ป้ายราคาที่พิมพ์ไว้ต้องพิมพ์ใหม่)
+  let needsNewCode = false;
+  if (input.is_preorder !== undefined) {
+    const oldPrefix = typeof existing.product_id === "string" ? existing.product_id.split("-")[0] : null;
+    if (oldPrefix && oldPrefix !== productCodePrefix(nextIsPreorder)) needsNewCode = true;
+  }
+
+  if (needsNewCode) {
+    let saved = false;
+    for (let attempt = 0; attempt < 20 && !saved; attempt++) {
+      existing.product_id = generateProductCode(nextIsPreorder);
+      try {
+        await existing.save();
+        saved = true;
+      } catch (err) {
+        const code = (err as { code?: number })?.code;
+        if (code === 11000 && attempt < 19) continue; // ชน product_id ที่สุ่มได้ → สุ่มใหม่
+        if (code === 11000) {
+          throw new ProductError("สร้างรหัสสินค้าใหม่ไม่สำเร็จ (รหัสสุ่มชนกันหลายครั้ง) กรุณาลองใหม่", 409);
+        }
+        throw err;
+      }
+    }
+  } else {
+    await existing.save();
+  }
   const result = existing.toObject();
 
   // BACKLOG §3.14 — ลบไฟล์รูปเดิมที่ไม่อยู่ในชุดใหม่แล้ว (best-effort, ไม่ทำให้ update พังถ้าลบไม่สำเร็จ —
@@ -515,13 +537,14 @@ export async function hardDeleteProduct(id: string) {
 
 // ─────────────────────────────────────────────────────────────
 //  STOCK MANAGEMENT — จัดการสต็อกสินค้า
-//  ใช้ได้กับสินค้าที่มีสต็อก (product_type = "inStore" หรือ "online")
-//  ("preorder" ไม่มีสต็อก product_stock_quantity = null)
+//  ใช้ได้กับสินค้าปกติ (is_preorder: false) เท่านั้น
+//  (พรีออเดอร์ไม่มีสต็อก product_stock_quantity = null)
 //  ทุก operation ที่แก้จำนวนใช้ update แบบ atomic กัน race condition
 // ─────────────────────────────────────────────────────────────
 
-/** เงื่อนไข query สำหรับ "สินค้าที่มีสต็อก" = ทุกประเภทยกเว้น preorder */
-const STOCKABLE_MATCH = { product_type: { $ne: "preorder" } } as const;
+/** เงื่อนไข query สำหรับ "สินค้าที่มีสต็อก" = ไม่ใช่พรีออเดอร์ — $ne: true (ไม่ใช่ false ตรง ๆ) ให้นับ
+ *  เอกสารที่ยังไม่มีฟิลด์ is_preorder เป็นสินค้าปกติด้วย (ค่าเริ่มต้นของ schema) */
+const STOCKABLE_MATCH = { is_preorder: { $ne: true } } as const;
 
 export interface StockItemInput {
   product_id: string;
@@ -546,11 +569,8 @@ async function loadStockableProduct(id: string) {
   if (!product) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
-  if (product.product_type === "preorder") {
-    throw new ProductError(
-      'สินค้าประเภท "preorder" ไม่มีการจัดการสต็อก',
-      400
-    );
+  if (isPreorderProduct(product)) {
+    throw new ProductError("สินค้าพรีออเดอร์ไม่มีการจัดการสต็อก", 400);
   }
   return product;
 }
@@ -656,18 +676,18 @@ export async function checkStockAvailability(items: StockItemInput[]) {
       assertPositiveQty(quantity);
       const product = await productModel
         .findOne({ _id: product_id, deleted_at: null })
-        .select("product_name_th product_type product_stock_quantity")
+        .select("product_name_th is_preorder product_stock_quantity")
         .lean<{
           _id: Types.ObjectId;
           product_name_th: string;
-          product_type: ProductType;
+          is_preorder?: boolean;
           product_stock_quantity: number | null;
         }>();
 
       if (!product) {
         return { product_id, requested: quantity, available: 0, ok: false, reason: "not_found" };
       }
-      if (product.product_type === "preorder") {
+      if (isPreorderProduct(product)) {
         // preorder ไม่จำกัดด้วยสต็อก
         return { product_id, requested: quantity, available: null, ok: true, reason: "preorder" };
       }
@@ -716,7 +736,7 @@ export async function deductStockForOrder(items: StockItemInput[]) {
         throw new ProductError(`ไม่พบสินค้า ${product_id}`, 404);
       }
       // preorder ข้ามการตัดสต็อก
-      if (product.product_type === "preorder") continue;
+      if (isPreorderProduct(product)) continue;
 
       const updated = await productModel.findOneAndUpdate(
         {

@@ -102,15 +102,17 @@ const productSchema = new mongoose.Schema(
       ref: "Units",
       required: true,
     },
-    product_type: {
-      type: String,
-      // inStore = สินค้าหน้าร้าน , online = สินค้าออนไลน์ , preorder = สินค้าพรีออเดอร์
-      enum: ["inStore", "online", "preorder"],
+    is_preorder: {
+      // true = สินค้าพรีออเดอร์ (รหัส pre- · ไม่มีสต็อก · ขายผ่านรอบพรีออเดอร์ต้องมี preorder_config)
+      // false = สินค้าปกติ (รหัส pos- · มีสต็อก · ขายได้ทั้งเว็บและหน้าร้าน — ซ่อนจากเว็บด้วย is_visible)
+      // docs/BACKLOG2.md §14 (2026-09-30) — แทน product_types (array inStore/online/preorder) ช่องทางขายดูจากออเดอร์แทน
+      // ข้อมูลเก่าต้องรัน scripts/migrate-is-preorder.ts ก่อน (ไม่งั้นสินค้าพรีออเดอร์เดิมจะถูกอ่านเป็น false)
+      type: Boolean,
       required: true,
+      default: false,
     },
     product_stock_quantity: {
-      // มีค่าเมื่อ product_type = "inStore" หรือ "online"
-      // product_type = "preorder" → null
+      // สินค้าปกติ (is_preorder: false) → มีค่า · พรีออเดอร์ → null
       type: Number,
       min: 0,
       default: 0,
@@ -127,7 +129,7 @@ const productSchema = new mongoose.Schema(
       default: 0,
     },
     preorder_config: {
-      // null ถ้า product_type = "inStore" หรือ "online" (ใช้เฉพาะ preorder)
+      // ใช้เฉพาะสินค้าพรีออเดอร์ (is_preorder: true) · สินค้าปกติ = null
       type: preorderConfigSchema,
       default: null,
     },
@@ -151,8 +153,7 @@ const productSchema = new mongoose.Schema(
 // (ให้รัน scripts/backfill-product-codes.ts เติมรหัสให้ของเดิม)
 productSchema.index({ product_id: 1 }, { unique: true, sparse: true });
 productSchema.index({ category_id: 1 });
-productSchema.index({ product_type: 1 });
-productSchema.index({ product_type: 1, deleted_at: 1 });
+productSchema.index({ is_preorder: 1, deleted_at: 1 });
 productSchema.index({ avg_rating: -1 });
 productSchema.index({ deleted_at: 1 });
 
