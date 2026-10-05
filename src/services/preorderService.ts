@@ -179,13 +179,10 @@ export async function createPreorder(
   // จุดต่อรายการ ต่างแค่ "ลำดับ" ของ error เมื่อมีหลายรายการผิดพร้อมกัน (เช็ค id/quantity ของทุก
   // รายการก่อน แล้วค่อยเช็คสิ่งที่ต้องรู้ผลจาก DB — เหมือนที่ยอมรับไว้แล้วใน resolveLines ไม่มีเทสไหน
   // อิงลำดับ error ข้ามรายการอยู่แล้ว)
-  const seen = new Set<string>();
+  // สินค้าเดียวกัน (round_item_id ซ้ำ) ได้ถ้าตัวเลือกต่างกัน — แยกแถว · ตัวเลือกเหมือนกัน = รวมจำนวนเป็นแถวเดียว
+  // (ผู้ใช้เลือก 2026-10-05 · แบบฝั่งลูกค้า — docs/customer-backend-merge.md §8.10)
   const quantities = input.items.map((raw) => {
     assertObjectId(raw.round_item_id, "round_item_id");
-    if (seen.has(String(raw.round_item_id))) {
-      throw badRequest("มี round_item_id ซ้ำใน items — รวมจำนวนเป็นรายการเดียว");
-    }
-    seen.add(String(raw.round_item_id));
     assertCustomizationIds(raw);
 
     const quantity = Number(raw.quantity);
@@ -205,18 +202,49 @@ export async function createPreorder(
   const alreadyByRoundItem = await quantityAlreadyOrdered(userId, round._id);
   const customizations = await getCustomizations(resolvedItems.map(({ product }) => String(product._id)));
 
-  const lines = resolvedItems.map(({ item, product, unit_price }, idx) => {
-    const quantity = quantities[idx];
+  // 1) คิดตัวเลือกต่อรายการ แล้วรวมรายการที่ round_item + ชุดตัวเลือกเดียวกัน (special_request ใช้ค่าล่าสุดที่ไม่ว่าง)
+  type Group = {
+    item: any;
+    product: any;
+    unit_price: number;
+    custom: ReturnType<typeof resolveCustomization>;
+    quantity: number;
+    special_request: string | null;
+  };
+  const groups = new Map<string, Group>();
+  resolvedItems.forEach(({ item, product, unit_price }, idx) => {
+    const custom = resolveCustomization(
+      customizations.get(String(product._id)) ?? { groups: [], options: [] },
+      input.items[idx],
+      product.product_name_th
+    );
+    const key = `${String(item._id)}#${custom.key}`;
+    const special = input.items[idx].special_request?.trim() || null;
+    const prev = groups.get(key);
+    if (prev) {
+      prev.quantity += quantities[idx];
+      prev.special_request = special ?? prev.special_request;
+    } else {
+      groups.set(key, { item, product, unit_price, custom, quantity: quantities[idx], special_request: special });
+    }
+  });
+
+  // 2) ตรวจขั้นต่ำต่อรายการ + สูงสุดต่อลูกค้า (รวมทุกแถวของสินค้าเดียวกัน + พรีออเดอร์เดิมในรอบ)
+  const orderedByRoundItem = new Map<string, number>();
+  const lines = [...groups.values()].map(({ item, product, unit_price, custom, quantity, special_request }) => {
     const cfg = product.preorder_config ?? {};
-    // ขั้นต่ำ = ค่าที่มากกว่าระหว่างรายการในรอบกับตัวสินค้า
+    // ขั้นต่ำ = ค่าที่มากกว่าระหว่างรายการในรอบกับตัวสินค้า (ต่อแถว — แบบฝั่งลูกค้า)
     const minQty = Math.max(item.min_order_qty ?? 1, cfg.min_order_qty ?? 1);
     if (quantity < minQty) {
       throw badRequest(`"${product.product_name_th}" สั่งขั้นต่ำ ${minQty} ชิ้นต่อรายการ`);
     }
-    // สูงสุดต่อลูกค้า 1 คนต่อรอบ (รวมพรีออเดอร์เดิมในรอบเดียวกัน) — กันคนเดียวกวาดโควตาทั้งรอบ
+    // สูงสุดต่อลูกค้า 1 คนต่อรอบ (รวมพรีออเดอร์เดิมในรอบเดียวกัน + ทุกตัวเลือกในใบนี้) — กันคนเดียวกวาดโควตาทั้งรอบ
+    const roundItemKey = String(item._id);
+    const inThisOrder = (orderedByRoundItem.get(roundItemKey) ?? 0) + quantity;
+    orderedByRoundItem.set(roundItemKey, inThisOrder);
     if (cfg.max_order_qty != null) {
-      const already = alreadyByRoundItem.get(String(item._id)) ?? 0;
-      if (already + quantity > cfg.max_order_qty) {
+      const already = alreadyByRoundItem.get(roundItemKey) ?? 0;
+      if (already + inThisOrder > cfg.max_order_qty) {
         throw badRequest(
           `"${product.product_name_th}" สั่งได้สูงสุด ${cfg.max_order_qty} ชิ้นต่อคนต่อรอบ` +
             (already > 0 ? ` (สั่งไว้แล้ว ${already} ชิ้น เหลือสั่งได้อีก ${Math.max(0, cfg.max_order_qty - already)})` : "")
@@ -224,15 +252,7 @@ export async function createPreorder(
       }
     }
 
-    // BACKLOG §3.11 เฟส 5b — unit_price จาก preorderRoundService.getOrderableRoundItems() เป็นสตางค์
-    // อยู่แล้ว (price_override/sale_price/product_price เป็นสตางค์ทั้งหมดตั้งแต่เฟส 5b) ไม่ต้องแปลง
-    // อะไรเพิ่ม — ก่อนหน้านี้ (เฟส 1-5a) ยังต้อง toSatang() ตรงนี้เพราะฝั่งสินค้ายังเป็นบาทอยู่
-    // ราคารอบ (price_override / ราคาสินค้า) + ตัวเลือก/ออปชันที่เลือก
-    const custom = resolveCustomization(
-      customizations.get(String(product._id)) ?? { groups: [], options: [] },
-      input.items[idx],
-      product.product_name_th
-    );
+    // ราคารอบ (price_override / ราคาสินค้า) + ตัวเลือก/ออปชันที่เลือก — เงินเป็นบาท (docs/money-units.md)
     const unitPriceSatang = toSatang(unit_price + custom.extra_price);
     return {
       round_item_id: item._id,
@@ -248,7 +268,7 @@ export async function createPreorder(
       quantity,
       unit_price: unitPriceSatang,
       total_price: toSatang(unitPriceSatang * quantity),
-      special_request: input.items[idx].special_request?.trim() || null,
+      special_request,
     };
   });
 

@@ -199,6 +199,60 @@ describe("productCustomization — กลุ่มตัวเลือกบว
     expect(item.selected_variants).toHaveLength(2);
   });
 
+  it("พรีออเดอร์หลายตัวเลือกในใบเดียว: ต่างตัวเลือก = แยกแถว · ตัวเลือกเดียวกัน = รวมจำนวน · สูงสุดต่อคนนับรวม", async () => {
+    const { cake, v } = await birthdayCake();
+    await productModel.updateOne(
+      { _id: cake._id },
+      {
+        $set: {
+          is_preorder: true, product_stock_quantity: null,
+          preorder_config: { min_order_qty: 1, max_order_qty: 4, lead_time_days: 1 },
+        },
+      }
+    );
+    const admin = await makeUser();
+    const round = (await preorderRoundService.createRound(
+      {
+        round_name: `รอบหลายรส-${Date.now()}`, open_date: new Date(Date.now() - 1000),
+        close_date: new Date(Date.now() + DAY), pickup_date: new Date(Date.now() + 5 * DAY), round_status: "open",
+        items: [{ product_id: String(cake._id), max_qty_total: 100 }],
+      },
+      String(admin._id)
+    )) as { _id: unknown; items: Array<{ _id: unknown }> };
+    const ri = String(round.items[0]._id);
+    const user = await makeUser();
+    const order = (items: Array<{ variant_ids: string[]; quantity: number; special_request?: string }>) =>
+      preorderService.createPreorder(String(user._id), {
+        round_id: String(round._id),
+        order_type: "takeaway",
+        items: items.map((it) => ({ round_item_id: ri, ...it })),
+      }) as Promise<{ _id: unknown; subtotal: number }>;
+
+    const choc = [v(0, 0), v(1, 0)]; // 300
+    const vanilla = [v(0, 0), v(1, 1)]; // 310
+    const pre = await order([
+      { variant_ids: choc, quantity: 1 },
+      { variant_ids: vanilla, quantity: 1 },
+      { variant_ids: [...choc].reverse(), quantity: 1, special_request: "ไม่หวาน" },
+    ]);
+    expect(pre.subtotal).toBe(2 * 300 + 310);
+    const items = await preorderItemModel.find({ preorder_id: pre._id }).sort({ unit_price: 1 }).lean<any[]>();
+    expect(items.map((i) => [i.product_snapshot.variant_name, i.quantity])).toEqual([
+      ["ขนาด: 1 ปอนด์ · รสชาติ: ช็อกโกแลต", 2],
+      ["ขนาด: 1 ปอนด์ · รสชาติ: วานิลลา", 1],
+    ]);
+    expect(items[0].special_request).toBe("ไม่หวาน");
+
+    // สั่งไปแล้ว 3 (สูงสุด 4) → ใบใหม่ 1 + 1 คนละรส = 5 เกิน
+    await expect(
+      order([
+        { variant_ids: choc, quantity: 1 },
+        { variant_ids: vanilla, quantity: 1 },
+      ])
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining("สูงสุด 4") });
+    expect((await order([{ variant_ids: vanilla, quantity: 1 }])).subtotal).toBe(310);
+  });
+
   it("ออปชันบังคับ: ไม่เลือก → 400", async () => {
     const user = await makeUser();
     const p = await makeProduct();
