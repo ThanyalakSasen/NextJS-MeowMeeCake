@@ -25,7 +25,7 @@ const WRITABLE = [
   "unit_id",
 ] as const;
 
-// BACKLOG §3.11 เฟส 5b — variant_price เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// variant_price — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentVariant<T extends Record<string, unknown>>(v: T): T {
   return toBahtFields(v, ["variant_price"] as const);
 }

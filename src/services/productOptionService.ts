@@ -23,7 +23,7 @@ const WRITABLE = [
   "is_required",
 ] as const;
 
-// BACKLOG §3.11 เฟส 5b — extra_price เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// extra_price — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentOption<T extends Record<string, unknown>>(o: T): T {
   return toBahtFields(o, ["extra_price"] as const);
 }

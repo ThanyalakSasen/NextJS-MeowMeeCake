@@ -63,8 +63,8 @@ function header(kind: CustomerDocKind, docNo: string): string {
 
 // ── ข้อความ (export ให้เทสตรวจได้) ─────────────────────────
 export const customerMessages = {
-  created(kind: CustomerDocKind, docNo: string, totalSatang: number): string {
-    return `${header(kind, docNo)}\nได้รับ${KIND_LABEL[kind]}แล้ว ยอดรวม ${toBaht(totalSatang).toLocaleString("th-TH")} บาท`;
+  created(kind: CustomerDocKind, docNo: string, total: number): string {
+    return `${header(kind, docNo)}\nได้รับ${KIND_LABEL[kind]}แล้ว ยอดรวม ${toBaht(total).toLocaleString("th-TH")} บาท`;
   },
   orderStatus(
     kind: CustomerDocKind,

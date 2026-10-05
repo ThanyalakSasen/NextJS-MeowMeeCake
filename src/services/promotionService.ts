@@ -30,7 +30,7 @@ import type { promotionCreate, promotionUpdate } from "../schemas/promotion";
 
 export const DISCOUNT_TYPES = ["Percentage", "Amount", "FreeShipping"] as const;
 
-// BACKLOG §3.11 เฟส 5a — promotionModel เก็บเงินเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 // discount_value เป็นเงินเฉพาะตอน discount_type === "Amount" เท่านั้น (ดู comment ที่ promotionModel.ts)
 const MONEY_FIELDS = ["min_order_amount", "max_discount_amount"] as const;
 
@@ -55,7 +55,7 @@ export async function createPromotion(input: CreatePromotionInput, createdBy: st
   await assertRefExists(userModel, createdBy, "ผู้สร้าง", "created_by");
 
   // input.discount_value/min_order_amount/max_discount_amount เป็นบาทจาก request (API contract)
-  // แปลงเป็นสตางค์ก่อนเก็บ — discount_value แปลงเฉพาะตอน Amount (ดู comment ที่ promotionModel.ts)
+  // ปัด 2 ตำแหน่งก่อนเก็บ — discount_value ปัดเฉพาะตอน Amount (Percentage เป็นเปอร์เซ็นต์ ไม่ใช่เงิน)
   const payload: Record<string, unknown> = {
     ...input,
     promotion_code: input.promotion_code.trim().toUpperCase(),
@@ -243,10 +243,7 @@ export async function validateForOrder(input: ValidateForOrderInput): Promise<Di
     }
   }
 
-  // promo จาก DB เป็นสตางค์ (min_order_amount/max_discount_amount เสมอ, discount_value เฉพาะ Amount)
-  // แต่ discountEngine.ts ทำงานเป็นบาทล้วน (ไม่เคยถูกแก้ในเฟสนี้) — แปลงตรงจุดข้ามนี้ทันที เหมือน
-  // deliveryService/recipeService ในเฟสก่อนหน้า — presentPromotion() ทำหน้าที่นี้ให้พอดี (แปลง field
-  // เดียวกับที่ API คืนกลับ)
+  // promo จาก DB เป็นบาท — presentPromotion() ปัด field เงินชุดเดียวกับที่ API คืน ก่อนส่งเข้า discountEngine.ts
   return computeDiscount(presentPromotion(promo), {
     lines: input.lines,
     subtotal: input.subtotal,

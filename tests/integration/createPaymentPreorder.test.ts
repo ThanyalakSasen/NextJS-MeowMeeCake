@@ -53,6 +53,19 @@ describe("paymentService.createPayment — preorder branch (BACKLOG 2b.1)", () =
     ).rejects.toThrow(/ยอดชำระต้องเท่ากับยอดพรีออเดอร์/);
   });
 
+  it("ยอดขาด/เกินเกิน 1 สตางค์ → 400 (เดิมยอมให้ขาดได้ถึง 1 บาท) · ต่างไม่เกิน 1 สตางค์ผ่าน", async () => {
+    const owner = await makeUser();
+    const preorder = await makePreorder(String(owner._id), { total_amount: 300 });
+    for (const amount of [299.5, 299.98, 300.02]) {
+      await expect(
+        paymentService.createPayment({ user_id: String(owner._id), preorder_id: String(preorder._id), amount })
+      ).rejects.toThrow(/ยอดชำระต้องเท่ากับยอดพรีออเดอร์/);
+    }
+    await expect(
+      paymentService.createPayment({ user_id: String(owner._id), preorder_id: String(preorder._id), amount: 299.99 })
+    ).resolves.toBeTruthy();
+  });
+
   it("เจ้าของจริง + สถานะปกติ + amount ตรง → สร้าง payment สำเร็จ", async () => {
     const owner = await makeUser();
     const preorder = await makePreorder(String(owner._id), { total_amount: 180 });

@@ -55,9 +55,8 @@ function notifyIfLowStockCrossed(
     .catch((err) => log.error("product.notify_failed", { product_id: String(product._id), err }));
 }
 
-// BACKLOG §3.11 — purchase_cost เก็บเป็นสตางค์ตั้งแต่เฟส 4 (ดู recipeService.getUnitCostByProduct
-// comment สำหรับเหตุผลที่ต้องแปลงก่อน product_price/sale_price อื่น) ส่วน product_price/sale_price
-// เก็บเป็นสตางค์ตั้งแต่เฟส 5b — API ยังรับ-ส่งบาททศนิยมเหมือนเดิมทั้งหมด
+// purchase_cost / product_price / sale_price — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
+// (หลังร้านเท่านั้น — API สาธารณะใช้ toPublicProduct() ที่ไม่มี purchase_cost · BACKLOG5 R1)
 function presentProduct<T extends Record<string, unknown>>(product: T): T {
   return toBahtFields(product, ["purchase_cost", "product_price", "sale_price"] as const);
 }
@@ -460,8 +459,8 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
   assertLowStockThreshold(input.low_stock_threshold);
-  // BACKLOG §3.11 — input.purchase_cost/product_price/sale_price เป็นบาทจาก request เสมอ (API
-  // contract) แปลงเป็นสตางค์ก่อนให้ loop `updatable` ด้านล่างเขียนลง existing.* (ซึ่งเป็นสตางค์ใน DB แล้ว)
+  // input.purchase_cost/product_price/sale_price เป็นบาทจาก request — ปัด 2 ตำแหน่งก่อนให้ loop `updatable`
+  // ด้านล่างเขียนลง existing.*
   if (input.purchase_cost != null) {
     input.purchase_cost = toSatang(Number(input.purchase_cost));
   }

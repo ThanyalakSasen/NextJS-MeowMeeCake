@@ -47,8 +47,7 @@ function invalidateCache(): void {
 }
 
 /** โซน active ทั้งหมด เรียงตาม sort_order (ใช้โดย deliveryService.calcDeliveryFee) — cache ไว้ TTL วิ
- *  ⚠️ `.fee` เป็นสตางค์ดิบจาก DB (ไม่ผ่าน presenter) — ผู้เรียก (deliveryService.ts) แปลงเป็นบาทเอง
- *  ตรงจุดที่ใช้จริง (ดู presentZone comment ด้านบน) */
+ *  `.fee` เป็นค่าดิบจาก DB (บาท · ไม่ผ่าน presenter) — ผู้เรียก (deliveryService.ts) ปัดเองตรงจุดที่ใช้จริง */
 export async function getActiveZonesCached(): Promise<DeliveryZoneRow[]> {
   if (cache && cache.expiresAt > Date.now()) return cache.rows;
 
@@ -69,10 +68,8 @@ async function unsetOtherCatchAll(exceptId?: string): Promise<void> {
   await deliveryZoneModel.updateMany(filter, { $set: { is_catch_all: false } });
 }
 
-// BACKLOG §3.11 เฟส 3 — fee เก็บเป็นสตางค์ แต่ /api/admin/delivery-zones ยังรับ-ส่งบาทเหมือนเดิม
-// (getActiveZonesCached() ด้านบน "ไม่" ผ่าน presenter นี้โดยตั้งใจ — เป็น cache ภายในที่มีแต่
-// deliveryService.ts เรียกใช้เท่านั้น ไม่เคยถูก expose ตรงให้ client เห็น จึงปล่อยเป็นสตางค์ดิบไว้
-// ให้ deliveryService.ts แปลงเองตรงจุดที่ต้องใช้ — เหมือน pattern "แปลงข้ามโดเมนตรงจุดที่ข้าม" ในเฟส 1)
+// fee — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
+// (getActiveZonesCached() ด้านบนไม่ผ่าน presenter นี้ — เป็น cache ภายในที่ deliveryService.ts ใช้ และปัดเองตรงจุดที่ใช้)
 function presentZone<T extends Record<string, unknown>>(zone: T): T {
   return toBahtFields(zone, ["fee"] as const);
 }

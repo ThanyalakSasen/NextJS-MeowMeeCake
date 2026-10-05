@@ -22,7 +22,7 @@ export const EXPENSE_CATEGORIES = [
   "อื่นๆ",
 ] as const;
 
-// BACKLOG §3.11 เฟส 2 — amount เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// amount — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentExpense<T extends Record<string, unknown>>(doc: T): T {
   return toBahtFields(doc, ["amount"] as const);
 }
@@ -45,7 +45,7 @@ const base = createCrudService(expenseModel as any, {
 });
 
 // BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
-// override เพราะต้องแปลง amount บาท→สตางค์ก่อนเขียน (present() แปลงแค่ตอน "คืนค่า" ไม่ใช่ตอนรับ input)
+// override เพราะต้องปัด amount (บาท 2 ตำแหน่ง) ก่อนเขียน (present() ทำแค่ตอน "คืนค่า" ไม่ใช่ตอนรับ input)
 /**
  * receipt_url ต้องเป็นไฟล์ที่อัปโหลดผ่าน POST /api/admin/expenses/receipts (public/uploads/receipts — docs/uploads.md)
  * เดิมเป็นช่องพิมพ์ข้อความ → DB มีแต่ชื่อไฟล์ลอย ๆ ที่ไม่มีไฟล์จริง
@@ -90,7 +90,7 @@ export async function summary(opts: { date_from?: string; date_to?: string } = {
     if (opts.date_to) match.date.$lte = new Date(opts.date_to);
   }
 
-  // $sum ได้ผลรวมเป็นสตางค์ (amount เก็บเป็นสตางค์แล้ว) — แปลงเป็นบาทก่อนคืน (API ยังบาทเหมือนเดิม)
+  // $sum ได้ผลรวมเป็นบาท — ปัด 2 ตำแหน่งก่อนคืน (กัน float สะสม)
   const rows = await expenseModel.aggregate([
     { $match: match },
     { $group: { _id: "$category", total: { $sum: "$amount" }, count: { $sum: 1 } } },

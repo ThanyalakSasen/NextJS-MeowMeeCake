@@ -31,9 +31,10 @@ import { buildPromptPayQr } from "./promptpayService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// BACKLOG §3.11 — order.total_amount/preorder.total_amount เป็นสตางค์ (integer) แล้ว เทียบกับ amount
-// ที่แปลงเป็นสตางค์ด้วย toSatang() ก่อนเทียบ — เผื่อ 1 สตางค์ กัน edge case ปัดเศษที่อาจหลงเหลือ
-const AMOUNT_TOLERANCE = 1;
+// เทียบยอดชำระกับ order/preorder.total_amount (บาท) — เผื่อส่วนต่างปัดเศษได้ไม่เกิน 1 สตางค์ (0.01 บาท)
+// (+1e-9 กัน float เช่น 100.1 - 100.09) · เดิม = 1 จากสมัยเก็บสตางค์ — หลังเปลี่ยนเป็นบาท (BACKLOG4 R7) กลายเป็น
+// "ขาดได้ 1 บาท" โดยไม่ตั้งใจ (docs/BACKLOG5.md G1 — เจอตอนไล่คอมเมนต์ยุคสตางค์)
+const AMOUNT_TOLERANCE = 0.01 + 1e-9;
 
 /**
  * สลิปต้องเป็นไฟล์ที่อัปโหลดผ่านระบบเรา (public/uploads/slips — docs/uploads.md) — เดิมรับ string อะไรก็ได้
@@ -95,8 +96,7 @@ export async function createPayment(input: CreatePaymentInput) {
     throw badRequest("ต้องระบุ order_id หรือ preorder_id อย่างใดอย่างหนึ่ง");
   }
 
-  // input.amount เป็นบาทจาก client เสมอ (API ไม่เปลี่ยน — BACKLOG §3.11) แปลงเป็นสตางค์ทันทีตรงนี้
-  // แล้วใช้สตางค์ตลอดที่เหลือ (เทียบกับ order/preorder.total_amount ที่เป็นสตางค์แล้ว)
+  // input.amount เป็นบาทจาก client — ปัด 2 ตำแหน่งทันที แล้วใช้ค่านี้เทียบกับ order/preorder.total_amount (บาท)
   const amount = toSatang(Number(input.amount));
   if (!Number.isFinite(amount) || amount <= 0) {
     throw badRequest("amount ต้องเป็นตัวเลขมากกว่า 0");
@@ -188,7 +188,7 @@ export async function createPayment(input: CreatePaymentInput) {
   return presentPayment(payment.toObject());
 }
 
-// BACKLOG §3.11 — DB เก็บ amount เป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม (เหมือน order/preorder)
+// amount — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentPayment<T extends Record<string, unknown>>(payment: T): T {
   return toBahtFields(payment, ["amount"] as const);
 }

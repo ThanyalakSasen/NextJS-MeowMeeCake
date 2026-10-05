@@ -19,7 +19,7 @@ import { toSatang, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
-// BACKLOG §3.11 เฟส 4 — cost_per_unit เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// cost_per_unit — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentIngredient<T extends Record<string, unknown>>(doc: T): T {
   return toBahtFields(doc, ["cost_per_unit"] as const);
 }
@@ -74,7 +74,7 @@ async function assertRefs(input: Record<string, any>): Promise<void> {
 }
 
 // BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
-// override เพราะมี validation เพิ่มเติม + แปลง cost_per_unit บาท→สตางค์ก่อนเขียน
+// override เพราะมี validation เพิ่มเติม + ปัด cost_per_unit (บาท 2 ตำแหน่ง) ก่อนเขียน
 export const ingredientService = {
   ...base,
 

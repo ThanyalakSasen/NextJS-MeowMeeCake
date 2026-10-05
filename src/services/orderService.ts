@@ -293,8 +293,7 @@ async function persistOrder(
   const subtotal = toSatang(itemsPayload.reduce((s, it) => s + it.total_price, 0));
 
   // ── ค่าส่ง: คิดฝั่ง server เสมอ (เว้นแต่แอดมินสั่ง override) ──
-  // deliveryService ยังทำงานเป็น "บาท" (ยังไม่แปลงในเฟสนี้) — แปลง subtotal เป็นบาทตอนส่งออก แล้ว
-  // แปลงผลลัพธ์ (บาท) กลับเป็นสตางค์ทันทีที่ได้รับ (ข้ามโดเมนแค่จุดเดียว ไม่ผสมหน่วยไปไกลกว่านี้)
+  // deliveryService รับ-คืนเป็นบาท — toBaht/toSatang ตรงนี้แค่ปัด 2 ตำแหน่ง (เงินเป็นบาททั้งระบบ · docs/money-units.md)
   let delivery_fee = 0;
   if (opts.order_type === "delivery") {
     if (opts.delivery_fee_override && opts.delivery_fee != null) {
@@ -320,10 +319,7 @@ async function persistOrder(
   }
 
   // ── ส่วนลด: ใช้โปรโมชัน (ระบบคิดเอง) หรือส่วนลดกรอกมือ ──
-  // promotionService.validateForOrder()/discountEngine.ts ยังรับ-คืนเป็น "บาท" เหมือนเดิมทุกประการ
-  // แม้ promotionModel เองจะถูกแปลงเป็นสตางค์แล้วตั้งแต่เฟส 5a ก็ตาม (promotionService แปลงกลับเป็น
-  // บาทให้เองก่อนส่งเข้า discountEngine — ดู presentPromotion() ที่นั่น) — จุดนี้จึงไม่ต้องแก้อะไรเลย
-  // แปลงอินพุตเป็นบาทตอนเรียก แล้วแปลงผลลัพธ์ (บาท) กลับเป็นสตางค์ทันที
+  // promotionService.validateForOrder()/discountEngine.ts รับ-คืนเป็นบาท — toBaht/toSatang ตรงนี้แค่ปัด 2 ตำแหน่ง
   let discount_amount = 0;
   let appliedPromotion: { promotion_id: string; discount_amount: number } | null = null;
   if (opts.user_coupon_id && (opts.promotion_code || opts.promotion_id)) {
@@ -583,12 +579,10 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
 }
 
 // ── READ ────────────────────────────────────────────────────
-// BACKLOG §3.11 — DB เก็บเงินเป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม (ตัดสินใจร่วมกับผู้ใช้
-// 2026-09-12 ไม่ให้เป็น breaking change) — แปลงกลับตรงนี้ที่เดียวก่อนส่งออกทุกจุดที่ query ตรง ๆ
-// (ฟังก์ชันที่ return ผ่าน getOrderById/getOrderByNo อยู่แล้วไม่ต้องแปลงซ้ำ)
+// เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) — ปัดตรงนี้ที่เดียวก่อนส่งออกทุกจุดที่ query ตรง ๆ
+// (ฟังก์ชันที่ return ผ่าน getOrderById/getOrderByNo อยู่แล้วไม่ต้องปัดซ้ำ)
 const ORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount"] as const;
-// cost_per_unit เป็นสตางค์เช่นกันตั้งแต่เฟส 4 (มาจาก recipeService.getUnitCostByProduct() ซึ่งคืน
-// สตางค์ล้วนแล้ว — ดู comment ที่นั่น) toBahtFields ข้าม key ที่เป็น null ไว้เฉย ๆ อยู่แล้ว จึงปลอดภัย
+// cost_per_unit มาจาก recipeService.getUnitCostByProduct() (บาท) · toBahtFields ข้าม key ที่เป็น null อยู่แล้ว
 const ORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price", "cost_per_unit"] as const;
 
 function presentOrder<T extends Record<string, unknown>>(order: T): T {
