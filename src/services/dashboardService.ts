@@ -33,7 +33,7 @@ function rangeMatch(dateFrom?: string, dateTo?: string): Record<string, any> {
 // ── แหล่งยอดขาย: ออเดอร์ปกติ + พรีออเดอร์ ─────────────────────
 // docs/BACKLOG4.md R5 — เดิม overview/salesByDay/topProducts อ่านแค่ orders → รายได้/กำไรพรีออเดอร์ (ช่องทางหลักของร้าน)
 // หายจากแดชบอร์ดทั้งหมด · ตอนนี้รวมทั้งสองแหล่ง (โครงเอกสารเหมือนกัน: total_amount/discount_amount/payment_status ·
-// รายการมี quantity/total_price/cost_per_unit/product_snapshot เป็นสตางค์เหมือนกัน)
+// รายการมี quantity/total_price/cost_per_unit/product_snapshot เหมือนกัน · เงินเป็นบาท)
 type SourceKey = "orders" | "preorders";
 const SOURCES: Record<SourceKey, { model: any; itemModel: any; fk: "order_id" | "preorder_id" }> = {
   orders: { model: orderModel, itemModel: orderItemModel, fk: "order_id" },
@@ -107,8 +107,8 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
     ),
   ]);
 
-  // BACKLOG §3.11 — total_amount/discount_amount/cost_per_unit เป็นสตางค์ · expenseTotal เป็นบาทแล้ว
-  // รวมเป็นสตางค์ก่อน แล้วแปลงเป็นบาทครั้งเดียว ไม่ให้หน่วยปนในสูตร profit_estimate
+  // total_amount/discount_amount/cost_per_unit/expenseTotal เป็นบาททั้งหมด — รวมค่าดิบก่อนแล้วปัด 2 ตำแหน่งครั้งเดียว
+  // (กัน float สะสมในสูตร profit_estimate · docs/money-units.md)
   const sum = (f: "revenue" | "discount" | "paid" | "cogs") => perSource.reduce((s, p) => s + p[f], 0);
   const revenue = toBaht(sum("revenue"));
   const discount = toBaht(sum("discount"));
@@ -181,7 +181,7 @@ export async function salesByDay(opts: { days?: number } = {}) {
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([date, v]) => ({
         date,
-        revenue: round2(toBaht(v.revenue)), // total_amount เป็นสตางค์ (BACKLOG §3.11)
+        revenue: round2(toBaht(v.revenue)), // บาท ปัด 2 ตำแหน่ง
         orders: v.orders, // รวมออเดอร์ปกติ + พรีออเดอร์
       })),
   };
@@ -240,7 +240,7 @@ export async function topProducts(opts: {
         product_id: id,
         product_name_th: v.name,
         quantity_sold: v.qty,
-        revenue: round2(toBaht(v.revenue)), // total_price เป็นสตางค์ (BACKLOG §3.11)
+        revenue: round2(toBaht(v.revenue)), // บาท ปัด 2 ตำแหน่ง
       })),
   };
 }
@@ -265,7 +265,7 @@ export function orderChannelOf(orderNo: unknown): RevenueChannel {
  *   preorder = พรีออเดอร์ (PRE-)               ← preorders (เดิมรายงานแบบแยกประเภทสินค้าไม่ได้นับ collection นี้เลย)
  *   other    = ออเดอร์เลขรุ่นเก่าก่อนแยก prefix (OP-, WEB- ฯลฯ) — ระบุช่องทางย้อนหลังไม่ได้
  * ใช้ total_amount ของออเดอร์ทั้งก้อน (รวมค่าส่ง − ส่วนลด) — ออเดอร์หนึ่งอยู่ช่องทางเดียว ไม่ต้องกระจายสัดส่วน
- * คืนเป็นบาท (แปลงจากสตางค์ตอนท้ายสุด) + จำนวนออเดอร์ต่อช่องทาง
+ * คืนเป็นบาท (ปัด 2 ตำแหน่งตอนท้ายสุด) + จำนวนออเดอร์ต่อช่องทาง
  */
 export async function revenueByChannel(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();

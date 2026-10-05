@@ -4,10 +4,9 @@
  * ⚠️ การคิดต้นทุนที่นี่ "ไม่แปลงหน่วย" — สมมติว่า quantity ในสูตรอยู่หน่วยเดียวกับ cost_per_unit
  * ของวัตถุดิบ ถ้าต้องรองรับการแปลงหน่วย (กรัม↔กิโล ฯลฯ) ต้องต่อยอดจากตารางอัตราแปลงหน่วยภายหลัง
  *
- * BACKLOG §3.11 เฟส 4 — ไม่ต้องแก้ไฟล์นี้เลยแม้ ingredientModel.cost_per_unit/componentModel.
- * estimated_cost_per_batch จะเปลี่ยนหน่วยเป็นสตางค์: ฟังก์ชันตรงนี้แค่ "คูณ/หาร" ตัวเลขที่ query
- * มาจาก DB ตรง ๆ ไม่เคยแปลงหน่วยเอง ผลลัพธ์จึงเป็นหน่วยเดียวกับ input เสมอ (satang เข้า → satang ออก)
- * ผู้เรียก (componentService.prepare/recipeService.prepare) เป็นคนปัดเศษให้เป็น integer สตางค์เอง
+ * หน่วยเงิน: ฟังก์ชันตรงนี้แค่ "คูณ/หาร" ตัวเลขที่ query มาจาก DB ตรง ๆ ไม่แปลงหน่วยเงินเอง — ผลลัพธ์เป็นหน่วยเดียวกับ
+ * input เสมอ (cost_per_unit / estimated_cost_per_batch เป็นบาท → ผลเป็นบาท · docs/money-units.md)
+ * ผู้เรียก (componentService.prepare/recipeService.prepare) เป็นคนปัดเป็นบาททศนิยม 2 ตำแหน่งเอง
  */
 import type { Model } from "mongoose";
 import { badRequest } from "./httpError";

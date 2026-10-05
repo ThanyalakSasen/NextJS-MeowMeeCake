@@ -52,11 +52,9 @@ const NEXT_ROUND_STATUS: Record<RoundStatus, RoundStatus[]> = {
 const PRODUCT_SELECT =
   "product_name_th product_name_eng product_price sale_price product_img is_preorder preorder_config";
 
-// BACKLOG §3.11 เฟส 5b — price_override เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
-// ต้องแปลง "ซ้อน" เข้าไปในผลลัพธ์ populate (product_id.product_price/sale_price) ด้วย เพราะ populate
-// ไม่เรียกผ่าน productService.presentProduct() เลย (เหมือน componentService/recipeService.
-// getExpanded() ในเฟส 4) — ใช้กับทั้ง listRoundItems()/getRoundDetail() (current_price คำนวณจาก
-// สตางค์ล้วนแล้วแปลงเป็นบาทตรงนี้ทีเดียว)
+// price_override / current_price — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
+// ปัด "ซ้อน" เข้าไปในผลลัพธ์ populate (product_id.product_price/sale_price) ด้วย เพราะ populate ไม่ผ่าน
+// productService.presentProduct() — ใช้กับทั้ง listRoundItems()/getRoundDetail()
 function presentRoundItem(it: Record<string, any>): Record<string, any> {
   const presented = toBahtFields(it, ["price_override", "current_price"] as const);
   return {
@@ -189,9 +187,8 @@ export async function createRound(input: CreateRoundInput, createdBy: string) {
       assertLeadTime(close_date, pickup_date, [product]);
       resolvedItems.push({
         product_id: product._id,
-        // BACKLOG §3.11 เฟส 5b — price_override เป็นบาทจาก request เสมอ (API contract) แปลงเป็น
-        // สตางค์ก่อนเก็บ (DB เป็นสตางค์แล้ว ผูก fallback chain เดียวกับ product.sale_price/
-        // product_price ใน getOrderableRoundItem()/getRoundDetail() ด้านล่าง)
+        // price_override เป็นบาทจาก request — ปัด 2 ตำแหน่งก่อนเก็บ (fallback chain เดียวกับ
+        // product.sale_price/product_price ใน getOrderableRoundItems()/getRoundDetail() ด้านล่าง)
         price_override:
           it.price_override != null ? toSatang(Math.max(0, Number(it.price_override) || 0)) : null,
         min_order_qty: Math.max(1, Number(it.min_order_qty) || 1),
@@ -286,9 +283,8 @@ export async function getRoundDetail(
     ...round,
     items: items.map((it) => {
       const product = it.product_id ?? {};
-      // price_override/product.sale_price/product.product_price เป็นสตางค์ทั้งหมดแล้ว (เฟส 5b) —
-      // current_price ที่คำนวณตรงนี้จึงเป็นสตางค์ไปด้วยโดยอัตโนมัติ แปลงเป็นบาทพร้อมกับ field อื่นใน
-      // presentRoundItem() ทีเดียวด้านล่าง
+      // price_override/product.sale_price/product.product_price เป็นบาททั้งหมด — current_price ปัดพร้อม
+      // field อื่นใน presentRoundItem() ทีเดียวด้านล่าง
       const base = it.price_override ?? product.sale_price ?? product.product_price ?? 0;
       return presentRoundItem({
         ...it,
@@ -669,12 +665,8 @@ export async function assertRoundOrderable(roundId: string) {
 
 /**
  * ดึง round item + product สำหรับคิดราคาตอนสร้างพรีออเดอร์ (batch)
- * BACKLOG §3.11 เฟส 5b — ฟังก์ชันนี้เป็น "internal only" ไม่เคย expose ผ่าน API ตรง ๆ (ใช้แค่ภายใน
- * preorderService ตอนสร้างพรีออเดอร์) `unit_price` ที่คืนจึงตั้งใจเป็น**สตางค์**ตรง ๆ (ไม่ผ่าน
- * presentRoundItem()) เพราะ item.price_override/product.sale_price/product.product_price เป็น
- * สตางค์ทั้งหมดแล้ว — ผู้เรียก (preorderService) ก็ไม่ต้องแปลงอะไรเพิ่มเพราะรับค่ามาใส่
- * preorderItem.unit_price ตรง ๆ (satang เหมือนกัน) — เหมือน recipeService.getUnitCostByProduct()
- * ในเฟส 4 เป๊ะ
+ * ฟังก์ชันนี้เป็น "internal only" (ใช้แค่ภายใน preorderService ตอนสร้างพรีออเดอร์) — `unit_price` ที่คืนเป็นค่าดิบ
+ * จาก DB (บาท · ไม่ผ่าน presentRoundItem()) ผู้เรียกใส่ preorderItem.unit_price ได้ตรง ๆ
  *
  * BACKLOG2 §2 — เดิมชื่อ getOrderableRoundItem() (เอกพจน์) รับ roundItemId เดียว ให้
  * createPreorder() เรียกวน await ทีละรายการ (N รายการ = query ~2N ครั้งทยอย) เปลี่ยนเป็น batch

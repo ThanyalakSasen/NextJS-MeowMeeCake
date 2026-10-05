@@ -34,7 +34,7 @@ const WRITABLE = [
   "ingredients",
 ] as const;
 
-// BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// estimated_cost_per_batch — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentComponent<T extends Record<string, unknown>>(doc: T): T {
   return toBahtFields(doc, ["estimated_cost_per_batch"] as const);
 }
@@ -95,8 +95,7 @@ function pickWritable(input: Record<string, any>): Record<string, any> {
 
 /** getExpanded() populate ingredients.ingredient_id เป็น object เต็ม (ติด cost_per_unit ของวัตถุดิบ
  *  นั้นมาด้วย) — เส้นทาง populate ตรงนี้ไม่ผ่าน ingredientService.presentIngredient() เลย ต้องแปลง
- *  ซ้อนเองตรงนี้ ไม่งั้นหน้าจอที่ใช้ getExpanded (วางแผนผลิต) จะเห็น cost_per_unit เป็นสตางค์ดิบปนอยู่
- *  ท่ามกลาง estimated_cost_per_batch ที่เป็นบาทแล้ว */
+ *  ปัดซ้อนเองตรงนี้ให้ cost_per_unit ผ่านกติกาเดียวกับ estimated_cost_per_batch (บาท ปัด 2 ตำแหน่ง) */
 function presentExpandedComponent(doc: Record<string, any>): Record<string, any> {
   const presented = presentComponent(doc);
   return {

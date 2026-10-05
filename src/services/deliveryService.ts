@@ -85,8 +85,7 @@ export async function calcDeliveryFee(input: {
     const specific = dbZones.find((z) => !z.is_catch_all && z.provinces.includes(province));
     const matched = specific ?? dbZones.find((z) => z.is_catch_all);
     if (matched) {
-      // matched.fee เป็นสตางค์ดิบจาก DB (BACKLOG §3.11 เฟส 3) — แปลงเป็นบาทตรงนี้ก่อนคืน (ผลลัพธ์
-      // ของฟังก์ชันนี้เป็นบาทเสมอ ผู้เรียก เช่น orderService จะแปลงกลับเป็นสตางค์เองอีกที)
+      // matched.fee เป็นค่าดิบจาก DB (บาท) — ปัด 2 ตำแหน่งก่อนคืน (ผลลัพธ์ของฟังก์ชันนี้เป็นบาทเสมอ)
       return {
         fee: free ? 0 : toBaht(matched.fee),
         free,
@@ -116,7 +115,7 @@ export async function listZones() {
       source: "db" as const,
       zones: dbZones.map((z) => ({
         name: z.zone_name,
-        fee: toBaht(z.fee), // z.fee เป็นสตางค์ดิบจาก DB (BACKLOG §3.11 เฟส 3)
+        fee: toBaht(z.fee), // ค่าดิบจาก DB (บาท) ปัด 2 ตำแหน่ง
         is_catch_all: z.is_catch_all,
         provinces: z.provinces,
       })),

@@ -40,7 +40,7 @@ const WRITABLE = [
   "components",
 ] as const;
 
-// BACKLOG §3.11 เฟส 4 — estimated_cost_per_batch เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาททศนิยมเหมือนเดิม
+// estimated_cost_per_batch — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentRecipe<T extends Record<string, unknown>>(doc: T): T {
   return toBahtFields(doc, ["estimated_cost_per_batch"] as const);
 }
@@ -186,15 +186,10 @@ function pickWritable(input: Record<string, any>): Record<string, any> {
  * ลำดับความสำคัญ: 1) สูตรล่าสุดที่มี yield_qty > 0  2) product.purchase_cost ที่แอดมินกรอกมือ
  * (BACKLOG §3.16 — เผื่อสินค้าที่ไม่มีสูตร เช่น ซื้อมาขายต่อ)  3) null (ไม่มีข้อมูลต้นทุนเลย)
  *
- * BACKLOG §3.11 เฟส 4 — ฟังก์ชันนี้เป็น "internal only" ไม่เคย expose ตรงผ่าน API เลย (ใช้แค่ภายใน
- * orderService/preorderService ตอน snapshot cost_per_unit ลง item) จึงตั้งใจคืนค่าเป็น**สตางค์**
- * ไม่ใช่บาท — ไม่ต้องผ่าน presenter เพราะ orderItemModel/preorderItemModel.cost_per_unit ก็เก็บเป็น
- * สตางค์เหมือนกันแล้ว (รับค่ามาใช้ตรง ๆ ได้เลยไม่ต้องแปลง) ทั้งฝั่งสูตร (estimated_cost_per_batch
- * มาจาก DB เป็นสตางค์อยู่แล้ว) และฝั่ง purchase_cost fallback (แปลงเป็นสตางค์ใน productService แล้ว
- * เช่นกัน) — **ทั้งสองฝั่งต้องแปลงพร้อมกันเสมอ** ไม่งั้น Map ที่คืนจะมีหน่วยปนกันโดยไม่มีทางรู้จาก
- * ภายนอกว่าค่าไหนมาจากไหน (นี่คือเหตุผลที่ purchase_cost ถูกดึงเข้ามาแปลงในเฟส 4 พร้อมกัน แทนที่จะ
- * รอเฟส 5 กับ product pricing ตัวอื่น — ดู docs/hardening-5-money-phase1.md §7)
- * คืน Map<productId, number(สตางค์) | null> — null = ไม่มีทั้งสูตรและ purchase_cost
+ * ฟังก์ชันนี้เป็น "internal only" (ใช้แค่ภายใน orderService/preorderService ตอน snapshot cost_per_unit ลง item) —
+ * คืนค่าดิบเป็นบาท (ไม่ผ่าน presenter) ใส่ orderItem/preorderItem.cost_per_unit ได้ตรง ๆ · ทั้งฝั่งสูตร
+ * (estimated_cost_per_batch) และฝั่ง purchase_cost fallback เป็นบาทเหมือนกัน (docs/money-units.md)
+ * คืน Map<productId, number(บาท) | null> — null = ไม่มีทั้งสูตรและ purchase_cost
  */
 export async function getUnitCostByProduct(
   productIds: string[]
@@ -226,8 +221,7 @@ export async function getUnitCostByProduct(
   }
 
   // fallback: สินค้าที่ยังไม่มีต้นทุนจากสูตร (ไม่มีสูตรเลย หรือมีแต่ yield_qty = 0) ใช้ purchase_cost ที่กรอกมือแทน
-  // productModel.purchase_cost เก็บเป็นสตางค์แล้วเช่นกัน (BACKLOG §3.11 เฟส 4) — ใช้ค่าดิบจาก DB ตรง ๆ
-  // ได้เลย ไม่ต้องแปลง (สอดคล้องกับฝั่งสูตรด้านบนที่เป็นสตางค์เหมือนกัน)
+  // productModel.purchase_cost เป็นบาทเหมือนฝั่งสูตรด้านบน — ใช้ค่าดิบจาก DB ตรง ๆ ได้เลย
   const missing = validIds.filter((id) => out.get(id) == null);
   if (missing.length > 0) {
     const products = await productModel

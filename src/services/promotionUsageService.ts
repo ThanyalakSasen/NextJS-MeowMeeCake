@@ -14,7 +14,7 @@ import promotionUsagesModel from "../models/promotionUsagesModel";
 import promotionModel from "../models/promotionModel";
 import { toBahtFields } from "../lib/money";
 
-// BACKLOG §3.11 — discount_applied เก็บเป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม
+// discount_applied — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentUsage<T extends Record<string, unknown>>(usage: T): T {
   return toBahtFields(usage, ["discount_applied"] as const);
 }

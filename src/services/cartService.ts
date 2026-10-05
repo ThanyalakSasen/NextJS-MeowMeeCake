@@ -39,10 +39,8 @@ export interface AddCartItemInput {
   quantity: number;
 }
 
-// BACKLOG §3.11 เฟส 5b — price_snapshot/selected_options[].extra_price เก็บเป็นสตางค์ (คำนวณจาก
-// product_price/sale_price/variant_price/extra_price ที่เป็นสตางค์ทั้งหมดแล้ว) แต่ API ยังรับ-ส่ง
-// บาททศนิยมเหมือนเดิม — ไม่มีจุด "รับ input เป็นบาท" ในไฟล์นี้เลย (price_snapshot คำนวณจาก DB ล้วน ๆ
-// ไม่เคยรับราคาจาก client ตรง ๆ) จึงมีแค่ presenter ฝั่งคืนค่า ไม่มีฝั่งแปลงเข้า
+// price_snapshot / selected_options[].extra_price — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
+// ไม่มีจุด "รับราคาจาก client" ในไฟล์นี้ (price_snapshot คำนวณจาก DB ล้วน ๆ) จึงมีแค่ฝั่งคืนค่า
 function presentCartItem(it: Record<string, any>): any {
   const presented = toBahtFields(it, ["price_snapshot"] as const);
   return {
@@ -76,12 +74,10 @@ export async function getCartDetail(userId: string) {
     .populate("variant_id", "variant_name variant_price")
     .lean();
 
-  // คำนวณ line_total เป็นสตางค์ (integer) ก่อนเสมอ แล้วค่อยแปลงเป็นบาทตอนสุดท้าย (กันปัดเศษสะสมจาก
-  // การคูณ/บวกเลขทศนิยม — BACKLOG §3.11) price_snapshot ที่นี่ยังเป็นสตางค์ดิบจาก DB (ยังไม่ผ่าน
-  // presentCartItem) ส่วน .populate("variant_id", "... variant_price") ก็ติดสตางค์ดิบมาด้วยเช่นกัน
-  // ต้องแปลงซ้อนอีกชั้นเหมือน componentService/recipeService.getExpanded() ในเฟส 4
+  // line_total / subtotal: คูณ/รวมจากค่าดิบใน DB (บาท) แล้วปัด 2 ตำแหน่งครั้งเดียวตอนท้าย (กัน float สะสม)
+  // .populate("variant_id", "... variant_price") ไม่ผ่าน presenter — ปัดซ้อนอีกชั้นตรงนี้
   const line = (items as any[]).map((it) => {
-    const lineTotalSatang = (it.price_snapshot ?? 0) * (it.quantity ?? 0);
+    const lineTotal = (it.price_snapshot ?? 0) * (it.quantity ?? 0);
     const presented = presentCartItem(it);
     return {
       ...presented,
@@ -89,14 +85,14 @@ export async function getCartDetail(userId: string) {
         presented.variant_id && typeof presented.variant_id === "object"
           ? toBahtFields(presented.variant_id, ["variant_price"] as const)
           : presented.variant_id,
-      line_total: toBaht(lineTotalSatang),
+      line_total: toBaht(lineTotal),
     };
   });
-  const subtotalSatang = (items as any[]).reduce(
+  const subtotalRaw = (items as any[]).reduce(
     (s, it) => s + (it.price_snapshot ?? 0) * (it.quantity ?? 0),
     0
   );
-  const subtotal = toBaht(subtotalSatang);
+  const subtotal = toBaht(subtotalRaw);
 
   return {
     cart: { _id: cart._id, user_id: cart.user_id },

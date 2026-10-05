@@ -262,7 +262,7 @@ export async function createPreorder(
     }
 
     // ราคารอบ (price_override / ราคาสินค้า) + ตัวเลือก/ออปชันที่เลือก — เงินเป็นบาท (docs/money-units.md)
-    const unitPriceSatang = toSatang(unit_price + custom.extra_price);
+    const unitPrice = toSatang(unit_price + custom.extra_price); // บาท ปัด 2 ตำแหน่ง
     return {
       round_item_id: item._id,
       product_id: product._id,
@@ -275,8 +275,8 @@ export async function createPreorder(
       selected_variants: custom.selected_variants,
       selected_options: custom.selected_options,
       quantity,
-      unit_price: unitPriceSatang,
-      total_price: toSatang(unitPriceSatang * quantity),
+      unit_price: unitPrice,
+      total_price: toSatang(unitPrice * quantity),
       special_request,
     };
   });
@@ -454,9 +454,9 @@ export async function createPreorder(
 }
 
 // ── READ ─────────────────────────────────────────────────────
-// BACKLOG §3.11 — DB เก็บเงินเป็นสตางค์ แต่ API ยังคืนบาททศนิยมเหมือนเดิม (เหมือน orderService)
+// เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) — ปัดก่อนส่งออก (เหมือน orderService)
 const PREORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount"] as const;
-// cost_per_unit เป็นสตางค์เช่นกันตั้งแต่เฟส 4 — เหตุผลเดียวกับ orderService (ORDER_ITEM_MONEY_FIELDS)
+// cost_per_unit (บาท) — เหตุผลเดียวกับ orderService (ORDER_ITEM_MONEY_FIELDS)
 const PREORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price", "cost_per_unit"] as const;
 
 function presentPreorder<T extends Record<string, unknown>>(preorder: T): T {
