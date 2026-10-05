@@ -130,7 +130,7 @@ async function marketsFromBusinessHours(profile: AnyDoc): Promise<AnyDoc[]> {
  * ย้ายเวลาทำการเดิมเข้า weekly_markets + ใส่ _id ให้รายการที่ไม่มี (ครั้งเดียว · idempotent — ตรงกับฝั่งลูกค้า
  * ensureWeeklyMarketsReady เพราะใช้ StoreProfile เอกสารเดียวกัน) แล้วคืนเอกสารล่าสุด
  */
-async function ensureWeeklyMarketsReady(): Promise<AnyDoc> {
+export async function ensureWeeklyMarketsReady(): Promise<AnyDoc> {
   let profile = await storeProfileModel.findOne().lean<AnyDoc>();
   if (!profile) profile = (await storeProfileModel.create({})).toObject() as AnyDoc;
 

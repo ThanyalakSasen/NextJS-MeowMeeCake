@@ -35,6 +35,7 @@ export const MENU_KEYS = [
   "dashboard",
   "promotions",
   "reports",
+  "store_info",
 ] as const;
 export type MenuKey = (typeof MENU_KEYS)[number];
 

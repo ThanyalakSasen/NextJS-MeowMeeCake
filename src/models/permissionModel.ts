@@ -13,6 +13,7 @@ const permissionSchema = new mongoose.Schema({
     required: true,
     enum: [
       "orders",
+      "preorder", // มีใน MENU_KEYS (permissionService) อยู่แล้วแต่ตกหล่นจาก enum นี้ — บันทึกสิทธิ์เมนูพรีออเดอร์ไม่ได้
       "payments",
       "products",
       "ingredients",
@@ -23,6 +24,7 @@ const permissionSchema = new mongoose.Schema({
       "dashboard",
       "promotions",
       "reports",
+      "store_info", // หน้าร้านประจำสัปดาห์ (customer-backend-merge.md §8.19) — ข้อมูลร้านส่วนอื่นเป็นของ owner เท่านั้น
     ],
   },
   // + เพิ่ม expires_at สำหรับสิทธิ์ชั่วคราว

@@ -13,7 +13,8 @@ export type HttpErrorCode =
   | "NOT_FOUND"
   | "CONFLICT"
   | "UNPROCESSABLE"
-  | "TOO_MANY_REQUESTS";
+  | "TOO_MANY_REQUESTS"
+  | "BAD_GATEWAY"; // บริการภายนอกที่ server ไปเรียกต่อล้มเหลว (เช่น แปลงลิงก์ Google Maps)
 
 export class HttpError extends Error {
   readonly status: number;

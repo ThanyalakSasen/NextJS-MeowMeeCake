@@ -1,7 +1,8 @@
 // storeProfileModel.ts
 // ข้อมูลทั่วไปของร้าน (เอกสารเดียว - single-doc config) ใช้กับหน้า "จัดการข้อมูลร้านค้า"
 // (ย้ายมาจาก backend ฝั่งลูกค้า — collection เดียวกัน) แยกจาก storeSettingsModel.ts (ที่อยู่ร้าน+พิกัด สำหรับรับเองที่ร้าน + ค่าจัดส่ง)
-// โลโก้ร้าน: ไม่เก็บ path ในเอกสารนี้ — อัปโหลดใหม่จะเขียนทับ public/pictures/logoMoewMeeCake.png ตรงๆ (ของ backend ฝั่งลูกค้า — ยังไม่ย้าย)
+// โลโก้ร้าน: หลักเก็บไฟล์ผ่าน src/lib/upload.ts (โฟลเดอร์ store) แล้วเก็บ URL ใน logo_url (customer-backend-merge.md §8.19)
+//   logo_url ว่าง = ยังไม่เคยอัปโหลดผ่านหลัก → ใช้ไฟล์เดิม /pictures/logoMoewMeeCake.png ของหน้าเว็บ
 // เบอร์โทรหลัก/สำรอง: ไม่เก็บเป็น string แต่อ้างอิง user_id ไปที่ตาราง Users (ใช้ user_phone ของคนนั้น)
 // อีเมลติดต่อร้าน (contact_email): ร้านตั้งเองได้ แสดงให้ลูกค้าเห็นที่หน้า "ติดต่อเรา"
 // อีเมลที่ระบบใช้ส่งอีเมล: อ่านจาก process.env.EMAIL_USER ตรงๆ (read-only ในหน้านี้) ไม่เก็บในเอกสารนี้
@@ -36,6 +37,7 @@ const weeklyMarketSchema = new mongoose.Schema(
 const storeProfileSchema = new mongoose.Schema(
   {
     store_name: { type: String, default: "" },
+    logo_url: { type: String, default: "" },
     // เวลาอัปโหลดโลโก้ล่าสุด — ใช้เป็น version ต่อท้าย URL โลโก้ ให้ cache รูปเก่าหมดผลทันที (ฝั่งลูกค้า src/lib/storeLogo.ts)
     logo_updated_at: { type: Date, default: null },
     cover_url: { type: String, default: "" },
