@@ -250,6 +250,9 @@ PATCH https://api.example.com/api/admin/products/6a814a064b44d4bf31fb2c4b   { "i
 - ลูกค้า 3 รายที่สลิป `pending` ไม่มีไฟล์ → แจ้งให้แนบใหม่ ([`uploads.md`](uploads.md) §3.3)
 - กำหนดชำระของพรีออเดอร์เก่า (BACKLOG4 Y7): `npm run backfill:payment-due` (dry-run) — ตรวจ 2026-10-01 ได้ 0 รายการ
   ไม่ต้อง `--apply` · ถ้าวัน deploy มีพรีออเดอร์ค้างจ่ายที่ยังไม่มีกำหนด ค่อย `-- --apply` (รายการที่เลยกำหนดแล้วจะได้ + 24 ชม.)
+- **รีวิว ([`customer-backend-merge.md`](customer-backend-merge.md) §8.20):** `npm run migrate:reviews` (dry-run) → `-- --apply` — เติม `status` ให้รีวิวเก่า
+  (ไม่เติม = ฝั่งลูกค้าไม่แสดง) · ลบ index `order_item_id_1` เฉพาะถ้าเป็น unique (บล็อกรีวิวพรีออเดอร์) · สร้าง index ใหม่ · ต้องรันก่อนเปิดรีวิวพรีออเดอร์
+  · ⚠️ สิทธิ์รีวิวหลังร้านย้ายจากเมนู `products` → `reports` — ให้สิทธิ์ reports กับพนักงานที่ดูแลรีวิว
 - ตรวจข้อมูลสินค้า (BACKLOG4 Y11): `npm run check:data-integrity -- --no-notify` → ต้องได้ "ไม่พบข้อมูลผิดปกติ" ก่อนเปิดร้าน
 - ⚠️ **หน่วยเงิน (BACKLOG4 R7 · [`money-units.md`](money-units.md) §3):** เอาสคริปต์ย้ายหน่วยออกแล้ว (2026-10-04) — ข้อมูลที่ยังเป็นสตางค์ต้องแก้ด้วยวิธีอื่น
   ```bash
@@ -318,6 +321,7 @@ PATH=/usr/bin:/bin:/usr/local/bin
 - [ ] ส่งข้อความทดสอบเข้า LINE เจ้าของร้าน (สร้างออเดอร์ทดสอบ หรือดูแจ้งเตือนในเว็บว่า `line_sent: true`)
 - [ ] ผูก LINE ลูกค้าจริงจบ flow → กลับมาที่ `https://app.example.com/profile?line=linked` (LINE.md §7)
 - [ ] ลูกค้าอัปโหลดสลิป → เปิดดูได้เฉพาะเจ้าของรายการ / owner / staff ที่มีสิทธิ์ (`/api/files/slips/…`)
+- [ ] หน้ารีวิวสินค้า (`/api/catalog/products/<id>/reviews`) ไม่มี `internal_note` / `internal_tags` · ชื่อผู้รีวิวปิดบางส่วน · `migrate:reviews` รอบ 2 ได้ "ไม่มี status: 0"
 - [ ] `pm2 status` = online · รีบูตเครื่องแล้วแอปกลับมาเอง
 
 ---

@@ -49,6 +49,7 @@ npm run seed:preorder-rounds   # สร้างรอบพรีออเด�
 npm run migrate:is-preorder    # แปลงประเภทสินค้าทุกรุ่น (product_type / product_types) → is_preorder — ✅ รันบน DB จริงแล้ว 2026-10-01 ไม่ต้องรันซ้ำ
 npm run cleanup:legacy-product-fields  # ลบฟิลด์เก่าของสินค้า (product_type / delete_at) — dry-run ก่อน, --apply เขียนจริง
 npm run migrate:line-user-id   # คัดลอก LINE ของลูกค้า users.lineId (ฝั่งลูกค้า) → line_user_id — dry-run ก่อน, --apply เขียนจริง · รันซ้ำได้
+npm run migrate:reviews        # เติม status ให้รีวิวเก่า + แก้ index ที่บล็อกรีวิวพรีออเดอร์ — dry-run ก่อน, --apply เขียนจริง · รันซ้ำได้
 npm run check:data-integrity   # ตรวจข้อมูลสินค้าผิดปกติ (อ่านอย่างเดียว) · --no-notify = ไม่ส่งแจ้งเตือน
 npm run backfill:payment-due   # เติมกำหนดชำระให้พรีออเดอร์เก่า — dry-run ก่อน, --apply เขียนจริง
 npm run cron:preorder-rounds   # เปิด/ปิดรอบตามเวลา + ยกเลิกคนไม่จ่าย (cron ทุก 15 นาที)
@@ -109,6 +110,7 @@ curl -s http://127.0.0.1:3000/api/health   # → {"ok":true,"db":"connected"}
 npm run cleanup:legacy-product-fields -- --apply   # ลบ product_type / delete_at ที่ค้าง (ไม่งั้นแจ้งเตือนทุกเช้า)
 npm run backfill:payment-due -- --apply            # เฉพาะถ้าข้อ 2 dry-run เจอรายการ
 npm run migrate:line-user-id                       # dry-run ดูรายชื่อ → แล้ว -- --apply (ไม่ลบ lineId · ห้ามใส่ --remove-old จนกว่าจะปิดพอร์ต 4000)
+npm run migrate:reviews                            # dry-run → แล้ว -- --apply (ต้องรันก่อนเปิดรีวิวพรีออเดอร์ · ไม่ลบ index ของฝั่งลูกค้า)
 npm run check:data-integrity -- --no-notify        # ไม่ควรมี price_too_high / price_too_low / sale_not_below_price
 npm run migrate:upload-files                       # หลัง merge PR #54 เท่านั้น — dry-run แล้วค่อย -- --apply
 npm run summary:monthly -- --dry-run               # ทดสอบข้อความ ไม่ส่ง

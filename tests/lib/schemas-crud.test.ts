@@ -54,11 +54,14 @@ describe("schemas/catalog — productVariant", () => {
 });
 
 describe("schemas/sentiment — aspect", () => {
-  it("create: ต้องมีชื่อ th/eng, desc เป็น null ได้", () => {
+  it("create: ต้องมีชื่อไทย (อังกฤษไม่กรอก = ใช้ชื่อไทย · §8.20), desc เป็น null ได้, icon ต้องเป็น key ที่รู้จัก", () => {
     expect(
       aspectCreate.parse({ aspect_name_th: "รสชาติ", aspect_name_eng: "taste", aspect_desc: null })
     ).toMatchObject({ aspect_name_th: "รสชาติ" });
-    expect(aspectCreate.safeParse({ aspect_name_th: "x" }).success).toBe(false);
+    expect(aspectCreate.safeParse({ aspect_name_th: "x" }).success).toBe(true);
+    expect(aspectCreate.safeParse({ aspect_name_eng: "x" }).success).toBe(false);
+    expect(aspectCreate.safeParse({ aspect_name_th: "x", icon: "rocket" }).success).toBe(false);
+    expect(aspectUpdate.safeParse({ aspect_name_eng: "" }).success).toBe(false);
     expect(aspectUpdate.safeParse({ aspect_desc: "note" }).success).toBe(true);
   });
 });

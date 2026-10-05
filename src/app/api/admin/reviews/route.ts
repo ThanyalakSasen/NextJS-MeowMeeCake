@@ -1,21 +1,16 @@
 /**
- * GET /api/admin/reviews — รีวิวทั้งหมด (products.view) — เห็นที่ซ่อนด้วย
- *   ?product_id= ?user_id= ?rating= ?is_visible= ?is_analyzed= ?page= ?limit=
+ * GET /api/admin/reviews — รายการรีวิวของหลังร้าน (reports.view · customer-backend-merge.md §8.20) — เห็นทุกสถานะ + ข้อมูลภายใน
+ *   กรอง: product_id · category_id · user_id · status (pending|approved|hidden) · rating | rating_min / rating_max ·
+ *         sentiment_group (positive|neutral|negative) · aspect_id (+ sentiment) · replied · read · has_media (1|0) ·
+ *         since / until (ISO) · source (customer|inferred|model|none) · order_kind (order|preorder) · q · is_visible · is_analyzed
+ *   sort = newest | oldest | lowest | highest | needs_reply · ?page= ?limit= · summary=1 → { count, avg_rating, negative_rate, unreplied_negative }
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { parseBool, parseNumber, parsePagination } from "@/lib/queryParams";
-import * as reviewService from "@/services/reviewService";
+import { parsePagination } from "@/lib/queryParams";
+import * as reviewModerationService from "@/services/reviewModerationService";
 
-export const GET = withPermission("products", "view", async (_s, req) => {
+export const GET = withPermission("reports", "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
-  const result = await reviewService.listReviews({
-    pagination: parsePagination(sp),
-    product_id: sp.get("product_id") ?? undefined,
-    user_id: sp.get("user_id") ?? undefined,
-    rating: parseNumber(sp.get("rating")),
-    is_visible: parseBool(sp.get("is_visible")),
-    is_analyzed: parseBool(sp.get("is_analyzed")),
-  });
-  return ok(result);
+  return ok(await reviewModerationService.listAdminReviews(sp, parsePagination(sp)));
 });

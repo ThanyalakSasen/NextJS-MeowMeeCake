@@ -109,9 +109,9 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | 11 | แจ้งเตือนถึงลูกค้าในเว็บ | `/customer/notifications` | หลักแจ้งลูกค้าทาง LINE อย่างเดียว |
 | 12 | ✅ ติดต่อร้าน — **ย้ายแล้ว (§8.17)** · ✏️ แก้ข้อมูล: ฝั่งลูกค้า**ไม่ได้ส่งอีเมล** แจ้งเตือนหลังร้าน | `/customer/contact` | — |
 | 13 | ยืนยันอีเมล / ลืมรหัสผ่าน / ตั้งรหัสใหม่ | `/user/verify-email` · `/auth/forgot-password` · `/auth/reset-password` | หลักมี field ใน user model แต่ไม่มี route |
-| 14 | จัดการรีวิวขั้นสูง | `/owner/reviews` (+ `bulk` · `analytics` · `dashboard` · `filter-options` · `products/[id]`) · `/owner/review-presets` | ตอบกลับ · ปักหมุด · สถานะ · แท็ก/โน้ตภายใน · อ่านแล้ว — หลักมีแค่ซ่อน + sentiment |
+| 14 | ✅ จัดการรีวิวขั้นสูง — **ย้ายแล้ว (§8.20) ยกเว้น analytics · dashboard · products/[id] (รอทีม) · review-presets (ไม่ย้าย)** | `/owner/reviews` (+ `bulk` · `analytics` · `dashboard` · `filter-options` · `products/[id]`) · `/owner/review-presets` | ตอบกลับ · ปักหมุด · สถานะ · แท็ก/โน้ตภายใน · อ่านแล้ว — หลักมีแค่ซ่อน + sentiment |
 | 15 | ✅ อัปโหลดรูป/วิดีโอในรีวิว + แต้มรีวิว — **ย้ายแล้ว (§8.18)** | `/customer/reviews/upload` | |
-| 16 | หมวดรีวิว (aspect) แบบเต็ม | `/owner/aspects/reorder` | เรียงลำดับ · เปิด/ปิด · ไอคอน |
+| 16 | ✅ หมวดรีวิว (aspect) แบบเต็ม — **ย้ายแล้ว (§8.20)** | `/owner/aspects/reorder` | เรียงลำดับ · เปิด/ปิด · ไอคอน |
 | 17 | ✅ ตัวเลือกสินค้าแบบกลุ่ม — **ย้ายแล้ว (§8.3 ขั้น 1)** | `/owner/products/[id]/customization` | `ProductVariantGroups` (เช่นเลือกครีมชีส/มะยงชิด) · เลิก Y9 แล้ว |
 | 18 | แจ้งลูกค้าเมื่อเปิดรอบ/มีโปรใหม่ | (`customerBroadcast`) | `customer_notified_at` ของรอบ/โปรโมชัน |
 | 19 | dashboard รอบพรีออเดอร์ + รายชื่อลูกค้าในรอบ | `/owner/preorder-rounds/dashboard` · `/[id]/customers` | หลักกรองพรีออเดอร์ตามรอบได้ แต่ไม่มีหน้าสรุป |
@@ -186,7 +186,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ✅ 2026-10-05 (§8.7) |
 | P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ✅ 2026-10-05 (§8.8) |
 | P2 | — | พรีออเดอร์: สินค้าเดียวกันหลายตัวเลือกในใบเดียว | — | ✅ 2026-10-05 (§8.10) |
-| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · ~~แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้~~ ✅ (§8.15) · ~~คำค้นเทียบเคียง~~ ✅ (§8.16) · ~~ติดต่อร้าน~~ ✅ (§8.17) · ~~อัปโหลดรูปรีวิว (+ แต้มรีวิว)~~ ✅ (§8.18) · ~~ข้อมูลร้าน/โลโก้~~ ✅ (§8.19) | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
+| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · ~~แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้~~ ✅ (§8.15) · ~~คำค้นเทียบเคียง~~ ✅ (§8.16) · ~~ติดต่อร้าน~~ ✅ (§8.17) · ~~อัปโหลดรูปรีวิว (+ แต้มรีวิว)~~ ✅ (§8.18) · ~~ข้อมูลร้าน/โลโก้~~ ✅ (§8.19) · ~~รีวิวพรีออเดอร์ + จัดการรีวิวหลังร้าน + แง่มุมรีวิว~~ ✅ (§8.20 · แดชบอร์ดรีวิวรอทีม) | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
 | P4 | 7 | หลังร้าน: API ที่หน้าเว็บลูกค้าต้องใช้แต่ข้อมูลมาจากร้าน (ตั้งค่าร้าน · โซนค่าส่ง · ตลาดนัด · ชุดสินค้า · คำค้น · รีวิวขั้นสูง) เข้า `/api/admin/*` | ตัดสินใจ "หลังร้านตัวไหน" | ⏸ รอทีม |
 | P5 | 8 | ปิด backend พอร์ต 4000 | หน้าเว็บลูกค้าย้าย path ครบ + ตัดสินใจหลังร้าน | ⏸ |
 
@@ -457,7 +457,7 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
 | รีวิว | `Reviews.video` (1 คลิป) · `POST /api/shop/reviews` / `PATCH /[id]` รับ `video` · รูปไม่เกิน 5 รูป/รีวิว |
 | แต้มรีวิว | ไม่มีรูป **15** · มีรูป **20** — เฉพาะออเดอร์ completed **และชำระแล้ว** ของผู้รีวิว · ครั้งเดียวต่อรายการในออเดอร์ (dedupe `review:item:<id>` — ลบแล้วเขียนใหม่ไม่ได้ซ้ำ · ตรงกับ key ของฝั่งลูกค้า) |
 
-**ยังไม่ครอบคลุม:** รีวิวสินค้าพรีออเดอร์ (`preorder_order_item_id`) — หลักยังรีวิวได้เฉพาะรายการในออเดอร์ปกติ (ไปพร้อมกลุ่มรีวิวขั้นสูง §7.1 ข้อ 14)
+~~**ยังไม่ครอบคลุม:** รีวิวสินค้าพรีออเดอร์~~ → ทำแล้วใน §8.20
 **หน้าเว็บลูกค้าเปลี่ยน path:** `/api/customer/reviews/upload` → `/api/shop/reviews/upload` · url รูปเป็น `/uploads/reviews/<userId>-…` (ฝั่งลูกค้า `review-image-<userId>-…`)
 **ไฟล์:** `src/lib/upload.ts` (วิดีโอ + prefix) · `src/services/reviewMediaService.ts` · `reviewService` (video + แต้ม) · `scripts/cleanup-review-media.ts` · เทส `reviewMediaPoints.test.ts` 5 เคส
 
@@ -484,3 +484,44 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
 
 **สิทธิ์เมนู:** `store_info` เพิ่มใน enum `Permissions.menu_key` · `MENU_KEYS` (permissionService · schemas/rbac) → `/api/auth/me` คืน `store_info` ด้วย · **แก้บั๊กเดิม:** enum ของ `Permissions` ไม่มี `preorder` (มีใน MENU_KEYS) → บันทึกสิทธิ์เมนูพรีออเดอร์ไม่ได้ — เพิ่มแล้ว · **หน้าจัดการสิทธิ์ของ FrontEnd ควรเพิ่มเมนู "ข้อมูลร้าน"**
 **ไฟล์:** `src/services/storeService.ts` · `src/lib/parseCoordinates.ts` (สำเนาจากฝั่งลูกค้า) · `storeProfileModel.logo_url` · `shippingService.ensureWeeklyMarketsReady` (export) · route 6 เส้น · เทส `storeInfo.test.ts` 8 เคส
+
+### 8.20 รีวิวพรีออเดอร์ · จัดการรีวิวหลังร้าน · แง่มุมรีวิว (2026-10-05)
+
+ผู้ใช้เลือก: สิทธิ์เมนู **`reports`** แบบฝั่งลูกค้า · **ต้องชำระแล้วถึงรีวิวได้** (ทั้งออเดอร์และพรีออเดอร์ — เดิมหลักให้รีวิวได้แต่ไม่ให้แต้ม) ·
+**รับรีวิวรวมหลายชิ้น** · แดชบอร์ด/analytics/รายงานรายสินค้า (R5) **รอทีมเลือกหลังร้านก่อน**
+
+**R0 — ปิดข้อมูลภายในรั่ว (มีอยู่ก่อนแล้ว):** `GET /api/catalog/products/[id]/reviews` เดิมส่งเอกสารรีวิวทั้งก้อน → เห็น `internal_note` / `internal_tags` / `read_by`
+ที่ backend ฝั่งลูกค้าเขียนไว้ + ชื่อเต็มผู้รีวิว · ตอนนี้ส่งเฉพาะ field ที่ลูกค้าควรเห็น · ชื่อปิดบางส่วน (`K. สมช***` — `reviewer_name` และ `user_id.user_fullname`) ·
+ปักหมุดขึ้นก่อน · มี `shop_reply` · `from_preorder` · `GET /api/shop/reviews` (รีวิวของฉัน) ตัดข้อมูลภายในด้วย
+
+**R1 — ฐานข้อมูล:** `Reviews` เพิ่ม field ที่ฝั่งลูกค้าใช้อยู่แล้ว (`status` · `aspect_feedback` · `is_pinned`/`pinned_at` · `shop_reply` · `internal_tags` · `internal_note` · `read_at`/`read_by`) ·
+`order_item_id` บังคับเฉพาะเมื่อไม่มี `preorder_order_item_id` · แก้ ref `"PreOrderItems"` → `PreorderItems` · **status กับ is_visible เปลี่ยนคู่กันเสมอ**
+(รีวิวที่แสดง = `is_visible: true` และ status ไม่ใช่ hidden/pending · เอกสารเก่าไม่มี status นับเป็น approved) — เดิมหลักซ่อนด้วย is_visible อย่างเดียว ฝั่งลูกค้ายังนับคะแนน ·
+index ใหม่ `uniq_active_order_item` / `uniq_active_preorder_item` (unique เฉพาะค่าที่เป็น ObjectId — index เดิม `order_item_id_1` นับ null ซ้ำ → รีวิวพรีออเดอร์ชิ้นที่ 2 ชน)
+
+⚠️ **DB จริงต้องรัน `npm run migrate:reviews` (dry-run) → `-- --apply`** ก่อนเปิดรีวิวพรีออเดอร์: เติม status ให้รีวิวเก่าของหลัก (ไม่เติม = ฝั่งลูกค้าไม่แสดง) ·
+ลบ `order_item_id_1` เฉพาะถ้าเป็น unique · สร้าง index ใหม่ (ไม่ลบ index อื่นของฝั่งลูกค้า · มีรีวิวซ้ำ = ไม่สร้าง แจ้งให้ตรวจ) · รายงาน status/is_visible ที่ขัดกัน
+
+**R2 — รีวิวพรีออเดอร์ + รีวิวรวม** (`POST /api/shop/reviews`)
+1. ลูกค้า: พรีออเดอร์ของฉัน → รีวิว (completed + ชำระแล้ว) → อัปโหลดรูป/วิดีโอ `/api/shop/reviews/upload`
+2. ส่ง `{ preorder_item_id }` หรือ `{ preorder_item_ids: [...] }` (ออเดอร์ปกติ: `order_item_id` / `order_item_ids`) + `rating, review_text, image, video, aspect_feedback`
+3. ตรวจ: รายการมีจริง (404) · เป็นของตัวเอง (403) · completed + ชำระแล้ว (400) · ยังไม่เคยรีวิว (409) · `product_id` จาก DB
+4. สร้าง status approved (แสดงทันที) → คำนวณคะแนนสินค้า → แต้ม 15 / 20 (key `review:preorder-item:<id>` · ออเดอร์ `review:item:<id>` — ตรงกับฝั่งลูกค้า)
+5. รีวิวรวม ≤ 30 ชิ้น → `{ data, failed: [{ item_id, message }] }` · ไม่ผ่านเลย = error ของชิ้นแรก (ฝั่งลูกค้าใช้ชื่อ `order_item_id` ใน failed — หลักใช้ `item_id`)
+
+**R3 — แง่มุมรีวิว:** `GET /api/catalog/review-aspects` (สาธารณะ · เปิดใช้งาน · เรียงตาม display_order · ไอคอนเป็น key ของ `src/lib/aspectIcons.ts`) ·
+`Aspects` เพิ่ม `is_active` · `display_order` · `icon` · `placeholder_text` · ชุดเริ่มต้น 4 ด้าน seed ครั้งแรก · ชื่อไทยห้ามซ้ำ (409) · สูงสุด 20 · ชื่ออังกฤษไม่กรอก = ชื่อไทย ·
+แก้ชื่อไทย → อัปเดตชื่อใน `aspect_feedback` ของรีวิวเดิม · `PATCH /api/admin/aspects/reorder` `{ orderedIds }` · ลูกค้าเลือกได้ทางเดียวต่อแง่มุม เก็บเฉพาะที่เปิดใช้งาน ชื่อจาก DB
+
+**R4 — จัดการรีวิวหลังร้าน** (สิทธิ์ `reports` · เดิม `/api/admin/reviews*` ใช้ `products` — **พนักงานที่เคยดู/ซ่อนรีวิวผ่านสิทธิ์สินค้าต้องได้สิทธิ์ reports แทน**)
+| API | ทำอะไร |
+|---|---|
+| `GET /api/admin/reviews` | กรอง: สินค้า · หมวด · ผู้ใช้ · status · ดาว / ช่วงดาว · ความรู้สึก (บวก/กลาง/ลบ) · แง่มุม (+ ชอบ/ติ) · ตอบแล้ว · อ่านแล้ว · มีรูป · ช่วงวันที่ · ที่มาผลวิเคราะห์ · ออเดอร์/พรีออเดอร์ · ค้นข้อความ · sort `needs_reply` (รีวิวลบที่ยังไม่ตอบขึ้นก่อน) · `summary=1` · มี `order_no` / `preorder_no` · ค่าผิด = 400 (ฝั่งลูกค้าเหมือนกัน) · แบ่งหน้าเสมอ (`{ items, meta }`) |
+| `PATCH /api/admin/reviews/[id]` | `status` · `is_pinned` · `shop_reply_text` (ว่าง = ลบ · นับว่าอ่านแล้ว) · `internal_tags` (≤ 20 · ตัดซ้ำ) · `internal_note_text` (ว่าง = ลบ) · `read` · ไม่มีอะไรให้แก้ = 400 · บันทึก userlog |
+| `POST /api/admin/reviews/bulk` | `{ ids ≤ 200, action: mark_read | mark_unread }` |
+| `GET /api/admin/reviews/filter-options` | สินค้า/หมวดที่มีรีวิว + คำตอบเก่า ≤ 50 |
+| `PATCH …/[id]/visibility` · `…/[id]/sentiment` | เดิม — เปลี่ยนเป็นสิทธิ์ reports · visibility = status approved/hidden |
+
+**ไม่ย้าย:** `/api/owner/review-presets` (ฝั่งลูกค้าเลิกใช้ · หน้าเว็บไม่เรียก) · **รอทีม (R5):** `/api/owner/reviews/analytics` · `/dashboard` · `/products/[id]` (~900 บรรทัด)
+**หน้าเว็บเปลี่ยน path:** `/api/customer/review-aspects` → `/api/catalog/review-aspects` · `/api/customer/products/:id/reviews` → `/api/catalog/products/:id/reviews` (`data.items`) · `/api/customer/reviews` → `/api/shop/reviews` · หลังร้าน `/api/owner/reviews*` → `/api/admin/reviews*` (`data.items` + `data.meta` + `data.summary`) · `/api/owner/aspects/reorder` → `/api/admin/aspects/reorder`
+**ไฟล์:** `reviewModel` · `aspectModel` · `src/services/reviewService.ts` (เขียนใหม่) · `src/services/reviewModerationService.ts` · `sentimentService` (aspects) · `src/lib/maskName.ts` · `src/lib/aspectIcons.ts` · `scripts/migrate-reviews.ts` · route 11 เส้น · เทส `reviewsAdvanced.test.ts` 8 เคส (+ ปรับ `reviewMediaPoints` · `schemas-crud`)

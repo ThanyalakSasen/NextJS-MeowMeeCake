@@ -110,10 +110,9 @@ describe("แต้มรีวิว", () => {
     expect(await pointsService.getBalance(b.uid)).toBe(20);
   });
 
-  it("ออเดอร์ยังไม่ชำระ → รีวิวได้แต่ไม่ได้แต้ม", async () => {
+  it("ออเดอร์ยังไม่ชำระ → รีวิวไม่ได้ (400 · ผู้ใช้เลือก 2026-10-05 §8.20) · ไม่ได้แต้ม", async () => {
     const c = await completedOrder(false);
-    const review = (await reviewService.createReview({ user_id: c.uid, order_item_id: c.itemId, rating: 3 })) as { video: unknown };
-    expect(review.video).toBeNull();
+    await expect(reviewService.createReview({ user_id: c.uid, order_item_id: c.itemId, rating: 3 })).rejects.toMatchObject({ status: 400 });
     expect(await pointsService.getBalance(c.uid)).toBe(0);
   });
 });
