@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import customerNotificationModel from "@/models/customerNotificationModel";
 import * as orderService from "@/services/orderService";
 import * as customerNotifyService from "@/services/customerNotifyService";
+import { flushBackground } from "@/lib/backgroundTasks";
 import { makeUser, makeProduct } from "./helpers";
 
 /** กระดิ่งแจ้งเตือนในเว็บของลูกค้า (customer-backend-merge.md §8.12) — ไม่ได้ตั้ง LINE token ในเทส = กระดิ่งอย่างเดียว */
@@ -58,12 +59,12 @@ describe("กระดิ่งในเว็บของลูกค้า", (
     const b = await webOrder();
     await waitNotices(b.user._id, 1);
     await orderService.cancelOrderByCustomer(b.oid, String(b.user._id));
-    await new Promise((r) => setTimeout(r, 150));
+    await flushBackground(); // รองานแจ้งเตือนเบื้องหลังจบจริง (แทนรอ 150ms)
     expect(await customerNotificationModel.countDocuments({ user_id: b.user._id })).toBe(1);
 
     const pos = await webOrder("instore");
     await orderService.updateOrderStatus(pos.oid, "confirmed");
-    await new Promise((r) => setTimeout(r, 150));
+    await flushBackground(); // รองานแจ้งเตือนเบื้องหลังจบจริง (แทนรอ 150ms)
     expect(await customerNotificationModel.countDocuments({ user_id: pos.user._id })).toBe(0);
   });
 

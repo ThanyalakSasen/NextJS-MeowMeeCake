@@ -6,6 +6,7 @@ import * as preorderService from "@/services/preorderService";
 import * as orderService from "@/services/orderService";
 import * as dashboardService from "@/services/dashboardService";
 import { makeUser, makeProduct } from "./helpers";
+import { flushBackground } from "@/lib/backgroundTasks";
 
 /** docs/LINE.md §9 — แจ้งเจ้าของร้าน: พรีออเดอร์ใหม่ + สินค้าใกล้หมดจากการปรับสต็อกเอง */
 
@@ -13,9 +14,9 @@ async function lowStockNotes(productName: string) {
   return notificationModel.find({ title: `สินค้าใกล้จะหมด: ${productName}` }).lean();
 }
 
-/** notify() เป็น fire-and-forget — รอให้ record ถูกสร้าง (หรือยืนยันว่าไม่มีหลังรอสักครู่) */
+/** notify() เป็น fire-and-forget — รอให้งานเบื้องหลังจบจริง (lib/backgroundTasks) แทนการรอเวลาตายตัว */
 async function settle() {
-  await new Promise((r) => setTimeout(r, 150));
+  await flushBackground();
 }
 
 describe("สินค้าใกล้หมด — ปรับสต็อกเอง", () => {
