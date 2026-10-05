@@ -13,7 +13,7 @@ import { alertQuotaExhausted, isQuotaExceededError, recordPushed } from "../lib/
 import { log } from "../lib/logger";
 
 /** ค่าที่เก็บใน DB — ภาษาอังกฤษ (enum ของ notificationModel · ใช้กรอง ?module=) ห้ามเปลี่ยนเป็นภาษาไทย */
-export type NotificationModule = "order" | "ingredient" | "production" | "finance" | "system";
+export type NotificationModule = "order" | "ingredient" | "production" | "finance" | "customer" | "system";
 
 /** ป้ายภาษาไทยสำหรับแสดงผล — ใส่ใน response เป็น `module_label` และหัวข้อความ LINE */
 export const NOTIFICATION_MODULE_LABELS: Record<NotificationModule, string> = {
@@ -21,6 +21,8 @@ export const NOTIFICATION_MODULE_LABELS: Record<NotificationModule, string> = {
   ingredient: "วัตถุดิบ",
   production: "การผลิต",
   finance: "การเงิน",
+  // ข้อความจากลูกค้า (ฟอร์มติดต่อร้าน) — ค่าเดียวกับที่ backend ฝั่งลูกค้าใช้ (customer-backend-merge.md §8.17)
+  customer: "ลูกค้า",
   system: "อื่น ๆ",
 };
 

@@ -66,7 +66,7 @@ Ingredients · Permissions · PreorderRoundItems · ProductionOrders · Promotio
 
 ชุดสินค้า (bundles) · แต้มสะสม (points + แชร์แต้ม) · คูปองส่วนตัว (`UserCoupons`) · รายการโปรด · จุดรับสินค้า / ตลาดนัดรายสัปดาห์ ·
 payment link · แนะนำสินค้า + ตรวจสารก่อภูมิแพ้ · คำค้นหาเทียบเคียง (search synonyms) · ตั้งค่า/ข้อมูลร้าน (store settings/profile/logo/map) ·
-แจ้งเตือนถึงลูกค้าในเว็บ (`CustomerNotifications`) · จัดการรีวิว (ปักหมุด · ตอบกลับ · preset · analytics) · ตัวเลือกสินค้าแบบกลุ่ม
+แจ้งเตือนถึงลูกค้าในเว็บ (`CustomerNotifications`) · ติดต่อร้าน (แจ้งเตือนหลังร้าน — ไม่ใช่อีเมล) · จัดการรีวิว (ปักหมุด · ตอบกลับ · preset · analytics) · ตัวเลือกสินค้าแบบกลุ่ม
 (`ProductVariantGroups` · product customization) · ยืนยันอีเมล / ลืมรหัสผ่าน · ติดต่อร้าน · สิทธิ์ชั่วคราว (`TemporaryPermissions`) · QR พร้อมเพย์
 
 ## 5. แนวทางที่แนะนำ (เป็นขั้น)
@@ -107,7 +107,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | 9 | ✅ คำค้นหาเทียบเคียง — **ย้ายแล้ว (§8.16)** | `/customer/search-synonyms` · `/owner/search-synonyms` | |
 | 10 | ข้อมูล/ตั้งค่าร้าน (โลโก้ · แผนที่) | `/owner/store-profile` · `/store-settings` · `/map-link` · `/customer/store-info` · `/store-logo` | |
 | 11 | แจ้งเตือนถึงลูกค้าในเว็บ | `/customer/notifications` | หลักแจ้งลูกค้าทาง LINE อย่างเดียว |
-| 12 | ติดต่อร้าน (อีเมล) | `/customer/contact` | nodemailer |
+| 12 | ✅ ติดต่อร้าน — **ย้ายแล้ว (§8.17)** · ✏️ แก้ข้อมูล: ฝั่งลูกค้า**ไม่ได้ส่งอีเมล** แจ้งเตือนหลังร้าน | `/customer/contact` | — |
 | 13 | ยืนยันอีเมล / ลืมรหัสผ่าน / ตั้งรหัสใหม่ | `/user/verify-email` · `/auth/forgot-password` · `/auth/reset-password` | หลักมี field ใน user model แต่ไม่มี route |
 | 14 | จัดการรีวิวขั้นสูง | `/owner/reviews` (+ `bulk` · `analytics` · `dashboard` · `filter-options` · `products/[id]`) · `/owner/review-presets` | ตอบกลับ · ปักหมุด · สถานะ · แท็ก/โน้ตภายใน · อ่านแล้ว — หลักมีแค่ซ่อน + sentiment |
 | 15 | อัปโหลดรูป/วิดีโอในรีวิว | `/customer/reviews/upload` | |
@@ -186,7 +186,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ✅ 2026-10-05 (§8.7) |
 | P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ✅ 2026-10-05 (§8.8) |
 | P2 | — | พรีออเดอร์: สินค้าเดียวกันหลายตัวเลือกในใบเดียว | — | ✅ 2026-10-05 (§8.10) |
-| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · ~~แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้~~ ✅ (§8.15) · ~~คำค้นเทียบเคียง~~ ✅ (§8.16) · ติดต่อร้าน · อัปโหลดรูปรีวิว (+ แต้มรีวิว) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
+| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · ~~แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้~~ ✅ (§8.15) · ~~คำค้นเทียบเคียง~~ ✅ (§8.16) · ~~ติดต่อร้าน~~ ✅ (§8.17) · อัปโหลดรูปรีวิว (+ แต้มรีวิว) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
 | P4 | 7 | หลังร้าน: API ที่หน้าเว็บลูกค้าต้องใช้แต่ข้อมูลมาจากร้าน (ตั้งค่าร้าน · โซนค่าส่ง · ตลาดนัด · ชุดสินค้า · คำค้น · รีวิวขั้นสูง) เข้า `/api/admin/*` | ตัดสินใจ "หลังร้านตัวไหน" | ⏸ รอทีม |
 | P5 | 8 | ปิด backend พอร์ต 4000 | หน้าเว็บลูกค้าย้าย path ครบ + ตัดสินใจหลังร้าน | ⏸ |
 
@@ -433,3 +433,16 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
 - **API:** `GET /api/catalog/search-synonyms` (สาธารณะ → `[{ term, synonyms }]`) · `GET/POST /api/admin/search-synonyms` · `PATCH/DELETE /api/admin/search-synonyms/[id]` (สิทธิ์เมนู products · ลบแบบ soft delete · บันทึก userlog)
 - หน้าเว็บลูกค้าเปลี่ยน path: `/api/customer/search-synonyms` → `/api/catalog/search-synonyms` · หน้าจัดการ `/api/owner/search-synonyms` → `/api/admin/search-synonyms` (ถ้ายังใช้หลังร้านฝั่งลูกค้า — รอทีมตัดสินใจ §8.1)
 - **ไฟล์:** `src/models/searchSynonymModel.ts` · `src/lib/search/normalize.ts` · `src/services/searchSynonymService.ts` · `productService.getProducts({ expandSynonyms })` · เทส `searchSynonyms.test.ts` 3 เคส
+
+### 8.17 ขั้น 6 — ติดต่อร้าน (ฟอร์ม "ส่งข้อความหาเรา") (2026-10-05)
+
+✏️ **แก้ข้อมูล §4 / §7.1 ข้อ 12:** ฝั่งลูกค้า**ไม่ได้ส่งอีเมล** — ส่งเป็นแจ้งเตือนหลังร้าน (หมวด "customer") อย่างเดียว
+
+ผู้ใช้เลือก: **แจ้งเตือนหลังร้าน + LINE เจ้าของร้าน** · เพิ่มหมวดแจ้งเตือนใหม่ **"ลูกค้า"** (`module: "customer"` — ค่าเดียวกับที่ฝั่งลูกค้าเขียน DB อยู่แล้ว)
+
+- ลูกค้าต้องล็อกอิน · หัวข้อ 4 แบบ (เค้กวันเกิด/ตามสั่ง · หน้าร้านประจำสัปดาห์ · จัดเลี้ยง/Snack Box · เรื่องอื่นๆ — ไม่รู้จัก = เรื่องอื่นๆ) · ข้อความ ≤ 1000 ตัวอักษร
+- ชื่อ/เบอร์/อีเมลผู้ส่งดึงจากบัญชี (ไม่รับจาก client · อีเมลชั่วคราวของบัญชี LINE ไม่แสดง) → "ข้อความจากลูกค้า: <หัวข้อ>" · "<ชื่อ> (โทร … · อีเมล …): <ข้อความ>"
+- กันกดรัว: 1 ข้อความ/นาที/บัญชี (429) — นับหลังตรวจข้อมูลผ่าน
+- **API:** `POST /api/shop/contact` `{ topic, message }` · `GET /api/catalog/contact-topics` → `{ topics, max_length }`
+- `NotificationModule` + enum ของ `Notifications` เพิ่ม `customer` (ป้าย "ลูกค้า" · `?module=customer` หรือ `?module=ลูกค้า`) — **หน้าแจ้งเตือนของ FrontEnd ควรเพิ่มตัวกรองนี้**
+- **ไฟล์:** `src/lib/contactTopics.ts` · `src/services/contactService.ts` · route 2 เส้น · `notificationService` / `notificationModel` · เทส `contact.test.ts` 2 เคส
