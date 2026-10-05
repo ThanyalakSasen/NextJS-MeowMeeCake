@@ -76,6 +76,8 @@ sudo -iu meowmee git clone https://github.com/ThanyalakSasen/NextJS-MeowMeeCake.
 
 ## ③ merge PR ตามลำดับ (รอ CI ผ่านทุกขั้น)
 
+> ✅ **merge เข้า main ครบแล้ว 2026-10-06** — ผล + conflict ที่แก้จริง → [`BACKLOG5.md`](BACKLOG5.md) §8 · ข้อนี้เหลือไว้เป็นประวัติ
+
 ```
 #56 postcss override ────────────────────────────▶ main   (ไม่ชนกับใคร · commit นี้รวมอยู่ใน #57 แล้ว 2026-10-06 — merge ก่อน/หลัง/ปิดไปก็ได้)
 #52 is_preorder + เลขออเดอร์ ────────────────────▶ main   ✔ ติ๊ก "Delete branch"

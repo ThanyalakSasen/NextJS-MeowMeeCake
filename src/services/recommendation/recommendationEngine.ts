@@ -28,6 +28,7 @@ import Component from "@/models/componentModel";
 import Order from "@/models/orderModel";
 import OrderItem from "@/models/orderItemModel";
 import Review from "@/models/reviewModel";
+import { VISIBLE_REVIEW } from "@/lib/reviewVisibility";
 import { isPreorderOf } from "@/lib/productCode";
 import Cart from "@/models/cartModel";
 import CartItem from "@/models/cartItemModel";
@@ -381,8 +382,7 @@ async function collectUserSignals(
   // ── 4. Reviews (rating -> weight = ค่า rating ตาม spec) ──
   const reviews = await Review.find({
     user_id: userId,
-    deleted_at: null,
-    is_visible: true,
+    ...VISIBLE_REVIEW, // รีวิวที่ร้านซ่อน (status หรือ is_visible) ไม่ใช้เป็นสัญญาณ — BACKLOG5 G4
   })
     .select("product_id rating")
     .lean();
@@ -429,7 +429,7 @@ interface CatalogProduct {
 let catalogCache: { data: { items: CatalogProduct[]; categoryOrder: string[] }; expiresAt: number } | null = null;
 
 /** อายุ cache ของแคตตาล็อก (ms) — ค่าเริ่มต้น 3 นาที · RECOMMENDATION_CACHE_TTL_MS=0 ปิด cache (เทส) */
-function catalogCacheTtl(): number {
+export function catalogCacheTtl(): number {
   const n = Number(process.env.RECOMMENDATION_CACHE_TTL_MS);
   return Number.isFinite(n) && n >= 0 ? n : 3 * 60 * 1000;
 }
@@ -623,8 +623,7 @@ async function buildNeighborhoodUserItemMap(
     
     Review.find({
       product_id: { $in: myProductIds },
-      deleted_at: null,
-      is_visible: true,
+      ...VISIBLE_REVIEW,
       user_id: { $ne: userId },
     }).limit(1000).select("user_id").lean()
   ]);
@@ -653,8 +652,7 @@ async function buildNeighborhoodUserItemMap(
 
     Review.find({
       user_id: { $in: neighborArr },
-      deleted_at: null,
-      is_visible: true,
+      ...VISIBLE_REVIEW,
     }).limit(1000).select("user_id product_id rating").lean()
   ]);
 
