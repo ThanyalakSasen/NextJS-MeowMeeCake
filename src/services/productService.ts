@@ -16,6 +16,7 @@ import productModel from "../models/productModel";
 import productCategoryModel from "../models/productCategoryModel";
 import productVariantModel from "../models/productVariantModel";
 import { getProductCustomization } from "./productCustomizationService";
+import * as searchSynonymService from "./searchSynonymService";
 import unitModel from "../models/unitModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
@@ -106,6 +107,8 @@ export type UpdateProductInput = Partial<CreateProductInput>;
 export interface ListProductQuery {
   pagination: Pagination;
   search?: string;
+  /** true = ขยายคำค้นด้วยกลุ่มคำพ้อง (หน้าร้าน · searchSynonymService — customer-backend-merge.md §8.16) */
+  expandSynonyms?: boolean;
   category_id?: string;
   /** true = เฉพาะพรีออเดอร์ · false = เฉพาะสินค้าปกติ · ไม่ส่ง = ทั้งหมด */
   is_preorder?: boolean;
@@ -360,12 +363,13 @@ export async function getProducts(query: ListProductQuery) {
     filter.is_visible = query.is_visible;
   }
   if (query.search) {
-    const rx = new RegExp(escapeRegExp(query.search.trim()), "i");
-    filter.$or = [
-      { product_name_th: rx },
-      { product_name_eng: rx },
-      { product_description: rx },
-    ];
+    const words = query.expandSynonyms
+      ? await searchSynonymService.searchWordsFor(query.search)
+      : [query.search.trim()];
+    filter.$or = words.flatMap((w) => {
+      const rx = new RegExp(escapeRegExp(w), "i");
+      return [{ product_name_th: rx }, { product_name_eng: rx }, { product_description: rx }];
+    });
   }
 
   const sortField = query.sortBy || "created_at";

@@ -104,7 +104,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | 6 | payment link | `/customer/payment-link` · `/redeem` | |
 | 7 | QR พร้อมเพย์ให้ลูกค้าจ่าย | `/customer/orders/[id]/payment` | ไลบรารี `promptpay-qr` · หลักมีแค่ `promptpay_ref` |
 | 8 | ✅ แนะนำสินค้า / สินค้าคล้ายกัน / ตรวจสารก่อภูมิแพ้ — **ย้ายแล้ว (§8.15)** | `/customer/recommendations` · `/similar/[id]` · `/products/recommended` · `/customer/ingredients` | model `Interactions` |
-| 9 | คำค้นหาเทียบเคียง | `/customer/search-synonyms` · `/owner/search-synonyms` | |
+| 9 | ✅ คำค้นหาเทียบเคียง — **ย้ายแล้ว (§8.16)** | `/customer/search-synonyms` · `/owner/search-synonyms` | |
 | 10 | ข้อมูล/ตั้งค่าร้าน (โลโก้ · แผนที่) | `/owner/store-profile` · `/store-settings` · `/map-link` · `/customer/store-info` · `/store-logo` | |
 | 11 | แจ้งเตือนถึงลูกค้าในเว็บ | `/customer/notifications` | หลักแจ้งลูกค้าทาง LINE อย่างเดียว |
 | 12 | ติดต่อร้าน (อีเมล) | `/customer/contact` | nodemailer |
@@ -186,7 +186,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ✅ 2026-10-05 (§8.7) |
 | P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ✅ 2026-10-05 (§8.8) |
 | P2 | — | พรีออเดอร์: สินค้าเดียวกันหลายตัวเลือกในใบเดียว | — | ✅ 2026-10-05 (§8.10) |
-| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · ~~แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้~~ ✅ (§8.15) · คำค้นเทียบเคียง · ติดต่อร้าน · อัปโหลดรูปรีวิว (+ แต้มรีวิว) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
+| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · ~~แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้~~ ✅ (§8.15) · ~~คำค้นเทียบเคียง~~ ✅ (§8.16) · ติดต่อร้าน · อัปโหลดรูปรีวิว (+ แต้มรีวิว) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
 | P4 | 7 | หลังร้าน: API ที่หน้าเว็บลูกค้าต้องใช้แต่ข้อมูลมาจากร้าน (ตั้งค่าร้าน · โซนค่าส่ง · ตลาดนัด · ชุดสินค้า · คำค้น · รีวิวขั้นสูง) เข้า `/api/admin/*` | ตัดสินใจ "หลังร้านตัวไหน" | ⏸ รอทีม |
 | P5 | 8 | ปิด backend พอร์ต 4000 | หน้าเว็บลูกค้าย้าย path ครบ + ตัดสินใจหลังร้าน | ⏸ |
 
@@ -423,3 +423,13 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
 `/customer/recommendations/similar/:id` → `/api/catalog/products/:id/similar` · `/customer/ingredients` → `/api/catalog/ingredients` · ข้อมูลอยู่ใน `data` (envelope ของหลัก)
 
 **ไฟล์:** `src/services/recommendation/{recommendationEngine,allergenChecker,recommendationService}.ts` · `src/types/recommendation.ts` · route 4 เส้น · `vitest.config.mts` (ปิด cache) · เทส `recommendations.test.ts` 3 เคส
+
+### 8.16 ขั้น 6 — คำค้นเทียบเคียง (คำพ้องค้นหา) (2026-10-05)
+
+- ร้านตั้งกลุ่มคำพ้อง เช่น "ช็อกโกแลต: chocolate, ช็อค" → ลูกค้าพิมพ์คำไหนในกลุ่มก็เจอสินค้าเดียวกัน · collection `SearchSynonyms` เดียวกับฝั่งลูกค้า
+- กติกาขยายคำค้น (เหมือนหน้าเว็บลูกค้า `synonymMatch.ts`): คำค้นตรงกับคำในกลุ่ม (ตรงตัว / คำค้นมีคำนั้น / คำนั้นขึ้นต้นด้วยคำค้น ≥ 2 ตัวอักษร) → ค้นด้วยทุกคำในกลุ่ม
+- **เพิ่มจากฝั่งลูกค้า:** `GET /api/catalog/products?search=` ขยายคำค้นให้ฝั่ง server ด้วย (storefront ของทีม FrontEnd ได้ผลเลยไม่ต้องทำเอง) · หลังร้าน `/api/admin/products` ค้นตามคำเดิม
+- ตรวจข้อมูลแบบฝั่งลูกค้า: คำ ≥ 2 ตัว · ≤ 60 ตัว · ≤ 50 คำพ้อง/กลุ่ม · ตัดคำซ้ำ · คำหลักซ้ำกลุ่มอื่น (ไม่สนตัวพิมพ์/วรรณยุกต์) = 409 · cache 60 วิ ล้างทันทีเมื่อแก้
+- **API:** `GET /api/catalog/search-synonyms` (สาธารณะ → `[{ term, synonyms }]`) · `GET/POST /api/admin/search-synonyms` · `PATCH/DELETE /api/admin/search-synonyms/[id]` (สิทธิ์เมนู products · ลบแบบ soft delete · บันทึก userlog)
+- หน้าเว็บลูกค้าเปลี่ยน path: `/api/customer/search-synonyms` → `/api/catalog/search-synonyms` · หน้าจัดการ `/api/owner/search-synonyms` → `/api/admin/search-synonyms` (ถ้ายังใช้หลังร้านฝั่งลูกค้า — รอทีมตัดสินใจ §8.1)
+- **ไฟล์:** `src/models/searchSynonymModel.ts` · `src/lib/search/normalize.ts` · `src/services/searchSynonymService.ts` · `productService.getProducts({ expandSynonyms })` · เทส `searchSynonyms.test.ts` 3 เคส
