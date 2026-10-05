@@ -187,12 +187,25 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 - [x] ~~merge ตามลำดับ (BACKLOG4 R1) + **#56**~~ — **merge เข้า main ครบแล้ว 2026-10-06** (§8)
 - [ ] deploy backend ฝั่งลูกค้าที่แก้ขั้น 0 พร้อมกัน (§8.5) แล้ว `cleanup:legacy-product-fields -- --apply`
 - [ ] env production ครบ (Y2) · secret ใหม่ทั้งหมด · **หมุน `LINE_LOGIN_CHANNEL_SECRET`** (เคยวางในแชต)
-- [ ] `migrate:line-user-id` → `--apply` (ห้าม `--remove-old` จนปิดพอร์ต 4000) · `migrate:reviews` → `--apply` (ก่อนเปิดรีวิวพรีออเดอร์)
-- [ ] `check:aspect-names` (dry-run ก่อน deploy — เจอชื่อซ้ำแก้ในหลังร้านก่อน) → `--apply` หลัง deploy = สร้าง unique index ชื่อแง่มุม (G5 · PR #59)
+- [ ] `migrate:line-user-id` → `--apply` (ห้าม `--remove-old` จนปิดพอร์ต 4000) — dry-run 2026-10-06: คัดลอก 1 คน · ไม่มีขัดกัน
+- [x] ~~`migrate:reviews` → `--apply`~~ — **apply แล้ว 2026-10-06** (DB จริง): status ครบอยู่แล้ว (เติม 0) · ลบ index เดิม `order_item_id_1` ·
+  สร้าง `uniq_active_order_item` / `uniq_active_preorder_item` (partial unique — ยังกันรีวิวซ้ำรายการออเดอร์ปกติ) → เปิดรีวิวพรีออเดอร์ได้
+- [x] ~~`check:aspect-names` → `--apply`~~ — **apply แล้ว 2026-10-06** (DB จริง): แง่มุม 5 · ไม่มีชื่อซ้ำ · สร้าง `uniq_active_aspect_name_th` แล้ว (G5 · PR #59)
 - [ ] `migrate:upload-files` dry-run → `--apply` หลัง deploy (ย้ายสลิปจาก `public/uploads/slips/` ไปที่เก็บส่วนตัว + เปลี่ยน URL — PR #54 · [`uploads.md`](uploads.md) §3.3)
 - [ ] cron 6 ตัว · nginx `/uploads/` · Atlas แยก DB user + เปลี่ยนรหัส user เดิม
 - [ ] หลังร้าน: เลขพร้อมเพย์ · ข้อมูลร้าน/โลโก้ · สิทธิ์ `reports` (รีวิว) และ `store_info` (หน้าร้านประจำสัปดาห์) ให้พนักงาน
 - [ ] ออเดอร์ค้าง `ORD-1790786142302-M2PY` · `WEB-1790317257577` (BACKLOG4 §8.3)
+- [ ] **เงินที่ยังเป็นสตางค์ใน DB จริง 168 ค่า** ([`money-units.md`](money-units.md) §3–§4 ข้อ 2 — ต้องแก้ก่อน deploy · ยังไม่ได้เลือกวิธี:
+  แก้ทีละรายการในหลังร้าน หรือเขียนสคริปต์ใหม่) — dry-run 2026-10-06 ยังเจอ `sale_not_below_price` 7 ตัว (เช่น ชิโอะปัง `pos-0126264` ราคาลด 4000 / ราคา 45)
+- [ ] **`product_type` กลับมา 33 ตัว** — backend ฝั่งลูกค้าโค้ดเดิมเขียนกลับ · `cleanup:legacy-product-fields` ลบแค่ `delete_at` ·
+  `migrate:is-preorder` (ตัวที่ลบ `product_type`) ห้าม `--apply` ซ้ำตาม README → ต้องกำหนดวิธีลบหลัง deploy ฝั่งลูกค้าขั้น 0
+- [ ] `backfill:payment-due` — dry-run 2026-10-06: พรีออเดอร์ค้างจ่ายไม่มีกำหนดชำระ 4 ใบ **เลยกำหนดแล้วทั้งหมด** (`PRE-1791013745988-RM33` ·
+  `PRE-1791067754534-H2YA` · `PRE-1791068589123-ST4R` · `PRE-1791112996109-W4B1`) → `--apply` = เลื่อนเป็นเวลารัน + 24 ชม. (`--grace-hours=`) · ต้องตัดสินใจ: เลื่อน หรือยกเลิกเอง
+- [ ] `code_prefix_mismatch` 2 ตัว — บราวนี่มัทฉะ `pos-1626338` · เค้กสตรอว์เบอร์รีครีม `pos-1626294` รหัส `pos-` แต่ `is_preorder = true` → ตรวจในหลังร้าน
+
+**ผล dry-run กับ DB จริง 2026-10-06** (README ข้อ 2 · ไม่เขียน DB · ไม่ส่ง LINE): `check:data-integrity -- --no-notify` = 42 รายการ
+(`legacy_fields` 33 · `sale_not_below_price` 7 · `code_prefix_mismatch` 2) · `cleanup:legacy-product-fields` = ลบ `delete_at: null` ได้ 4 ตัว
+(`pos-0126264` · `pos-2826088` · `pos-2726067` · `pos-2626624` — รอ deploy ฝั่งลูกค้าขั้น 0 ก่อน apply)
 
 ---
 
