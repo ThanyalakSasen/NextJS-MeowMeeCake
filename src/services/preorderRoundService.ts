@@ -30,7 +30,7 @@ import type { z } from "zod";
 import type { updateRoundBody, updateRoundItemBody } from "../schemas/preorderRound";
 import { toSatang, toBahtFields } from "../lib/money";
 import { isPreorderProduct } from "../lib/productCode";
-import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
+import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -381,7 +381,8 @@ async function syncPickupDateChange(roundId: unknown, pickupDate: Date): Promise
   await preorderModel.updateMany({ _id: { $in: ids } }, { $set: { pickup_reminded_at: null } });
 
   for (const p of active) {
-    notifyCustomerLater(p.user_id, customerMessages.pickupDateChanged(p.preorder_no, pickupDate, p.order_type));
+    const text = customerMessages.pickupDateChanged(p.preorder_no, pickupDate, p.order_type);
+    notifyCustomerLater(p.user_id, text, customerWeb.fromLineText("preorder", p._id, p.preorder_no, text, "warning"));
   }
 }
 

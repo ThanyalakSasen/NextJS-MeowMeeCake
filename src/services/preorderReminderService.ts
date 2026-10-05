@@ -17,7 +17,7 @@ import { bangkokDateString } from "../lib/datetime";
 import { log } from "../lib/logger";
 import preorderModel from "../models/preorderModel";
 import preorderRoundModel from "../models/preorderRoundModel";
-import { customerMessages, notifyCustomer } from "./customerNotifyService";
+import { customerMessages, customerWeb, notifyCustomer } from "./customerNotifyService";
 import { notificationService } from "./notificationService";
 import { adminLinks } from "../lib/adminLinks";
 
@@ -111,7 +111,7 @@ export async function sendPickupReminders(
       unpaid: p.payment_status !== "paid",
     });
     // ทีละคน (ไม่ Promise.all) — ให้ตัวนับโควตาใน lib/lineQuota หยุดตรง reserve ได้แม่น
-    if (await notifyCustomer(p.user_id, text)) result.sent++;
+    if (await notifyCustomer(p.user_id, text, customerWeb.fromLineText("preorder", p._id, p.preorder_no, text))) result.sent++;
     else result.skipped++;
   }
 

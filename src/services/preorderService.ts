@@ -31,7 +31,7 @@ import userModel from "../models/userModel";
 import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
-import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
+import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 import { notificationService } from "./notificationService";
 import { computePaymentDueAt, onPreorderCancelled, onPreorderPaid } from "./preorderRoundLifecycleService";
 import { log } from "../lib/logger";
@@ -440,7 +440,11 @@ export async function createPreorder(
         link: adminLinks.preorder(preorder._id),
       })
       .catch((err) => log.error("preorder.notify_failed", { preorder_id: String(preorder._id), err }));
-    notifyCustomerLater(userId, customerMessages.created("preorder", preorder.preorder_no, total_amount));
+    notifyCustomerLater(
+      userId,
+      customerMessages.created("preorder", preorder.preorder_no, total_amount),
+      customerWeb.created("preorder", preorder._id, preorder.preorder_no, total_amount)
+    );
     return getPreorderById(String(preorder._id));
   } catch (err) {
     await saga.rollback();
@@ -620,13 +624,22 @@ export async function updatePreorderStatus(
         .catch((err) => log.error("preorder.revoke_usage_failed", { preorder_id: String(preorder._id), err }));
     }
   }
-  notifyCustomerLater(
-    preorder.user_id,
-    customerMessages.orderStatus("preorder", preorder.preorder_no, next, {
-      reason: preorder.cancelled_reason,
-      orderType: preorder.order_type,
-    })
-  );
+  // ลูกค้ายกเลิกเองไม่ต้องแจ้งกลับ (§8.12)
+  const selfCancel = next === "cancelled" && !!opts.cancelled_by && String(opts.cancelled_by) === String(preorder.user_id);
+  if (!selfCancel) {
+    notifyCustomerLater(
+      preorder.user_id,
+      customerMessages.orderStatus("preorder", preorder.preorder_no, next, {
+        reason: preorder.cancelled_reason,
+        orderType: preorder.order_type,
+      }),
+      customerWeb.orderStatus("preorder", preorder._id, preorder.preorder_no, next, {
+        reason: preorder.cancelled_reason,
+        orderType: preorder.order_type,
+        paymentStatus: preorder.payment_status,
+      })
+    );
+  }
 
   // docs/BACKLOG4.md Y1 — ยกเลิกรายการที่ถูกนับเข้าใบผลิตแล้ว → ลดใบผลิต (best-effort ไม่ให้การยกเลิกล้ม)
   if (next === "cancelled") {

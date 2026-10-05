@@ -17,6 +17,7 @@
  *    (ส่ง promotion_code/promotion_id มา ระบบคิดเอง — ไม่เชื่อ discount_amount จาก client เมื่อมีโปรโมชัน)
  */
 import mongoose from "mongoose";
+import { ORDER_PAYMENT_WINDOW_MS, PAYMENT_EXPIRED_REASON } from "../lib/paymentDeadline";
 import dbConnect from "../lib/dbConnect";
 import { log } from "../lib/logger";
 import { Saga } from "../lib/compensation";
@@ -52,7 +53,7 @@ import {
   type SelectedVariant,
 } from "./productCustomizationService";
 import { notificationService } from "./notificationService";
-import { customerMessages, notifyCustomerLater } from "./customerNotifyService";
+import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { generateDocNo, isPreorderProduct } from "../lib/productCode";
 import type { z } from "zod";
@@ -499,7 +500,11 @@ async function persistOrder(
 
   // แจ้งลูกค้าทาง LINE (ถ้าผูกบัญชีไว้) — เฉพาะออเดอร์จากเว็บ หน้าร้าน (POS) ลูกค้ายืนอยู่ตรงนั้นแล้ว
   if (!isPos) {
-    notifyCustomerLater(userId, customerMessages.created("order", order.order_no, total_amount));
+    notifyCustomerLater(
+      userId,
+      customerMessages.created("order", order.order_no, total_amount),
+      customerWeb.created("order", order._id, order.order_no, total_amount)
+    );
   }
 
   return presentOrderWithItems(
@@ -766,20 +771,27 @@ export async function updateOrderStatus(
       );
     }
   }
-  notifyCustomerLater(
-    order.user_id,
-    customerMessages.orderStatus("order", order.order_no, next, {
-      reason: order.cancelled_reason,
-      orderType: order.order_type,
-    })
-  );
+  // ลูกค้ายกเลิกเองไม่ต้องแจ้งกลับ (เห็นผลในหน้าเว็บอยู่แล้ว · แบบฝั่งลูกค้า — §8.12)
+  const selfCancel = next === "cancelled" && !!opts.cancelled_by && String(opts.cancelled_by) === String(order.user_id);
+  if (!selfCancel) {
+    notifyCustomerLater(
+      order.user_id,
+      customerMessages.orderStatus("order", order.order_no, next, {
+        reason: order.cancelled_reason,
+        orderType: order.order_type,
+      }),
+      customerWeb.orderStatus("order", order._id, order.order_no, next, {
+        reason: order.cancelled_reason,
+        orderType: order.order_type,
+        paymentStatus: order.payment_status,
+      })
+    );
+  }
   return presentOrderWithItems(order, cancelledItems);
 }
 
-/** ออเดอร์จากหน้าเว็บต้องชำระ (ส่งสลิป) ภายในกี่นาทีหลังสั่ง — เลยแล้วยกเลิกอัตโนมัติ (ผู้ใช้เลือก 30 นาที · §8.1) */
-export const ORDER_PAYMENT_WINDOW_MS = 30 * 60 * 1000;
-/** เหตุผลที่ระบบใส่ตอนยกเลิกเพราะหมดเวลาชำระ — ใช้แยกข้อความ + อนุญาตแนบสลิปย้อนหลังเพื่อเปิดออเดอร์กลับ */
-export const PAYMENT_EXPIRED_REASON = "หมดเวลาชำระเงิน (ระบบยกเลิกอัตโนมัติ)";
+// กำหนดชำระออเดอร์เว็บ — ค่าคงที่อยู่ที่ src/lib/paymentDeadline.ts (ใช้ร่วมกับ customerNotifyService)
+export { ORDER_PAYMENT_WINDOW_MS, PAYMENT_EXPIRED_REASON };
 
 /** สถานะที่ "ลูกค้า" ยกเลิกออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน */
 export const CUSTOMER_CANCELABLE_STATUSES: readonly OrderStatus[] = ["pending", "confirmed"];

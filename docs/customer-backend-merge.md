@@ -186,7 +186,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ✅ 2026-10-05 (§8.7) |
 | P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ✅ 2026-10-05 (§8.8) |
 | P2 | — | พรีออเดอร์: สินค้าเดียวกันหลายตัวเลือกในใบเดียว | — | ✅ 2026-10-05 (§8.10) |
-| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ชุดสินค้า · รายการโปรด · แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้ · คำค้นเทียบเคียง · กระดิ่งแจ้งเตือน · ติดต่อร้าน · อัปโหลดรูปรีวิว (+ แต้มรีวิว) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปองเสร็จ 2026-10-05 |
+| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ชุดสินค้า · รายการโปรด · แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้ · คำค้นเทียบเคียง · ติดต่อร้าน · อัปโหลดรูปรีวิว (+ แต้มรีวิว) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
 | P4 | 7 | หลังร้าน: API ที่หน้าเว็บลูกค้าต้องใช้แต่ข้อมูลมาจากร้าน (ตั้งค่าร้าน · โซนค่าส่ง · ตลาดนัด · ชุดสินค้า · คำค้น · รีวิวขั้นสูง) เข้า `/api/admin/*` | ตัดสินใจ "หลังร้านตัวไหน" | ⏸ รอทีม |
 | P5 | 8 | ปิด backend พอร์ต 4000 | หน้าเว็บลูกค้าย้าย path ครบ + ตัดสินใจหลังร้าน | ⏸ |
 
@@ -358,3 +358,26 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
 **ไฟล์:** `src/services/pointsService.ts` · `src/services/couponService.ts` · model `PointTransactions` / `UserCoupons` · `Promotions.points_cost` ·
 `orderService` / `preorderService` (checkout + sync ตอน completed/cancelled/refunded) · `promotionService.validateForOrder` (กันโค้ดของโปรแลกแต้ม) ·
 `accountService.verifyEmail` · `oauthService` (โบนัสสมัคร) · `/api/shop/addresses` · `/api/shop/me` (โบนัสข้อมูลครบ) · เทส `loyalty.test.ts` 6 เคส + โบนัสใน `accountFlows.test.ts`
+
+### 8.12 ขั้น 6 — กระดิ่งแจ้งเตือนในเว็บของลูกค้า + LINE (2026-10-05)
+
+ผู้ใช้เลือก: แจ้ง**ทั้งในเว็บและ LINE** ทุกสถานะ · **LINE ส่งเฉพาะบางสถานะแบบหลัก** (ประหยัดโควตา LINE OA ฟรี 300/เดือน) · **ไม่รวมบิลหน้าร้าน (POS-)**
+
+| เหตุการณ์ | กระดิ่งในเว็บ | LINE (เดิม) |
+|---|---|---|
+| สร้างออเดอร์/พรีออเดอร์ | ✅ | ✅ |
+| รับออเดอร์ (confirmed) · กำลังเตรียม · สำเร็จ | ✅ | — |
+| พร้อมรับ (รับเอง) / พร้อมจัดส่ง | ✅ | ✅ เฉพาะรับเอง |
+| ยกเลิก (+ เหตุผล · หมดเวลา = คำแนะนำแนบสลิป · จ่ายแล้ว = จะคืนเงิน) | ✅ | ✅ |
+| ชำระสำเร็จ / สลิปไม่ผ่าน / คืนเงิน | ✅ | ✅ |
+| จัดส่งแล้ว (+ เลขพัสดุ) / ถึงแล้ว / มีปัญหา | ✅ | ✅ |
+| เตือนก่อนวันรับพรีออเดอร์ · ร้านเลื่อนวันรับ | ✅ | ✅ |
+
+- ลูกค้ายกเลิกเอง → ไม่แจ้งกลับทั้งสองทาง (เห็นผลในหน้าเว็บแล้ว · แบบฝั่งลูกค้า) · บิล `POS-` ไม่แจ้งทั้งสองทาง (เดิม POS ยังส่ง LINE ตอนพร้อม/ยกเลิก/ชำระ)
+- กระดิ่งบันทึกได้แม้ลูกค้าไม่ได้ผูก LINE หรือไม่ได้ตั้ง LINE token · `link` = `/customer/account/purchases/<id>` (ออเดอร์) · `/customer/account/preorders` (พรีออเดอร์) ตามหน้าเว็บลูกค้า
+- collection `CustomerNotifications` เดียวกับฝั่งลูกค้า (รองรับ `visible_at` — รายการที่บันทึกล่วงหน้าโผล่เองเมื่อถึงเวลา)
+
+**API:** `GET /api/shop/notifications?limit=` → `{ items, unread_count }` · `PATCH /api/shop/notifications` (อ่านทั้งหมด) · `PATCH /api/shop/notifications/[id]` (อ่านรายการเดียว)
+
+**ไฟล์:** `customerNotifyService` (`customerWeb` · `notifyCustomer(userId, lineText, webNotice)` · list/markRead) · `src/models/customerNotificationModel.ts` · `src/lib/paymentDeadline.ts` (ค่าคงที่กำหนดชำระ — ใช้ร่วมไม่ import วน) ·
+จุดเรียก: `orderService` · `preorderService` · `lib/orderLifecycle` · `preorderReminderService` · `preorderRoundService` · เทส `customerWebNotify.test.ts` 3 เคส
