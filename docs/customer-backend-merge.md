@@ -41,7 +41,7 @@ controller ~70 · ไม่มีหน้าเว็บสักหน้า) 
 
 ## 3. เทียบ model (collection เดียวกันใน MongoDB)
 
-**เฉพาะหลัก:** `Attendances` · `DeliveryZones`
+**เฉพาะหลัก:** `Attendances` (ลบระบบลงเวลาจาก backend หลักแล้ว 2026-10-06 — collection เดิมยังอยู่ใน DB) · `DeliveryZones`
 **เฉพาะฝั่งลูกค้า:** `Bundles` · `CustomerNotifications` · `Interactions` · `PointTransactions` · `ProductVariantGroups` · `ReviewPresets` ·
 `SearchSynonyms` · `ShippingZones` · `StoreProfile` · `StoreSettings` · `TemporaryPermissions` · `UserCoupons`
 
