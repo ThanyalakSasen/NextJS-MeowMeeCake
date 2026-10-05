@@ -6,13 +6,13 @@
  */
 import type { NextRequest } from "next/server";
 import { ok, route } from "@/lib/apiResponse";
-import { requireAuth } from "@/lib/authGuard";
+import { authenticate } from "@/lib/authGuard";
 import { parseBool, parsePagination } from "@/lib/queryParams";
 import { notificationService, parseNotificationModule } from "@/services/notificationService";
 import type { NotificationModule, NotificationType } from "@/services/notificationService";
 
 export const GET = route(async (req: NextRequest) => {
-  requireAuth(req);
+  await authenticate(req);
   const sp = req.nextUrl.searchParams;
   const filter: Record<string, unknown> = {};
   if (sp.has("is_read")) filter.is_read = parseBool(sp.get("is_read"));

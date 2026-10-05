@@ -9,6 +9,12 @@ vi.mock("@/services/notificationService", () => ({
   notificationService: { remove: (id: string) => remove(id), update: vi.fn() },
 }));
 
+// unit test ไม่มี DB — ข้ามการตรวจบัญชีกับ DB (เทสแยกใน tests/integration/sessionValidation.test.ts)
+vi.mock("@/lib/authGuard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/authGuard")>();
+  return { ...actual, authenticate: async (r: NextRequest) => actual.requireAuth(r) };
+});
+
 const { DELETE } = await import("@/app/api/admin/notifications/[id]/route");
 
 const req = (role?: "owner" | "staff") =>

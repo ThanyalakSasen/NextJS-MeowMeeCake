@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { USER_HEADER } from "@/lib/session";
 
@@ -9,6 +9,12 @@ import { USER_HEADER } from "@/lib/session";
 
 // src/lib/jwt.ts (middleware import) throw ตั้งแต่ load ถ้าไม่มี JWT_SECRET — ตั้งก่อน dynamic import
 process.env.JWT_SECRET ??= "test-jwt-secret-unit-only";
+
+// unit test ไม่มี DB — ข้ามการตรวจบัญชีกับ DB (เทสแยกใน tests/integration/sessionValidation.test.ts)
+vi.mock("@/lib/authGuard", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/authGuard")>()),
+  assertSessionStillValid: async (s: unknown) => s,
+}));
 
 type Handler = (req: NextRequest) => Promise<Response>;
 let callbackGET: Handler;

@@ -13,6 +13,7 @@ import { ok, route } from "@/lib/apiResponse";
 import { log } from "@/lib/logger";
 import { exchangeCodeForLineUserId, lineLoginConfig, verifyLinkState } from "@/lib/lineLogin";
 import { getSession } from "@/lib/session";
+import { assertSessionStillValid } from "@/lib/authGuard";
 import * as userService from "@/services/userService";
 
 type LinkResult = "linked" | "cancelled" | "error";
@@ -32,7 +33,9 @@ export const GET = route(async (req: NextRequest) => {
   const params = req.nextUrl.searchParams;
   if (params.get("error")) return finish("cancelled"); // ลูกค้ากดไม่ยินยอมในหน้า LINE
 
-  const session = getSession(req);
+  const raw = getSession(req);
+  // ตรวจบัญชีกับ DB ด้วย (ปิด/ลบ/เปลี่ยนรหัสแล้ว = ต้องล็อกอินใหม่ — BACKLOG5 Y1)
+  const session = raw ? await assertSessionStillValid(raw).catch(() => null) : null;
   if (!session) return finish("error", "login_required");
 
   const config = lineLoginConfig();

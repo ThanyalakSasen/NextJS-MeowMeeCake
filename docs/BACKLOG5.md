@@ -13,7 +13,7 @@
 | ระดับ | จำนวน | สรุป |
 |---|---|---|
 | 🔴 ต้องแก้ก่อนใช้งานจริง | 1 (✅ R1 แก้แล้ว 2026-10-06) | ~~ต้นทุนสินค้า + สูตรหลุดทาง API สาธารณะ~~ |
-| 🟡 ควรแก้ | 5 (✅ Y5 แก้แล้ว 2026-10-06) | session แบบ cookie หลักไม่ตรวจบัญชีกับ DB · `.env.example` ขาดตัวแปรใหม่ · `npm audit` · ล็อกอินผ่าน next-auth ไม่มี rate limit ต่อ IP · ~~sortBy สาธารณะไม่จำกัด field~~ |
+| 🟡 ควรแก้ | 5 (✅ Y1 · Y5 แก้แล้ว 2026-10-06) | ~~session แบบ cookie หลักไม่ตรวจบัญชีกับ DB~~ · `.env.example` ขาดตัวแปรใหม่ · `npm audit` · ล็อกอินผ่าน next-auth ไม่มี rate limit ต่อ IP · ~~sortBy สาธารณะไม่จำกัด field~~ |
 | 🟢 เล็กน้อย / เก็บกวาด | 6 | คอมเมนต์ยุคสตางค์ค้าง 54 บรรทัด · หน้าแนะนำสินค้าโหลดทั้งร้านทุกครั้ง · ตัวกรองรีวิวที่ยังดู `is_visible` อย่างเดียว ฯลฯ |
 | ⏸ รอ FrontEnd / ทีม | 4 | ปิด `product_stock_quantity` ใน PATCH · R5 แดชบอร์ดรีวิว · P4/P5 หลังร้าน + ปิดพอร์ต 4000 · FrontOffice เขียน DB ตรง |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | §6 |
@@ -60,7 +60,22 @@
 
 ## 2. 🟡 ควรแก้
 
-### Y1. session แบบ cookie ของหลัก (JWT) ไม่ตรวจบัญชีกับ DB — ปิดบัญชี/ลบ/เปลี่ยนรหัส/เปลี่ยน role ไม่มีผลจนหมดอายุ 7 วัน
+### Y1. ✅ session แบบ cookie ของหลัก (JWT) ไม่ตรวจบัญชีกับ DB — แก้แล้ว 2026-10-06
+
+**ทำแล้ว:**
+- `assertSessionStillValid` ตรวจ**ทั้ง JWT และ next-auth** ทุก request: ไม่พบ/ลบ/ปิดบัญชี → 401 · เปลี่ยนรหัสหลังออก token → 401
+  (เทียบระดับวินาที — JWT `iat` เป็นวินาที · `verifySession` ส่ง `source: "jwt"` + `auth_time` = iat) · **role_id / role_type จาก DB เสมอ**
+  (ย้าย role มีผลทันที · token อ้าง owner แต่ DB เป็น staff = staff) · role ถูกลบ/ปิด → 403
+- `authenticate(req)` ใหม่ใน `authGuard` แทน `requireAuth` ที่เคยข้ามการตรวจ: `crudRoutes` (guard ของทุก route CRUD) ·
+  `/api/admin/attendances` (+ check-in/out) · `/api/admin/notifications` (+ `[id]`) · LINE callback (`/api/shop/me/line/callback` → login_required)
+- เปลี่ยนรหัสผ่านตัวเอง (`PATCH /api/shop/me/password`) ออก cookie `session` ใหม่ให้เครื่องนี้ (เครื่องอื่นหลุด) · next-auth ต้องล็อกอินใหม่ (แบบฝั่งลูกค้าเดิม) ·
+  แอดมินตั้งรหัสให้พนักงาน (`adminSetPassword`) → session เดิมของพนักงานหลุด
+- ต้นทุน: +2 query ตาม `_id` ต่อ request ที่ต้องล็อกอิน (users + roles) · เทส `tests/integration/sessionValidation.test.ts` 6 เคส ·
+  unit test ที่ไม่มี DB mock การตรวจนี้ (`notificationRoute` · `lineCallback`)
+- ยังใช้ token เดิมจาก cookie (`getSession`) โดยไม่ตรวจ DB: `audit` (แค่บันทึกชื่อ) · `logout` · แนะนำสินค้า/สินค้าคล้าย (แค่ปรับผลแนะนำ) — ไม่ให้สิทธิ์อะไร
+
+ปัญหาเดิม:
+
 
 - `src/lib/jwt.ts:29` `verifySession` เชื่อ payload อย่างเดียว · `src/lib/authGuard.ts` `assertSessionStillValid` ตรวจ DB **เฉพาะ session จาก next-auth**
   (`if (session.source !== "nextauth") return session`)
@@ -170,6 +185,6 @@
 ## 7. ลำดับที่แนะนำ
 
 1. ~~**R1** (ต้นทุน/สูตรหลุด) + **Y5** (sortBy)~~ ✅ 2026-10-06
-2. **Y1** (session cookie ตรวจ DB) — ก่อนให้พนักงานจริงใช้
+2. ~~**Y1** (session cookie ตรวจ DB)~~ ✅ 2026-10-06
 3. **Y2** (`.env.example`) + **Y4** (rate limit next-auth) — เล็ก ทำพร้อมกันได้
 4. **Y3** ตอน merge #56 · **G1–G5** หลัง merge ชุดใหญ่ (กัน conflict)
