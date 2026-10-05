@@ -30,7 +30,8 @@ const assertPublic = (product: any) => {
   expect(product).not.toHaveProperty("low_stock_threshold");
   expect(product).not.toHaveProperty("yield_per_batch");
   expect(product).not.toHaveProperty("recipe_id");
-  expect(JSON.stringify(product)).not.toContain("987");
+  // ไม่มีปริมาณในสูตรหลุดออกมา — ตรวจที่ key (เดิมตรวจตัวเลข "987" ซึ่งบังเอิญโผล่ใน _id/รหัสสินค้า/มิลลิวินาทีของ created_at ได้ = เทสล้มสุ่ม)
+  expect(JSON.stringify(product)).not.toContain("\"quantity\"");
 };
 
 describe("สินค้าสาธารณะไม่มีต้นทุน/สูตร", () => {

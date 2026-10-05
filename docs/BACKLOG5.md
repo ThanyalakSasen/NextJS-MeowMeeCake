@@ -164,7 +164,7 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 | ~~G2~~ ✅ | แนะนำสินค้าแบบไม่ล็อกอินโหลดสินค้า**ทั้งร้าน + สูตรทั้งหมด**ทุก request ไม่มี cache และไม่มี rate limit | `recommendationService.ts:93` `popular()` | ใช้ catalog cache เดียวกับ engine (`catalogCacheTtl`) หรือ query เฉพาะ 10 อันดับ `sort({ avg_rating: -1 }).limit(10)` |
 | ~~G3~~ ✅ | สรุปความรู้สึกรายแง่มุมของสินค้า (สาธารณะ) `$lookup` จาก **SentimentResults ทั้ง collection** ก่อนกรองสินค้า | `sentimentService.ts:213` | `$match` รีวิวของสินค้าก่อน (หา review_id ของสินค้า → `$in`) |
 | ~~G4~~ ✅ | ตัวกรองรีวิวที่แสดงยังดู `is_visible` อย่างเดียว (ไม่ใช้ `VISIBLE_REVIEW` ของ §8.20) — ตรงกันตราบที่ status/is_visible sync กัน (`migrate:reviews` รายงานรายการที่ขัดกัน) | `sentimentService.ts:228` · `recommendationEngine.ts:385/627/657` (ตรวจบน main 2026-10-06 — `recommendationService.ts` เป็นตัวกรองสินค้า ไม่ใช่รีวิว) | ใช้ `VISIBLE_REVIEW` จาก `reviewService` |
-| G5 | seed แง่มุมเริ่มต้นพร้อมกัน 2 คำขอแรก → ได้ชุดซ้ำ (ไม่มี unique index ชื่อแง่มุม) | `sentimentService.ensureDefaultAspects` | unique partial index `aspect_name_th` (deleted_at null) + ข้าม 11000 — โอกาสเกิดน้อยมาก (ครั้งแรกครั้งเดียว) |
+| ~~G5~~ ✅ (branch `fix/backlog5-g5-aspect-names`) | seed แง่มุมเริ่มต้นพร้อมกัน 2 คำขอแรก → ได้ชุดซ้ำ (ไม่มี unique index ชื่อแง่มุม) | `sentimentService.ensureDefaultAspects` | unique partial index `aspect_name_th` (deleted_at null) + ข้าม 11000 — โอกาสเกิดน้อยมาก (ครั้งแรกครั้งเดียว) |
 | G6 | `rateLimit` / cache สิทธิ์ / cache แนะนำสินค้า เป็น in-memory ต่อ instance | `rateLimit.ts` · `permissionService.ts:82` · `recommendationEngine` | ตามที่บันทึกไว้แล้ว (BACKLOG4 Y8) — รัน instance เดียว (DEPLOY ⑤) |
 
 ---
@@ -232,7 +232,7 @@ merge ครบแล้ว (§8) — ไม่มี PR ค้างให้�
 | **A** ✅ | 1 | **G4** ตัวกรองรีวิวที่แสดงใช้ `VISIBLE_REVIEW` (4 จุด) | ความถูกต้องของข้อมูล — รีวิวที่ร้านซ่อนด้วย `status` (หลังร้านฝั่งลูกค้ายังตั้งแค่ status ได้) ยังถูกนับในสรุปแง่มุม/แนะนำสินค้า | ไม่ต้องรอ (`VISIBLE_REVIEW` รองรับเอกสารที่ยังไม่มี status แล้ว — ไม่ต้องรอ `migrate:reviews`) | เล็ก |
 | **A** ✅ | 2 | **G2** แนะนำสินค้าแบบไม่ล็อกอินโหลดทั้งร้าน + สูตรทุก request | endpoint สาธารณะ ไม่มี cache/rate limit — ยิงรัวแล้ว DB หนัก | — | เล็ก |
 | **A** ✅ | 3 | **G3** สรุปแง่มุมรายสินค้า `$lookup` ทั้ง collection | endpoint สาธารณะ · ช้าลงตามจำนวนผลวิเคราะห์ | — | เล็ก |
-| **B** | 4 | **G5** seed แง่มุมเริ่มต้นซ้ำ (unique index ชื่อแง่มุม) | สร้าง unique index บน collection ที่ backend ฝั่งลูกค้า (พอร์ต 4000) เขียนอยู่ด้วย — **ต้องตรวจชื่อซ้ำใน DB จริงก่อน** (มีซ้ำ = สร้าง index ไม่ได้) | ผู้ใช้รันสคริปต์ตรวจ (dry-run) บน DB จริง | เล็ก + สคริปต์ |
+| **B** ✅ | 4 | **G5** seed แง่มุมเริ่มต้นซ้ำ (unique index ชื่อแง่มุม) | สร้าง unique index บน collection ที่ backend ฝั่งลูกค้า (พอร์ต 4000) เขียนอยู่ด้วย — **ต้องตรวจชื่อซ้ำใน DB จริงก่อน** (มีซ้ำ = สร้าง index ไม่ได้) | ผู้ใช้รันสคริปต์ตรวจ (dry-run) บน DB จริง | เล็ก + สคริปต์ |
 | **C** | 5 | **G1** คอมเมนต์ยุคสตางค์ 54 บรรทัด / 19 ไฟล์ | แก้คอมเมนต์อย่างเดียว แต่แตะไฟล์มากสุด — PR แยกให้ review ง่าย ไม่ปนโค้ด | — | กลาง (คอมเมนต์ล้วน) |
 | — | — | **G6** in-memory ต่อ instance | ไม่ต้องแก้ตราบที่รัน instance เดียว (DEPLOY ⑤) | ตอนจะขยายหลาย instance (Redis) | ใหญ่ |
 
@@ -245,6 +245,19 @@ merge ครบแล้ว (§8) — ไม่มี PR ค้างให้�
 - เทส `tests/integration/backlog5ReviewSignals.test.ts` 4 เคส · ทั้งหมด 603/603 · build ✅
 
 **PR A** (G4 + G2 + G3) อยู่ในไฟล์กลุ่มเดียวกัน (`sentimentService` · `recommendation/*`) จึงรวม PR เดียว + เทสพฤติกรรม ·
+**✅ PR B (G5) ทำแล้ว 2026-10-06 — branch `fix/backlog5-g5-aspect-names`:**
+- unique index `uniq_active_aspect_name_th` บน `Aspects.aspect_name_th` (แง่มุมที่ยังไม่ลบ · ไม่สนตัวพิมพ์ — collation `en` strength 2) ·
+  **`autoIndex: false`** — แอปไม่สร้างเองตอนเปิด (DB จริงอาจมีชื่อซ้ำ → สร้างไม่ผ่าน) · สร้างผ่านสคริปต์เท่านั้น
+- **`npm run check:aspect-names`** (ตรวจอย่างเดียว · exit 2 เมื่อพบซ้ำ) → รายงานกลุ่มชื่อซ้ำ (ตัดช่องว่างหัวท้าย + ไม่สนตัวพิมพ์) พร้อมจำนวนที่ถูกอ้างถึง
+  (รีวิว `aspect_feedback` · `SemanticTerms` · `SentimentResults`) ช่วยเลือกตัวที่จะเก็บ · ชื่อที่มีช่องว่างหัว/ท้าย · มี index แล้วหรือยัง ·
+  **`-- --apply`** สร้าง index เฉพาะเมื่อไม่มีชื่อซ้ำ · ไม่แก้/ลบข้อมูลใด ๆ · รันซ้ำได้
+- มีชื่อซ้ำ → แก้ชื่อ หรือลบ (soft delete) ตัวที่ไม่ใช้ในหลังร้าน (`/api/admin/aspects/[id]`) แล้วรันใหม่ — รีวิวเดิมเก็บชื่อแง่มุมไว้ใน `aspect_feedback` จึงไม่หาย
+- `ensureDefaultAspects`: `insertMany(..., { ordered: false })` + ข้าม 11000 — เรียกพร้อมกันครั้งแรกได้ชุดเริ่มต้น 4 ด้านพอดี (เมื่อมี index) ·
+  เพิ่ม/แก้ชื่อชนกันพร้อมกัน → 409 (ตัวแปลง 11000 กลางใน `apiResponse`)
+- เทส `tests/integration/aspectNames.test.ts` 3 เคส · **แก้เทสที่ล้มสุ่มเพิ่ม:** `publicProduct.test.ts` (R1) เคยตรวจว่า JSON ไม่มีตัวเลข "987" (ปริมาณในสูตร)
+  ซึ่งบังเอิญโผล่ใน `_id`/รหัสสินค้า/มิลลิวินาทีของ `created_at` ได้ → เปลี่ยนเป็นตรวจว่าไม่มี key `"quantity"`
+- **DB จริง (ผู้ใช้รันเอง):** `npm run check:aspect-names` → ถ้ามีชื่อซ้ำ แก้ในหลังร้าน → `npm run check:aspect-names -- --apply`
+
 **PR B** แยกเพราะต้องมีสคริปต์ตรวจ DB จริงก่อน · **PR C** แยกเพราะไม่ใช่โค้ด
 
 ---
