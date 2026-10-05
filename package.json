@@ -30,6 +30,7 @@
     "cron:order-expiry": "tsx scripts/run-order-expiry.ts",
     "cleanup:review-media": "tsx scripts/cleanup-review-media.ts",
     "backfill:payment-due": "tsx scripts/backfill-payment-due.ts",
+    "fix:satang-money": "tsx scripts/fix-satang-money.ts",
     "check:data-integrity": "tsx scripts/check-data-integrity.ts",
     "summary:monthly": "tsx scripts/send-monthly-summary.ts",
     "migrate:upload-files": "tsx scripts/migrate-upload-files.ts"

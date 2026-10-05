@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import preorderModel from "@/models/preorderModel";
 import preorderRoundModel from "@/models/preorderRoundModel";
-import { runBackfill } from "../../scripts/backfill-payment-due";
+import paymentModel from "@/models/paymentModel";
+import { runBackfill, OVERDUE_CANCEL_REASON } from "../../scripts/backfill-payment-due";
 import { makeUser, makePreorder } from "./helpers";
 
 /**
@@ -72,6 +73,42 @@ describe("scripts/backfill-payment-due (BACKLOG4 Y7)", () => {
     // รันซ้ำ → ไม่มีอะไรต้องทำ
     const again = await runBackfill({ apply: true, now: NOW, graceHours: 24, backupDir });
     expect(again.planned).toHaveLength(0);
+  });
+
+  it("--cancel-overdue: ที่เลยกำหนดถูกยกเลิก (แทนการเลื่อน) · ที่ยังไม่ถึงกำหนดตั้งค่าตามปกติ · มีสลิปรอตรวจ = ไม่ยกเลิก", async () => {
+    const round = await makeRound(100);
+    const fresh = await legacyPreorder(round._id, 2);
+    const overdue = await legacyPreorder(round._id, 30);
+    const withSlip = await legacyPreorder(round._id, 30);
+    await paymentModel.create({
+      user_id: withSlip.user_id,
+      preorder_id: withSlip._id,
+      amount: 100,
+      status: "pending",
+      slip_image_url: "/uploads/slips/1700000000000-aaaaaaaaaaaa.jpg",
+    });
+
+    const dry = await runBackfill({ now: NOW, cancelOverdue: true });
+    expect(dry.toCancel.map((c) => c.preorder_no)).toEqual([overdue.preorder_no]);
+    expect(dry.waitingSlip).toEqual([withSlip.preorder_no]);
+    expect(dry.planned.map((p) => p.preorder_no)).toEqual([fresh.preorder_no]);
+    expect((await preorderModel.findById(overdue._id).lean<{ order_status: string }>())!.order_status).toBe("pending");
+
+    backupDir = mkdtempSync(join(tmpdir(), "y7-"));
+    const res = await runBackfill({ apply: true, now: NOW, cancelOverdue: true, backupDir });
+    expect(res.cancelled).toEqual([overdue.preorder_no]);
+    expect(res.cancelSkipped).toEqual([]);
+    const after = (await preorderModel.findById(overdue._id).lean<{ order_status: string; cancelled_reason: string }>())!;
+    expect(after.order_status).toBe("cancelled");
+    expect(after.cancelled_reason).toBe(OVERDUE_CANCEL_REASON);
+    expect((await preorderModel.findById(withSlip._id).lean<{ order_status: string }>())!.order_status).toBe("pending");
+    expect(await dueOf(withSlip._id)).toBeNull();
+    expect(await dueOf(fresh._id)).not.toBeNull();
+
+    // รันซ้ำ → ยกเลิกแล้วไม่ถูกเลือกอีก
+    const again = await runBackfill({ apply: true, now: NOW, cancelOverdue: true, backupDir });
+    expect(again.toCancel).toHaveLength(0);
+    expect(again.cancelled).toHaveLength(0);
   });
 
   it("ปิดรอบก่อนครบ N ชม. → กำหนดชำระ = เวลาปิดรอบ", async () => {

@@ -54,7 +54,8 @@ npm run migrate:line-user-id   # คัดลอก LINE ของลูกค�
 npm run migrate:reviews        # เติม status ให้รีวิวเก่า + แก้ index ที่บล็อกรีวิวพรีออเดอร์ — dry-run ก่อน, --apply เขียนจริง · รันซ้ำได้
 npm run check:aspect-names    # ตรวจชื่อแง่มุมรีวิวซ้ำ (อ่านอย่างเดียว) · --apply = สร้าง unique index ชื่อ (เฉพาะเมื่อไม่มีชื่อซ้ำ)
 npm run check:data-integrity   # ตรวจข้อมูลสินค้าผิดปกติ (อ่านอย่างเดียว) · --no-notify = ไม่ส่งแจ้งเตือน
-npm run backfill:payment-due   # เติมกำหนดชำระให้พรีออเดอร์เก่า — dry-run ก่อน, --apply เขียนจริง
+npm run backfill:payment-due   # เติมกำหนดชำระให้พรีออเดอร์เก่า — dry-run ก่อน, --apply เขียนจริง · --cancel-overdue = ยกเลิกที่เลยกำหนดแทนการเลื่อน
+npm run fix:satang-money       # แก้เงินที่ยังเป็นสตางค์ใน DB → บาท (docs/money-units.md §3) — dry-run ก่อน, --apply เขียนจริง · รันซ้ำไม่หารซ้ำ
 npm run cron:preorder-rounds   # เปิด/ปิดรอบตามเวลา + ยกเลิกคนไม่จ่าย (cron ทุก 15 นาที)
 npm run cron:order-expiry      # ยกเลิกออเดอร์เว็บที่เลยกำหนดชำระ 30 นาที + คืนสต็อก (cron ทุก 5 นาที)
 npm run cleanup:review-media   # ลบไฟล์รูป/วิดีโอรีวิวที่ค้างเกิน 24 ชม. (cron วันละครั้ง)
@@ -96,6 +97,7 @@ npm run backfill:payment-due
 npm run migrate:line-user-id      # ดูรายชื่อลูกค้าที่จะคัดลอก LINE + รายการที่ขัดกัน (ต้องตรวจเอง)
 npm run migrate:reviews           # ดูจำนวนรีวิวที่ไม่มี status · index ที่บล็อกรีวิวพรีออเดอร์ · รีวิวซ้ำ (ถ้ามี ต้องจัดการก่อน)
 npm run check:aspect-names        # ชื่อแง่มุมรีวิวซ้ำ (ถ้ามี แก้ชื่อ/ลบตัวที่ไม่ใช้ในหลังร้านก่อน — BACKLOG5 G5)
+npm run fix:satang-money          # เงินที่ยังเป็นสตางค์ → ตรวจรายการ แล้ว -- --apply (ไม่ต้องรอ deploy — money-units.md §3)
 ```
 
 - ตรวจ `.env.local` ครบตาม [`docs/env.md`](docs/env.md) · secret ของ production ต้องคนละค่ากับ dev (`JWT_SECRET` · `SESSION_SECRET` · `NEXTAUTH_SECRET` · `CRON_SECRET`)
