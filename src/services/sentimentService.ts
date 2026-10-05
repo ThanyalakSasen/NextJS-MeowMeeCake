@@ -18,6 +18,7 @@ import { createCrudService } from "../lib/crudService";
 import aspectModel from "../models/aspectModel";
 import semanticTermModel from "../models/semanticTermModel";
 import sentimentResultModel from "../models/sentimentResultModel";
+import { VISIBLE_REVIEW } from "../lib/reviewVisibility";
 import reviewModel from "../models/reviewModel";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -210,24 +211,12 @@ export async function getProductAspectSummary(productId: string) {
   await dbConnect();
   assertObjectId(productId, "product_id");
 
-  const rows = await sentimentResultModel.aggregate([
-    { $match: { deleted_at: null } },
-    {
-      $lookup: {
-        from: reviewModel.collection.name,
-        localField: "review_id",
-        foreignField: "_id",
-        as: "review",
-      },
-    },
-    { $unwind: "$review" },
-    {
-      $match: {
-        "review.product_id": new Types.ObjectId(productId),
-        "review.deleted_at": null,
-        "review.is_visible": true,
-      },
-    },
+  // หารีวิวที่แสดงของสินค้านี้ก่อน (index product_id) แล้วค่อยดึงผลวิเคราะห์ของรีวิวเหล่านั้น (index review_id) —
+  // เดิม $lookup จาก SentimentResults ทั้ง collection แล้วค่อยกรองสินค้า (ช้าลงตามผลวิเคราะห์ทั้งร้าน · BACKLOG5 G3)
+  // รีวิวที่แสดงใช้เงื่อนไขกลาง VISIBLE_REVIEW (รวม status — เดิมดูแค่ is_visible · BACKLOG5 G4)
+  const reviewIds = await reviewModel.distinct("_id", { product_id: new Types.ObjectId(productId), ...VISIBLE_REVIEW });
+  const rows = reviewIds.length === 0 ? [] : await sentimentResultModel.aggregate([
+    { $match: { deleted_at: null, review_id: { $in: reviewIds } } },
     {
       $group: {
         _id: "$aspect_id",

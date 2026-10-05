@@ -30,8 +30,9 @@ import { round2 } from "../lib/money";
 export type ReviewStatus = "pending" | "approved" | "hidden";
 export const REVIEW_STATUSES: readonly ReviewStatus[] = ["pending", "approved", "hidden"];
 
-/** รีวิวที่ลูกค้าเห็น — เอกสารเก่าที่ไม่มี status นับเป็น approved */
-export const VISIBLE_REVIEW = { deleted_at: null, is_visible: true, status: { $nin: ["hidden", "pending"] } };
+/** รีวิวที่ลูกค้าเห็น — เอกสารเก่าที่ไม่มี status นับเป็น approved (นิยามอยู่ที่ lib/reviewVisibility — ใช้ร่วมกับระบบแนะนำ/สรุปแง่มุม) */
+export { VISIBLE_REVIEW } from "../lib/reviewVisibility";
+import { VISIBLE_REVIEW } from "../lib/reviewVisibility";
 
 /** ข้อมูลภายในของทีมงาน — ห้ามส่งให้ลูกค้า (ทั้งหน้าสาธารณะและ "รีวิวของฉัน") */
 const INTERNAL_FIELDS = "-internal_tags -internal_note -read_at -read_by -is_analyzed";

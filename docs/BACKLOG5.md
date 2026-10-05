@@ -161,9 +161,9 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 | # | เรื่อง | ที่ | แก้ |
 |---|---|---|---|
 | G1 | คอมเมนต์ยุค "เก็บเป็นสตางค์" ค้าง **54 บรรทัดใน 19 ไฟล์** — โค้ดเป็นบาทแล้ว (`toSatang` = ปัด 2 ตำแหน่ง) แต่คอมเมนต์ยังบอกว่าเป็นสตางค์/integer · คนอ่านเข้าใจผิดแล้วแก้โค้ดผิดได้ | `cartService.ts:42-84` · `bom.ts:8-10` · `preorderRoundService.ts:55` ฯลฯ (`grep -rn "เป็นสตางค์\|สตางค์ดิบ" src`) | ไล่แก้คอมเมนต์ (ไม่แตะโค้ด) — ทำหลัง merge #54/#57 กัน conflict |
-| G2 | แนะนำสินค้าแบบไม่ล็อกอินโหลดสินค้า**ทั้งร้าน + สูตรทั้งหมด**ทุก request ไม่มี cache และไม่มี rate limit | `recommendationService.ts:93` `popular()` | ใช้ catalog cache เดียวกับ engine (`catalogCacheTtl`) หรือ query เฉพาะ 10 อันดับ `sort({ avg_rating: -1 }).limit(10)` |
-| G3 | สรุปความรู้สึกรายแง่มุมของสินค้า (สาธารณะ) `$lookup` จาก **SentimentResults ทั้ง collection** ก่อนกรองสินค้า | `sentimentService.ts:213` | `$match` รีวิวของสินค้าก่อน (หา review_id ของสินค้า → `$in`) |
-| G4 | ตัวกรองรีวิวที่แสดงยังดู `is_visible` อย่างเดียว (ไม่ใช้ `VISIBLE_REVIEW` ของ §8.20) — ตรงกันตราบที่ status/is_visible sync กัน (`migrate:reviews` รายงานรายการที่ขัดกัน) | `sentimentService.ts:228` · `recommendationEngine.ts:385/627/657` · `recommendationService.ts:95` | ใช้ `VISIBLE_REVIEW` จาก `reviewService` |
+| ~~G2~~ ✅ | แนะนำสินค้าแบบไม่ล็อกอินโหลดสินค้า**ทั้งร้าน + สูตรทั้งหมด**ทุก request ไม่มี cache และไม่มี rate limit | `recommendationService.ts:93` `popular()` | ใช้ catalog cache เดียวกับ engine (`catalogCacheTtl`) หรือ query เฉพาะ 10 อันดับ `sort({ avg_rating: -1 }).limit(10)` |
+| ~~G3~~ ✅ | สรุปความรู้สึกรายแง่มุมของสินค้า (สาธารณะ) `$lookup` จาก **SentimentResults ทั้ง collection** ก่อนกรองสินค้า | `sentimentService.ts:213` | `$match` รีวิวของสินค้าก่อน (หา review_id ของสินค้า → `$in`) |
+| ~~G4~~ ✅ | ตัวกรองรีวิวที่แสดงยังดู `is_visible` อย่างเดียว (ไม่ใช้ `VISIBLE_REVIEW` ของ §8.20) — ตรงกันตราบที่ status/is_visible sync กัน (`migrate:reviews` รายงานรายการที่ขัดกัน) | `sentimentService.ts:228` · `recommendationEngine.ts:385/627/657` (ตรวจบน main 2026-10-06 — `recommendationService.ts` เป็นตัวกรองสินค้า ไม่ใช่รีวิว) | ใช้ `VISIBLE_REVIEW` จาก `reviewService` |
 | G5 | seed แง่มุมเริ่มต้นพร้อมกัน 2 คำขอแรก → ได้ชุดซ้ำ (ไม่มี unique index ชื่อแง่มุม) | `sentimentService.ensureDefaultAspects` | unique partial index `aspect_name_th` (deleted_at null) + ข้าม 11000 — โอกาสเกิดน้อยมาก (ครั้งแรกครั้งเดียว) |
 | G6 | `rateLimit` / cache สิทธิ์ / cache แนะนำสินค้า เป็น in-memory ต่อ instance | `rateLimit.ts` · `permissionService.ts:82` · `recommendationEngine` | ตามที่บันทึกไว้แล้ว (BACKLOG4 Y8) — รัน instance เดียว (DEPLOY ⑤) |
 
@@ -184,7 +184,7 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 
 คำสั่งทั้งหมดอยู่ใน [`README.md`](../README.md) "ก่อน deploy — คำสั่งที่ต้องรัน" ข้อ 1–6 · ขั้นตอนเต็ม [`DEPLOY.md`](DEPLOY.md)
 
-- [ ] merge ตามลำดับ (BACKLOG4 R1) + **#56** (postcss/audit — Y3) · ตอน merge #54: `package.json` ใช้ฝั่ง #57 + `migrate:upload-files` · `.env.example` เก็บทั้งสองฝั่ง
+- [x] ~~merge ตามลำดับ (BACKLOG4 R1) + **#56**~~ — **merge เข้า main ครบแล้ว 2026-10-06** (§8)
 - [ ] deploy backend ฝั่งลูกค้าที่แก้ขั้น 0 พร้อมกัน (§8.5) แล้ว `cleanup:legacy-product-fields -- --apply`
 - [ ] env production ครบ (Y2) · secret ใหม่ทั้งหมด · **หมุน `LINE_LOGIN_CHANNEL_SECRET`** (เคยวางในแชต)
 - [ ] `migrate:line-user-id` → `--apply` (ห้าม `--remove-old` จนปิดพอร์ต 4000) · `migrate:reviews` → `--apply` (ก่อนเปิดรีวิวพรีออเดอร์)
@@ -223,15 +223,67 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 4. ~~**Y3** ตอน merge #56~~ ✅ 2026-10-06 (รวม #56 เข้า #57)
 5. **G1–G6 หลัง merge ชุดใหญ่เข้า main** (กัน conflict กับ #52–#55 / #54 ที่ยังเปิดอยู่) — ลำดับด้านล่าง
 
-### 7.1 ลำดับแก้ 🟢 G1–G6 (หลัง merge ชุดใหญ่)
+### 7.1 ลำดับแก้ 🟢 G1–G6 (จัดใหม่หลัง merge ชุดใหญ่ 2026-10-06)
 
-ทำหลัง #52 → #53 → #55 → #57 และ #54 เข้า main ครบ (DEPLOY ③) — ข้อเหล่านี้แตะไฟล์ service จำนวนมาก ถ้าทำก่อนจะชนกับ PR ที่ยังเปิด
+merge ครบแล้ว (§8) — ไม่มี PR ค้างให้ชนแล้ว จึงไม่ต้องรอ · ตรวจตำแหน่งทุกข้อซ้ำบน main `8e6930b` (G1 ยัง 54 บรรทัด / 19 ไฟล์ · #54 ไม่ได้เพิ่ม)
 
-| ลำดับ | ข้อ | ทำไมลำดับนี้ | ขนาด |
+| PR | ลำดับ | ข้อ | ทำไมลำดับนี้ | ต้องรออะไร | ขนาด |
+|---|---|---|---|---|---|
+| **A** ✅ | 1 | **G4** ตัวกรองรีวิวที่แสดงใช้ `VISIBLE_REVIEW` (4 จุด) | ความถูกต้องของข้อมูล — รีวิวที่ร้านซ่อนด้วย `status` (หลังร้านฝั่งลูกค้ายังตั้งแค่ status ได้) ยังถูกนับในสรุปแง่มุม/แนะนำสินค้า | ไม่ต้องรอ (`VISIBLE_REVIEW` รองรับเอกสารที่ยังไม่มี status แล้ว — ไม่ต้องรอ `migrate:reviews`) | เล็ก |
+| **A** ✅ | 2 | **G2** แนะนำสินค้าแบบไม่ล็อกอินโหลดทั้งร้าน + สูตรทุก request | endpoint สาธารณะ ไม่มี cache/rate limit — ยิงรัวแล้ว DB หนัก | — | เล็ก |
+| **A** ✅ | 3 | **G3** สรุปแง่มุมรายสินค้า `$lookup` ทั้ง collection | endpoint สาธารณะ · ช้าลงตามจำนวนผลวิเคราะห์ | — | เล็ก |
+| **B** | 4 | **G5** seed แง่มุมเริ่มต้นซ้ำ (unique index ชื่อแง่มุม) | สร้าง unique index บน collection ที่ backend ฝั่งลูกค้า (พอร์ต 4000) เขียนอยู่ด้วย — **ต้องตรวจชื่อซ้ำใน DB จริงก่อน** (มีซ้ำ = สร้าง index ไม่ได้) | ผู้ใช้รันสคริปต์ตรวจ (dry-run) บน DB จริง | เล็ก + สคริปต์ |
+| **C** | 5 | **G1** คอมเมนต์ยุคสตางค์ 54 บรรทัด / 19 ไฟล์ | แก้คอมเมนต์อย่างเดียว แต่แตะไฟล์มากสุด — PR แยกให้ review ง่าย ไม่ปนโค้ด | — | กลาง (คอมเมนต์ล้วน) |
+| — | — | **G6** in-memory ต่อ instance | ไม่ต้องแก้ตราบที่รัน instance เดียว (DEPLOY ⑤) | ตอนจะขยายหลาย instance (Redis) | ใหญ่ |
+
+**✅ PR A ทำแล้ว 2026-10-06 (branch `fix/backlog5-g4-g2-g3`):**
+- **G4:** นิยาม `VISIBLE_REVIEW` ย้ายไป `src/lib/reviewVisibility.ts` (+ `visibleReviewMatch(prefix)`) · `reviewService` re-export ของเดิม ·
+  ใช้ที่สรุปแง่มุมรายสินค้า + ระบบแนะนำ 3 จุด (รีวิวของตัวเอง · รีวิวสินค้าเดียวกันของคนอื่น · รีวิวของเพื่อนบ้าน) — รีวิวที่ซ่อนด้วย status (แม้ is_visible ยัง true) ไม่นับแล้ว
+- **G3:** หา `_id` รีวิวที่แสดงของสินค้าก่อน (index `product_id`) แล้ว aggregate ผลวิเคราะห์เฉพาะ `review_id` เหล่านั้น — ไม่มีรีวิว = ไม่ query ผลวิเคราะห์เลย
+- **G2:** DB เรียง `avg_rating ↓ · review_count ↓ · _id` + `limit(10)` แล้วโหลดสูตรเฉพาะ 10 ตัว (เดิมโหลดทั้งร้าน + สูตรทั้งหมด) · cache ผลอายุเท่า
+  catalog cache ของ engine (`RECOMMENDATION_CACHE_TTL_MS` ค่าเริ่มต้น 3 นาที · `resetPopularCache()`) · ผลเหมือนเดิม (10 อันดับตามคะแนน ไม่รวมที่ซ่อน/ลบ)
+- เทส `tests/integration/backlog5ReviewSignals.test.ts` 4 เคส · ทั้งหมด 603/603 · build ✅
+
+**PR A** (G4 + G2 + G3) อยู่ในไฟล์กลุ่มเดียวกัน (`sentimentService` · `recommendation/*`) จึงรวม PR เดียว + เทสพฤติกรรม ·
+**PR B** แยกเพราะต้องมีสคริปต์ตรวจ DB จริงก่อน · **PR C** แยกเพราะไม่ใช่โค้ด
+
+---
+
+### 7.2 งดทดสอบส่ง LINE จริงจนถึงตอน deploy (ผู้ใช้ตัดสินใจ 2026-10-06)
+
+เหตุผล: กันโควตาข้อความ LINE OA ของเดือนหมดก่อนใช้งานจริง → **ทดสอบส่ง LINE จริงตอน deploy / เปิดใช้งานจริงเท่านั้น** (DEPLOY ⑨ ข้อส่งข้อความทดสอบเข้า LINE เจ้าของร้าน + ผูก LINE ลูกค้า)
+
+- **เทสอัตโนมัติ (vitest / CI) ไม่ใช้โควตา** — ตรวจแล้ว: เทสไม่เห็น `LINE_CHANNEL_ACCESS_TOKEN` จริง (vitest ไม่โหลด `.env.local`) · เทสที่ทดสอบ LINE ใช้ token ปลอม + stub `fetch` ทั้งหมด
+- **ที่ใช้โควตาจริง:** `npm run dev` / `npm start` ที่มี token จริงใน `.env.local` (สร้างออเดอร์ทดสอบ = แจ้งเจ้าของร้าน + ลูกค้าที่ผูก LINE) · สคริปต์ที่โหลด `.env.local`
+  (`remind:preorders` · `summary:monthly` · `cron:preorder-rounds` · `cron:order-expiry`) — ระหว่างนี้ใช้ `-- --dry-run` (มีใน `remind:preorders` / `summary:monthly`)
+  หรือเว้นว่าง `LINE_CHANNEL_ACCESS_TOKEN` ใน `.env.local` ของเครื่อง dev (ระบบบันทึกแจ้งเตือนในเว็บตามปกติ · LINE ข้ามพร้อมเหตุผลใน `line_error`)
+
+## 8. ผล merge ชุดใหญ่เข้า main (2026-10-06)
+
+| ลำดับ | PR | merge commit | หมายเหตุ |
 |---|---|---|---|
-| 1 | **G4** ตัวกรองรีวิวที่แสดงใช้ `VISIBLE_REVIEW` | ถูกต้องของข้อมูล (รีวิวที่ซ่อนด้วย status ยังโผล่ในสรุปแง่มุม/แนะนำสินค้า) · หลัง `migrate:reviews --apply` บน DB จริง | เล็ก (4 จุด) |
-| 2 | **G2** แนะนำสินค้าแบบไม่ล็อกอินโหลดทั้งร้านทุกครั้ง | endpoint สาธารณะ ยิงรัวแล้ว DB หนัก — ใช้ catalog cache ของ engine หรือ query 10 อันดับ | เล็ก |
-| 3 | **G3** สรุปแง่มุมรายสินค้า `$lookup` ทั้ง collection | endpoint สาธารณะเหมือนกัน · ช้าลงตามจำนวนผลวิเคราะห์ | เล็ก |
-| 4 | **G5** seed แง่มุมเริ่มต้นซ้ำเมื่อเรียกพร้อมกันครั้งแรก | ต้องเพิ่ม unique index — ทำหลัง `migrate:reviews` และตรวจชื่อแง่มุมซ้ำใน DB จริงก่อน | เล็ก |
-| 5 | **G1** คอมเมนต์ยุคสตางค์ 54 บรรทัด / 19 ไฟล์ | แก้แค่คอมเมนต์ แต่แตะไฟล์เยอะที่สุด — ทำทีหลังสุดเป็น PR แยก (ไม่ปนกับโค้ด) | กลาง (คอมเมนต์ล้วน) |
-| — | **G6** in-memory ต่อ instance | ไม่ต้องแก้ตราบที่รัน instance เดียว (DEPLOY ⑤) — ทำเมื่อจะขยายหลาย instance (Redis) | ใหญ่ (ตอนขยาย) |
+| 1 | #56 postcss override | `bae3cb4` | commit เดียวกันรวมอยู่ใน #57 แล้ว (Y3) |
+| 2 | #52 is_preorder + เลขออเดอร์ | `9603276` | |
+| 3 | #53 แจ้งเตือน LINE | `0f5d4e6` | ⚠️ ถูกปิดอัตโนมัติชั่วคราว — ดูด้านล่าง |
+| 4 | #55 รอบพรีออเดอร์ | `0a766d0` | |
+| 5 | #57 Y7–Y11 + เงินเป็นบาท + รวม backend ฝั่งลูกค้า | `7def045` | merge main เข้า branch ก่อน (`85e5eae` — ไม่มีไฟล์เปลี่ยน) |
+| 6 | #54 สลิป/ใบเสร็จเป็นไฟล์ | `8e6930b` | merge main เข้า branch (`47dd0e1`) แก้ conflict 4 ไฟล์ |
+
+CI ผ่านทุกขั้น · CI ของ main หลัง #54 ผ่าน · ทดลองใน worktree แยกก่อน push ทุกครั้งที่มี conflict
+
+**ก่อน merge:** CI ของ #57 ล้ม 1 เทส (`preorderRoundFlow` "แก้ชื่อรอบอย่างเดียว → ไม่แจ้งลูกค้า") — แจ้งเตือนตอนสั่งวิ่งเบื้องหลังแล้วมาถึงหลัง
+`fetchSpy.mockClear()` บนเครื่อง CI ที่ช้ากว่า → รอ `flushBackground()` ก่อนล้าง · เทสที่ยืนยัน "ไม่มีแจ้งเตือนเพิ่ม" อีก 3 ไฟล์เปลี่ยนจากรอเวลาตายตัวเป็น `flushBackground()` (`f9e1b28`)
+
+**conflict ของ #54 (มากกว่าที่ DEPLOY ③ บันทึกไว้ 2 ไฟล์):**
+- `package.json`: scripts ของ main + `migrate:upload-files` (ไม่เอา `migrate:money-to-satang`)
+- `.env.example`: ของ main ทั้งไฟล์ + `PRIVATE_UPLOAD_DIR` ไว้หมวดที่เก็บไฟล์
+- `src/lib/upload.ts`: เก็บ export ของ #54 (`ValidatedFile` · `validateFiles` · `randomFilename` ที่ `privateFiles.ts` ใช้) + วิดีโอ/prefix/`contentTypeOf` ของ main (§8.18)
+- `paymentService.createPayment`: `assertSlipUrl()` (#54) **ก่อน** เปิดออเดอร์ที่หมดเวลากลับ (§8.8) — ตรวจสลิปก่อนตัดสต็อก
+- เพิ่ม: `/api/files/slips/[filename]` (route ใหม่ของ #54) ใช้ `authenticate()` ตรวจบัญชีกับ DB (Y1) · เทส `privateSlips` สร้าง role จริงตามที่ session อ้าง
+
+**⚠️ เหตุการณ์ #53 ถูกปิด:** `gh pr merge 52 --delete-branch` ลบ branch ฐานของ #53 ผ่าน API แต่ GitHub **ไม่ย้าย base ให้อัตโนมัติ** (ต่างจากกดใน
+หน้าเว็บ) → #53 ถูกปิด · กู้: สร้าง branch `feat/product-types-and-order-no-prefix` คืนที่ commit เดิม (`d42eda2`) → reopen #53 → เปลี่ยน base เป็น main →
+ลบ branch อีกครั้ง · ไม่มีโค้ด/ประวัติหาย · **บทเรียน:** PR ซ้อนกัน ให้ `gh pr edit <ถัดไป> --base main` **ก่อน** merge + ลบ branch ของตัวก่อนหน้า
+(ทำแบบนี้กับ #55 และ #57 แล้วไม่มีปัญหา)
+
+**branch ที่ยังอยู่ (ไม่ได้ลบ):** `fix/backlog4-y7-y11` (#57) · `fix/uploads-slips-receipts` (#54) — merge แล้ว ลบได้เมื่อไม่ใช้
