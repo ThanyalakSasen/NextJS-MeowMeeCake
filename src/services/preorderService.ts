@@ -46,6 +46,7 @@ import * as shippingService from "./shippingService";
 import * as couponService from "./couponService";
 import * as pointsService from "./pointsService";
 import * as promotionUsageService from "./promotionUsageService";
+import { trackBackground } from "../lib/backgroundTasks";
 import {
   assertCustomizationIds,
   getCustomizations,
@@ -694,7 +695,7 @@ export async function setPaymentStatus(
   });
   // จ่ายหลังปิดรอบ/หลังสร้างใบผลิต → บวกเข้าใบผลิต (fire-and-forget — ไม่ให้การยืนยันชำระเงินล้มเพราะงานนี้)
   if (status === "paid") {
-    onPreorderPaid(preorderId).catch((err) => log.error("preorder.late_payment_sync_failed", { preorder_id: preorderId, err }));
+    trackBackground(onPreorderPaid(preorderId)).catch((err) => log.error("preorder.late_payment_sync_failed", { preorder_id: preorderId, err }));
   }
   // คืนเงินแล้ว → คืนแต้มที่ใช้ + ดึงแต้มที่ได้คืน + คืนคูปอง (§8.11)
   if (status === "refunded") {

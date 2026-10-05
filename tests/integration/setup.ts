@@ -8,6 +8,7 @@
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
 import { afterAll, afterEach } from "vitest";
+import { flushBackground } from "../../src/lib/backgroundTasks";
 
 const mongod = await MongoMemoryServer.create();
 process.env.MONGODB_URI = mongod.getUri();
@@ -21,6 +22,8 @@ const conn = await mongoose.connect(process.env.MONGODB_URI);
 };
 
 afterEach(async () => {
+  // รองานเบื้องหลัง (แจ้งเตือน ฯลฯ ที่ service ปล่อยไว้) ให้จบก่อน — ไม่งั้นเขียนลง DB หลังล้าง/หลังปิด connection
+  await flushBackground();
   // list จาก DB จริงแทน mongoose.connection.collections (แคชแค่ collection ที่เคยผ่าน model ของ
   // mongoose เท่านั้น) — collection ที่ถูกสร้าง/เขียนตรงผ่าน native driver (เช่น db.collection("x")
   // ใน scripts/migrate-*.ts) จะไม่ถูกเคลียร์ถ้าใช้ mongoose.connection.collections อย่างเดียว ทำให้
@@ -32,6 +35,7 @@ afterEach(async () => {
 });
 
 afterAll(async () => {
+  await flushBackground();
   await mongoose.disconnect().catch(() => undefined);
   await mongod.stop();
 });

@@ -525,3 +525,12 @@ index ใหม่ `uniq_active_order_item` / `uniq_active_preorder_item` (uniqu
 **ไม่ย้าย:** `/api/owner/review-presets` (ฝั่งลูกค้าเลิกใช้ · หน้าเว็บไม่เรียก) · **รอทีม (R5):** `/api/owner/reviews/analytics` · `/dashboard` · `/products/[id]` (~900 บรรทัด)
 **หน้าเว็บเปลี่ยน path:** `/api/customer/review-aspects` → `/api/catalog/review-aspects` · `/api/customer/products/:id/reviews` → `/api/catalog/products/:id/reviews` (`data.items`) · `/api/customer/reviews` → `/api/shop/reviews` · หลังร้าน `/api/owner/reviews*` → `/api/admin/reviews*` (`data.items` + `data.meta` + `data.summary`) · `/api/owner/aspects/reorder` → `/api/admin/aspects/reorder`
 **ไฟล์:** `reviewModel` · `aspectModel` · `src/services/reviewService.ts` (เขียนใหม่) · `src/services/reviewModerationService.ts` · `sentimentService` (aspects) · `src/lib/maskName.ts` · `src/lib/aspectIcons.ts` · `scripts/migrate-reviews.ts` · route 11 เส้น · เทส `reviewsAdvanced.test.ts` 8 เคส (+ ปรับ `reviewMediaPoints` · `schemas-crud`)
+
+### 8.21 เก็บงานค้างหมวด 1 (2026-10-05)
+
+| เรื่อง | ผล |
+|---|---|
+| `postcss.config.mjs` อ้าง `@tailwindcss/postcss` ที่ไม่ได้ติดตั้ง | ลบใน #57 แล้ว (เหมือน PR #56 `6df01ca` — ลบไฟล์เดียวกันจึง merge ไม่ชน) · `overrides.next.postcss` + lock ยังอยู่ที่ #56 (ไม่ใส่ซ้ำใน #57 กัน `package-lock.json` ชน) |
+| เทส integration มี log `MongoNotConnectedError` / แจ้งเตือนเขียนลง DB หลังล้าง | `src/lib/backgroundTasks.ts` + `flushBackground()` ใน `tests/integration/setup.ts` ([`infra-tooling.md`](infra-tooling.md) §3) · log หายหมด |
+| ปฏิเสธ `product_stock_quantity` ใน `PATCH /api/admin/products/[id]` | **ยังไม่ทำ — รอ FrontEnd** · FrontEnd ยังส่งค่านี้ผ่าน PATCH 2 จุด (`productForm.ts` ตอนแก้สินค้า · `productStock/useProductStockViewModel.ts:104`) → ต้องเปลี่ยนไปใช้ `PATCH /api/admin/products/[id]/stock` ก่อน แล้วค่อยปิดฝั่ง backend |
+| worktree `feat/categories-delivery-status` · แจ้งเตือน POS · BACKLOG2 ของ frontend | งานของ repo FrontEnd (worktree ถูกลบไปแล้ว — `git worktree list` เหลือ main) · FrontEnd มีไฟล์แก้ค้างของคนอื่น (`docs/Debug.md` · `package.json`) ไม่แตะ |

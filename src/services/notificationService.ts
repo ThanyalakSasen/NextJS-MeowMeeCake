@@ -10,6 +10,7 @@ import { createCrudService } from "../lib/crudService";
 import notificationModel from "../models/notificationModel";
 import { pushLineMessage } from "../lib/line";
 import { alertQuotaExhausted, isQuotaExceededError, recordPushed } from "../lib/lineQuota";
+import { trackBackground } from "../lib/backgroundTasks";
 import { log } from "../lib/logger";
 
 /** ค่าที่เก็บใน DB — ภาษาอังกฤษ (enum ของ notificationModel · ใช้กรอง ?module=) ห้ามเปลี่ยนเป็นภาษาไทย */
@@ -90,8 +91,13 @@ export function notificationLineUrl(link: string | null | undefined): string | n
   }
 }
 
-/** บันทึกแจ้งเตือนลง DB + พยายาม push เข้า LINE คู่กัน (ไม่ throw ถ้า LINE ล้มเหลว) */
-async function notify(input: NotifyInput) {
+/** บันทึกแจ้งเตือนลง DB + พยายาม push เข้า LINE คู่กัน (ไม่ throw ถ้า LINE ล้มเหลว)
+ *  ส่วนใหญ่ถูกเรียกแบบไม่รอผล → ลงทะเบียนเป็นงานเบื้องหลัง (lib/backgroundTasks — เทสรอให้จบก่อนล้าง DB) */
+function notify(input: NotifyInput) {
+  return trackBackground(notifyNow(input));
+}
+
+async function notifyNow(input: NotifyInput) {
   const doc = await notificationModel.create({
     title: input.title,
     message: input.message,

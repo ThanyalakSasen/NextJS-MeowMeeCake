@@ -28,6 +28,7 @@ import userModel from "../models/userModel";
 import customerNotificationModel from "../models/customerNotificationModel";
 import { PAYMENT_EXPIRED_REASON } from "../lib/paymentDeadline";
 import { isObjectId } from "../lib/objectId";
+import { trackBackground } from "../lib/backgroundTasks";
 import { notFound } from "../lib/httpError";
 
 export type CustomerDocKind = "order" | "preorder";
@@ -275,7 +276,7 @@ export async function notifyCustomer(userId: unknown, text: string | null, notic
 
 /** fire-and-forget — ใช้ในจุดที่ไม่อยากรอ LINE API ก่อนตอบ client */
 export function notifyCustomerLater(userId: unknown, text: string | null, notice?: WebNotice | null): void {
-  void notifyCustomer(userId, text, notice);
+  void trackBackground(notifyCustomer(userId, text, notice));
 }
 
 // ── กระดิ่งของลูกค้า (GET/PATCH /api/shop/notifications) ──────────
