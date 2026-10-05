@@ -30,7 +30,8 @@
     "cleanup:review-media": "tsx scripts/cleanup-review-media.ts",
     "backfill:payment-due": "tsx scripts/backfill-payment-due.ts",
     "check:data-integrity": "tsx scripts/check-data-integrity.ts",
-    "summary:monthly": "tsx scripts/send-monthly-summary.ts"
+    "summary:monthly": "tsx scripts/send-monthly-summary.ts",
+    "migrate:upload-files": "tsx scripts/migrate-upload-files.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1131.0",

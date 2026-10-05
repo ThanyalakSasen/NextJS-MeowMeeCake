@@ -89,14 +89,14 @@ const VIDEO_MAX_BYTES = 30 * 1024 * 1024; // 30 MB (เท่าฝั่งล�
 const VIDEO_EXT = new Set([".mp4", ".mov", ".webm"]);
 const VIDEO_CONTENT_TYPE: Record<string, string> = { ".mp4": "video/mp4", ".mov": "video/quicktime", ".webm": "video/webm" };
 
-interface ValidatedFile {
+export interface ValidatedFile {
   buf: Buffer;
   ext: string;
   originalSize: number;
 }
 
-/** ตรวจไฟล์ 3 ชั้น (ใช้ร่วมกันทุก driver — ไม่ให้ driver ไหนหลุดการตรวจ) */
-async function validateFiles(files: File[], kind: MediaKind = "image"): Promise<ValidatedFile[]> {
+/** ตรวจไฟล์ 3 ชั้น (ใช้ร่วมกันทุก driver — ไม่ให้ driver ไหนหลุดการตรวจ · export ให้ privateFiles.ts ใช้ด้วย) */
+export async function validateFiles(files: File[], kind: MediaKind = "image"): Promise<ValidatedFile[]> {
   if (kind === "video") return validateVideos(files);
   if (!Array.isArray(files) || files.length === 0) {
     throw badRequest("ไม่พบไฟล์ที่อัปโหลด");
@@ -148,7 +148,7 @@ async function validateVideos(files: File[]): Promise<ValidatedFile[]> {
   return [{ buf, ext: realExt, originalSize: file.size }];
 }
 
-function randomFilename(ext: string, prefix?: string): string {
+export function randomFilename(ext: string, prefix?: string): string {
   const p = (prefix ?? "").replace(/[^a-z0-9]/gi, "").toLowerCase();
   return `${p ? `${p}-` : ""}${Date.now()}-${randomBytes(6).toString("hex")}${ext}`;
 }
@@ -272,6 +272,47 @@ function getDriver(): UploadDriver {
  */
 export async function saveImages(files: File[], dir: string, opts: SaveOptions = {}): Promise<SavedFile[]> {
   return getDriver().save(files, dir, opts);
+}
+
+/**
+ * url นี้เป็นไฟล์ที่ระบบเราอัปโหลดเองในโฟลเดอร์ `dir` ไหม (ตาม driver ที่ใช้อยู่) — ใช้กับฟิลด์ที่ต้องเป็นไฟล์
+ * ของเราเท่านั้น (สลิปโอนเงิน / ใบเสร็จค่าใช้จ่าย — docs/uploads.md) กัน client ใส่ url ภายนอก/ไฟล์ที่ไม่มีจริง
+ *   localDisk: `/uploads/<dir>/<ชื่อไฟล์>` · s3: `<S3_PUBLIC_URL_BASE>/<dir>/<ชื่อไฟล์>`
+ */
+export function isUploadedUrl(url: unknown, dir: string): boolean {
+  if (typeof url !== "string") return false;
+  const safeDir = dir.replace(/[^a-z0-9_-]/gi, "") || "misc";
+  const file = "[A-Za-z0-9._-]+";
+  if (process.env.UPLOAD_DRIVER === "s3") {
+    const base = (process.env.S3_PUBLIC_URL_BASE || "").replace(/\/$/, "");
+    if (!base || !url.startsWith(`${base}/`)) return false;
+    return new RegExp(`^${safeDir}/${file}$`).test(url.slice(base.length + 1));
+  }
+  return new RegExp(`^/uploads/${safeDir}/${file}$`).test(url);
+}
+
+/** โฟลเดอร์มาตรฐานของไฟล์แต่ละประเภท (public/uploads/<ค่า>) — ใช้ร่วมกันทุก route/service */
+export const UPLOAD_DIRS = {
+  products: "products",
+  banners: "banners",
+  /** สลิปโอนเงินที่ลูกค้า/พนักงานแนบกับการชำระเงิน */
+  slips: "slips",
+  /** สลิป/ใบเสร็จของค่าใช้จ่ายร้าน */
+  receipts: "receipts",
+} as const;
+
+/**
+ * อ่าน multipart form แล้วคืนไฟล์แรกตามชื่อ field ที่ยอมรับ (ตัวแรกที่เจอ) + form ทั้งก้อน (อ่าน field อื่นต่อได้ —
+ * request body อ่านได้ครั้งเดียว) · ไม่มีไฟล์ → 400
+ */
+export async function readSingleUpload(req: Request, fields: string[]): Promise<{ file: File; form: FormData }> {
+  const form = await req.formData().catch(() => null);
+  if (!form) throw badRequest("ต้องส่งเป็น multipart/form-data");
+  for (const f of fields) {
+    const v = form.get(f);
+    if (v instanceof File) return { file: v, form };
+  }
+  throw badRequest(`ไม่พบไฟล์ที่อัปโหลด (field: ${fields.join(" หรือ ")})`);
 }
 
 /**

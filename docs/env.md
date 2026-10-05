@@ -36,6 +36,7 @@ Next.js โหลด `.env.local` ให้อัตโนมัติตอน 
 | `DELIVERY_ZONE_CACHE_TTL_MS` | ไม่ | `60000` | `src/services/deliveryZoneService.ts` | อายุ cache ของโซนค่าจัดส่งจาก DB (มิลลิวินาที) — ตั้งเป็น `0` ปิด cache ได้ (ใช้ตอนเทส) |
 | `PERMISSION_CACHE_TTL_MS` | ไม่ | `30000` | `src/services/permissionService.ts` | อายุ cache ของ `getEffectivePermissions()` ต่อ role (มิลลิวินาที, BACKLOG3 §7) — invalidate ทันทีทุกจุดที่เขียน permission อยู่แล้ว TTL เป็นแค่ backstop · ตั้งเป็น `0` ปิด cache ได้ (ใช้ตอนเทส) · หลาย instance พร้อมกันต้องเปลี่ยนเป็น Redis เหมือน `rateLimit.ts` |
 | `UPLOAD_DRIVER` | ไม่ | `localDisk` | `src/lib/upload.ts` | `localDisk` (เขียนลง `public/uploads/` — self-host เท่านั้น) หรือ `s3` (S3-compatible: AWS S3 / Cloudflare R2 / GCS interop — จำเป็นถ้า deploy serverless) |
+| `PRIVATE_UPLOAD_DIR` | ไม่ | `storage/private` | `src/lib/privateFiles.ts` | ที่เก็บไฟล์ส่วนตัว (สลิปโอนเงิน) นอก `public/` — เปิดดูได้ผ่าน `/api/files/slips/…` ที่ตรวจสิทธิ์เท่านั้น · s3 ใช้ key `private/…` ใน bucket เดิม (ตั้ง prefix นี้ให้ไม่ public) — ดู [`uploads.md`](uploads.md) §6 |
 | `S3_BUCKET` | เฉพาะ `UPLOAD_DRIVER=s3` | — | `src/lib/upload.ts` | ชื่อ bucket ปลายทาง |
 | `S3_REGION` | ไม่ | `auto` | `src/lib/upload.ts` | region ของ bucket (R2 ใช้ `auto` ได้) |
 | `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | เฉพาะ `UPLOAD_DRIVER=s3` | — | `src/lib/upload.ts` | credential เข้าถึง bucket |

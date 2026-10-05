@@ -7,6 +7,7 @@ import { badRequest } from "../lib/httpError";
 import { createCrudService } from "../lib/crudService";
 import expenseModel from "../models/expenseModel";
 import { toSatang, toBaht, toBahtFields, round2 } from "../lib/money";
+import { isUploadedUrl, UPLOAD_DIRS } from "../lib/upload";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -45,16 +46,34 @@ const base = createCrudService(expenseModel as any, {
 
 // BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
 // override เพราะต้องแปลง amount บาท→สตางค์ก่อนเขียน (present() แปลงแค่ตอน "คืนค่า" ไม่ใช่ตอนรับ input)
+/**
+ * receipt_url ต้องเป็นไฟล์ที่อัปโหลดผ่าน POST /api/admin/expenses/receipts (public/uploads/receipts — docs/uploads.md)
+ * เดิมเป็นช่องพิมพ์ข้อความ → DB มีแต่ชื่อไฟล์ลอย ๆ ที่ไม่มีไฟล์จริง
+ * ค่าเดิมรุ่นเก่า (ชื่อไฟล์ลอย ๆ) ยังส่งกลับมาซ้ำตอนแก้ฟิลด์อื่นได้ (`existing`) — แต่ตั้งค่าใหม่ต้องเป็นไฟล์ของระบบ
+ */
+function assertReceiptUrl(url: unknown, existing?: unknown): void {
+  if (url === undefined || url === null || url === "") return;
+  if (url === existing) return;
+  if (!isUploadedUrl(url, UPLOAD_DIRS.receipts)) {
+    throw badRequest("receipt_url ต้องเป็นไฟล์ที่อัปโหลดผ่าน POST /api/admin/expenses/receipts (multipart)");
+  }
+}
+
 export const expenseService = {
   ...base,
 
   async create(input: Record<string, unknown>) {
+    assertReceiptUrl(input.receipt_url);
     const payload =
       input.amount != null ? { ...input, amount: toSatang(Number(input.amount)) } : input;
     return base.create(payload);
   },
 
   async update(id: string, input: Record<string, unknown>) {
+    if (input.receipt_url !== undefined) {
+      const current = (await base.getById(id)) as { receipt_url?: unknown };
+      assertReceiptUrl(input.receipt_url, current.receipt_url);
+    }
     const payload =
       input.amount != null ? { ...input, amount: toSatang(Number(input.amount)) } : input;
     return base.update(id, payload);
