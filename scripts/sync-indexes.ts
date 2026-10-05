@@ -11,10 +11,9 @@ import dbConnect from "../src/lib/dbConnect";
 /**
  * sync-indexes — ปรับ index ใน MongoDB ให้ตรงกับ schema ปัจจุบัน (Model.syncIndexes())
  *   - drop index เก่าที่ไม่มีใน schema แล้ว (เช่น role_id_1_menu_key_1 เดิมของ permissions)
- *   - สร้าง index ใหม่ (เช่น unique partial ของ attendance / review / permission / product)
+ *   - สร้าง index ใหม่ (เช่น unique partial ของ review / permission / product)
  *
  * ก่อน sync จะตรวจ "ข้อมูลซ้ำ" ที่จะทำให้สร้าง unique index ไม่ผ่าน:
- *   attendances : ซ้ำ (user_id + work_date) ในกลุ่มที่ deleted_at = null
  *   reviews     : ซ้ำ (order_item_id)       ในกลุ่มที่ deleted_at = null
  *
  * โหมด:
@@ -97,11 +96,6 @@ async function main() {
   // 1) จัดการข้อมูลซ้ำก่อน
   console.log("── ตรวจข้อมูลซ้ำ ─────────────────────────────");
   let blocking = 0;
-  blocking += await handleDuplicates(
-    "attendances",
-    mongoose.model("Attendances"),
-    ["user_id", "work_date"]
-  );
   blocking += await handleDuplicates(
     "reviews",
     mongoose.model("Reviews"),
