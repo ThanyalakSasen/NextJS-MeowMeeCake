@@ -103,7 +103,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | 5 | จุดรับสินค้า / ตลาดนัดรายสัปดาห์ | `/customer/pickup-locations` · `/weekly-markets` | ออเดอร์ `pickup_point` · `pickup_date` |
 | 6 | payment link | `/customer/payment-link` · `/redeem` | |
 | 7 | QR พร้อมเพย์ให้ลูกค้าจ่าย | `/customer/orders/[id]/payment` | ไลบรารี `promptpay-qr` · หลักมีแค่ `promptpay_ref` |
-| 8 | แนะนำสินค้า / สินค้าคล้ายกัน / ตรวจสารก่อภูมิแพ้ | `/customer/recommendations` · `/similar/[id]` · `/products/recommended` · `/customer/ingredients` | model `Interactions` |
+| 8 | ✅ แนะนำสินค้า / สินค้าคล้ายกัน / ตรวจสารก่อภูมิแพ้ — **ย้ายแล้ว (§8.15)** | `/customer/recommendations` · `/similar/[id]` · `/products/recommended` · `/customer/ingredients` | model `Interactions` |
 | 9 | คำค้นหาเทียบเคียง | `/customer/search-synonyms` · `/owner/search-synonyms` | |
 | 10 | ข้อมูล/ตั้งค่าร้าน (โลโก้ · แผนที่) | `/owner/store-profile` · `/store-settings` · `/map-link` · `/customer/store-info` · `/store-logo` | |
 | 11 | แจ้งเตือนถึงลูกค้าในเว็บ | `/customer/notifications` | หลักแจ้งลูกค้าทาง LINE อย่างเดียว |
@@ -186,7 +186,7 @@ payment link · แนะนำสินค้า + ตรวจสารก่�
 | P2 | 4 | `ShippingZones` + จุดรับสินค้า / ตลาดนัด สำหรับออเดอร์เว็บ (POS/หลังร้านใช้ `DeliveryZones`) | — | ✅ 2026-10-05 (§8.7) |
 | P2 | 5 | ออเดอร์เว็บ: หมดเวลาจ่าย 30 นาที + นโยบายยกเลิก · QR พร้อมเพย์ · payment link | — | ✅ 2026-10-05 (§8.8) |
 | P2 | — | พรีออเดอร์: สินค้าเดียวกันหลายตัวเลือกในใบเดียว | — | ✅ 2026-10-05 (§8.10) |
-| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้ · คำค้นเทียบเคียง · ติดต่อร้าน · อัปโหลดรูปรีวิว (+ แต้มรีวิว) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
+| P3 | 6 | ฟีเจอร์ลูกค้า (ตาม §8.4): ~~แต้ม + แชร์แต้ม · คูปองส่วนตัว~~ ✅ (§8.11) · ~~กระดิ่งแจ้งเตือน~~ ✅ (§8.12) · ~~ชุดสินค้า~~ ❌ ไม่ย้าย (§8.13) · ~~รายการโปรด~~ ✅ (§8.14) · ~~แนะนำ/สินค้าคล้าย/สารก่อภูมิแพ้~~ ✅ (§8.15) · คำค้นเทียบเคียง · ติดต่อร้าน · อัปโหลดรูปรีวิว (+ แต้มรีวิว) · ข้อมูลร้าน/โลโก้ | — | 🟡 แต้ม+คูปอง · กระดิ่ง เสร็จ 2026-10-05 |
 | P4 | 7 | หลังร้าน: API ที่หน้าเว็บลูกค้าต้องใช้แต่ข้อมูลมาจากร้าน (ตั้งค่าร้าน · โซนค่าส่ง · ตลาดนัด · ชุดสินค้า · คำค้น · รีวิวขั้นสูง) เข้า `/api/admin/*` | ตัดสินใจ "หลังร้านตัวไหน" | ⏸ รอทีม |
 | P5 | 8 | ปิด backend พอร์ต 4000 | หน้าเว็บลูกค้าย้าย path ครบ + ตัดสินใจหลังร้าน | ⏸ |
 
@@ -401,3 +401,25 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
   `POST /api/shop/favorites` `{ productId }` (201 · สินค้าไม่มี = 404) · `DELETE /api/shop/favorites` `{ productId }` หรือ `?productId=` · รับ `product_id` ได้ด้วย
 - ต่างจากฝั่งลูกค้า: เพิ่มสินค้าที่ไม่มี/ถูกลบ = 404 (ฝั่งลูกค้าบันทึกได้เลย) · หน้าเว็บลูกค้าเปลี่ยน path `/api/customer/favorites` → `/api/shop/favorites` และอ่านข้อมูลจาก `data.items` (envelope ของหลัก)
 - **ไฟล์:** `src/models/interactionModel.ts` · `src/services/favoriteService.ts` · `src/app/api/shop/favorites/route.ts` · เทส `favorites.test.ts` 2 เคส
+
+### 8.15 ขั้น 6 — แนะนำสินค้า · สินค้าคล้ายกัน · ตรวจสารก่อภูมิแพ้ (2026-10-05)
+
+ย้าย engine ของฝั่งลูกค้ามาทั้งชุด (`src/services/recommendation/recommendationEngine.ts` + `allergenChecker.ts` · ปรับ import ให้ใช้ model ของหลัก — ตรรกะเดิม)
+
+| เรื่อง | ทำอะไร |
+|---|---|
+| คะแนนแนะนำ (hybrid) | collaborative (ลูกค้าที่ซื้อ/ชอบคล้ายกัน) 35% · content (หมวด/ราคา/รสชาติจากสิ่งที่เคยซื้อ) 30% · ยอดนิยม 15% · สารก่อภูมิแพ้ 20% + boost หมวดที่ชอบ/ช่วงวัย · ข้อมูลจาก ออเดอร์ · ตะกร้า · รีวิว · รายการโปรด (`Interactions`) · ลูกค้าใหม่ (< 5 การใช้งาน) = cold start |
+| สารก่อภูมิแพ้ | `users.user_allergies` (ชื่อวัตถุดิบ · ใส่ `ชื่อ:severe` ได้ — ตั้งที่ `PATCH /api/shop/me`) เทียบกับวัตถุดิบในสูตร (แบบไม่สนวรรณยุกต์/ชื่อย่อย เช่น "นม" ตรง "นมสด") → `allergenWarning` (caution/warning/danger) + ลดคะแนน · `excludeAllergens=true` ตัดออก |
+| ไม่แนะนำ | สินค้าที่ร้านซ่อน · พรีออเดอร์ · สต็อก 0 (ตามตัวกรองเดิมของฝั่งลูกค้า) |
+| ความเร็ว | cache แคตตาล็อก 3 นาที (`RECOMMENDATION_CACHE_TTL_MS` · 0 = ปิด) · คำนวณเกิน 4.5 วิ หรือ hybrid ล้ม → ถอยเป็น popular |
+
+**API:**
+- `GET /api/shop/recommendations?limit=&strategy=hybrid|collaborative|content|popular&excludeAllergens=` (ล็อกอิน) → `{ recommendations: [{ product, score, reasons, allergenWarning }], meta }`
+- `GET /api/catalog/products/recommended` (สาธารณะ · ล็อกอินอยู่ = เฉพาะตัว) → `{ products }` 10 ชิ้น — ไม่ล็อกอินเรียงตามคะแนนรีวิว
+- `GET /api/catalog/products/[id]/similar?limit=` (สาธารณะ · ล็อกอิน = เตือนสารก่อภูมิแพ้) → `{ recommendations }`
+- `GET /api/catalog/ingredients` (สาธารณะ) → `{ ingredients: [{ _id, ingredient_name }] }` ให้เลือกอาหารที่แพ้ — ไม่ส่งต้นทุน/สต็อก
+
+**หน้าเว็บลูกค้าเปลี่ยน path:** `/api/customer/recommendations` → `/api/shop/recommendations` · `/customer/products/recommended` → `/api/catalog/products/recommended` ·
+`/customer/recommendations/similar/:id` → `/api/catalog/products/:id/similar` · `/customer/ingredients` → `/api/catalog/ingredients` · ข้อมูลอยู่ใน `data` (envelope ของหลัก)
+
+**ไฟล์:** `src/services/recommendation/{recommendationEngine,allergenChecker,recommendationService}.ts` · `src/types/recommendation.ts` · route 4 เส้น · `vitest.config.mts` (ปิด cache) · เทส `recommendations.test.ts` 3 เคส

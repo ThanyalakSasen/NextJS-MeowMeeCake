@@ -29,6 +29,7 @@ Next.js โหลด `.env.local` ให้อัตโนมัติตอน 
 | `STOREFRONT_URL` | ไม่ | `NEXTAUTH_URL` | `src/lib/mailer.ts` | URL หน้าเว็บลูกค้าในลิงก์อีเมล (`/customer/verify-email` · `/customer/reset-password`) |
 | `EMAIL_USER`, `EMAIL_PASS` | สมัคร/ลืมรหัสผ่าน | — | `src/lib/mailer.ts` | บัญชีส่งอีเมล (Gmail ใช้ App Password) · ไม่ตั้ง = สมัครสมาชิก/ลืมรหัสผ่านตอบ 502 |
 | `EMAIL_SERVICE` หรือ `EMAIL_HOST` + `EMAIL_PORT` | ไม่ | `gmail` | `src/lib/mailer.ts` | ผู้ให้บริการของ nodemailer หรือ SMTP เอง (port 465 = TLS) |
+| `RECOMMENDATION_CACHE_TTL_MS` | ไม่ | `180000` | `src/services/recommendation/recommendationEngine.ts` | อายุ cache แคตตาล็อกของระบบแนะนำสินค้า (ms) · `0` = ปิด (เทส) · แก้สินค้าแล้วผลแนะนำเปลี่ยนภายในเวลานี้ |
 | `PROMPTPAY_ID` | ไม่ | — | `src/services/promptpayService.ts` | เลขพร้อมเพย์สำหรับ QR หน้าชำระเงินของลูกค้า — **ใช้เมื่อ `StoreProfile.promptpay_id` ยังไม่ได้ตั้ง** · ไม่ตั้งทั้งคู่ = หน้าชำระเงินไม่มี QR (`qr_error`) |
 | `DELIVERY_FEE_METRO` | ไม่ | `40` | `src/services/deliveryService.ts` | **fallback เท่านั้น** (BACKLOG §3.15) — ใช้ต่อเมื่อยังไม่มีโซนไหนตั้งไว้ใน `/api/admin/delivery-zones` เลย ปกติแอดมินแก้ค่าส่งผ่านหน้านั้นแทน ไม่ต้องแก้ env+redeploy แล้ว · ค่าส่ง กรุงเทพฯ + ปริมณฑล (นนทบุรี/ปทุมธานี/สมุทรปราการ/สมุทรสาคร/นครปฐม) |
 | `DELIVERY_FEE_UPCOUNTRY` | ไม่ | `80` | `src/services/deliveryService.ts` | **fallback เท่านั้น** เช่นเดียวกับข้างบน — ค่าส่งต่างจังหวัด (จังหวัดอื่นทั้งหมด) |
