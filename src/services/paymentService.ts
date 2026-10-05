@@ -254,8 +254,8 @@ export async function submitSlip(
   if (payment.order_id) {
     const order = await orderModel
       .findOne({ _id: payment.order_id, deleted_at: null })
-      .select("order_status payment_status cancelled_reason")
-      .lean<{ order_status?: string; payment_status?: string; cancelled_reason?: string | null } | null>();
+      .select("order_status payment_status cancelled_reason points_redeemed user_coupon_id")
+      .lean<any>();
     if (order && orderService.canReopenWithLateSlip(order)) {
       await orderService.reopenExpiredOrder(String(payment.order_id));
     } else if (order?.order_status === "cancelled") {
@@ -379,7 +379,7 @@ export async function getPaymentPage(kind: PaymentPageKind, id: string, userId: 
   const numberField = kind === "order" ? "order_no" : "preorder_no";
   const doc = await model
     .findOne({ _id: id, user_id: userId, deleted_at: null })
-    .select(`${numberField} order_status payment_status total_amount payment_id payment_due_at cancelled_reason`)
+    .select(`${numberField} order_status payment_status total_amount payment_id payment_due_at cancelled_reason points_redeemed user_coupon_id`)
     .lean();
   if (!doc) throw notFound("ไม่พบคำสั่งซื้อ");
 

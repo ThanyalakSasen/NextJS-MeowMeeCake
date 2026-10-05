@@ -8,6 +8,7 @@ import { withAuth } from "@/lib/authGuard";
 import { parseBody } from "@/lib/validate";
 import { addressCreate } from "@/schemas/address";
 import * as addressService from "@/services/addressService";
+import * as pointsService from "@/services/pointsService";
 
 export const GET = withAuth(async (session) => {
   return ok(await addressService.listByUser(session.user_id));
@@ -15,5 +16,8 @@ export const GET = withAuth(async (session) => {
 
 export const POST = withAuth(async (session, req) => {
   const data = await parseBody(req, addressCreate);
-  return created(await addressService.create(session.user_id, data));
+  const address = await addressService.create(session.user_id, data);
+  // ข้อมูลส่วนตัวครบ (วันเกิด + เบอร์ + ที่อยู่) → โบนัส 10 แต้มครั้งเดียว (customer-backend-merge.md §8.11)
+  await pointsService.safely("profile", () => pointsService.checkProfileCompletion(session.user_id));
+  return created(address);
 });

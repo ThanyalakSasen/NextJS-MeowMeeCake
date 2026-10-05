@@ -13,6 +13,7 @@ import dbConnect from "../lib/dbConnect";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
 import type { SessionUser } from "../lib/session";
+import { awardWelcomeBonus, safely } from "./pointsService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -120,10 +121,13 @@ export async function signInWithGoogle(profile: {
         },
       }
     );
+    // Google ยืนยันอีเมลให้แล้ว → โบนัสสมาชิกใหม่ทันที (§8.11)
+    await safely("welcome", () => awardWelcomeBonus(String(abandoned._id)));
     return toOAuthUser(abandoned._id);
   }
   if (candidates.length) throw new OAuthAccountError(DELETED_ACCOUNT_MESSAGE);
   const created = await userModel.create(fields);
+  await safely("welcome", () => awardWelcomeBonus(String(created._id)));
   return toOAuthUser(created._id);
 }
 

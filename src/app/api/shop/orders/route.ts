@@ -50,6 +50,9 @@ export const POST = withAuth(async (session, req) => {
     storefront: true,
     pickup_location_id: body.pickup_location_id ?? null,
     pickup_date: body.pickup_date ?? null,
+    // คูปองของฉัน + แต้ม (customer-backend-merge.md §8.11)
+    user_coupon_id: body.user_coupon_id ?? null,
+    points_to_redeem: body.points_to_redeem ?? 0,
     // ไม่รับ delivery_fee จากลูกค้า — orderService คิดเอง
   };
   const order =

@@ -28,6 +28,9 @@ export const createPreorderBody = z
     recipient_name: z.string().trim().min(1).max(200).nullish(),
     recipient_phone: phone.nullish(),
     delivery_address: deliveryAddress.nullish(),
+    // คูปองของฉัน (แลกด้วยแต้ม — ใช้ร่วมกับโค้ดส่วนลดไม่ได้) + ใช้แต้มเป็นส่วนลด (customer-backend-merge.md §8.11)
+    user_coupon_id: objectId.nullish(),
+    points_to_redeem: z.number().int().min(0).max(1_000_000).nullish(),
     // takeaway: จุดรับ + วันรับ (ไม่บังคับ — ส่งมาแล้วตรวจกับหน้าร้านประจำสัปดาห์ · docs/customer-backend-merge.md §8.7)
     pickup_location_id: objectId.nullish(),
     pickup_date: z.string().regex(/^d{4}-d{2}-d{2}$/, "pickup_date ต้องเป็น YYYY-MM-DD").nullish(),

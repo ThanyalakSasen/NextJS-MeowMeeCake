@@ -19,6 +19,7 @@ import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
 import { assertPasswordStrength, hashPassword } from "./userService";
 import { isPlaceholderEmail } from "./oauthService";
+import { awardWelcomeBonus, safely } from "./pointsService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -136,6 +137,8 @@ export async function verifyEmail(token: unknown) {
     { _id: user._id },
     { $set: { is_email_verified: true, email_verify_token: null, verification_token_expiry: null } }
   );
+  // โบนัสสมาชิกใหม่ให้ตอนยืนยันอีเมล (ไม่ใช่ตอนสมัคร — กันสมัครด้วยอีเมลปลอมเก็บแต้ม · §8.11)
+  await safely("welcome", () => awardWelcomeBonus(String(user._id)));
   return { message: "ยืนยันอีเมลสำเร็จ" };
 }
 

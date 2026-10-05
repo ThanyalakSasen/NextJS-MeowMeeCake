@@ -9,6 +9,7 @@ import { withAuth } from "@/lib/authGuard";
 import { parseBody } from "@/lib/validate";
 import { updateProfileBody } from "@/schemas/user";
 import * as userService from "@/services/userService";
+import * as pointsService from "@/services/pointsService";
 
 export const GET = withAuth(async (session) => {
   return ok({ user: await userService.getUserById(session.user_id) });
@@ -16,5 +17,8 @@ export const GET = withAuth(async (session) => {
 
 export const PATCH = withAuth(async (session, req) => {
   const data = await parseBody(req, updateProfileBody);
-  return ok({ user: await userService.updateProfile(session.user_id, data) });
+  const user = await userService.updateProfile(session.user_id, data);
+  // ข้อมูลส่วนตัวครบ → โบนัส 10 แต้มครั้งเดียว (customer-backend-merge.md §8.11)
+  await pointsService.safely("profile", () => pointsService.checkProfileCompletion(session.user_id));
+  return ok({ user });
 });

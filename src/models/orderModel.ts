@@ -44,6 +44,11 @@ const orderSchema = new mongoose.Schema(
     total_amount: { type: Number, required: true, min: 0 },
     promotion_id: { type: mongoose.Schema.Types.ObjectId, ref: "Promotions", default: null },
     payment_id: { type: mongoose.Schema.Types.ObjectId, ref: "Payments", default: null },
+    // แต้มสะสม + คูปองส่วนตัว (customer-backend-merge.md §8.11) — ส่วนลดรวมอยู่ใน discount_amount แล้ว
+    points_redeemed: { type: Number, default: 0, min: 0 },
+    points_discount: { type: Number, default: 0, min: 0 },
+    user_coupon_id: { type: mongoose.Schema.Types.ObjectId, ref: "UserCoupons", default: null },
+    coupon_discount: { type: Number, default: 0, min: 0 },
     // กำหนดชำระของออเดอร์จากหน้าเว็บ (สร้าง + 30 นาที) — เลยแล้วยังไม่ส่งสลิป → ยกเลิกอัตโนมัติ (orderExpiryService)
     // null = ไม่มีกำหนด (POS / แอดมินสร้าง / ออเดอร์เก่า)
     payment_due_at: { type: Date, default: null },

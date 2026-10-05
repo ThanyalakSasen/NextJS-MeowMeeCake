@@ -4,6 +4,7 @@ import userModel from "@/models/userModel";
 import { setMailTransport } from "@/lib/mailer";
 import * as accountService from "@/services/accountService";
 import * as userService from "@/services/userService";
+import * as pointsService from "@/services/pointsService";
 import { signInWithGoogle, signInWithLine, isPlaceholderEmail } from "@/services/oauthService";
 import { assertSessionStillValid } from "@/lib/authGuard";
 import type { SessionUser } from "@/lib/session";
@@ -45,6 +46,7 @@ describe("สมัครสมาชิก + ยืนยันอีเมล"
     await expect(accountService.signup(signupInput("new@test.local"))).rejects.toMatchObject({ status: 409 });
 
     await accountService.verifyEmail(token);
+    expect(await pointsService.getBalance(res.user_id)).toBe(50); // โบนัสสมาชิกใหม่หลังยืนยันอีเมล (§8.11)
     const user = (await userService.verifyCredentials("new@test.local", "Password123")) as { email: string };
     expect(user.email).toBe("new@test.local");
     await expect(accountService.verifyEmail(token)).rejects.toMatchObject({ status: 400 });

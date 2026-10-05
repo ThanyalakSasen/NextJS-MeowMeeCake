@@ -45,6 +45,11 @@ const preorderSchema = new mongoose.Schema(
     total_amount: { type: Number, required: true, min: 0 },
     promotion_id: { type: mongoose.Schema.Types.ObjectId, ref: "Promotions", default: null },
     payment_id: { type: mongoose.Schema.Types.ObjectId, ref: "Payments", default: null },
+    // แต้มสะสม + คูปองส่วนตัว (customer-backend-merge.md §8.11) — ส่วนลดรวมอยู่ใน discount_amount แล้ว
+    points_redeemed: { type: Number, default: 0, min: 0 },
+    points_discount: { type: Number, default: 0, min: 0 },
+    user_coupon_id: { type: mongoose.Schema.Types.ObjectId, ref: "UserCoupons", default: null },
+    coupon_discount: { type: Number, default: 0, min: 0 },
     // ลิงก์หน้าชำระเงินแบบใช้ครั้งเดียว — เก็บ SHA-256 ของ token (src/services/paymentLinkService.ts) · select: false กันหลุดไปกับ API อื่น
     payment_link_token: { type: String, default: null, select: false },
     payment_link_expires_at: { type: Date, default: null, select: false },

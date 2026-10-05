@@ -71,6 +71,13 @@ const promotionSchema = new mongoose.Schema({
         type: Number,
         required: false,
     },
+    // แต้มสะสมที่ใช้แลกเป็นคูปองส่วนตัว (null = ไม่เปิดให้แลก) — โปรที่ตั้งค่านี้ใช้ได้ผ่าน "คูปองของฉัน" เท่านั้น
+    // กรอกเป็นโค้ดตรง ๆ ไม่ได้ (couponService · customer-backend-merge.md §8.11)
+    points_cost: {
+        type: Number,
+        default: null,
+        min: 0,
+    },
     start_date: { //วันที่เริ่มต้นโปรโมชั่น
         type: Date,
         required: true,

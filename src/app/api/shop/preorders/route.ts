@@ -42,6 +42,8 @@ export const POST = withAuth(async (session, req) => {
     items: body.items,
     pickup_location_id: body.pickup_location_id ?? null,
     pickup_date: body.pickup_date ?? null,
+    user_coupon_id: body.user_coupon_id ?? null,
+    points_to_redeem: body.points_to_redeem ?? 0,
   }, { storefront: true });
   audit(req, {
     action: `สั่งพรีออเดอร์ ${preorder?.preorder_no ?? ""}`.trim(),
