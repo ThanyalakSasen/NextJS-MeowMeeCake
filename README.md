@@ -87,9 +87,11 @@ mongodump --uri "<MONGODB_URI>" --out backup-$(date +%F)
 # อ่านอย่างเดียว — เก็บผลไว้เทียบหลัง deploy
 npm run check:data-integrity -- --no-notify
 
-# dry-run ดูแผนก่อน (ยังไม่เขียน)
+# dry-run ดูแผนก่อน (ยังไม่เขียน) — ทุกตัวรันซ้ำได้ ไม่แตะข้อมูล
 npm run cleanup:legacy-product-fields
 npm run backfill:payment-due
+npm run migrate:line-user-id      # ดูรายชื่อลูกค้าที่จะคัดลอก LINE + รายการที่ขัดกัน (ต้องตรวจเอง)
+npm run migrate:reviews           # ดูจำนวนรีวิวที่ไม่มี status · index ที่บล็อกรีวิวพรีออเดอร์ · รีวิวซ้ำ (ถ้ามี ต้องจัดการก่อน)
 ```
 
 - ตรวจ `.env.local` ครบตาม [`docs/env.md`](docs/env.md) · secret ของ production ต้องคนละค่ากับ dev (`JWT_SECRET` · `SESSION_SECRET` · `NEXTAUTH_SECRET` · `CRON_SECRET`)
@@ -117,13 +119,32 @@ npm run summary:monthly -- --dry-run               # ทดสอบข้อค
 npm run remind:preorders -- --dry-run
 ```
 
-แล้วตั้ง cron 6 ตัว ([`docs/DEPLOY.md`](docs/DEPLOY.md) ⑧) และตรวจรับตาม ⑨ · ตั้งเลขพร้อมเพย์ (`StoreProfile.promptpay_id` หรือ env `PROMPTPAY_ID`) ไม่งั้นหน้าชำระเงินไม่มี QR
+### 5. ตั้ง cron 6 ตัว (ครั้งแรกครั้งเดียว — crontab เต็มอยู่ใน [`docs/DEPLOY.md`](docs/DEPLOY.md) ⑧)
+
+| เวลา (เวลาไทย) | คำสั่ง | ทำอะไร |
+|---|---|---|
+| ทุก 15 นาที | `npm run -s cron:preorder-rounds` | เปิด/ปิดรอบพรีออเดอร์ · ยกเลิกคนไม่จ่าย · สร้างใบสั่งผลิต |
+| ทุก 5 นาที | `npm run -s cron:order-expiry` | ยกเลิกออเดอร์เว็บที่เลยกำหนดชำระ 30 นาที + คืนสต็อก |
+| 04:15 ทุกวัน | `npm run -s cleanup:review-media` | ลบรูป/วิดีโอรีวิวที่ค้างเกิน 24 ชม. |
+| 07:30 ทุกวัน | `npm run -s check:data-integrity` | ตรวจข้อมูลสินค้าผิดปกติ แจ้งเจ้าของร้าน (exit 2 เมื่อพบปัญหา = ปกติ) |
+| 18:00 ทุกวัน | `npm run -s remind:preorders` | เตือนลูกค้าก่อนวันรับพรีออเดอร์ทาง LINE |
+| วันที่ 1 08:00 | `npm run -s summary:monthly` | สรุปยอดเดือนที่แล้วถึงเจ้าของร้าน |
+
+ตั้งเครื่องเป็นเวลาไทยก่อน: `sudo timedatectl set-timezone Asia/Bangkok` · แล้วตรวจรับตาม [`docs/DEPLOY.md`](docs/DEPLOY.md) ⑨
+
+### 6. ตั้งค่าในหลังร้าน (ไม่ใช่คำสั่ง แต่ต้องทำหลัง deploy)
+
+- **เลขพร้อมเพย์** — `PUT /api/admin/store-profile` (`promptpay_id` + `promptpay_account_name`) หรือ env `PROMPTPAY_ID` ไม่งั้นหน้าชำระเงินไม่มี QR
+- **ข้อมูลร้าน / โลโก้ / ที่อยู่ร้าน** — `/api/admin/store-profile` · `/api/admin/store-settings` (เจ้าของร้าน · [`docs/customer-backend-merge.md`](docs/customer-backend-merge.md) §8.19) — ยังไม่อัปโหลดโลโก้ = ใช้ไฟล์เดิมของหน้าเว็บ
+- **สิทธิ์พนักงาน** — สิทธิ์รีวิวหลังร้านย้ายจากเมนู `products` → **`reports`** (§8.20) · หน้าร้านประจำสัปดาห์ใช้เมนูใหม่ **`store_info`** (§8.19) → ให้สิทธิ์ใหม่กับพนักงานที่ดูแลงานเหล่านี้
 
 ### ⚠️ ห้ามรัน / ข้อควรระวัง
 
 | คำสั่ง | เหตุผล |
 |---|---|
 | `npm run migrate:is-preorder -- --apply` | รันบน DB จริงแล้ว 2026-10-01 |
+| `npm run migrate:line-user-id -- --apply --remove-old` | **ห้ามจนกว่าจะปิด backend ฝั่งลูกค้า (พอร์ต 4000)** — ฝั่งลูกค้ายังอ่าน `lineId` ส่ง LINE อยู่ · ใช้ `-- --apply` อย่างเดียว |
+| เปิดให้ลูกค้ารีวิวพรีออเดอร์ก่อน `migrate:reviews -- --apply` | index เดิม `order_item_id_1` (ถ้าเป็น unique) ทำให้รีวิวพรีออเดอร์ชิ้นที่ 2 บันทึกไม่ได้ · รีวิวเก่าที่ไม่มี status ไม่แสดงที่ฝั่งลูกค้า |
 | `npm run sync-indexes` | **ห้ามรันระหว่างที่ backend ฝั่งลูกค้า (พอร์ต 4000) ยังใช้ DB เดียวกัน** — `syncIndexes()` ลบ index ที่ไม่มีใน schema ของโปรเจกต์นี้ = ลบ index ของฝั่งลูกค้าด้วย ([`docs/customer-backend-merge.md`](docs/customer-backend-merge.md)) |
 | สคริปต์เงินยุคสตางค์ (`fix-money-units` · `fix-orders-money` · `migrate-money-to-satang` ฯลฯ) | ระบบเก็บเงินเป็นบาทแล้ว — สคริปต์ถูกล็อกไว้ ([`docs/money-units.md`](docs/money-units.md)) |
 | deploy หลักโดยไม่ deploy ฝั่งลูกค้าขั้น 0 | ถ้า backend ฝั่งลูกค้ายังเป็นโค้ดเดิม จะเขียน `product_type` + ตั้งสต็อก 0 ตอนปิดรอบต่อ → ควร deploy ฝั่งลูกค้าที่แก้ขั้น 0 พร้อมกัน แล้วค่อยรัน `cleanup:legacy-product-fields -- --apply` ([`docs/customer-backend-merge.md`](docs/customer-backend-merge.md) §8.2) |
