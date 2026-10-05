@@ -77,7 +77,7 @@ sudo -iu meowmee git clone https://github.com/ThanyalakSasen/NextJS-MeowMeeCake.
 ## ③ merge PR ตามลำดับ (รอ CI ผ่านทุกขั้น)
 
 ```
-#56 postcss override ────────────────────────────▶ main   (ไม่ชนกับใคร)
+#56 postcss override ────────────────────────────▶ main   (ไม่ชนกับใคร · commit นี้รวมอยู่ใน #57 แล้ว 2026-10-06 — merge ก่อน/หลัง/ปิดไปก็ได้)
 #52 is_preorder + เลขออเดอร์ ────────────────────▶ main   ✔ ติ๊ก "Delete branch"
      └─ #53 แจ้งเตือน LINE (base ย้ายเป็น main เอง) ─▶ main   ✔ Delete branch
            └─ #55 รอบพรีออเดอร์ (base ย้ายเป็น main เอง) ─▶ main
@@ -88,6 +88,9 @@ sudo -iu meowmee git clone https://github.com/ThanyalakSasen/NextJS-MeowMeeCake.
 
 ⚠️ ตอนแก้ conflict `package.json` ระหว่าง #54 กับ #57: ใช้ฝั่ง #57 แล้วเพิ่มแค่ `"migrate:upload-files"` —
 **ห้ามเก็บ `"migrate:money-to-satang"`** (#57 ลบแล้ว · ระบบเก็บเงินเป็นบาท — [`money-units.md`](money-units.md)) · `.env.example` เก็บทั้งสองฝั่ง
+
+`package.json` ของ #57 มี `overrides` 2 ตัว (`next.postcss` จาก #56 · `next-auth.nodemailer` — ไม่มีแล้ว `npm install` ล้ม ERESOLVE ·
+[`BACKLOG5.md`](BACKLOG5.md) Y3) — ตอนแก้ conflict กับ #54 ต้องเก็บไว้ทั้งคู่ · `package-lock.json` ชนเมื่อไหร่ให้ใช้ของ #57 แล้ว `npm install` ใหม่
 
 ไม่ได้ติ๊กลบ branch → เปลี่ยน base ของ PR ถัดไปเป็น `main` เอง · ตรวจรวมทุก PR แล้ว (BACKLOG4 §1 R1): unit 223 · integration 271 · build ✅
 

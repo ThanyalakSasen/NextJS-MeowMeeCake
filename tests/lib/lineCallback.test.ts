@@ -20,10 +20,12 @@ type Handler = (req: NextRequest) => Promise<Response>;
 let callbackGET: Handler;
 let middleware: (req: NextRequest) => Promise<Response>;
 
+// import route + middleware (next-auth · mongoose models) ครั้งแรกหลัง npm ci ตอนรันพร้อมเทสอื่นใช้เวลาเกิน hookTimeout 10 วิ
+// เป็นครั้งคราว (ไฟล์ทั้งไฟล์ skip) — ให้เวลา 60 วิ
 beforeAll(async () => {
   callbackGET = (await import("@/app/api/shop/me/line/callback/route")).GET as Handler;
   middleware = (await import("@/middleware")).middleware;
-});
+}, 60_000);
 
 const ORIGINAL_RETURN = process.env.LINE_LINK_RETURN_URL;
 afterEach(() => {

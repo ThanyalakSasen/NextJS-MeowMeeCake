@@ -13,7 +13,7 @@
 | ระดับ | จำนวน | สรุป |
 |---|---|---|
 | 🔴 ต้องแก้ก่อนใช้งานจริง | 1 (✅ R1 แก้แล้ว 2026-10-06) | ~~ต้นทุนสินค้า + สูตรหลุดทาง API สาธารณะ~~ |
-| 🟡 ควรแก้ | 5 (✅ Y1 · Y2 · Y4 · Y5 แก้แล้ว 2026-10-06 · เหลือ Y3 ตอน merge #56) | ~~session แบบ cookie หลักไม่ตรวจบัญชีกับ DB~~ · ~~`.env.example` ขาดตัวแปรใหม่~~ · `npm audit` · ~~ล็อกอินผ่าน next-auth ไม่มี rate limit ต่อ IP~~ · ~~sortBy สาธารณะไม่จำกัด field~~ |
+| 🟡 ควรแก้ | 5 (✅ ครบ Y1–Y5 แก้แล้ว 2026-10-06) | ~~session แบบ cookie หลักไม่ตรวจบัญชีกับ DB~~ · ~~`.env.example` ขาดตัวแปรใหม่~~ · ~~`npm audit`~~ · ~~ล็อกอินผ่าน next-auth ไม่มี rate limit ต่อ IP~~ · ~~sortBy สาธารณะไม่จำกัด field~~ |
 | 🟢 เล็กน้อย / เก็บกวาด | 6 | คอมเมนต์ยุคสตางค์ค้าง 54 บรรทัด · หน้าแนะนำสินค้าโหลดทั้งร้านทุกครั้ง · ตัวกรองรีวิวที่ยังดู `is_visible` อย่างเดียว ฯลฯ |
 | ⏸ รอ FrontEnd / ทีม | 4 | ปิด `product_stock_quantity` ใน PATCH · R5 แดชบอร์ดรีวิว · P4/P5 หลังร้าน + ปิดพอร์ต 4000 · FrontOffice เขียน DB ตรง |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | §6 |
@@ -100,7 +100,25 @@
 — มีใน [`env.md`](env.md) ครบแล้ว แต่คน deploy มักคัดลอกจาก `.env.example` → **ไม่ตั้ง `NEXTAUTH_SECRET` = ล็อกอินหน้าเว็บลูกค้าไม่ได้ ·
 ไม่ตั้ง `EMAIL_*` = สมัครสมาชิกไม่ได้ (502)** · แก้: เติมลง `.env.example` (ค่าว่าง + คอมเมนต์) ระวังชนกับ #54 ที่ท้ายไฟล์ (เก็บทั้งสองฝั่ง)
 
-### Y3. `npm audit` — 8 รายการ (production 2)
+### Y3. ✅ `npm audit` — แก้แล้ว 2026-10-06 (รวม PR #56 เข้า #57 — ผู้ใช้เลือก)
+
+**ทำแล้ว:**
+- merge branch `chore/postcss-override` (PR #56) เข้า `fix/backlog4-y7-y11` (PR #57) — **ไม่แตะ main** · ชนแค่ `package-lock.json`
+  (ใช้ของ #57 แล้วสร้างใหม่ด้วย `npm install`) · `package.json` รวมได้เอง · `postcss.config.mjs` ลบไปแล้วทั้งสองฝั่ง (§8.21)
+- **พบเพิ่ม:** `npm install` บน #57 ล้มด้วย ERESOLVE — `next-auth@4` ประกาศ peer `nodemailer@^7` แต่โปรเจกต์ใช้ `nodemailer@10`
+  (อัปตอน §8.9 เพราะ 7.x มีช่องโหว่) · `npm ci` ยังผ่านเพราะใช้ lock เดิม แต่ `npm install`/`npm audit fix` ทำไม่ได้ →
+  เพิ่ม `overrides: { "next-auth": { "nodemailer": "$nodemailer" } }` (next-auth ใช้ nodemailer เฉพาะ Email provider ซึ่งไม่ได้เปิด — ส่งอีเมลใช้ `src/lib/mailer.ts`)
+- `overrides.next.postcss: ^8.5.23` (จาก #56 · ได้ 8.5.28/8.5.29) + `npm audit fix` (brace-expansion)
+- ผล: **production `npm audit --omit=dev` = 0** · ทั้งหมดเหลือ 5 high = `braces` สายเดียว
+  (`eslint-config-next` → `@next/eslint-plugin-next` → `fast-glob` → `micromatch` → `braces@3.0.3`)
+  — **ยอมรับความเสี่ยง:** 3.0.3 คือรุ่นล่าสุด ยังไม่มีแพตช์ · `audit fix --force` = ถอย `eslint-config-next` ไป 14 (ใช้ไม่ได้) ·
+  ใช้เฉพาะตอน lint ไม่รับ pattern จากผู้ใช้ · ตรวจใหม่เมื่อ `braces` ออกรุ่นแก้
+- ตรวจ: typecheck · typecheck:test · lint 0 error · เทส 583/583 · build ✅ · ทดลองใน worktree แยกก่อนทำจริง
+- เทส `lineCallback.test.ts` ล้มเป็นครั้งคราวตอนรันครั้งแรกหลัง `npm ci` (beforeAll import route+middleware เกิน 10 วิ ทั้งไฟล์ skip) → hook timeout 60 วิ
+- **PR #56 หลังจากนี้:** merge เข้า main ได้โดยไม่ชน (commit ของ #56 อยู่ใน #57 แล้ว) หรือปิดไปเลยก็ได้ — DEPLOY ③ อัปเดตแล้ว
+
+<details><summary>สภาพก่อนแก้</summary>
+
 
 | แพ็กเกจ | ระดับ | ใช้ที่ | สถานะ |
 |---|---|---|---|
@@ -109,6 +127,8 @@
 | `brace-expansion` | high · dev | eslint / typescript-estree | `npm audit fix` ได้ (ไม่ breaking — #56 เคยแก้ตัวนี้) |
 
 ไม่กระทบ runtime ของ API (dev ทั้งหมด ยกเว้น postcss ที่ใช้ตอน build) · แก้รวมตอน merge #56 แล้วรัน `npm audit` ซ้ำ
+
+</details>
 
 ### Y4. ✅ ล็อกอินผ่าน next-auth (credentials) ไม่มี rate limit ต่อ IP — แก้แล้ว 2026-10-06
 
@@ -200,4 +220,18 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 1. ~~**R1** (ต้นทุน/สูตรหลุด) + **Y5** (sortBy)~~ ✅ 2026-10-06
 2. ~~**Y1** (session cookie ตรวจ DB)~~ ✅ 2026-10-06
 3. ~~**Y2** (`.env.example`) + **Y4** (rate limit next-auth)~~ ✅ 2026-10-06
-4. **Y3** ตอน merge #56 · **G1–G5** หลัง merge ชุดใหญ่ (กัน conflict)
+4. ~~**Y3** ตอน merge #56~~ ✅ 2026-10-06 (รวม #56 เข้า #57)
+5. **G1–G6 หลัง merge ชุดใหญ่เข้า main** (กัน conflict กับ #52–#55 / #54 ที่ยังเปิดอยู่) — ลำดับด้านล่าง
+
+### 7.1 ลำดับแก้ 🟢 G1–G6 (หลัง merge ชุดใหญ่)
+
+ทำหลัง #52 → #53 → #55 → #57 และ #54 เข้า main ครบ (DEPLOY ③) — ข้อเหล่านี้แตะไฟล์ service จำนวนมาก ถ้าทำก่อนจะชนกับ PR ที่ยังเปิด
+
+| ลำดับ | ข้อ | ทำไมลำดับนี้ | ขนาด |
+|---|---|---|---|
+| 1 | **G4** ตัวกรองรีวิวที่แสดงใช้ `VISIBLE_REVIEW` | ถูกต้องของข้อมูล (รีวิวที่ซ่อนด้วย status ยังโผล่ในสรุปแง่มุม/แนะนำสินค้า) · หลัง `migrate:reviews --apply` บน DB จริง | เล็ก (4 จุด) |
+| 2 | **G2** แนะนำสินค้าแบบไม่ล็อกอินโหลดทั้งร้านทุกครั้ง | endpoint สาธารณะ ยิงรัวแล้ว DB หนัก — ใช้ catalog cache ของ engine หรือ query 10 อันดับ | เล็ก |
+| 3 | **G3** สรุปแง่มุมรายสินค้า `$lookup` ทั้ง collection | endpoint สาธารณะเหมือนกัน · ช้าลงตามจำนวนผลวิเคราะห์ | เล็ก |
+| 4 | **G5** seed แง่มุมเริ่มต้นซ้ำเมื่อเรียกพร้อมกันครั้งแรก | ต้องเพิ่ม unique index — ทำหลัง `migrate:reviews` และตรวจชื่อแง่มุมซ้ำใน DB จริงก่อน | เล็ก |
+| 5 | **G1** คอมเมนต์ยุคสตางค์ 54 บรรทัด / 19 ไฟล์ | แก้แค่คอมเมนต์ แต่แตะไฟล์เยอะที่สุด — ทำทีหลังสุดเป็น PR แยก (ไม่ปนกับโค้ด) | กลาง (คอมเมนต์ล้วน) |
+| — | **G6** in-memory ต่อ instance | ไม่ต้องแก้ตราบที่รัน instance เดียว (DEPLOY ⑤) — ทำเมื่อจะขยายหลาย instance (Redis) | ใหญ่ (ตอนขยาย) |
