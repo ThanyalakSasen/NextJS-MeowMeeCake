@@ -6,7 +6,10 @@ import { pathToFileURL } from "node:url";
 import dbConnect from "../src/lib/dbConnect";
 import preorderModel from "../src/models/preorderModel";
 import preorderRoundModel from "../src/models/preorderRoundModel";
+import paymentModel from "../src/models/paymentModel";
+import { flushBackground } from "../src/lib/backgroundTasks";
 import { computePaymentDueAt, paymentDeadlineHours } from "../src/services/preorderRoundLifecycleService";
+import { cancelPreorder } from "../src/services/preorderService";
 
 /**
  * docs/BACKLOG4.md Y7 — พรีออเดอร์ที่สร้างก่อนมีฟิลด์ payment_due_at (ค่าเป็น null) จะไม่ถูกยกเลิก
@@ -18,6 +21,8 @@ import { computePaymentDueAt, paymentDeadlineHours } from "../src/services/preor
  * กำหนดชำระ = min(เวลาสั่ง + PREORDER_PAYMENT_DEADLINE_HOURS, ปิดรอบ) — สูตรเดียวกับพรีออเดอร์ใหม่
  * แต่ถ้าค่านั้น "เลยไปแล้ว" จะเลื่อนเป็น ตอนรัน + grace ชม. (ค่าเริ่มต้น = PREORDER_PAYMENT_DEADLINE_HOURS)
  * → ลูกค้าเก่าไม่ถูกยกเลิกทันทีในรอบ cron ถัดไปโดยไม่ทันรู้ตัว (รายงานแยกเป็น "extended")
+ * --cancel-overdue: รายการที่เลยกำหนดแล้ว "ยกเลิก" แทนการเลื่อน (cancelPreorder — คืนโควตา/แต้ม/คูปอง · ลดใบผลิต · แจ้งลูกค้า)
+ *   ข้ามรายการที่มีสลิปรอตรวจ (กติกาเดียวกับ cron ยกเลิกอัตโนมัติ) · ตรวจสถานะซ้ำก่อนยกเลิก (จ่ายระหว่างรัน = ข้าม)
  *
  * ความปลอดภัย:
  *   - ค่าเริ่มต้น = dry-run (อ่านอย่างเดียว พิมพ์แผน) · เขียนจริงต้องส่ง --apply
@@ -27,6 +32,7 @@ import { computePaymentDueAt, paymentDeadlineHours } from "../src/services/preor
  * รัน: npm run backfill:payment-due                       (dry-run)
  *      npm run backfill:payment-due -- --apply            (เขียนจริง)
  *      npm run backfill:payment-due -- --apply --grace-hours=48
+ *      npm run backfill:payment-due -- --apply --cancel-overdue   (ยกเลิกรายการที่เลยกำหนด)
  */
 
 export interface PaymentDueBackfillResult {
@@ -37,13 +43,23 @@ export interface PaymentDueBackfillResult {
   missingRound: string[];
   updated: number;
   conflicts: string[];
+  /** --cancel-overdue: รายการที่เลยกำหนดแล้ว → ยกเลิก (แทนการเลื่อน) */
+  toCancel: Array<{ _id: string; preorder_no: string; due_at: string }>;
+  cancelled: string[];
+  /** มีสลิปรอตรวจ — ไม่ยกเลิก ไม่เลื่อน (รอแอดมินตรวจสลิป) */
+  waitingSlip: string[];
+  /** สถานะเปลี่ยนระหว่างรัน (จ่ายแล้ว/ถูกยกเลิกแล้ว) หรือยกเลิกไม่สำเร็จ */
+  cancelSkipped: Array<{ preorder_no: string; reason: string }>;
   backupFile: string | null;
 }
+
+export const OVERDUE_CANCEL_REASON = "เลยกำหนดการชำระเงิน — ระบบยกเลิก";
+const UNPAID = ["pending", "failed"];
 
 const HOUR_MS = 60 * 60 * 1000;
 
 export async function runBackfill(
-  opts: { apply?: boolean; now?: Date; graceHours?: number; backupDir?: string } = {}
+  opts: { apply?: boolean; now?: Date; graceHours?: number; backupDir?: string; cancelOverdue?: boolean } = {}
 ): Promise<PaymentDueBackfillResult> {
   await dbConnect();
   const dryRun = !opts.apply;
@@ -57,7 +73,7 @@ export async function runBackfill(
         deleted_at: null,
         payment_due_at: null,
         order_status: { $nin: ["cancelled", "completed"] },
-        payment_status: { $in: ["pending", "failed"] },
+        payment_status: { $in: UNPAID },
       },
       { projection: { preorder_no: 1, round_id: 1, created_at: 1 } }
     )
@@ -70,6 +86,7 @@ export async function runBackfill(
   const closeById = new Map(rounds.map((r) => [String(r._id), r.close_date as Date | null]));
 
   const planned: PaymentDueBackfillResult["planned"] = [];
+  const toCancel: PaymentDueBackfillResult["toCancel"] = [];
   const missingRound: string[] = [];
   for (const p of preorders) {
     const close = closeById.get(String(p.round_id));
@@ -79,6 +96,10 @@ export async function runBackfill(
     }
     const due = computePaymentDueAt(p.created_at ?? now, close);
     const extended = due.getTime() <= now.getTime();
+    if (extended && opts.cancelOverdue) {
+      toCancel.push({ _id: String(p._id), preorder_no: p.preorder_no, due_at: due.toISOString() });
+      continue;
+    }
     planned.push({
       _id: String(p._id),
       preorder_no: p.preorder_no,
@@ -87,14 +108,31 @@ export async function runBackfill(
     });
   }
 
+  // มีสลิปรอตรวจ = payment pending ที่แนบสลิปแล้ว (เทียบ cancelUnpaidPreorders) — ไม่ยกเลิก
+  const withSlip = toCancel.length
+    ? await paymentModel
+        .find({
+          preorder_id: { $in: toCancel.map((c) => new mongoose.Types.ObjectId(c._id)) },
+          status: "pending",
+          slip_image_url: { $nin: [null, ""] },
+          deleted_at: null,
+        })
+        .distinct("preorder_id")
+    : [];
+  const slipIds = new Set(withSlip.map(String));
+  const waitingSlip = toCancel.filter((c) => slipIds.has(c._id)).map((c) => c.preorder_no);
+  const cancelList = toCancel.filter((c) => !slipIds.has(c._id));
+
   let updated = 0;
   const conflicts: string[] = [];
+  const cancelled: string[] = [];
+  const cancelSkipped: PaymentDueBackfillResult["cancelSkipped"] = [];
   let backupFile: string | null = null;
-  if (!dryRun && planned.length > 0) {
+  if (!dryRun && (planned.length > 0 || cancelList.length > 0)) {
     const dir = opts.backupDir ?? "scripts/backups";
     mkdirSync(dir, { recursive: true });
     backupFile = `${dir}/payment-due-${new Date().toISOString().replace(/[:.]/g, "-")}.json`;
-    writeFileSync(backupFile, JSON.stringify(planned, null, 2));
+    writeFileSync(backupFile, JSON.stringify({ planned, cancel: cancelList }, null, 2));
 
     for (const p of planned) {
       const res = await preorderModel.collection
@@ -105,6 +143,26 @@ export async function runBackfill(
       if (res.modifiedCount === 1) updated++;
       else conflicts.push(p.preorder_no);
     }
+
+    for (const c of cancelList) {
+      // ตรวจซ้ำก่อนยกเลิก — จ่ายระหว่างรันแล้วยกเลิก = คืนเงินอัตโนมัติ (ไม่ใช่สิ่งที่ต้องการ)
+      const cur = await preorderModel.collection.findOne(
+        { _id: new mongoose.Types.ObjectId(c._id) },
+        { projection: { order_status: 1, payment_status: 1, deleted_at: 1 } }
+      );
+      if (!cur || cur.deleted_at || ["cancelled", "completed"].includes(cur.order_status) || !UNPAID.includes(cur.payment_status)) {
+        cancelSkipped.push({ preorder_no: c.preorder_no, reason: `สถานะเปลี่ยนระหว่างรัน (${cur?.order_status}/${cur?.payment_status})` });
+        continue;
+      }
+      try {
+        await cancelPreorder(c._id, { cancelled_reason: OVERDUE_CANCEL_REASON });
+        cancelled.push(c.preorder_no);
+      } catch (err) {
+        cancelSkipped.push({ preorder_no: c.preorder_no, reason: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    // แจ้งลูกค้า (เว็บ/LINE) วิ่งเบื้องหลัง — รอให้จบก่อนสคริปต์ปิด DB
+    await flushBackground();
   }
 
   const extendedCount = planned.filter((p) => p.extended).length;
@@ -112,13 +170,34 @@ export async function runBackfill(
   console.log(`  พรีออเดอร์ค้างจ่ายที่ยังไม่มีกำหนดชำระ: ${preorders.length} · จะตั้งค่า: ${planned.length}`);
   console.log(`  เลยกำหนดแล้ว → เลื่อนเป็นตอนนี้ + ${graceHours} ชม.: ${extendedCount}`);
   for (const p of planned) console.log(`    - ${p.preorder_no} → ${p.payment_due_at}${p.extended ? " (เลื่อน)" : ""}`);
+  if (opts.cancelOverdue) {
+    console.log(`  เลยกำหนดแล้ว → ยกเลิก (${OVERDUE_CANCEL_REASON}): ${cancelList.length}`);
+    for (const c of cancelList) console.log(`    - ${c.preorder_no} (กำหนดเดิม ${c.due_at})`);
+    if (waitingSlip.length) console.log(`  มีสลิปรอตรวจ (ไม่ยกเลิก): ${waitingSlip.join(", ")}`);
+  }
   if (missingRound.length) console.log(`  หารอบไม่เจอ (ไม่แตะ): ${missingRound.join(", ")}`);
   if (!dryRun) {
     console.log(`  เขียนสำเร็จ: ${updated} · ถูกตั้งค่าไประหว่างรัน (ข้าม): ${conflicts.length}`);
+    if (opts.cancelOverdue) {
+      console.log(`  ยกเลิกสำเร็จ: ${cancelled.length}${cancelled.length ? ` — ${cancelled.join(", ")}` : ""}`);
+      for (const s of cancelSkipped) console.log(`  ข้าม: ${s.preorder_no} — ${s.reason}`);
+    }
     if (backupFile) console.log(`  รายการที่แก้: ${backupFile}`);
   }
 
-  return { dryRun, graceHours, planned, missingRound, updated, conflicts, backupFile };
+  return {
+    dryRun,
+    graceHours,
+    planned,
+    missingRound,
+    updated,
+    conflicts,
+    toCancel: cancelList,
+    cancelled,
+    waitingSlip,
+    cancelSkipped,
+    backupFile,
+  };
 }
 
 function argNumber(name: string): number | undefined {
@@ -129,7 +208,11 @@ function argNumber(name: string): number | undefined {
 // รันจริงเฉพาะตอนเรียกไฟล์นี้ตรง ๆ ผ่าน CLI (`npm run backfill:payment-due`)
 const isDirectRun = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
-  runBackfill({ apply: process.argv.includes("--apply"), graceHours: argNumber("grace-hours") })
+  runBackfill({
+    apply: process.argv.includes("--apply"),
+    graceHours: argNumber("grace-hours"),
+    cancelOverdue: process.argv.includes("--cancel-overdue"),
+  })
     .catch((err) => {
       console.error(err);
       process.exitCode = 1;
