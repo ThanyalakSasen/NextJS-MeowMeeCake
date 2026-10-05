@@ -188,6 +188,8 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 - [ ] deploy backend ฝั่งลูกค้าที่แก้ขั้น 0 พร้อมกัน (§8.5) แล้ว `cleanup:legacy-product-fields -- --apply`
 - [ ] env production ครบ (Y2) · secret ใหม่ทั้งหมด · **หมุน `LINE_LOGIN_CHANNEL_SECRET`** (เคยวางในแชต)
 - [ ] `migrate:line-user-id` → `--apply` (ห้าม `--remove-old` จนปิดพอร์ต 4000) · `migrate:reviews` → `--apply` (ก่อนเปิดรีวิวพรีออเดอร์)
+- [ ] `check:aspect-names` (dry-run ก่อน deploy — เจอชื่อซ้ำแก้ในหลังร้านก่อน) → `--apply` หลัง deploy = สร้าง unique index ชื่อแง่มุม (G5 · PR #59)
+- [ ] `migrate:upload-files` dry-run → `--apply` หลัง deploy (ย้ายสลิปจาก `public/uploads/slips/` ไปที่เก็บส่วนตัว + เปลี่ยน URL — PR #54 · [`uploads.md`](uploads.md) §3.3)
 - [ ] cron 6 ตัว · nginx `/uploads/` · Atlas แยก DB user + เปลี่ยนรหัส user เดิม
 - [ ] หลังร้าน: เลขพร้อมเพย์ · ข้อมูลร้าน/โลโก้ · สิทธิ์ `reports` (รีวิว) และ `store_info` (หน้าร้านประจำสัปดาห์) ให้พนักงาน
 - [ ] ออเดอร์ค้าง `ORD-1790786142302-M2PY` · `WEB-1790317257577` (BACKLOG4 §8.3)
