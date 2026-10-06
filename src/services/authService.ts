@@ -13,6 +13,7 @@ import { stripSecrets } from "./userService";
 import * as userLogService from "./userLogService";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
+import { signInWithLine } from "./oauthService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -53,6 +54,26 @@ export async function login(email: string, password: string, ctx: { ip?: string 
     ip_address: ctx.ip ?? null,
   });
   return { user, token, session };
+}
+
+// ── LOGIN ด้วย LINE (frontend แยก origin — /api/auth/line/callback) ─────────
+// หา/สร้างบัญชีด้วยกติกาเดียวกับ next-auth (oauthService.signInWithLine — หาจาก line_user_id เท่านั้น ·
+// บัญชีใหม่ที่ไม่มีอีเมลได้อีเมลชั่วคราว *@line-user.invalid) แล้วออก cookie `session` ของหลักแทน next-auth
+export async function loginWithLine(
+  profile: { sub: string; name?: string | null; email?: string | null; picture?: string | null },
+  ctx: { ip?: string | null } = {}
+) {
+  const oauthUser = await signInWithLine(profile); // throw OAuthAccountError ถ้าบัญชีใช้ไม่ได้
+  const user = await userModel.findById(oauthUser.user_id).populate("role_id", "role_name role_type").lean<any>();
+  if (!user) throw badRequest("ไม่พบบัญชีผู้ใช้");
+  const { session, token } = await issue(user);
+  await userLogService.writeLog({
+    user_id: session.user_id,
+    action: "เข้าสู่ระบบผ่าน LINE",
+    action_type: "LOGIN",
+    ip_address: ctx.ip ?? null,
+  });
+  return { user: stripSecrets(user), token, session };
 }
 
 // ── REGISTER — ย้ายไป accountService.signup() (ยืนยันอีเมลก่อน · ไม่ล็อกอินให้ — customer-backend-merge.md §8.9) ──
