@@ -106,3 +106,23 @@ describe("schemas/preorder — listPreorderQuery", () => {
     expect(listPreorderQuery.safeParse({ round_id: "not-an-id" }).success).toBe(false);
   });
 });
+
+describe("pickup_date — YYYY-MM-DD (regex เดิมขาด \d → ปฏิเสธวันที่จริงทุกค่า)", () => {
+  it("ออเดอร์: รับวันที่จริง · ปฏิเสธรูปแบบอื่น", async () => {
+    const { createOrderBody } = await import("@/schemas/order");
+    const body = (pickup_date: string) => ({ order_type: "takeaway", pickup_location_id: OID, pickup_date });
+    expect(createOrderBody.safeParse(body("2026-10-08")).success).toBe(true);
+    expect(createOrderBody.safeParse(body("dddd-dd-dd")).success).toBe(false);
+    expect(createOrderBody.safeParse(body("8/10/2026")).success).toBe(false);
+  });
+  it("พรีออเดอร์: รับวันที่จริง", () => {
+    const r = createPreorderBody.safeParse({
+      round_id: OID,
+      order_type: "takeaway",
+      pickup_location_id: OID,
+      pickup_date: "2026-10-08",
+      items: [{ round_item_id: OID2, quantity: 1 }],
+    });
+    expect(r.success).toBe(true);
+  });
+});
