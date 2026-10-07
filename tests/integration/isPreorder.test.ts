@@ -92,6 +92,37 @@ describe("productService — is_preorder", () => {
     expect(u.product_stock_quantity).toBeNull();
   });
 
+  it("updateProduct: สินค้ามีสต็อก เปลี่ยนเป็นพรีออเดอร์โดยไม่ส่ง product_stock_quantity (แบบหน้าแก้สินค้า) → ได้ สต็อกเป็น null", async () => {
+    const p = (await productService.createProduct(await baseInput({ product_stock_quantity: 3 }))) as Created;
+    const u = (await productService.updateProduct(String(p._id), {
+      is_preorder: true,
+      preorder_config: PREORDER_CONFIG,
+    })) as Created;
+    expect(u.product_id).toMatch(/^pre-\d{7}$/);
+    expect(u.product_stock_quantity).toBeNull();
+  });
+
+  it("updateProduct: ส่ง product_stock_quantity เป็นตัวเลข → 400 ให้ใช้ /stock · สต็อกไม่เปลี่ยน", async () => {
+    const p = (await productService.createProduct(await baseInput({ product_stock_quantity: 3 }))) as Created;
+    await expect(
+      productService.updateProduct(String(p._id), { product_stock_quantity: 99 })
+    ).rejects.toMatchObject({ status: 400, message: expect.stringMatching(/\/stock/) });
+    await expect(
+      productService.updateProduct(String(p._id), { product_name_th: "ชื่อใหม่", product_stock_quantity: 0 })
+    ).rejects.toMatchObject({ status: 400 });
+    const after = await productModel.findById(p._id).lean<{ product_stock_quantity: number; product_name_th: string }>();
+    expect(after?.product_stock_quantity).toBe(3);
+    expect(after?.product_name_th).toBe("เค้ก");
+  });
+
+  it("updateProduct: พรีออเดอร์ → สินค้าปกติ → สต็อกเริ่ม 0", async () => {
+    const p = (await productService.createProduct(
+      await baseInput({ is_preorder: true, preorder_config: PREORDER_CONFIG, product_stock_quantity: null })
+    )) as Created;
+    const u = (await productService.updateProduct(String(p._id), { is_preorder: false, preorder_config: null })) as Created;
+    expect(u.product_stock_quantity).toBe(0);
+  });
+
   it("updateProduct: ส่ง is_preorder ค่าเดิมกับสินค้าที่รหัสค้างผิดประเภท → แก้รหัสให้ (วิธีแก้ pos-1626294 แบบ §14)", async () => {
     const p = await makeProduct({
       product_id: "pos-1626999",

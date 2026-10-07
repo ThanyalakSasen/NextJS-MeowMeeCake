@@ -2,7 +2,8 @@
  * /api/shop/me/line — ผูกบัญชี LINE เพื่อรับแจ้งเตือนออเดอร์ (src/lib/lineLogin.ts)
  *   GET    — สถานะการผูก { linked, authorize_url } · frontend พาไป authorize_url เพื่อเริ่มผูก
  *            (authorize_url อายุ 10 นาที · null ถ้าเซิร์ฟเวอร์ยังไม่ได้ตั้งค่า LINE Login)
- *   DELETE — ยกเลิกผูก (เลิกรับแจ้งเตือนทาง LINE)
+ *   DELETE — ยกเลิกผูก (เลิกรับแจ้งเตือนทาง LINE) · บัญชีที่สมัครด้วย LINE และไม่มีรหัสผ่าน/Google = 409
+ *            (LINE เป็นทางเข้าเดียว — userService.unlinkLineAccount)
  */
 import { ok } from "@/lib/apiResponse";
 import { withAuth } from "@/lib/authGuard";

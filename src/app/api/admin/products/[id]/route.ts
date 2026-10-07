@@ -1,7 +1,7 @@
 /**
  * /api/admin/products/[id]
  *   GET    — ดูสินค้ารายตัว (products.view)
- *   PATCH  — แก้ไขสินค้า (products.update)
+ *   PATCH  — แก้ไขสินค้า (products.update) · ส่ง product_stock_quantity เป็นตัวเลข = 400 → ใช้ ./stock
  *   DELETE — ลบสินค้า (products.delete) ; ?hard=true = ลบถาวร
  */
 import { ok } from "@/lib/apiResponse";

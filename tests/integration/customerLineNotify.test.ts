@@ -4,7 +4,7 @@ import * as preorderService from "@/services/preorderService";
 import * as userService from "@/services/userService";
 import { customerMessages, notifyCustomer } from "@/services/customerNotifyService";
 import { flushBackground } from "@/lib/backgroundTasks";
-import { makeUser, makePreorder } from "./helpers";
+import { makeUser, makePreorder, oid } from "./helpers";
 
 /** LINE push ที่ถูกยิงหา `to` นี้ (อ่านจาก fetch spy) */
 function pushedTo(fetchSpy: ReturnType<typeof vi.fn>, to: string): string[] {
@@ -120,6 +120,26 @@ describe("userService.linkLineAccount", () => {
     const u = await makeUser({ line_user_id: "U_F" });
     await userService.unlinkLineAccount(String(u._id));
     expect((await userModel.findById(u._id).lean<{ line_user_id: string | null }>())?.line_user_id).toBeNull();
+  });
+
+  it("บัญชีที่สมัครด้วย LINE ไม่มีรหัสผ่าน/Google → unlink ไม่ได้ (409) และยังผูกอยู่", async () => {
+    const u = await makeUser({ auth_provider: "line", line_user_id: "U_G", password: null, googleId: null });
+    await expect(userService.unlinkLineAccount(String(u._id))).rejects.toMatchObject({ status: 409 });
+    expect((await userModel.findById(u._id).lean<{ line_user_id: string | null }>())?.line_user_id).toBe("U_G");
+  });
+
+  it("บัญชี LINE ที่ตั้งรหัสผ่านแล้ว หรือผูก Google แล้ว → unlink ได้", async () => {
+    const withPassword = await makeUser({ auth_provider: "line", line_user_id: "U_H", password: "hashed" });
+    const withGoogle = await makeUser({ auth_provider: "line", line_user_id: "U_I", googleId: "g-1" });
+    await userService.unlinkLineAccount(String(withPassword._id));
+    await userService.unlinkLineAccount(String(withGoogle._id));
+    for (const u of [withPassword, withGoogle]) {
+      expect((await userModel.findById(u._id).lean<{ line_user_id: string | null }>())?.line_user_id).toBeNull();
+    }
+  });
+
+  it("unlink ผู้ใช้ที่ไม่มี → 404", async () => {
+    await expect(userService.unlinkLineAccount(String(oid()))).rejects.toMatchObject({ status: 404 });
   });
 });
 

@@ -480,17 +480,24 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   // ประเภทหลังอัปเดต (ใช้ค่าใหม่ถ้าส่งมา ไม่งั้นใช้ค่าเดิม)
   const nextIsPreorder = input.is_preorder !== undefined ? input.is_preorder : isPreorderProduct(existing);
 
-  if (input.is_preorder !== undefined || input.preorder_config !== undefined ||
-      input.product_stock_quantity !== undefined) {
+  // สต็อกแก้ผ่าน PATCH ไม่ได้แล้ว — ใช้ /stock (atomic · บันทึกประวัติ · แจ้งสต็อกใกล้หมด) · customer-backend-merge.md §8.21
+  // null ยังรับ (ผลเท่ากับไม่ส่ง — client เดิมส่งคู่กับการเปลี่ยนเป็นพรีออเดอร์)
+  if (input.product_stock_quantity != null) {
+    throw new ProductError(
+      "แก้ product_stock_quantity ผ่าน PATCH ไม่ได้ — ใช้ PUT /api/admin/products/{id}/stock { quantity } หรือ PATCH …/stock { delta }",
+      400
+    );
+  }
+
+  if (input.is_preorder !== undefined || input.preorder_config !== undefined) {
     validateTypeConsistency(nextIsPreorder, {
       preorder_config:
         input.preorder_config !== undefined
           ? input.preorder_config
           : existing.preorder_config,
-      product_stock_quantity:
-        input.product_stock_quantity !== undefined
-          ? input.product_stock_quantity
-          : existing.product_stock_quantity,
+      // เปลี่ยนเป็นพรีออเดอร์ = สต็อกถูกล้างเป็น null ด้านล่างเสมอ → ไม่ต้องตรวจสต็อกเดิม
+      // (เดิมตรวจสต็อกเดิม → สินค้าที่มีสต็อกเปลี่ยนเป็นพรีออเดอร์ไม่ได้ ถ้า client ไม่ส่ง null มาด้วย)
+      product_stock_quantity: null,
     });
   }
 
@@ -521,11 +528,8 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   // ปรับฟิลด์ที่ผูกกับ is_preorder ให้สอดคล้องเสมอ
   if (!nextIsPreorder) {
     existing.preorder_config = null;
-    if (input.product_stock_quantity !== undefined) {
-      existing.product_stock_quantity = input.product_stock_quantity;
-    } else if (existing.product_stock_quantity == null) {
-      existing.product_stock_quantity = 0;
-    }
+    // พรีออเดอร์ → สินค้าปกติ: เริ่มสต็อก 0 (ตั้งจริงผ่าน /stock)
+    if (existing.product_stock_quantity == null) existing.product_stock_quantity = 0;
     if (input.low_stock_threshold !== undefined) {
       existing.low_stock_threshold = input.low_stock_threshold;
     }
