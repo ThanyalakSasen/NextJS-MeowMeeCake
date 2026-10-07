@@ -15,7 +15,7 @@
 | 🔴 ต้องแก้ก่อนใช้งานจริง | 1 (✅ R1 แก้แล้ว 2026-10-06) | ~~ต้นทุนสินค้า + สูตรหลุดทาง API สาธารณะ~~ |
 | 🟡 ควรแก้ | 5 (✅ ครบ Y1–Y5 แก้แล้ว 2026-10-06) | ~~session แบบ cookie หลักไม่ตรวจบัญชีกับ DB~~ · ~~`.env.example` ขาดตัวแปรใหม่~~ · ~~`npm audit`~~ · ~~ล็อกอินผ่าน next-auth ไม่มี rate limit ต่อ IP~~ · ~~sortBy สาธารณะไม่จำกัด field~~ |
 | 🟢 เล็กน้อย / เก็บกวาด | 6 | คอมเมนต์ยุคสตางค์ค้าง 54 บรรทัด · หน้าแนะนำสินค้าโหลดทั้งร้านทุกครั้ง · ตัวกรองรีวิวที่ยังดู `is_visible` อย่างเดียว ฯลฯ |
-| ⏸ รอ FrontEnd / ทีม | 4 | ปิด `product_stock_quantity` ใน PATCH · R5 แดชบอร์ดรีวิว · P4/P5 หลังร้าน + ปิดพอร์ต 4000 · FrontOffice เขียน DB ตรง |
+| ⏸ รอ FrontEnd / ทีม | 3 (✅ ปิด `product_stock_quantity` ใน PATCH แล้ว 2026-10-08) | R5 แดชบอร์ดรีวิว · P4/P5 หลังร้าน + ปิดพอร์ต 4000 · FrontOffice เขียน DB ตรง |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | §6 |
 
 ผลตรวจอัตโนมัติ: typecheck ✅ · typecheck:test ✅ · lint 0 error (5 warning เดิม) · เทส 573/573 ✅ · build ✅ · log `MongoNotConnectedError` ในเทส = 0 (§8.21)
@@ -173,7 +173,7 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 
 | เรื่อง | รออะไร | อ้างอิง |
 |---|---|---|
-| ปฏิเสธ `product_stock_quantity` ใน `PATCH /api/admin/products/[id]` (บังคับใช้ `/stock` — แจ้งสินค้าใกล้หมด · atomic) | FrontEnd เปลี่ยน 2 จุด: `productForm.ts` (แก้สินค้า) · `productStock/useProductStockViewModel.ts:104` | [`customer-backend-merge.md`](customer-backend-merge.md) §8.21 |
+| ~~ปฏิเสธ `product_stock_quantity` ใน `PATCH /api/admin/products/[id]`~~ ✅ 2026-10-08 (branch `fix/line-unlink-and-stock-patch`) | ~~FrontEnd เปลี่ยน 2 จุด~~ — FrontEnd เลิกส่งแล้ว (frontend PR #19) | [`customer-backend-merge.md`](customer-backend-merge.md) §8.21 |
 | R5 แดชบอร์ด / analytics / รายงานรีวิวรายสินค้า (~900 บรรทัด) | ทีมเลือกหลังร้าน | §8.20 |
 | P4 API หลังร้านที่เหลือ · P5 ปิด backend ฝั่งลูกค้า (พอร์ต 4000) | ทีมเลือกหลังร้าน + หน้าเว็บลูกค้าย้าย path ครบ (`/api/customer/*` → `/api/catalog/*` / `/api/shop/*`) | §8.2 · §8.7–§8.20 |
 | FrontOffice เขียน MongoDB ตรง (ไม่มี userlog / validation) | ทีมตัดสินใจ | BACKLOG4 §8.3 |

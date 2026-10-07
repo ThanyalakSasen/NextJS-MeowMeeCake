@@ -9,7 +9,7 @@
  */
 import bcrypt from "bcryptjs";
 import dbConnect from "../lib/dbConnect";
-import { badRequest, forbidden, notFound, unauthorized, HttpError } from "../lib/httpError";
+import { badRequest, conflict, forbidden, notFound, unauthorized, HttpError } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
@@ -402,13 +402,31 @@ export async function linkLineAccount(id: string, lineUserId: string) {
   return user;
 }
 
+/**
+ * บัญชีที่สมัครด้วย LINE และไม่มีทางเข้าระบบอื่น (ไม่มีรหัสผ่าน · ไม่ได้ผูก Google) — line_user_id คือทางเข้าเดียว
+ * (oauthService.signInWithLine หาบัญชีจาก line_user_id) ยกเลิกผูกแล้วจะเข้าบัญชีไม่ได้อีก → ห้าม
+ * ตั้งรหัสผ่านก่อน (ลืมรหัสผ่าน → ลิงก์ในอีเมล) แล้วค่อยยกเลิกได้
+ */
+const LINE_ONLY_ACCOUNT = { auth_provider: "line", password: null, googleId: null };
+
 export async function unlinkLineAccount(id: string) {
   await dbConnect();
   assertObjectId(id);
+  // เงื่อนไขอยู่ใน filter เดียวกับ update — กันตั้ง/ลบรหัสผ่านพร้อมกันระหว่างตรวจ
   const user = await userModel
-    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { line_user_id: null } }, { returnDocument: "after" })
+    .findOneAndUpdate(
+      { _id: id, deleted_at: null, $nor: [LINE_ONLY_ACCOUNT] },
+      { $set: { line_user_id: null } },
+      { returnDocument: "after" }
+    )
     .select(SELECT_PUBLIC)
     .lean();
-  if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
+  if (!user) {
+    const exists = await userModel.exists({ _id: id, deleted_at: null });
+    if (!exists) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
+    throw conflict(
+      "บัญชีนี้เข้าสู่ระบบด้วย LINE อย่างเดียว — ยกเลิกการผูกแล้วจะเข้าบัญชีไม่ได้ · ตั้งรหัสผ่านก่อน (ลืมรหัสผ่าน) แล้วค่อยยกเลิก"
+    );
+  }
   return user;
 }
