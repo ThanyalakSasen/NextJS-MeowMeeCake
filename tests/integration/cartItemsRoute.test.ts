@@ -32,8 +32,7 @@ const post = (session: SessionUser, body: unknown) =>
       method: "POST",
       headers: { [USER_HEADER]: JSON.stringify(session), "content-type": "application/json" },
       body: JSON.stringify(body),
-    }),
-    { params: Promise.resolve({}) } as never
+    })
   );
 
 async function cakeWithGroups() {
