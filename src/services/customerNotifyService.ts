@@ -13,6 +13,10 @@
  * จุดที่เรียก: orderService.persistOrder / preorderService.createPreorder (สร้างใหม่),
  * updateOrderStatus / updatePreorderStatus (สถานะ), lib/orderLifecycle (ชำระเงิน + จัดส่ง — ใช้ร่วม order/preorder),
  * preorderReminderService (เตือนวันรับ) · preorderRoundService (เลื่อนวันรับ)
+ *
+ * ลิงก์ใน LINE (BACKLOG4 D10 · เลือกทาง A): ต่อท้ายข้อความด้วย URL หน้าคำสั่งซื้อ (notice.link) — ลูกค้ากดไปชำระเงิน/ดูสถานะได้
+ * เป็นลิงก์ธรรมดา ไม่หมดอายุ ไม่ใช้ token (/shop/payment-link ใช้ได้ครั้งเดียว 30 นาที ไม่เหมาะกับข้อความที่เปิดอ่านทีหลัง)
+ * ความปลอดภัยมาจากหน้าเว็บที่ต้องล็อกอินเป็นเจ้าของคำสั่งซื้อ · ไม่ได้ตั้ง STOREFRONT_URL / NEXTAUTH_URL = ไม่แนบลิงก์
  */
 import dbConnect from "../lib/dbConnect";
 import { pushLineMessage } from "../lib/line";
@@ -30,6 +34,7 @@ import { PAYMENT_EXPIRED_REASON } from "../lib/paymentDeadline";
 import { isObjectId } from "../lib/objectId";
 import { trackBackground } from "../lib/backgroundTasks";
 import { notFound } from "../lib/httpError";
+import { storefrontBase } from "../lib/storefront";
 
 export type CustomerDocKind = "order" | "preorder";
 
@@ -138,7 +143,14 @@ export interface WebNotice {
 const isPosDoc = (docNo?: string | null) => typeof docNo === "string" && docNo.startsWith("POS-");
 
 function docPath(kind: CustomerDocKind, id: unknown): string {
-  return kind === "order" ? `/customer/account/purchases/${String(id)}` : "/customer/account/preorders";
+  return kind === "order" ? `/customer/account/purchases/${String(id)}` : `/customer/account/preorders/${String(id)}`;
+}
+
+/** ข้อความ LINE + บรรทัดลิงก์หน้าคำสั่งซื้อ — เฉพาะ path ในเว็บลูกค้า และตั้ง URL หน้าเว็บไว้แล้ว */
+export function withDocLink(text: string, link: string | null | undefined): string {
+  const base = storefrontBase();
+  if (!base || !link || !link.startsWith("/customer/")) return text;
+  return `${text}\n\n👉 ดูคำสั่งซื้อ / ชำระเงิน\n${base}${link}`;
 }
 function docTitle(kind: CustomerDocKind, docNo: string): string {
   return kind === "order" ? `คำสั่งซื้อ #${docNo}` : `พรีออเดอร์ #${docNo}`;
@@ -260,7 +272,7 @@ export async function notifyCustomer(userId: unknown, text: string | null, notic
       return false;
     }
 
-    const result = await pushLineMessage(text, user.line_user_id);
+    const result = await pushLineMessage(withDocLink(text, notice?.link), user.line_user_id);
     if (result.ok) {
       recordPushed();
     } else {

@@ -26,7 +26,7 @@ Next.js โหลด `.env.local` ให้อัตโนมัติตอน 
 | `NEXTAUTH_SECRET` | สำหรับหน้าเว็บลูกค้า | — | `src/lib/nextAuth.ts` · `src/middleware.ts` | กุญแจเซ็น session ของ next-auth · ไม่ตั้ง = middleware ไม่อ่าน session next-auth (ล็อกอินผ่านหน้าเว็บลูกค้าไม่ได้) · ใช้ค่าเดียวกับ backend ฝั่งลูกค้าถ้าไม่อยากให้ลูกค้าหลุดตอนสลับ (customer-backend-merge.md §8.9) |
 | `NEXTAUTH_URL` | สำหรับหน้าเว็บลูกค้า | — | next-auth | URL ที่เบราว์เซอร์เห็น (หน้าเว็บลูกค้า — เรียก /api ผ่าน rewrites) · callback OAuth = `{NEXTAUTH_URL}/api/auth/callback/{google,line}` |
 | `GOOGLE_CLIENT_SECRET` | ถ้าเปิด Google ใน next-auth | — | `src/lib/nextAuth.ts` | คู่กับ `GOOGLE_CLIENT_ID` · ไม่ตั้ง = next-auth ไม่มีปุ่ม Google (`/api/auth/google` แบบ ID-token ของหลักยังใช้ได้) |
-| `STOREFRONT_URL` | ไม่ | `NEXTAUTH_URL` | `src/lib/mailer.ts` | URL หน้าเว็บลูกค้าในลิงก์อีเมล (`/customer/verify-email` · `/customer/reset-password`) |
+| `STOREFRONT_URL` | ไม่ | `NEXTAUTH_URL` | `src/lib/storefront.ts` | URL หน้าเว็บลูกค้าในลิงก์อีเมล (`/customer/verify-email` · `/customer/reset-password`) + ลิงก์หน้าคำสั่งซื้อท้ายข้อความ LINE ถึงลูกค้า (`customerNotifyService.withDocLink`) · ไม่ได้ตั้งทั้งคู่ = LINE ไม่แนบลิงก์ |
 | `EMAIL_USER`, `EMAIL_PASS` | สมัคร/ลืมรหัสผ่าน | — | `src/lib/mailer.ts` | บัญชีส่งอีเมล (Gmail ใช้ App Password) · ไม่ตั้ง = สมัครสมาชิก/ลืมรหัสผ่านตอบ 502 |
 | `EMAIL_SERVICE` หรือ `EMAIL_HOST` + `EMAIL_PORT` | ไม่ | `gmail` | `src/lib/mailer.ts` | ผู้ให้บริการของ nodemailer หรือ SMTP เอง (port 465 = TLS) |
 | `RECOMMENDATION_CACHE_TTL_MS` | ไม่ | `180000` | `src/services/recommendation/recommendationEngine.ts` | อายุ cache แคตตาล็อกของระบบแนะนำสินค้า (ms) · `0` = ปิด (เทส) · แก้สินค้าแล้วผลแนะนำเปลี่ยนภายในเวลานี้ |
