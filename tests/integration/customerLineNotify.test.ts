@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import userModel from "@/models/userModel";
 import * as preorderService from "@/services/preorderService";
 import * as userService from "@/services/userService";
-import { customerMessages, notifyCustomer } from "@/services/customerNotifyService";
+import { customerMessages, customerWeb, notifyCustomer, withDocLink } from "@/services/customerNotifyService";
 import { flushBackground } from "@/lib/backgroundTasks";
 import { makeUser, makePreorder, oid } from "./helpers";
 
@@ -46,6 +46,40 @@ describe("customerNotifyService.notifyCustomer", () => {
     const u = await makeUser({ line_user_id: "U_A" });
     expect(await notifyCustomer(String(u._id), "hello")).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("ตั้ง STOREFRONT_URL → LINE แนบลิงก์หน้าคำสั่งซื้อ (D10) · กระดิ่งเก็บแค่ path", async () => {
+    const prev = process.env.STOREFRONT_URL;
+    process.env.STOREFRONT_URL = "https://shop.example/";
+    try {
+      const u = await makeUser({ line_user_id: "U_L" });
+      const id = oid();
+      const notice = customerWeb.created("preorder", id, "PRE-1", 10000);
+      expect(notice.link).toBe(`/customer/account/preorders/${id}`);
+      expect(await notifyCustomer(String(u._id), "hello", notice)).toBe(true);
+      expect(pushedTo(fetchSpy, "U_L")).toEqual([`hello\n\n👉 ดูคำสั่งซื้อ / ชำระเงิน\nhttps://shop.example/customer/account/preorders/${id}`]);
+    } finally {
+      if (prev === undefined) delete process.env.STOREFRONT_URL;
+      else process.env.STOREFRONT_URL = prev;
+    }
+  });
+
+  it("withDocLink: ไม่ได้ตั้ง URL / ไม่มี link / ไม่ใช่ path หน้าร้าน → ข้อความเดิม", () => {
+    const prev = { s: process.env.STOREFRONT_URL, n: process.env.NEXTAUTH_URL };
+    delete process.env.STOREFRONT_URL;
+    delete process.env.NEXTAUTH_URL;
+    try {
+      expect(withDocLink("hi", "/customer/account/purchases/1")).toBe("hi");
+      process.env.NEXTAUTH_URL = "http://localhost:3001";
+      expect(withDocLink("hi", null)).toBe("hi");
+      expect(withDocLink("hi", "https://evil.example/x")).toBe("hi");
+      expect(withDocLink("hi", "/customer/account/purchases/1")).toBe("hi\n\n👉 ดูคำสั่งซื้อ / ชำระเงิน\nhttp://localhost:3001/customer/account/purchases/1");
+    } finally {
+      if (prev.s === undefined) delete process.env.STOREFRONT_URL;
+      else process.env.STOREFRONT_URL = prev.s;
+      if (prev.n === undefined) delete process.env.NEXTAUTH_URL;
+      else process.env.NEXTAUTH_URL = prev.n;
+    }
   });
 
   it("LINE ล้มเหลว → คืน false ไม่ throw", async () => {

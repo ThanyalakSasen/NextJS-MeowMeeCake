@@ -10,6 +10,7 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import dbConnect from "./dbConnect";
 import storeProfileModel from "../models/storeProfileModel";
+import { storefrontUrl } from "./storefront";
 
 const FALLBACK_STORE_NAME = "เหมียวมีเค้ก";
 
@@ -36,11 +37,8 @@ function getTransport(): Pick<Transporter, "sendMail"> {
   return transport;
 }
 
-/** URL หน้าเว็บลูกค้าสำหรับลิงก์ในอีเมล */
-export function storefrontUrl(path: string): string {
-  const base = (process.env.STOREFRONT_URL || process.env.NEXTAUTH_URL || "").trim().replace(/\/+$/, "");
-  return `${base}${path}`;
-}
+/** URL หน้าเว็บลูกค้าสำหรับลิงก์ในอีเมล (ย้ายไป lib/storefront — ใช้ร่วมกับลิงก์ในข้อความ LINE) */
+export { storefrontUrl };
 
 async function getSender(): Promise<{ from: { name: string; address: string }; replyTo?: string; storeName: string }> {
   let storeName = FALLBACK_STORE_NAME;
