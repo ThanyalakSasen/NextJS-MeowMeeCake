@@ -321,6 +321,8 @@ async function persistOrder(
   // ── ส่วนลด: ใช้โปรโมชัน (ระบบคิดเอง) หรือส่วนลดกรอกมือ ──
   // promotionService.validateForOrder()/discountEngine.ts รับ-คืนเป็นบาท — toBaht/toSatang ตรงนี้แค่ปัด 2 ตำแหน่ง
   let discount_amount = 0;
+  // ส่วนของ discount_amount ที่เป็นส่วนลดค่าส่ง (โปร/คูปองส่งฟรี) — ไม่ลดฐานคิดเพดานแต้ม (Q-BE14)
+  let shippingDiscount = 0;
   let appliedPromotion: { promotion_id: string; discount_amount: number } | null = null;
   if (opts.user_coupon_id && (opts.promotion_code || opts.promotion_id)) {
     throw badRequest("ใช้คูปองของฉันกับโค้ดส่วนลดพร้อมกันไม่ได้ — เลือกอย่างใดอย่างหนึ่ง");
@@ -355,6 +357,7 @@ async function persistOrder(
       channel: opts.channel ?? "online",
     });
     discount_amount = toSatang(result.discount_amount);
+    if (result.free_shipping) shippingDiscount = discount_amount;
     appliedPromotion = { promotion_id: result.promotion_id, discount_amount };
   } else if (!opts.user_coupon_id) {
     discount_amount = toSatang(Math.max(0, Number(opts.discount_amount) || 0));
@@ -395,12 +398,13 @@ async function persistOrder(
       });
       saga.onRollback("release-coupon", coupon.undo);
       discount_amount = toSatang(coupon.discount_amount);
+      shippingDiscount = coupon.free_shipping ? discount_amount : 0;
       couponFields = { user_coupon_id: coupon.user_coupon_id, coupon_discount: discount_amount };
       couponPromotionId = coupon.promotion_id;
       appliedPromotion = null;
     }
     if (pointsToRedeem > 0) {
-      const goodsDiscount = Math.min(discount_amount, subtotal); // ส่วนลดส่งฟรีไม่ลดฐานคิดแต้ม
+      const goodsDiscount = Math.min(discount_amount - shippingDiscount, subtotal); // ส่วนลดส่งฟรีไม่ลดฐานคิดแต้ม (Q-BE14)
       const points_discount = await pointsService.redeemPoints({
         userId,
         points: pointsToRedeem,

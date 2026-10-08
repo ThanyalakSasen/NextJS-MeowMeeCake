@@ -6,9 +6,12 @@ import promotionUsagesModel from "@/models/promotionUsagesModel";
 import pointTransactionModel from "@/models/pointTransactionModel";
 import userCouponModel from "@/models/userCouponModel";
 import orderModel from "@/models/orderModel";
+import productCategoryModel from "@/models/productCategoryModel";
 import * as orderService from "@/services/orderService";
 import * as pointsService from "@/services/pointsService";
 import * as couponService from "@/services/couponService";
+import * as preorderRoundService from "@/services/preorderRoundService";
+import * as preorderService from "@/services/preorderService";
 import { makeUser, makeProduct } from "./helpers";
 
 /** ขั้น 6 — แต้มสะสม + คูปองส่วนตัว (customer-backend-merge.md §8.11) */
@@ -158,5 +161,65 @@ describe("คูปองส่วนตัว (แลกด้วยแต้�
     ).rejects.toMatchObject({ status: 409 });
     expect(await pointsService.getBalance(uid)).toBe(before);
     expect((await userCouponModel.findById(coupon._id).lean<{ status: string }>())!.status).toBe("available");
+  });
+});
+
+describe("เพดานแต้ม + คูปองส่งฟรี (Q-BE14)", () => {
+  const address = {
+    recipient_name: "ลูกค้า", recipient_phone: "0812345678", house_no: "1",
+    sub_district: "ในเมือง", district: "เมือง", province: "กรุงเทพมหานคร", zip_code: "10100",
+  };
+
+  async function freeShippingCoupon(uid: string) {
+    const promo = await pointsPromo({ discount_type: "FreeShipping", discount_value: 0 });
+    return (await couponService.redeemCoupon(uid, String(promo._id))) as { _id: unknown };
+  }
+
+  it("ออเดอร์: ส่วนลดค่าส่งไม่ลดฐานคิดแต้ม → ใช้แต้มได้เต็ม 30% ของยอดสินค้า", async () => {
+    const user = await customer();
+    const uid = String(user._id);
+    await give(user._id, 5000);
+    const coupon = await freeShippingCoupon(uid);
+    const cat = await productCategoryModel.create({ product_category_name: `ส่งทั่วประเทศ-${Math.random()}`, ships_nationwide: true });
+    const p = await makeProduct({ product_price: 500, category_id: cat._id, product_stock_quantity: 10 });
+
+    // ยอดสินค้า 1,000 · ค่าส่ง 100 (Zone D) → ส่งฟรี 100 · เพดานแต้ม 30% × 1,000 = 300 บาท = 3,000 แต้ม (เดิม 2,700)
+    const o = (await orderService.createOrder(uid, {
+      order_type: "delivery", delivery_address: address, storefront: true,
+      items: [{ product_id: String(p._id), quantity: 2 }],
+      user_coupon_id: String(coupon._id), points_to_redeem: 3000,
+    })) as { _id: unknown; subtotal: number; delivery_fee: number; discount_amount: number; total_amount: number };
+    expect(o).toMatchObject({ subtotal: 1000, delivery_fee: 100, discount_amount: 400, total_amount: 700 });
+    expect(await orderModel.findById(o._id).lean()).toMatchObject({ coupon_discount: 100, points_redeemed: 3000, points_discount: 300 });
+  });
+
+  it("พรีออเดอร์: คูปองส่งฟรีไม่ลดฐานคิดแต้มเช่นกัน", async () => {
+    const user = await customer();
+    const uid = String(user._id);
+    await give(user._id, 5000);
+    const coupon = await freeShippingCoupon(uid);
+    const p = await makeProduct({
+      is_preorder: true, product_stock_quantity: null, product_price: 1000,
+      preorder_config: { min_order_qty: 1, max_order_qty: 50, lead_time_days: 1 },
+    });
+    const round = (await preorderRoundService.createRound(
+      {
+        round_name: `รอบแต้ม-${Date.now()}`, open_date: new Date(Date.now() - 1000), close_date: new Date(Date.now() + DAY),
+        pickup_date: new Date(Date.now() + 5 * DAY), round_status: "open",
+        items: [{ product_id: String(p._id), max_qty_total: 100 }],
+      },
+      String((await makeUser())._id)
+    )) as { _id: unknown; items: Array<{ _id: unknown }> };
+
+    const pre = (await preorderService.createPreorder(
+      uid,
+      {
+        round_id: String(round._id), order_type: "delivery", delivery_address: address,
+        items: [{ round_item_id: String(round.items[0]._id), quantity: 1 }],
+        user_coupon_id: String(coupon._id), points_to_redeem: 3000,
+      },
+      { storefront: true }
+    )) as { subtotal: number; delivery_fee: number; discount_amount: number; total_amount: number };
+    expect(pre).toMatchObject({ subtotal: 1000, delivery_fee: 100, discount_amount: 400, total_amount: 700 });
   });
 });
