@@ -324,6 +324,8 @@ export async function createPreorder(
   const preorderId = new mongoose.Types.ObjectId();
   let preorderNo = generateDocNo("PRE");
   let loyaltyFields = { user_coupon_id: null as unknown, coupon_discount: 0, points_redeemed: 0, points_discount: 0, promotion_id: null as unknown };
+  // ส่วนลดค่าส่ง (คูปองส่งฟรี) — ไม่ลดฐานคิดเพดานแต้ม (Q-BE14)
+  let shippingDiscount = 0;
   try {
     // คูปองของฉัน + แต้ม (customer-backend-merge.md §8.11) — หักคูปองก่อน แล้วคิดเพดานแต้มจากยอดสินค้าที่เหลือ
     if (input.user_coupon_id) {
@@ -351,13 +353,14 @@ export async function createPreorder(
       });
       saga.onRollback("release-coupon", coupon.undo);
       discount_amount = toSatang(discount_amount + coupon.discount_amount);
+      if (coupon.free_shipping) shippingDiscount = toSatang(coupon.discount_amount);
       loyaltyFields = { ...loyaltyFields, user_coupon_id: coupon.user_coupon_id, coupon_discount: coupon.discount_amount, promotion_id: coupon.promotion_id };
     }
     if (pointsToRedeem > 0) {
       const points_discount = await pointsService.redeemPoints({
         userId,
         points: pointsToRedeem,
-        subtotal: toBaht(subtotal - Math.min(discount_amount, subtotal)),
+        subtotal: toBaht(subtotal - Math.min(discount_amount - shippingDiscount, subtotal)),
         refType: "preorder",
         refId: preorderId,
         refNo: preorderNo,
