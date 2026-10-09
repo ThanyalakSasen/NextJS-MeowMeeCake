@@ -15,7 +15,7 @@ import {
 import productModel from "../models/productModel";
 import productCategoryModel from "../models/productCategoryModel";
 import productVariantModel from "../models/productVariantModel";
-import { getProductCustomization } from "./productCustomizationService";
+import { getProductCustomization, productIdsWithCustomization } from "./productCustomizationService";
 import * as searchSynonymService from "./searchSynonymService";
 import unitModel from "../models/unitModel";
 import { notificationService } from "./notificationService";
@@ -355,6 +355,52 @@ export async function resolveScan(code: string) {
     stock: (product.product_stock_quantity as number | null) ?? null,
     variants,
     customization,
+  };
+}
+
+// ── READ (list สำหรับ POS) ────────────────────────────────────
+/** ฟิลด์ที่ POS ใช้ — ไม่มี purchase_cost (พนักงานหน้าร้านที่มีแค่สิทธิ์ orders ไม่ควรเห็นต้นทุน) */
+const POS_PRODUCT_FIELDS =
+  "product_id product_name_th product_name_eng category_id unit_id product_price sale_price product_img product_stock_quantity is_preorder";
+
+export interface PosProductQuery {
+  pagination: Pagination;
+  /** ค้นจากรหัสสินค้า (product_id) หรือชื่อ th/en */
+  search?: string;
+}
+
+/**
+ * getPosProducts — รายการสินค้าที่ขายหน้าร้านได้ ให้ POS ใช้เป็นคำแนะนำในช่องค้นหา (สิทธิ์ orders · frontend Q-BE10)
+ * ขายได้ = ยังไม่ลบ + ไม่ใช่พรีออเดอร์ (พรีออเดอร์ขายผ่านรอบ) · ไม่กรอง is_visible — ใช้ซ่อนจากเว็บเท่านั้น (เหมือน resolveScan)
+ * แต่ละรายการมี has_customization — true = ต้องให้พนักงานเลือกตัวเลือกก่อนลงบิล (ดึงรายละเอียดจาก /admin/pos/scan)
+ */
+export async function getPosProducts(query: PosProductQuery) {
+  await dbConnect();
+
+  const filter: Filter = { deleted_at: null, is_preorder: { $ne: true } };
+  const search = query.search?.trim();
+  if (search) {
+    const rx = new RegExp(escapeRegExp(search), "i");
+    filter.$or = [{ product_id: rx }, { product_name_th: rx }, { product_name_eng: rx }];
+  }
+
+  const [items, total] = await Promise.all([
+    productModel
+      .find(filter)
+      .select(POS_PRODUCT_FIELDS)
+      .sort({ product_name_th: 1, _id: 1 })
+      .skip(query.pagination.skip)
+      .limit(query.pagination.limit)
+      .populate("category_id", "product_category_name")
+      .populate("unit_id", "unit_name unit_abbr")
+      .lean(),
+    productModel.countDocuments(filter),
+  ]);
+
+  const customizable = await productIdsWithCustomization(items.map((p) => String(p._id)));
+  return {
+    items: items.map((p) => ({ ...presentProduct(p), has_customization: customizable.has(String(p._id)) })),
+    meta: buildMeta(total, query.pagination),
   };
 }
 

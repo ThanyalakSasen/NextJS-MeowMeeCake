@@ -150,6 +150,22 @@ export async function getCustomizations(productIds: string[]): Promise<Map<strin
   return out;
 }
 
+/**
+ * สินค้าไหนมีตัวเลือกให้เลือก (เทียบเท่า groups.length > 0 || options.length > 0 ของ getCustomizations —
+ * กลุ่มที่ไม่มีตัวเลือกไม่นับ · ตัวเลือกที่ไม่มีกลุ่มนับ) · distinct 2 ครั้ง ไม่โหลดทั้งแถว
+ * POS ใช้เป็น flag has_customization ในรายการสินค้า — ไม่ต้องเรียกทีละสินค้า (frontend Q-BE9)
+ */
+export async function productIdsWithCustomization(productIds: string[]): Promise<Set<string>> {
+  const ids = [...new Set(productIds.map(String))].filter(isObjectId);
+  if (ids.length === 0) return new Set();
+  const filter = { product_id: { $in: ids }, deleted_at: null };
+  const [withVariants, withOptions] = await Promise.all([
+    productVariantModel.distinct("product_id", filter),
+    productOptionModel.distinct("product_id", filter),
+  ]);
+  return new Set([...withVariants, ...withOptions].map(String));
+}
+
 export async function getProductCustomization(productId: string): Promise<ProductCustomization> {
   return (await getCustomizations([productId])).get(String(productId)) ?? { groups: [], options: [] };
 }
