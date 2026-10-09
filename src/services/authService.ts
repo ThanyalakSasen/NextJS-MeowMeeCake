@@ -130,7 +130,10 @@ export async function loginWithGoogle(credential: string, ctx: { ip?: string | n
     }
     user = stripSecrets(user); // findOne ตรงนี้ไม่ผ่าน userService เลยยังไม่ถูก strip
   } else {
-    const role = await roleModel.findOne({ role_name: "customer", deleted_at: null }).lean<any>();
+    // หาจากประเภท ไม่ใช่ชื่อ — ชื่อบทบาทแก้ได้ (PATCH /api/admin/roles/:id) · ตรงกับ accountService / oauthService
+    const role = await roleModel
+      .findOne({ role_type: "customer", deleted_at: null, is_active: { $ne: false } })
+      .lean<any>();
     if (!role) throw badRequest("ระบบยังไม่ได้ตั้งค่าบทบาท 'customer'");
     user = await userService.createUser({
       user_fullname: name,
