@@ -5,6 +5,12 @@
 import { z } from "zod";
 import { phone, objectId } from "./common";
 
+/** เลขพร้อมเพย์รับเงินคืน: เบอร์มือถือ 10 หลัก (ขึ้นต้น 0) หรือเลขบัตรประชาชน 13 หลัก · ตัดขีด/ช่องว่างให้ */
+const refundPromptpayId = z
+  .string()
+  .transform((v) => v.replace(/[\s-]/g, ""))
+  .pipe(z.string().regex(/^(0\d{9}|\d{13})$/, "เลขพร้อมเพย์ต้องเป็นเบอร์มือถือ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก"));
+
 export const updateProfileBody = z
   .object({
     user_fullname: z.string().trim().min(1).max(120),
@@ -12,6 +18,9 @@ export const updateProfileBody = z
     user_phone: phone.nullable(),
     user_img: z.string().trim().max(1000).nullable(),
     user_allergies: z.array(z.string().trim().min(1).max(100)),
+    // null = ล้างบัญชีรับเงินคืน
+    refund_promptpay_id: refundPromptpayId.nullable(),
+    refund_promptpay_name: z.string().trim().min(1).max(120).nullable(),
   })
   .partial();
 

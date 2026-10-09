@@ -40,7 +40,13 @@ const SECRET_FIELDS = [
   "reset_password_token_expiry",
 ] as const;
 
-const SELECT_PUBLIC = SECRET_FIELDS.map((f) => `-${f}`).join(" ");
+// ── ฟิลด์ที่เจ้าของบัญชีเห็นได้คนเดียว (ไม่ออกทาง /admin/users) — บัญชีพร้อมเพย์อาจเป็นเลขบัตรประชาชน
+// หลังร้านเห็นผ่าน withRefundAccount() เฉพาะออเดอร์/พรีออเดอร์ที่รอโอนคืนเท่านั้น (frontend Q-BE12)
+const SELF_ONLY_FIELDS = ["refund_promptpay_id", "refund_promptpay_name"] as const;
+
+const SELECT_PUBLIC = [...SECRET_FIELDS, ...SELF_ONLY_FIELDS].map((f) => `-${f}`).join(" ");
+/** สำหรับเจ้าของบัญชีเอง (GET/PATCH /shop/me) — ตัดแค่ฟิลด์ลับ */
+const SELECT_SELF = SECRET_FIELDS.map((f) => `-${f}`).join(" ");
 
 // PROFILE_FIELDS/EMPLOYMENT_FIELDS (whitelist สำหรับ pick()) ถูกลบไปแล้ว — field ที่เขียนได้
 // ตอนนี้กำหนดที่ schemas/user.ts (updateProfileBody/createUserBody/updateUserBody) แทน
@@ -151,7 +157,8 @@ export async function listUsers(query: ListUserQuery) {
 }
 
 // ── READ (single) ────────────────────────────────────────────
-export async function getUserById(id: string, opts: { includeDeleted?: boolean } = {}) {
+/** self = true → รวมฟิลด์ที่เจ้าของบัญชีเห็นคนเดียว (SELF_ONLY_FIELDS) — ใช้กับ GET /shop/me เท่านั้น */
+export async function getUserById(id: string, opts: { includeDeleted?: boolean; self?: boolean } = {}) {
   await dbConnect();
   assertObjectId(id);
 
@@ -160,7 +167,7 @@ export async function getUserById(id: string, opts: { includeDeleted?: boolean }
 
   const user = await userModel
     .findOne(filter)
-    .select(SELECT_PUBLIC)
+    .select(opts.self ? SELECT_SELF : SELECT_PUBLIC)
     .populate("role_id", "role_name role_type")
     .lean();
   if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
@@ -207,10 +214,40 @@ export async function updateProfile(id: string, input: UpdateProfileInput) {
       returnDocument: "after",
       runValidators: true,
     })
-    .select(SELECT_PUBLIC)
+    .select(SELECT_SELF)
     .lean();
   if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
   return user;
+}
+
+// ── บัญชีรับเงินคืนสำหรับหลังร้าน ─────────────────────────────
+export interface RefundAccount {
+  promptpay_id: string;
+  promptpay_name: string | null;
+}
+
+/**
+ * แนบบัญชีพร้อมเพย์รับเงินคืนของลูกค้า (refund_account) ให้ออเดอร์/พรีออเดอร์ที่ "รอโอนคืน"
+ * (ยกเลิกแล้วแต่ยังชำระแล้ว — ลูกค้ายกเลิกเอง backend ไม่คืนอัตโนมัติ · customer-backend-merge.md §8.8)
+ * สถานะอื่น / ลูกค้ายังไม่ตั้งบัญชี = null · ใช้ใน GET /admin/orders/:id และ /admin/preorders/:id (frontend Q-BE12)
+ */
+export async function withRefundAccount<T extends { order_status?: unknown; payment_status?: unknown; user_id?: unknown }>(
+  doc: T
+): Promise<T & { refund_account: RefundAccount | null }> {
+  const awaitingRefund = doc.order_status === "cancelled" && doc.payment_status === "paid";
+  const ref = doc.user_id as { _id?: unknown } | string | null | undefined;
+  const userId = ref && typeof ref === "object" ? ref._id : ref;
+  if (!awaitingRefund || !userId) return { ...doc, refund_account: null };
+
+  await dbConnect();
+  const user = await userModel
+    .findById(userId)
+    .select("refund_promptpay_id refund_promptpay_name")
+    .lean<{ refund_promptpay_id?: string | null; refund_promptpay_name?: string | null } | null>();
+  const account = user?.refund_promptpay_id
+    ? { promptpay_id: user.refund_promptpay_id, promptpay_name: user.refund_promptpay_name ?? null }
+    : null;
+  return { ...doc, refund_account: account };
 }
 
 // ── เปลี่ยนรหัสผ่าน (ผู้ใช้ทำเอง ต้องยืนยันรหัสเดิม) ──────────

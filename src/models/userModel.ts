@@ -16,6 +16,10 @@ const userSchema = new mongoose.Schema(
     user_phone: { type: String, default: null },
     user_img: { type: String, default: null },
     user_allergies: { type: [String], default: [] },
+    // บัญชีพร้อมเพย์รับเงินคืน (ลูกค้าตั้งเองที่ PATCH /shop/me) — ร้านใช้โอนคืนออเดอร์ที่ลูกค้ายกเลิกหลังชำระ
+    // เห็นได้เฉพาะเจ้าของบัญชี + หลังร้านตอนออเดอร์รอโอนคืน (userService SELF_ONLY_FIELDS · frontend Q-BE12)
+    refund_promptpay_id: { type: String, default: null },
+    refund_promptpay_name: { type: String, default: null },
     email_verify_token: { type: String, default: null },
     is_email_verified: { type: Boolean, default: false },
     verification_token_expiry: { type: Date, default: null },
