@@ -88,10 +88,15 @@ file = <รูป>   → 200 { url, filename, size }   แล้วนำ url �
 
 ## 4. สิ่งที่ frontend ต้องทำ
 
-- [ ] **หน้าแจ้งชำระเงินของลูกค้า:** อัปโหลดสลิปด้วย `POST /api/shop/payments/[id]/slip` (multipart field `file`) แทนการส่ง `slip_image_url` เป็นข้อความ
+> ตรวจกับโค้ด frontend (`main` หลัง frontend PR #58) 2026-10-10
+
+- [x] **หน้าแจ้งชำระเงินของลูกค้า:** อัปโหลดสลิปด้วย `POST /api/shop/payments/[id]/slip` (multipart field `file`) แทนการส่ง `slip_image_url` เป็นข้อความ
+  — frontend `SlipPaymentPanel` (ออเดอร์ + พรีออเดอร์)
 - [ ] **หน้าค่าใช้จ่าย (`ExpenseFormModal`):** เปลี่ยนช่อง `receipt_url` จากช่องพิมพ์เป็นปุ่มอัปโหลด → `POST /api/admin/expenses/receipts` แล้วใส่ `url` ที่ได้ลงฟอร์ม · แสดงรูปจาก `receipt_url` ได้เลย
-- [ ] **หน้าแบนเนอร์:** อัปโหลดผ่าน `POST /api/admin/banners/images` เท่านั้น (ส่ง base64 / ลิงก์ภายนอกจะได้ 400)
-- [ ] รูปจาก backend อยู่คนละ origin กับ frontend — แสดงด้วย `${API_ORIGIN}${url}` (url ที่ได้เป็น path `/uploads/...`)
+  — ⚠️ **ยังไม่ได้ทำ:** frontend ใช้ `UploadImageBox` ที่อ่านไฟล์เป็น base64 (data URL) แล้วส่งเป็น `receipt_url` ตรง ๆ → `assertReceiptUrl` ตอบ 400
+  (แนบใบเสร็จใหม่ไม่ได้) · แสดงรูปเดิมก็ไม่ผ่าน `resolveUploadUrl()` — ต้องแก้ฝั่ง frontend
+- [x] **หน้าแบนเนอร์:** อัปโหลดผ่าน `POST /api/admin/banners/images` เท่านั้น (ส่ง base64 / ลิงก์ภายนอกจะได้ 400) — frontend `BannerImageUpload`
+- [x] รูปจาก backend อยู่คนละ origin กับ frontend — แสดงด้วย `${API_ORIGIN}${url}` (url ที่ได้เป็น path `/uploads/...`) — frontend `lib/uploads.ts` `resolveUploadUrl()`
 
 ## 5. ข้อควรรู้
 

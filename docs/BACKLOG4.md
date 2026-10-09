@@ -429,10 +429,13 @@ Next 16 + antd + i18n ที่ทำถึง D0.5 · ตามหลัง mai
 
 ### 8.4 frontend (repo แยก)
 
-- [ ] หน้าแจ้งเตือน: แสดง `module_label` · เอาตัวกรอง `employee` ออก · ปรับจุดที่เทียบข้อความหัวข้อตามถ้อยคำใหม่ — [`LINE.md`](LINE.md) §8.2 ค., §9.10–9.11
-- [ ] สินค้าที่มีตัวเลือก: ~~Y9 สต็อกต่อตัวเลือก~~ ยกเลิกแล้ว → POS เลือกตามกลุ่มตัวเลือก (`scan.customization`) ส่ง `variant_ids` · หน้าแก้สินค้าใช้ `/api/admin/products/[id]/customization` ([`customer-backend-merge.md`](customer-backend-merge.md) §8.3)
-- [ ] หน้า dashboard: ยืนยัน path `/owner/dashboard` (ลิงก์ของสรุปรายเดือน — LINE.md §9.13) หรือแจ้ง path จริง
-- [ ] ลิงก์จาก LINE: `/owner/orders/manageOrders?id=<orderId>` ต้องเปิดออเดอร์นั้นได้ตรง ๆ · บอก path หน้าจัดการพรีออเดอร์ เพื่อให้แจ้งเตือนพรีออเดอร์มีลิงก์ด้วย — [`LINE.md`](LINE.md) §9.12
+> ตรวจกับโค้ด frontend (`main` หลัง frontend PR #58) 2026-10-10 — ติ๊กตามของที่มีจริง
+- [x] หน้าแจ้งเตือน: แสดง `module_label` · เอาตัวกรอง `employee` ออก · ปรับจุดที่เทียบข้อความหัวข้อตามถ้อยคำใหม่ — [`LINE.md`](LINE.md) §8.2 ค., §9.10–9.11
+  — ไม่มีตัวกรอง `employee` แล้ว · หมวดแสดงผ่าน i18n ของ frontend จาก `module` (ไม่ได้อ่าน `module_label`) · ไม่มีจุดเทียบข้อความหัวข้อ
+- [x] สินค้าที่มีตัวเลือก: ~~Y9 สต็อกต่อตัวเลือก~~ ยกเลิกแล้ว → POS เลือกตามกลุ่มตัวเลือก (`scan.customization`) ส่ง `variant_ids` · หน้าแก้สินค้าใช้ `/api/admin/products/[id]/customization` ([`customer-backend-merge.md`](customer-backend-merge.md) §8.3)
+  — frontend I4 (`CustomizationPickerModal`) · `services/productCustomization.ts` · POS รู้ล่วงหน้าจาก `has_customization` (#72)
+- [x] หน้า dashboard: ยืนยัน path `/owner/dashboard` (ลิงก์ของสรุปรายเดือน — LINE.md §9.13) หรือแจ้ง path จริง — path นี้มีจริง
+- [x] ลิงก์จาก LINE: `/owner/orders/manageOrders?id=<orderId>` ต้องเปิดออเดอร์นั้นได้ตรง ๆ · บอก path หน้าจัดการพรีออเดอร์ เพื่อให้แจ้งเตือนพรีออเดอร์มีลิงก์ด้วย — [`LINE.md`](LINE.md) §9.12 — frontend PR #16 (ดูข้อถัดไป)
 - [x] **ลิงก์แจ้งเตือนครบทุกหน้า** — frontend ยืนยัน path + รองรับ `?id=` แล้ว (frontend PR #16) · backend ใส่ลิงก์แล้ว (LINE.md §9.14):
 
   | แจ้งเตือน | ลิงก์ (2026-10-03 — `src/lib/adminLinks.ts`) |
@@ -446,8 +449,9 @@ Next 16 + antd + i18n ที่ทำถึง D0.5 · ตามหลัง mai
   | วัตถุดิบใกล้จะหมด | `/owner/ingredients` (ไม่มีหน้ารายตัว) |
   | สรุปยอดรายเดือน | `/owner/dashboard` |
   | โควตา LINE ใกล้หมด/หมด (เว็บอย่างเดียว) | — |
-- [ ] สลิป: เปิดผ่าน `/api/files/slips/…` แบบส่ง cookie แล้วทำ blob URL (PR #54 — `uploads.md` §6)
-- [ ] เชื่อม LINE ลูกค้า + เกณฑ์สินค้าใกล้หมดรายสินค้า + คำถามที่ต้องตอบ backend — [`LINE.md`](LINE.md) §8.2 ก., ข., ง.
+- [x] สลิป: เปิดผ่าน `/api/files/slips/…` แบบส่ง cookie แล้วทำ blob URL (PR #54 — `uploads.md` §6)
+  — frontend `SlipImage` ใช้ `<img>` + `resolveUploadUrl()` แทน blob (frontend/backend same-site → เบราว์เซอร์แนบ cookie เอง) · โหลดไม่ได้แสดงข้อความแทน
+- [x] เชื่อม LINE ลูกค้า + เกณฑ์สินค้าใกล้หมดรายสินค้า + คำถามที่ต้องตอบ backend — [`LINE.md`](LINE.md) §8.2 ก., ข., ง. (ติ๊กรายข้อไว้ที่นั่น)
 
 ### 8.5 ต่อยอด (ไม่เร่ง)
 
