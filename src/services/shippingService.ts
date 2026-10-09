@@ -9,7 +9,9 @@
  */
 import mongoose from "mongoose";
 import dbConnect from "../lib/dbConnect";
-import { badRequest } from "../lib/httpError";
+import { badRequest, conflict, notFound } from "../lib/httpError";
+import { round2 } from "../lib/money";
+import type { ShippingZoneUpdate } from "../schemas/shipping";
 import shippingZoneModel from "../models/shippingZoneModel";
 import storeProfileModel from "../models/storeProfileModel";
 import storeSettingsModel from "../models/storeSettingsModel";
@@ -48,6 +50,45 @@ export async function getShippingZones(): Promise<ShippingZone[]> {
     .select("zone_code zone_label provinces fee")
     .sort({ zone_code: 1 })
     .lean<ShippingZone[]>();
+}
+
+/**
+ * แก้โซนค่าส่ง 1 โซน (หลังร้าน · PATCH /api/admin/shipping-zones/:zone_code · frontend Q-BE2)
+ *   - รูปแบบ (ชื่อจังหวัด 77 จังหวัด · fee ≥ 0) ตรวจที่ schemas/shipping.ts แล้ว
+ *   - โซน D = จังหวัดที่ไม่อยู่ใน A–C (computeShippingFee ไม่ดู provinces ของ D) → ใส่จังหวัดไม่ได้
+ *   - จังหวัดเดียวกันอยู่ได้โซนเดียว — ชนกับโซนอื่น = 409 บอกชื่อจังหวัด + โซน
+ * คืน { before, after } ให้ route เขียน audit log
+ */
+export async function updateShippingZone(
+  zoneCode: string,
+  input: ShippingZoneUpdate
+): Promise<{ before: ShippingZone; after: ShippingZone }> {
+  const zones = await getShippingZones(); // seed ชุดเริ่มต้นให้ถ้ายังไม่มี
+  const before = zones.find((z) => z.zone_code === zoneCode);
+  if (!before) throw notFound("ไม่พบโซนค่าส่ง (มีเฉพาะ A, B, C, D)");
+
+  const set: Partial<ShippingZone> = {};
+  if (input.zone_label !== undefined) set.zone_label = input.zone_label;
+  if (input.fee !== undefined) set.fee = round2(input.fee);
+  if (input.provinces !== undefined) {
+    if (zoneCode === "D" && input.provinces.length > 0) {
+      throw badRequest("โซน D ใช้กับจังหวัดที่ไม่อยู่ในโซน A–C อัตโนมัติ — ใส่รายชื่อจังหวัดไม่ได้");
+    }
+    const taken = new Map<string, string>();
+    for (const z of zones) if (z.zone_code !== zoneCode) for (const p of z.provinces) taken.set(p.trim(), z.zone_code);
+    const clashes = input.provinces.filter((p) => taken.has(p));
+    if (clashes.length > 0) {
+      throw conflict(`จังหวัดอยู่ในโซนอื่นแล้ว: ${clashes.map((p) => `${p} (โซน ${taken.get(p)})`).join(", ")} — เอาออกจากโซนเดิมก่อน`);
+    }
+    set.provinces = input.provinces;
+  }
+
+  const after = await shippingZoneModel
+    .findOneAndUpdate({ zone_code: zoneCode }, { $set: set }, { returnDocument: "after", runValidators: true })
+    .select("zone_code zone_label provinces fee")
+    .lean<ShippingZone | null>();
+  if (!after) throw notFound("ไม่พบโซนค่าส่ง (มีเฉพาะ A, B, C, D)");
+  return { before, after };
 }
 
 export interface StorefrontDeliveryQuote {
