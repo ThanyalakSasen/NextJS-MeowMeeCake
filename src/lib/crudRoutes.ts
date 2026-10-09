@@ -23,6 +23,10 @@
  * createInject/updateInject: ฟิลด์ที่ derive จาก session แล้วยัดเข้า body ก่อนส่งเข้า service (กัน
  * client ตั้งเองผ่าน request body ตรง ๆ) — `createInject` ใช้กับ POST (`collectionRoutes`),
  * `updateInject` ใช้กับ PATCH (`itemRoutes`, BACKLOG §3.17) ทั้งคู่ต้องตั้ง `auth` ด้วยเพื่อให้มี session
+ *
+ * authorize: กติกาเพิ่มเติมนอกสิทธิ์เมนู ที่ต้องดู session + ข้อมูลเป้าหมาย (เช่น เฉพาะ owner แตะบทบาท owner ได้ —
+ * services/ownerProtection.ts) · เรียกหลังผ่าน `auth` และ validate body แล้ว ก่อนเขียนจริง · throw เพื่อปฏิเสธ
+ * ใช้ได้กับ POST (collectionRoutes) · PATCH/DELETE (itemRoutes) · restore (restoreRoute) · ต้องตั้ง `auth` ด้วย
  */
 import type { NextRequest } from "next/server";
 import type { z } from "zod";
@@ -66,16 +70,34 @@ export interface CrudAudit {
   entity: string;
 }
 
-/** ตรวจสิทธิ์ตาม config — no-op ถ้าไม่ได้ตั้ง auth */
+/** ตรวจสิทธิ์ตาม config — คืน session ที่ตรวจกับ DB แล้ว · ไม่ได้ตั้ง auth (หรืออ่านสาธารณะ) = null */
 async function guard(
   req: NextRequest,
   auth: CrudAuth | undefined,
   action: PermAction
-): Promise<void> {
-  if (!auth) return;
-  if (action === "view" && auth.publicRead) return;
+): Promise<SessionUser | null> {
+  if (!auth) return null;
+  if (action === "view" && auth.publicRead) return null;
   const session = await authenticate(req);
   await requirePermission(session, auth.menu, action);
+  return session;
+}
+
+/** กติกาเพิ่มเติมหลังผ่านสิทธิ์เมนู (ดูหัวไฟล์) */
+export type CrudAuthorize = (
+  session: SessionUser,
+  args: { op: "create" | "update" | "delete" | "restore"; id?: string; body?: Record<string, unknown> }
+) => Promise<void> | void;
+
+async function runAuthorize(
+  authorize: CrudAuthorize | undefined,
+  session: SessionUser | null,
+  args: Parameters<CrudAuthorize>[1]
+): Promise<void> {
+  if (!authorize) return;
+  // ตั้ง authorize แต่ไม่ได้ตั้ง auth = ไม่มี session ให้ตรวจ → ปฏิเสธไว้ก่อน (fail closed)
+  if (!session) throw new Error("crudRoutes: authorize ต้องใช้คู่กับ auth");
+  await authorize(session, args);
 }
 
 const ACTION_LABEL: Record<string, string> = {
@@ -112,6 +134,8 @@ export interface CollectionRoutesOptions {
   /** ฟิลด์ที่ inject จาก session ตอน POST (เช่น { created_by: s.user_id }) — merge ทับ body
    *  กัน client ตั้งค่าเอง (mass-assign) · ต้องตั้ง `auth` ด้วยเพื่อให้มี session */
   createInject?: (session: SessionUser) => Record<string, unknown>;
+  /** กติกาเพิ่มเติมก่อนสร้าง (ดูหัวไฟล์) */
+  authorize?: CrudAuthorize;
 }
 
 export function collectionRoutes(
@@ -137,8 +161,9 @@ export function collectionRoutes(
   });
 
   const POST = route(async (req: NextRequest) => {
-    await guard(req, opts.auth, "create");
+    const session = await guard(req, opts.auth, "create");
     const body = await readBody(req, opts.validate?.create);
+    await runAuthorize(opts.authorize, session, { op: "create", body });
     const injected = opts.createInject ? opts.createInject(requireAuth(req)) : undefined;
     const doc = await service.create(injected ? { ...body, ...injected } : body);
     logMutation(req, opts.audit, "create", doc);
@@ -156,6 +181,8 @@ export interface ItemRoutesOptions {
    *  กัน client ตั้งค่าเอง (mass-assign) · คู่กับ `createInject` ของ `CollectionRoutesOptions`
    *  (BACKLOG §3.17 — เดิมไม่มีจุดเทียบเท่านี้ฝั่ง PATCH เลย) · ต้องตั้ง `auth` ด้วยเพื่อให้มี session */
   updateInject?: (session: SessionUser) => Record<string, unknown>;
+  /** กติกาเพิ่มเติมก่อนแก้ / ลบ / กู้คืน (ดูหัวไฟล์) */
+  authorize?: CrudAuthorize;
 }
 
 export function itemRoutes(
@@ -170,9 +197,10 @@ export function itemRoutes(
   });
 
   const PATCH = route(async (req: NextRequest, ctx: RouteContext) => {
-    await guard(req, opts.auth, "update");
+    const session = await guard(req, opts.auth, "update");
     const { id } = await ctx.params;
     const body = await readBody(req, opts.validate?.update);
+    await runAuthorize(opts.authorize, session, { op: "update", id, body });
     const injected = opts.updateInject ? opts.updateInject(requireAuth(req)) : undefined;
     const doc = await service.update(id, injected ? { ...body, ...injected } : body);
     logMutation(req, opts.audit, "update", doc ?? { _id: id });
@@ -180,8 +208,9 @@ export function itemRoutes(
   });
 
   const DELETE = route(async (req: NextRequest, ctx: RouteContext) => {
-    await guard(req, opts.auth, "delete");
+    const session = await guard(req, opts.auth, "delete");
     const { id } = await ctx.params;
+    await runAuthorize(opts.authorize, session, { op: "delete", id });
     const doc = await service.remove(id);
     logMutation(req, opts.audit, "delete", doc ?? { _id: id });
     return ok(doc);
@@ -196,8 +225,9 @@ export function restoreRoute(
   opts: ItemRoutesOptions = {}
 ) {
   const POST = route(async (req: NextRequest, ctx: RouteContext) => {
-    await guard(req, opts.auth, "update");
+    const session = await guard(req, opts.auth, "update");
     const { id } = await ctx.params;
+    await runAuthorize(opts.authorize, session, { op: "restore", id });
     const doc = await service.restore(id);
     logMutation(req, opts.audit, "restore", doc ?? { _id: id });
     return ok(doc);
