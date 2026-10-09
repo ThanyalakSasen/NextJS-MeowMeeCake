@@ -215,16 +215,18 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
 
 ทุก API ต้องส่ง cookie `session` (`credentials: "include"`) · รูปแบบ response `{ success, data }` เหมือน API อื่น
 
-**ก. หน้าโปรไฟล์ลูกค้า — เชื่อม LINE** (ต้องทำ · §5)
+> ตรวจกับโค้ด frontend (`main` หลัง frontend PR #58) 2026-10-10 — ก.–ง. ทำครบแล้ว (หมายเหตุที่ต่างจากสเปกเขียนไว้ใต้ข้อ) · §8.3 ยังเป็นงานตอน deploy
 
-- [ ] เรียก `GET /api/shop/me/line` → `{ linked, authorize_url }`
-- [ ] `linked: false` → ปุ่ม "เชื่อม LINE" · `linked: true` → แสดง "เชื่อมแล้ว" + ปุ่ม "ยกเลิกการเชื่อม"
-- [ ] `authorize_url: null` → ปิดปุ่ม (server ยังไม่ตั้งค่า LINE Login)
-- [ ] กดเชื่อม → เรียก `GET /api/shop/me/line` **ใหม่ทุกครั้ง** (ลิงก์อายุ 10 นาที) แล้ว `window.location.href = data.authorize_url`
+**ก. หน้าโปรไฟล์ลูกค้า — เชื่อม LINE** (ต้องทำ · §5) — หลังร้าน `/profile` · ลูกค้า `/customer/account` (`LineSection`)
+
+- [x] เรียก `GET /api/shop/me/line` → `{ linked, authorize_url }`
+- [x] `linked: false` → ปุ่ม "เชื่อม LINE" · `linked: true` → แสดง "เชื่อมแล้ว" + ปุ่ม "ยกเลิกการเชื่อม" (บัญชีที่สมัครด้วย LINE ไม่มีปุ่มยกเลิก)
+- [x] `authorize_url: null` → ปิดปุ่ม (server ยังไม่ตั้งค่า LINE Login) — frontend ไม่ปิดปุ่ม แต่กดแล้วแจ้ง "ร้านยังไม่ได้ตั้งค่าการเชื่อมต่อ LINE"
+- [x] กดเชื่อม → เรียก `GET /api/shop/me/line` **ใหม่ทุกครั้ง** (ลิงก์อายุ 10 นาที) แล้ว `window.location.href = data.authorize_url`
   (เปลี่ยนหน้าทั้งหน้า — ห้าม fetch / popup)
-- [ ] กดยกเลิก → `DELETE /api/shop/me/line` → `{ linked: false }`
-- [ ] ข้อความใต้ปุ่ม เช่น "เชื่อม LINE และเพิ่มเพื่อน MeowMeeCake เพื่อรับแจ้งเตือนออเดอร์" (ไม่เป็นเพื่อน OA = ไม่ได้ข้อความ)
-- [ ] หน้าโปรไฟล์อ่าน query ตอน LINE พากลับมา (path ต้องตรงกับ `LINE_LINK_RETURN_URL` — dev = `http://localhost:3001/profile`
+- [x] กดยกเลิก → `DELETE /api/shop/me/line` → `{ linked: false }`
+- [x] ข้อความใต้ปุ่ม เช่น "เชื่อม LINE และเพิ่มเพื่อน MeowMeeCake เพื่อรับแจ้งเตือนออเดอร์" (ไม่เป็นเพื่อน OA = ไม่ได้ข้อความ)
+- [x] หน้าโปรไฟล์อ่าน query ตอน LINE พากลับมา — `/profile` (ลูกค้าถูกส่งต่อไป `/customer/account` พร้อม `?line=`) · `?line=cancelled` แสดงข้อความแจ้งสั้น ๆ (path ต้องตรงกับ `LINE_LINK_RETURN_URL` — dev = `http://localhost:3001/profile`
   ถ้า path จริงไม่ใช่ `/profile` แจ้ง backend ให้แก้ env):
 
   | query | แสดง |
@@ -234,34 +236,37 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
   | `?line=error&reason=login_required` | "กรุณาเข้าสู่ระบบอีกครั้ง แล้วกดเชื่อม LINE ใหม่" |
   | `?line=error` (ไม่มี `reason`) | "เชื่อมต่อไม่สำเร็จ ลองใหม่อีกครั้ง" |
 
-- [ ] แสดงผลแล้วล้าง query ออกจาก URL (กันรีเฟรชแล้วขึ้นข้อความซ้ำ)
+- [x] แสดงผลแล้วล้าง query ออกจาก URL (กันรีเฟรชแล้วขึ้นข้อความซ้ำ)
 
 **ข. ฟอร์มสินค้า (หลังร้าน) — เกณฑ์สินค้าใกล้หมด** (ควรทำ · §9.5)
 
-- [ ] ช่อง "แจ้งเตือนเมื่อเหลือไม่เกิน … ชิ้น (เว้นว่าง = 5)" ใน `POST /api/admin/products` / `PATCH /api/admin/products/[id]`
+- [x] ช่อง "แจ้งเตือนเมื่อเหลือไม่เกิน … ชิ้น (เว้นว่าง = 5)" ใน `POST /api/admin/products` / `PATCH /api/admin/products/[id]`
   ฟิลด์ `low_stock_threshold` — จำนวนเต็ม ≥ 0 หรือ `null` (เว้นว่าง) · ค่าผิดได้ 400
-- [ ] แสดงเฉพาะสินค้าปกติ (`is_preorder: false`) — สินค้าพรีออเดอร์ไม่มีช่องนี้ (server เก็บเป็น `null` เสมอ) ·
+- [x] แสดงเฉพาะสินค้าปกติ (`is_preorder: false`) — สินค้าพรีออเดอร์ไม่มีช่องนี้ (server เก็บเป็น `null` เสมอ) ·
   ⚠️ ฟิลด์ประเภทสินค้าเปลี่ยนจาก `product_types` เป็น `is_preorder` แล้ว (PR #52 / BACKLOG2 §14.1)
-- [ ] (ถ้ามีหน้า "สินค้าใกล้หมด") `GET /api/admin/products/low-stock` **ไม่ส่ง `?threshold=`** แล้ว = ใช้เกณฑ์รายสินค้า ·
-  response เพิ่ม `per_product` และ `items[].low_stock_threshold` — ถ้าหน้าเดิมส่ง `?threshold=5` ตายตัวไว้ ให้เอาออก
+- [x] (ถ้ามีหน้า "สินค้าใกล้หมด") `GET /api/admin/products/low-stock` **ไม่ส่ง `?threshold=`** แล้ว = ใช้เกณฑ์รายสินค้า ·
+  response เพิ่ม `per_product` และ `items[].low_stock_threshold` — ถ้าหน้าเดิมส่ง `?threshold=5` ตายตัวไว้ ให้เอาออก — ไม่เกี่ยว: frontend ไม่เรียก endpoint นี้
 
 **ค. หน้าแจ้งเตือนหลังร้าน** (ตรวจว่ายังแสดงถูก · มีฟิลด์ใหม่ `module_label` — §9.10 · หัวข้อเปลี่ยนถ้อยคำ — §9.11)
 
-- [ ] แสดงหมวดด้วย **`module_label`** (คำสั่งซื้อ / วัตถุดิบ / การผลิต / การเงิน / อื่น ๆ) แทน `module` — ไม่ต้องมีตารางแปลเอง ·
+- [x] แสดงหมวดด้วย **`module_label`** (คำสั่งซื้อ / วัตถุดิบ / การผลิต / การเงิน / อื่น ๆ) แทน `module` — ไม่ต้องมีตารางแปลเอง ·
   ตัวกรองหมวดยังส่ง `?module=order` ได้เหมือนเดิม (หรือส่งป้ายไทยก็ได้) · หมวด `employee` เลิกใช้แล้ว (เอาตัวเลือกออก)
-- [ ] ถ้ามีจุดไหน**ค้น/กรอง/เทียบด้วยข้อความหัวข้อ** ต้องปรับตามถ้อยคำใหม่ (§9.11) เช่น "สินค้าใกล้จะหมด: …", "เปิดพรีออเดอร์รอบใหม่ PRE-…",
+  — frontend แปลป้ายหมวดจาก `module` ด้วย i18n ของตัวเอง (รองรับ 2 ภาษา) แทน `module_label` · ไม่มีตัวเลือก `employee` แล้ว
+- [x] ถ้ามีจุดไหน**ค้น/กรอง/เทียบด้วยข้อความหัวข้อ** ต้องปรับตามถ้อยคำใหม่ (§9.11) เช่น "สินค้าใกล้จะหมด: …", "เปิดพรีออเดอร์รอบใหม่ PRE-…",
   "มีคำสั่งซื้อรอตรวจสอบสลิปโอนเงิน รหัสคำสั่งซื้อ ORD-…" (หัวข้อสลิปมีเลขออเดอร์แล้ว ไม่ใช่ ObjectId)
 
-- [ ] มีแจ้งเตือนหัวข้อใหม่ module `system` type `warning`: "โควตา LINE ใกล้หมด (YYYY-MM)" / "โควตา LINE หมดแล้ว (YYYY-MM)" (§9.6)
-- [ ] มีแจ้งเตือน module `order`: "เปิดพรีออเดอร์รอบใหม่ PRE-…" และ "เปิดรับพรีออเดอร์ถึงวันรับ YYYY-MM-DD: N รายการ" — **`link: null`** (§9.2, §9.7)
+- [x] มีแจ้งเตือนหัวข้อใหม่ module `system` type `warning`: "โควตา LINE ใกล้หมด (YYYY-MM)" / "โควตา LINE หมดแล้ว (YYYY-MM)" (§9.6)
+- [x] มีแจ้งเตือน module `order`: "เปิดพรีออเดอร์รอบใหม่ PRE-…" และ "เปิดรับพรีออเดอร์ถึงวันรับ YYYY-MM-DD: N รายการ" — **`link: null`** (§9.2, §9.7)
   ต้องรองรับ `link` เป็น `null` (ไม่ทำลิงก์ / ไม่ error)
-- [ ] ออเดอร์หน้าร้าน (`POS-`) ยังขึ้นในหน้าแจ้งเตือนเหมือนเดิม แค่ไม่ส่ง LINE (§9.5)
+- [x] ออเดอร์หน้าร้าน (`POS-`) ยังขึ้นในหน้าแจ้งเตือนเหมือนเดิม แค่ไม่ส่ง LINE (§9.5)
 
 **ง. ต้องตอบ backend** (ถาม-ตอบ ไม่ต้องเขียนโค้ด)
 
-- [ ] **path หน้าจัดการพรีออเดอร์** ของหลังร้าน (แบบออเดอร์ใช้ `/owner/orders/manageOrders?id=…`) → backend จะใส่ `link` ให้แจ้งเตือนพรีออเดอร์
-- [ ] **path หน้าโปรไฟล์ลูกค้า** จริง → ตั้ง `LINE_LINK_RETURN_URL`
-- [ ] หน้าสร้างออเดอร์แทนลูกค้า (`POST /api/admin/orders`): ออเดอร์โทรศัพท์/แชตจะส่ง `channel: "online"` ไหม (§8.1 ข้อ 8)
+- [x] **path หน้าจัดการพรีออเดอร์** ของหลังร้าน (แบบออเดอร์ใช้ `/owner/orders/manageOrders?id=…`) → backend จะใส่ `link` ให้แจ้งเตือนพรีออเดอร์
+  — `/owner/orders/preOrderRound?tab=orders&id=<preorderId>` (ใส่แล้วใน `src/lib/adminLinks.ts` · BACKLOG4 §8.4)
+- [x] **path หน้าโปรไฟล์ลูกค้า** จริง → ตั้ง `LINE_LINK_RETURN_URL` — `/profile` (ค่าเดิม)
+- [x] หน้าสร้างออเดอร์แทนลูกค้า (`POST /api/admin/orders`): ออเดอร์โทรศัพท์/แชตจะส่ง `channel: "online"` ไหม (§8.1 ข้อ 8)
+  — ไม่เกี่ยว: frontend ไม่มีหน้าสร้างออเดอร์แทนลูกค้า มีแค่ POS (`channel: "instore"`)
 
 ### 8.3 ตั้งค่าตอน deploy (ไม่ใช่โค้ด)
 
@@ -271,7 +276,7 @@ window.location.href = data.authorize_url; // เปลี่ยนหน้า�
   `LINE_OWNER_QUOTA_RESERVE`, `PREORDER_REMINDER_DAYS_BEFORE` (§3)
 - [ ] เพิ่ม Callback URL ของโดเมนจริงในแท็บ **LINE Login** ของ LINE Login channel (เก็บ localhost ไว้ด้วยได้สำหรับ dev) (§4, §6.1)
 - [ ] ทดสอบผูกบัญชีจริง end-to-end ด้วยมือ (§7)
-- [ ] merge PR #52 ก่อน แล้วค่อย #53
+- [x] merge PR #52 ก่อน แล้วค่อย #53
 
 ---
 
