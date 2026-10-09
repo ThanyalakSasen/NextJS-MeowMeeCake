@@ -71,10 +71,25 @@ export function readProductId(source: Record<string, unknown> | null | undefined
   return id;
 }
 
-/** เพิ่มเข้ารายการโปรด (เคยเอาออกแล้ว = กู้แถวเดิม) — สินค้าต้องยังมีอยู่ */
+/**
+ * เพิ่มเข้ารายการโปรด — สินค้าต้องยังมีอยู่
+ *   - เคยเอาออกแล้ว = กู้แถวเดิม + ตั้ง created_at ใหม่ ให้ขึ้นบนสุดของรายการ "ล่าสุดก่อน" (frontend Q-BE16)
+ *     (ระบบแนะนำสินค้าก็เรียง Interactions ตาม created_at — กดถูกใจใหม่ = สัญญาณล่าสุดเหมือนกัน)
+ *   - อยู่ในรายการอยู่แล้ว = ไม่เปลี่ยนลำดับ (กดซ้ำ/คำขอซ้ำ) · ยังไม่เคยมี = สร้างแถวใหม่
+ */
 export async function addFavorite(userId: string, productId: string) {
   await dbConnect();
   if (!(await productModel.exists({ _id: productId, deleted_at: null }))) throw notFound("ไม่พบสินค้า");
+  const now = new Date();
+  // created_at ของ timestamps เป็น immutable — ไม่ใส่ overwriteImmutable mongoose จะตัด $set ทิ้งเงียบ ๆ
+  const restored = await interactionModel
+    .findOneAndUpdate(
+      { user_id: userId, product_id: productId, action_type: "wishlist", deleted_at: { $ne: null } },
+      { $set: { deleted_at: null, created_at: now } },
+      { returnDocument: "after", overwriteImmutable: true }
+    )
+    .lean();
+  if (restored) return restored;
   return interactionModel
     .findOneAndUpdate(
       { user_id: userId, product_id: productId, action_type: "wishlist" },

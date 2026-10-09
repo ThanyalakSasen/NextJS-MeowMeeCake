@@ -33,6 +33,37 @@ describe("รายการโปรด", () => {
     expect((await favoriteService.listFavorites(uid)).items.map((i) => i.id)).toEqual([String(b._id)]);
   });
 
+  it("เอาออกแล้วเพิ่มกลับ → ขึ้นบนสุด (ตั้ง created_at ใหม่) · กดซ้ำตอนอยู่ในรายการ → ลำดับไม่เปลี่ยน (Q-BE16)", async () => {
+    const user = await makeUser();
+    const uid = String(user._id);
+    const [a, b, c] = await Promise.all([makeProduct(), makeProduct(), makeProduct()]);
+    const tick = () => new Promise((r) => setTimeout(r, 5));
+    const order = async () => (await favoriteService.listFavorites(uid)).items.map((i) => i.id);
+
+    await favoriteService.addFavorite(uid, String(a._id));
+    await tick();
+    await favoriteService.addFavorite(uid, String(b._id));
+    await tick();
+    await favoriteService.addFavorite(uid, String(c._id));
+    expect(await order()).toEqual([String(c._id), String(b._id), String(a._id)]);
+
+    // a อยู่ในรายการอยู่แล้ว → กดซ้ำไม่ดันขึ้น
+    await tick();
+    await favoriteService.addFavorite(uid, String(a._id));
+    expect(await order()).toEqual([String(c._id), String(b._id), String(a._id)]);
+
+    // เอา a ออกแล้วเพิ่มกลับ → แถวเดิม แต่ขึ้นบนสุด
+    const before = await interactionModel.findOne({ user_id: user._id, product_id: a._id }).lean<{ _id: unknown; created_at: Date }>();
+    await favoriteService.removeFavorite(uid, String(a._id));
+    await tick();
+    await favoriteService.addFavorite(uid, String(a._id));
+    expect(await order()).toEqual([String(a._id), String(c._id), String(b._id)]);
+    const after = await interactionModel.findOne({ user_id: user._id, product_id: a._id }).lean<{ _id: unknown; created_at: Date }>();
+    expect(String(after?._id)).toBe(String(before?._id));
+    expect(after!.created_at.getTime()).toBeGreaterThan(before!.created_at.getTime());
+    expect(await interactionModel.countDocuments({ user_id: user._id, action_type: "wishlist" })).toBe(3);
+  });
+
   it("สินค้าไม่มี = 404 · id ผิดรูปแบบ = 400 · เห็นเฉพาะของตัวเอง", async () => {
     const user = await makeUser();
     const other = await makeUser();
