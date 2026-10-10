@@ -1,7 +1,7 @@
 /**
  * /api/admin/permissions/[id]
  *   GET    — ดูสิทธิ์รายตัว (employees.view)
- *   PATCH  — แก้ flag การอนุญาต / expires_at (employees.update)
+ *   PATCH  — แก้ flag การอนุญาต / expires_at (employees.update) · ผู้ที่ไม่ใช่ owner เปิดได้เฉพาะ flag ที่ตัวเองมี (permissionCeiling)
  *   DELETE — ลบสิทธิ์ soft (employees.delete)
  */
 import { ok } from "@/lib/apiResponse";
@@ -10,6 +10,7 @@ import { audit } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { permissionUpdate } from "@/schemas/rbac";
 import * as permissionService from "@/services/permissionService";
+import { assertMayGrantExisting } from "@/services/permissionCeiling";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -18,9 +19,10 @@ export const GET = withPermission("employees", "view", async (_s, _r, ctx: Ctx) 
   return ok(await permissionService.getPermissionById(id));
 });
 
-export const PATCH = withPermission("employees", "update", async (_s, req, ctx: Ctx) => {
+export const PATCH = withPermission("employees", "update", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await parseBody(req, permissionUpdate);
+  await assertMayGrantExisting(session, id, body);
   const result = await permissionService.updatePermission(id, body);
   audit(req, {
     action: "แก้ไขสิทธิ์เมนู",

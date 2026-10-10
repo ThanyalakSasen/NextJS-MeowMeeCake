@@ -3,6 +3,7 @@
  *   GET  — รายการสิทธิ์ (employees.view) ?role_id= ?menu_key= ?includeDeleted=
  *   POST — ให้สิทธิ์ใหม่แก่บทบาท (employees.create)
  *          body: { role_id, menu_key, granted_by, can_view?, can_create?, can_update?, can_delete?, can_approve?, expires_at? }
+ *          ผู้ที่ไม่ใช่ owner ให้ได้เฉพาะ flag ที่ตัวเองมีในเมนูนั้น (permissionCeiling)
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
@@ -12,6 +13,7 @@ import { parseBool, parsePagination } from "@/lib/queryParams";
 import { permissionCreate } from "@/schemas/rbac";
 import * as permissionService from "@/services/permissionService";
 import type { MenuKey } from "@/services/permissionService";
+import { assertMayGrant } from "@/services/permissionCeiling";
 
 export const GET = withPermission("employees", "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
@@ -26,6 +28,7 @@ export const GET = withPermission("employees", "view", async (_s, req) => {
 
 export const POST = withPermission("employees", "create", async (session, req) => {
   const body = await parseBody(req, permissionCreate);
+  await assertMayGrant(session, body.menu_key as MenuKey, body);
   const result = await permissionService.createPermission({
     ...body,
     granted_by: session.user_id,
