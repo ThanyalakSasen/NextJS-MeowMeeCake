@@ -3,6 +3,7 @@
  *   GET  — รายการผู้ใช้ (employees.view) — ?search= ?role_id= ?role_type=owner,staff ?is_active= ?employment_type=
  *   POST — สร้างผู้ใช้ (employees.create) — auth_provider "local" ต้องมี password / "google" ต้องมี googleId
  *          ผู้ใช้ในบทบาทประเภท owner สร้างได้เฉพาะ owner (ownerProtection)
+ *          บทบาทของผู้ใช้ใหม่ต้องมีสิทธิ์ไม่เกินของผู้สร้าง (permissionCeiling)
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
@@ -13,6 +14,7 @@ import { parseBool, parsePagination, parseSort } from "@/lib/queryParams";
 import { createUserBody } from "@/schemas/user";
 import * as userService from "@/services/userService";
 import { assertMayAssignRole } from "@/services/ownerProtection";
+import { assertMayAssignRoleWithin } from "@/services/permissionCeiling";
 
 const ROLE_TYPES = ["owner", "staff", "customer"] as const;
 
@@ -47,6 +49,7 @@ export const GET = withPermission("employees", "view", async (_s, req) => {
 export const POST = withPermission("employees", "create", async (session, req) => {
   const body = await parseBody(req, createUserBody);
   await assertMayAssignRole(session, body.role_id);
+  await assertMayAssignRoleWithin(session, body.role_id);
   const result = await userService.createUser(body);
   audit(req, {
     action: "สร้างผู้ใช้ใหม่",

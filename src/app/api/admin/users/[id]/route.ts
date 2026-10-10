@@ -6,6 +6,7 @@
  *
  * (ผู้ใช้แก้โปรไฟล์ตัวเองที่ /api/shop/me)
  * ผู้ที่ไม่ใช่ owner: แก้ / ลบบัญชีในบทบาท owner ไม่ได้ · ย้ายใครเข้าบทบาท owner ไม่ได้ (ownerProtection)
+ *   แก้ / ลบ / ย้ายบทบาทได้เฉพาะบัญชีและบทบาทที่สิทธิ์ไม่เกินของตัวเอง (permissionCeiling)
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
@@ -15,6 +16,7 @@ import { parseBool } from "@/lib/queryParams";
 import { updateUserBody } from "@/schemas/user";
 import * as userService from "@/services/userService";
 import { assertMayAssignRole, assertMayManageUser } from "@/services/ownerProtection";
+import { assertMayManageUserWithin } from "@/services/permissionCeiling";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -29,6 +31,7 @@ export const PATCH = withPermission("employees", "update", async (session, req, 
   const body = await parseBody(req, updateUserBody);
   await assertMayManageUser(session, id);
   if (body.role_id !== undefined) await assertMayAssignRole(session, body.role_id);
+  await assertMayManageUserWithin(session, id, body.role_id);
   const result = await userService.updateUser(id, body);
   // เปลี่ยน role / เปิด-ปิดใช้งาน = เหตุการณ์สำคัญ log แยกให้ชัด
   if (body.role_id !== undefined || body.is_active !== undefined) {
@@ -46,6 +49,7 @@ export const PATCH = withPermission("employees", "update", async (session, req, 
 export const DELETE = withPermission("employees", "delete", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   await assertMayManageUser(session, id);
+  await assertMayManageUserWithin(session, id);
   const result = await userService.deleteUser(id);
   audit(req, { action: "ลบผู้ใช้", action_type: "DELETE", entity: "User", entity_id: id });
   return ok(result);

@@ -10,12 +10,14 @@ import { audit } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import * as userService from "@/services/userService";
 import { assertMayManageUser } from "@/services/ownerProtection";
+import { assertMayManageUserWithin } from "@/services/permissionCeiling";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const PUT = withPermission("employees", "update", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   await assertMayManageUser(session, id);
+  await assertMayManageUserWithin(session, id);
   const body = await req.json();
   const next = body.new_password ?? body.newPassword;
   if (!next) throw badRequest("ต้องระบุ new_password");
