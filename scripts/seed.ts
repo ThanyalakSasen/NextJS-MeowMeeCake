@@ -9,6 +9,7 @@ import productCategoryModel from "../src/models/productCategoryModel";
 import ingredientCategoryModel from "../src/models/ingredientCategoryModel";
 import componentCategoryModel from "../src/models/componentsCategory";
 import userModel from "../src/models/userModel";
+import { GUEST_CUSTOMER_EMAIL } from "../src/lib/posGuest";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -16,9 +17,8 @@ import userModel from "../src/models/userModel";
 const OWNER_EMAIL = "thanyalak.sas@kkumail.com";
 const OWNER_PASSWORD = "MeowMee@1234";
 
-// บัญชี "ลูกค้าทั่วไป" คงที่ — ผูกกับออเดอร์หน้าร้าน (POS) ที่ไม่ระบุตัวลูกค้าจริง
-// ไม่มี password (login ไม่ได้ตั้งใจ) — frontend หา id ผ่าน GET /admin/users?search=<email> นี้
-export const GUEST_CUSTOMER_EMAIL = "guest@meowmeecake.local";
+// บัญชี "ลูกค้าทั่วไป" คงที่ — ค่าอยู่ที่ src/lib/posGuest.ts (POS หา id ผ่าน GET /admin/pos/guest-customer)
+export { GUEST_CUSTOMER_EMAIL };
 
 type Doc = Record<string, unknown>;
 

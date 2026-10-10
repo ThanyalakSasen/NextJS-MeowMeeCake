@@ -15,6 +15,8 @@
  * auth (ไม่ใส่ = เปิดหมด — ใช้กับ endpoint ภายในเท่านั้น):
  *   - publicRead: true  → GET ไม่ต้องล็อกอิน ; POST/PATCH/DELETE ต้องมีสิทธิ์ create/update/delete ของ menu
  *   - publicRead: false → GET ต้องมีสิทธิ์ view ด้วย
+ *   - readMenus: [...]  → GET ผ่านได้ถ้ามี view ของ menu หรือเมนูใดเมนูหนึ่งในนี้ (ข้อมูลอ้างอิงที่หลายหน้าใช้ เช่นหน่วยนับ)
+ *                         POST/PATCH/DELETE ยังต้องมีสิทธิ์ของ menu หลักเหมือนเดิม
  *
  * validate (ไม่ใส่ = รับ body ดิบเหมือนเดิม, service ตรวจเอง):
  *   - validate.create → parse body ของ POST ด้วย zod schema (บาด JSON / schema ผิด → 400 + issues)
@@ -45,6 +47,8 @@ export interface CrudAuth {
   menu: MenuKey;
   /** GET (list/get) เปิดสาธารณะ ไม่ต้องล็อกอิน */
   publicRead?: boolean;
+  /** GET ผ่านได้ด้วย view ของเมนูเหล่านี้ด้วย (นอกจาก menu) — เขียนยังต้องใช้ menu (ดูหัวไฟล์) */
+  readMenus?: MenuKey[];
 }
 
 /** zod schema สำหรับ body ของ crud factory (ไม่ใส่ = รับ body ดิบ) */
@@ -79,6 +83,16 @@ async function guard(
   if (!auth) return null;
   if (action === "view" && auth.publicRead) return null;
   const session = await authenticate(req);
+  if (action === "view" && auth.readMenus?.length) {
+    for (const menu of [auth.menu, ...auth.readMenus]) {
+      try {
+        await requirePermission(session, menu, "view");
+        return session;
+      } catch {
+        // ลองเมนูถัดไป — ไม่ผ่านสักเมนูค่อยตอบ 403 ของเมนูหลักด้านล่าง
+      }
+    }
+  }
   await requirePermission(session, auth.menu, action);
   return session;
 }
