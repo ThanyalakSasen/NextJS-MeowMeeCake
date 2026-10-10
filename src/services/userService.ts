@@ -16,6 +16,7 @@ import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
+import { GUEST_CUSTOMER_EMAIL } from "../lib/posGuest";
 import type { z } from "zod";
 import type { updateProfileBody, createUserBody, updateUserBody } from "../schemas/user";
 
@@ -172,6 +173,18 @@ export async function getUserById(id: string, opts: { includeDeleted?: boolean; 
     .lean();
   if (!user) throw notFound("ไม่พบผู้ใช้ที่ระบุ");
   return user;
+}
+
+// ── บัญชี "ลูกค้าทั่วไป" ของ POS (GET /admin/pos/guest-customer) ─────
+/** คืนเฉพาะ id + ชื่อ + อีเมล · ยังไม่ได้ seed (หรือถูกลบ/ปิดใช้งาน) = 404 */
+export async function getPosGuestCustomer() {
+  await dbConnect();
+  const guest = await userModel
+    .findOne({ email: GUEST_CUSTOMER_EMAIL.toLowerCase(), deleted_at: null, is_active: { $ne: false } })
+    .select("_id user_fullname email")
+    .lean();
+  if (!guest) throw notFound("ยังไม่มีบัญชีลูกค้าทั่วไปสำหรับหน้าร้าน — รัน npm run seed");
+  return guest;
 }
 
 // ── UPDATE (โปรไฟล์ + ข้อมูลการจ้างงาน ไม่รวมรหัสผ่าน) ────────
