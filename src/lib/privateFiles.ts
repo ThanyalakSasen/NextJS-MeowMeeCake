@@ -1,11 +1,14 @@
 /**
- * privateFiles — ไฟล์ที่ห้ามเปิดสาธารณะ (สลิปโอนเงิน — มีชื่อ/เลขบัญชี) · docs/uploads.md §6, BACKLOG4 Y3
+ * privateFiles — ไฟล์ที่ห้ามเปิดสาธารณะ (สลิปโอนเงิน — มีชื่อ/เลขบัญชี · ใบเสร็จค่าใช้จ่าย — เอกสารการเงินภายใน)
+ * docs/uploads.md §6, BACKLOG4 Y3
  *
  * ต่างจาก upload.ts (public/uploads — Next.js เสิร์ฟ static ให้ใครก็ได้ที่รู้ URL):
  *   - localDisk: เขียนลง `<PRIVATE_UPLOAD_DIR>/<dir>/` (ค่าเริ่มต้น `storage/private`) — **อยู่นอก public/** เว็บเสิร์ฟตรงไม่ได้
- *   - s3: key `private/<dir>/<ไฟล์>` ใน bucket เดิม — ⚠️ ต้องตั้ง bucket/prefix `private/` ให้ **ไม่** public
+ *   - s3: key `private/<dir>/<ไฟล์>` ใน bucket `S3_PRIVATE_BUCKET` (ไม่ตั้ง = bucket เดียวกับไฟล์สาธารณะ `S3_BUCKET`)
+ *     ⚠️ bucket นี้ต้อง **ไม่** เปิดอ่านสาธารณะ — R2 เปิด public ได้ทั้ง bucket เท่านั้น (แยก prefix ไม่ได้)
+ *     จึงควรแยกเป็น bucket ส่วนตัวต่างหาก ไม่งั้นใครรู้ URL ตรงของ bucket ก็เปิดสลิป/ใบเสร็จได้
  *   - URL ที่เก็บใน DB = `/api/files/<dir>/<ไฟล์>` → เปิดผ่าน route ที่ตรวจสิทธิ์เท่านั้น
- *     (src/app/api/files/slips/[filename]/route.ts)
+ *     (src/app/api/files/slips/[filename]/route.ts · src/app/api/files/receipts/[filename]/route.ts)
  * ตรวจไฟล์ 3 ชั้นเหมือนอัปโหลดปกติ (validateFiles — ขนาด/นามสกุล/magic bytes)
  */
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
@@ -44,8 +47,9 @@ async function s3() {
       secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "",
     },
   });
-  const bucket = process.env.S3_BUCKET;
-  if (!bucket) throw new Error("UPLOAD_DRIVER=s3 ต้องตั้ง env S3_BUCKET");
+  // ไฟล์ส่วนตัวใช้ bucket แยก (ไม่เปิดสาธารณะ) ถ้าตั้งไว้ — ไม่ตั้ง = bucket เดียวกับไฟล์สาธารณะ (พฤติกรรมเดิม)
+  const bucket = process.env.S3_PRIVATE_BUCKET?.trim() || process.env.S3_BUCKET;
+  if (!bucket) throw new Error("UPLOAD_DRIVER=s3 ต้องตั้ง env S3_PRIVATE_BUCKET หรือ S3_BUCKET");
   return { sdk, client, bucket };
 }
 

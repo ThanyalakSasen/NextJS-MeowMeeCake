@@ -13,12 +13,14 @@ import { runMigration } from "../../scripts/migrate-upload-files";
 import { makeUser } from "./helpers";
 
 /**
- * docs/uploads.md — banner_img / slip_image_url / receipt_url ต้องเป็นไฟล์ในระบบ (public/uploads/<โฟลเดอร์>)
+ * docs/uploads.md — banner_img ต้องเป็นไฟล์ในระบบ (public/uploads/<โฟลเดอร์>) · slip_image_url / receipt_url ต้องเป็นไฟล์ส่วนตัว (/api/files/<โฟลเดอร์>)
  * + scripts/migrate-upload-files.ts ย้ายแบนเนอร์ base64 เป็นไฟล์ และรายงานสลิป/ใบเสร็จที่ไม่มีไฟล์จริง
  */
 
 const SLIP = "/api/files/slips/1700000000000-aaaaaaaaaaaa.jpg";
-const RECEIPT = "/uploads/receipts/1700000000000-bbbbbbbbbbbb.jpg";
+const RECEIPT = "/api/files/receipts/1700000000000-bbbbbbbbbbbb.jpg";
+/** ใบเสร็จรุ่นก่อนย้ายเป็นไฟล์ส่วนตัว — ตั้งเป็นค่าใหม่ไม่ได้แล้ว (ย้ายด้วย migrate-upload-files) */
+const PUBLIC_RECEIPT = "/uploads/receipts/1700000000000-dddddddddddd.jpg";
 const BANNER = "/uploads/banners/1700000000000-cccccccccccc.jpg";
 
 // PNG 1x1 จริง (ผ่าน magic bytes ของ saveImages)
@@ -50,8 +52,9 @@ describe("สลิปโอนเงิน (paymentService)", () => {
 describe("ใบเสร็จค่าใช้จ่าย (expenseService)", () => {
   const base = { date: new Date(), description: "ค่าแป้ง", category: "วัตถุดิบ", amount: 100, payment_method: "เงินสด" };
 
-  it("create: ไฟล์ในระบบ / ไม่แนบ ผ่าน · ชื่อไฟล์ลอย ๆ → 400", async () => {
+  it("create: ไฟล์ส่วนตัวในระบบ / ไม่แนบ ผ่าน · ชื่อไฟล์ลอย ๆ / public/uploads/receipts รุ่นเก่า → 400", async () => {
     await expect(expenseService.create({ ...base, receipt_url: "02cae48b.jpg" })).rejects.toThrow(/receipts/);
+    await expect(expenseService.create({ ...base, receipt_url: PUBLIC_RECEIPT })).rejects.toThrow(/receipts/);
     const e = (await expenseService.create({ ...base, receipt_url: RECEIPT })) as { receipt_url: string };
     expect(e.receipt_url).toBe(RECEIPT);
     await expect(expenseService.create({ ...base, receipt_url: null })).resolves.toBeTruthy();

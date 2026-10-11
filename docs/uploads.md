@@ -16,7 +16,7 @@
 | แบนเนอร์ | `public/uploads/banners/` | `banners.banner_img` | `POST /api/admin/banners/images` (มีอยู่แล้ว — BACKLOG2 §15) |
 | **สลิปโอนเงิน** (ลูกค้า) | **`storage/private/slips/` (ส่วนตัว — §6)** | `payments.slip_image_url` | **`POST /api/shop/payments/[id]/slip`** (ใหม่) |
 | **สลิปโอนเงิน** (พนักงาน) | **`storage/private/slips/` (ส่วนตัว — §6)** | `payments.slip_image_url` | **`POST /api/admin/payments/slips`** (ใหม่) |
-| **ใบเสร็จค่าใช้จ่าย** | `public/uploads/receipts/` | `expenses.receipt_url` | **`POST /api/admin/expenses/receipts`** (ใหม่) |
+| **ใบเสร็จค่าใช้จ่าย** | **`storage/private/receipts/` (ส่วนตัว — §6 · ย้ายจาก `public/uploads/receipts/` 2026-10-12)** | `expenses.receipt_url` | **`POST /api/admin/expenses/receipts`** |
 
 `public/uploads/` อยู่ใน `.gitignore` — ไฟล์ไม่เข้า git ต้องสำรองโฟลเดอร์นี้แยกตอน deploy/ย้ายเครื่อง
 
@@ -58,7 +58,7 @@ file = <รูป>   → 200 { url, filename, size }   แล้วนำ url �
 | ฟิลด์ | ก่อน | หลัง |
 |---|---|---|
 | `payments.slip_image_url` (`createPayment` / `submitSlip`) | string อะไรก็ได้ ≤ 1000 ตัว | ต้องเป็น `/api/files/slips/<ไฟล์>` (ไฟล์ส่วนตัว — §6) ไม่งั้น 400 |
-| `expenses.receipt_url` (`create` / `update`) | string อะไรก็ได้ | ต้องเป็น `/uploads/receipts/<ไฟล์>` · **ค่ารุ่นเก่าที่ส่งกลับมาซ้ำตอนแก้ฟิลด์อื่นยังผ่าน** (ไม่บังคับให้แก้ของเก่าก่อนแก้อย่างอื่น) |
+| `expenses.receipt_url` (`create` / `update`) | string อะไรก็ได้ | ต้องเป็น `/api/files/receipts/<ไฟล์>` (ไฟล์ส่วนตัว — §6 · เดิม `/uploads/receipts/<ไฟล์>`) · **ค่ารุ่นเก่าที่ส่งกลับมาซ้ำตอนแก้ฟิลด์อื่นยังผ่าน** (ไม่บังคับให้แก้ของเก่าก่อนแก้อย่างอื่น) |
 | `banners.banner_img` (`create` / `update`) | string ≤ 500 ตัว (บังคับแค่ schema) | ต้องเป็น `/uploads/banners/<ไฟล์>` · ค่ารุ่นเก่าส่งซ้ำได้เหมือนกัน |
 
 `isUploadedUrl` ตรวจรูปแบบแบบเข้ม: โฟลเดอร์ต้องตรง, ชื่อไฟล์ `[A-Za-z0-9._-]` เท่านั้น — ไม่ผ่าน `..` / โฟลเดอร์ย่อย / โดเมนอื่น
@@ -115,7 +115,7 @@ file = <รูป>   → 200 { url, filename, size }   แล้วนำ url �
 | | ก่อน | หลัง |
 |---|---|---|
 | ที่เก็บ (localDisk) | `public/uploads/slips/` — Next.js เสิร์ฟ static ใครรู้ URL ก็เปิดได้ | **`storage/private/slips/`** (นอก `public/` · ตั้งที่อื่นได้ด้วย `PRIVATE_UPLOAD_DIR`) · อยู่ใน `.gitignore` |
-| ที่เก็บ (s3) | `<bucket>/slips/…` public URL | key `private/slips/…` ใน bucket เดิม — ⚠️ **ต้องตั้ง policy ให้ prefix `private/` ไม่เป็น public** |
+| ที่เก็บ (s3) | `<bucket>/slips/…` public URL | key `private/slips/…` ใน bucket `S3_PRIVATE_BUCKET` (ไม่ตั้ง = bucket เดิม) — ⚠️ **bucket นี้ต้องไม่เปิด public** (§6.2) |
 | URL ใน DB | `/uploads/slips/<ไฟล์>` | **`/api/files/slips/<ไฟล์>`** |
 | เปิดดู | ใครก็ได้ | **`GET /api/files/slips/[filename]`** ตรวจสิทธิ์ทุกครั้ง |
 | ตรวจ `slip_image_url` | `isUploadedUrl(…, "slips")` | `isPrivateFileUrl(…, "slips")` — url แบบ `/uploads/slips/…` ถูกปฏิเสธแล้ว |
@@ -133,6 +133,28 @@ file = <รูป>   → 200 { url, filename, size }   แล้วนำ url �
 | ชื่อไฟล์แปลก (`..`, `/`) / ไม่มีไฟล์ | 404 (ตรวจสิทธิ์ก่อนเสมอ — ไม่บอกคนไม่มีสิทธิ์ว่าไฟล์มีอยู่ไหม) |
 
 ตอบกลับพร้อม `Cache-Control: private, no-store` + `X-Content-Type-Options: nosniff` (ไม่ให้ proxy/CDN แคชสลิป)
+
+### 6.1 ใบเสร็จค่าใช้จ่ายเป็นไฟล์ส่วนตัวด้วย (2026-10-12)
+
+ใบเสร็จเป็นเอกสารการเงินภายในร้าน — เดิมอยู่ใน `public/uploads/receipts/` ใครรู้ URL ก็เปิดได้
+
+| | ก่อน | หลัง |
+|---|---|---|
+| อัปโหลด `POST /api/admin/expenses/receipts` | `saveImages` → `/uploads/receipts/<ไฟล์>` | `savePrivateImage` → **`/api/files/receipts/<ไฟล์>`** |
+| เปิดดู | ใครก็ได้ | **`GET /api/files/receipts/[filename]`** — ต้องมีสิทธิ์ `reports.view` (owner ผ่านเสมอ · ลูกค้า 403 · ไม่ล็อกอิน 401 · ไม่มีไฟล์ 404 หลังตรวจสิทธิ์) |
+| ตรวจ `receipt_url` | `isUploadedUrl(…, "receipts")` | `isPrivateFileUrl(…, "receipts")` — ค่ารุ่นเก่าส่งกลับซ้ำตอนแก้ฟิลด์อื่นยังผ่าน |
+| migration | — | `npm run migrate:upload-files -- --apply` ย้ายใบเสร็จใน `public/uploads/receipts/` + เปลี่ยน `receipt_url` (localDisk) |
+
+### 6.2 bucket ส่วนตัวแยก (`S3_PRIVATE_BUCKET` — 2026-10-12)
+
+`UPLOAD_DRIVER=s3` + ตั้ง `S3_PRIVATE_BUCKET` → ไฟล์ส่วนตัว (สลิป · ใบเสร็จ) ไปอยู่ bucket นี้ (key `private/<dir>/…`)
+ส่วนรูปสินค้า · แบนเนอร์ · รูป/วิดีโอรีวิวอยู่ `S3_BUCKET` (เปิด public) · ไม่ตั้ง = bucket เดียวกัน (พฤติกรรมเดิม)
+เหตุผล: Cloudflare R2 เปิดอ่านสาธารณะ (r2.dev / custom domain) ได้ทั้ง bucket — ตั้ง prefix `private/` ให้ไม่ public ไม่ได้
+```
+meowmeecake-public   (เปิด public · S3_PUBLIC_URL_BASE ชี้ที่นี่)   products/ banners/ reviews/
+meowmeecake-private  (ไม่เปิด public · อ่านผ่าน backend เท่านั้น)    private/slips/ private/receipts/
+```
+ย้ายไฟล์ส่วนตัวที่มีอยู่ใน `storage/private/` ขึ้น bucket: คัดลอกเป็น key `private/<dir>/<ไฟล์>` (เช่น `rclone copy storage/private r2:meowmeecake-private/private`) — URL ใน DB ไม่ต้องแก้ (`/api/files/…` เหมือนเดิม)
 
 **migration:** `npm run migrate:upload-files -- --apply` ย้ายสลิปที่ยังอยู่ใน `public/uploads/slips/` ไปที่เก็บส่วนตัว + เปลี่ยน URL
 ในรายการชำระเงิน (localDisk) · dry-run กับ DB จริง 2026-10-01: **0 ไฟล์ต้องย้าย** (ยังไม่เคยมีใครอัปโหลดผ่านระบบใหม่) ·

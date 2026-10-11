@@ -7,7 +7,8 @@ import { badRequest } from "../lib/httpError";
 import { createCrudService } from "../lib/crudService";
 import expenseModel from "../models/expenseModel";
 import { toSatang, toBaht, toBahtFields, round2 } from "../lib/money";
-import { isUploadedUrl, UPLOAD_DIRS } from "../lib/upload";
+import { UPLOAD_DIRS } from "../lib/upload";
+import { isPrivateFileUrl } from "../lib/privateFiles";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -47,14 +48,15 @@ const base = createCrudService(expenseModel as any, {
 // BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
 // override เพราะต้องปัด amount (บาท 2 ตำแหน่ง) ก่อนเขียน (present() ทำแค่ตอน "คืนค่า" ไม่ใช่ตอนรับ input)
 /**
- * receipt_url ต้องเป็นไฟล์ที่อัปโหลดผ่าน POST /api/admin/expenses/receipts (public/uploads/receipts — docs/uploads.md)
+ * receipt_url ต้องเป็นไฟล์ส่วนตัวที่อัปโหลดผ่าน POST /api/admin/expenses/receipts (`/api/files/receipts/<ไฟล์>` — docs/uploads.md §6)
  * เดิมเป็นช่องพิมพ์ข้อความ → DB มีแต่ชื่อไฟล์ลอย ๆ ที่ไม่มีไฟล์จริง
- * ค่าเดิมรุ่นเก่า (ชื่อไฟล์ลอย ๆ) ยังส่งกลับมาซ้ำตอนแก้ฟิลด์อื่นได้ (`existing`) — แต่ตั้งค่าใหม่ต้องเป็นไฟล์ของระบบ
+ * ค่าเดิมรุ่นเก่า (ชื่อไฟล์ลอย ๆ / `/uploads/receipts/…` ก่อนย้ายเป็นไฟล์ส่วนตัว) ยังส่งกลับมาซ้ำตอนแก้ฟิลด์อื่นได้
+ * (`existing`) — แต่ตั้งค่าใหม่ต้องเป็นไฟล์ส่วนตัวของระบบ · ย้ายของเดิม: npm run migrate:upload-files
  */
 function assertReceiptUrl(url: unknown, existing?: unknown): void {
   if (url === undefined || url === null || url === "") return;
   if (url === existing) return;
-  if (!isUploadedUrl(url, UPLOAD_DIRS.receipts)) {
+  if (!isPrivateFileUrl(url, UPLOAD_DIRS.receipts)) {
     throw badRequest("receipt_url ต้องเป็นไฟล์ที่อัปโหลดผ่าน POST /api/admin/expenses/receipts (multipart)");
   }
 }
