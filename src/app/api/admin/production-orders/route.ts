@@ -10,7 +10,7 @@ import { withPermission } from "@/lib/authGuard";
 import { parseBool, parsePagination } from "@/lib/queryParams";
 import * as productionOrderService from "@/services/productionOrderService";
 import { auditChange } from "@/lib/audit";
-import { orderForAudit, stockUsageLines } from "@/services/productionAudit";
+import { orderForAudit } from "@/services/productionAudit";
 import type { ProductionStatus } from "@/services/productionOrderService";
 
 export const GET = withPermission("production", "view", async (_s, req) => {
