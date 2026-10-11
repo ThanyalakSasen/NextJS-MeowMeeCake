@@ -8,7 +8,7 @@
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import { parseBool, parsePagination, parseSort } from "@/lib/queryParams";
 import * as preorderService from "@/services/preorderService";
@@ -46,12 +46,15 @@ export const POST = withPermission("preorder", "create", async (_s, req) => {
     },
     { allowManualDiscount: true }
   );
-  audit(req, {
-    action: `สร้างพรีออเดอร์แทนลูกค้า ${preorder?.preorder_no ?? ""}`.trim(),
-    action_type: "CREATE",
+  auditChange(req, {
+    op: "create",
+    noun: "พรีออเดอร์",
+    suffix: " แทนลูกค้า",
     entity: "Preorder",
     entity_id: preorder?._id ? String(preorder._id) : null,
-    details: { for_user: body.user_id, round_id: body.round_id, total_amount: preorder?.total_amount },
+    after: preorder,
+    keys: ["order_type", "subtotal", "discount_amount", "delivery_fee", "total_amount"],
+    details: { for_user: body.user_id, round_id: body.round_id },
   });
   return created(preorder);
 });

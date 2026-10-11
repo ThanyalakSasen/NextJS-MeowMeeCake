@@ -241,7 +241,7 @@ export async function getPaymentById(id: string) {
 }
 
 /** เลขเอกสารของ payment: order_no (ORD-/POS-…) หรือ preorder_no (PRE-…) · หาไม่เจอ = ObjectId เดิม (ยังพอสืบได้) */
-async function paymentDocNo(payment: { order_id?: unknown; preorder_id?: unknown }): Promise<string> {
+export async function paymentDocNo(payment: { order_id?: unknown; preorder_id?: unknown }): Promise<string> {
   if (payment.order_id) {
     const o = await orderModel.findById(payment.order_id).select("order_no").lean<{ order_no?: string } | null>();
     return o?.order_no ?? String(payment.order_id);

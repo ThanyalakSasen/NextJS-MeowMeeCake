@@ -7,7 +7,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withAuth, withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import * as storeService from "@/services/storeService";
 
 export const dynamic = "force-dynamic";
@@ -15,7 +15,17 @@ export const dynamic = "force-dynamic";
 export const GET = withPermission("store_info", "view", async () => ok(await storeService.getWeeklyMarkets()));
 
 export const PUT = withAuth(async (session, req) => {
+  const before = await storeService.getWeeklyMarkets().catch(() => undefined);
   const result = await storeService.updateWeeklyMarkets(session, await req.json().catch(() => null));
-  audit(req, { action: "แก้ไขหน้าร้านประจำสัปดาห์", action_type: "UPDATE", entity: "StoreProfile" });
+  // เทียบรายแถวตามชื่อหน้าร้าน → "weekly_markets[ชื่อ].close_time" (lib/auditDiff)
+  auditChange(req, {
+    op: "update",
+    noun: "หน้าร้านประจำสัปดาห์",
+    label: "",
+    entity: "StoreProfile",
+    before,
+    after: await storeService.getWeeklyMarkets().catch(() => result),
+    keys: ["weekly_markets"],
+  });
   return ok(result);
 });

@@ -8,7 +8,7 @@
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { parseBool, parsePagination, parseSort } from "@/lib/queryParams";
 import { adminCreateOrderBody } from "@/schemas/order";
@@ -54,12 +54,15 @@ export const POST = withPermission("orders", "create", async (_s, req) => {
           ...common,
           item_notes: body.item_notes ?? {},
         });
-  audit(req, {
-    action: `สร้างออเดอร์แทนลูกค้า ${order.order_no ?? ""}`.trim(),
-    action_type: "CREATE",
+  auditChange(req, {
+    op: "create",
+    noun: "ออเดอร์",
+    suffix: " แทนลูกค้า",
     entity: "Order",
     entity_id: String(order._id),
-    details: { for_user: body.user_id, total_amount: order.total_amount },
+    after: order,
+    keys: ["order_type", "subtotal", "discount_amount", "delivery_fee", "total_amount"],
+    details: { for_user: body.user_id },
   });
   return created(order);
 });

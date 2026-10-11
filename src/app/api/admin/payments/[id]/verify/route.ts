@@ -5,7 +5,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import * as paymentService from "@/services/paymentService";
 
@@ -15,16 +15,21 @@ export const POST = withPermission("payments", "approve", async (session, req, c
   const { id } = await ctx.params;
   const body = await req.json();
   if (typeof body.approved !== "boolean") throw badRequest("approved ต้องเป็น true หรือ false");
+  const before = await paymentService.getPaymentById(id).catch(() => undefined);
   const result = await paymentService.verifyPayment(id, {
     verified_by: session.user_id,
     approved: body.approved,
   });
-  audit(req, {
-    action: body.approved ? "อนุมัติการชำระเงิน" : "ปฏิเสธการชำระเงิน",
-    action_type: "UPDATE",
+  auditChange(req, {
+    op: "update",
+    verb: body.approved ? "อนุมัติ" : "ปฏิเสธ",
+    noun: "การชำระเงินของ",
+    label: await paymentService.paymentDocNo(result),
     entity: "Payment",
     entity_id: id,
-    details: { approved: body.approved },
+    before,
+    after: result,
+    keys: ["status", "amount"],
   });
   return ok(result);
 });

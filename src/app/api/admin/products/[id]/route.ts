@@ -6,7 +6,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBool } from "@/lib/queryParams";
 import * as productService from "@/services/productService";
 
@@ -21,14 +21,11 @@ export const GET = withPermission("products", "view", async (_s, req, ctx: Ctx) 
 export const PATCH = withPermission("products", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await req.json();
+  // อ่าน keys ก่อน — updateProduct ปรับ input ในตัว (normalizeTypesInput)
+  const keys = Object.keys(body ?? {});
+  const before = await productService.getProductById(id, { includeDeleted: true }).catch(() => undefined);
   const result = await productService.updateProduct(id, body);
-  audit(req, {
-    action: "แก้ไขสินค้า",
-    action_type: "UPDATE",
-    entity: "Product",
-    entity_id: id,
-    details: Object.keys(body ?? {}),
-  });
+  auditChange(req, { op: "update", noun: "สินค้า", entity: "Product", entity_id: id, before, after: result, keys });
   return ok(result);
 });
 
@@ -38,11 +35,14 @@ export const DELETE = withPermission("products", "delete", async (_s, req, ctx: 
   const result = hard
     ? await productService.hardDeleteProduct(id)
     : await productService.deleteProduct(id);
-  audit(req, {
-    action: hard ? "ลบสินค้าถาวร" : "ลบสินค้า",
-    action_type: "DELETE",
+  auditChange(req, {
+    op: "delete",
+    noun: "สินค้า",
     entity: "Product",
     entity_id: id,
+    before: result,
+    keys: ["product_name_th", "product_price", "product_stock_quantity"],
+    suffix: hard ? " (ถาวร)" : "",
   });
   return ok(result);
 });

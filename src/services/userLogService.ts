@@ -10,6 +10,7 @@ import { badRequest, notFound } from "../lib/httpError";
 import { assertObjectId, isObjectId } from "../lib/objectId";
 import { buildMeta, type Pagination } from "../lib/queryParams";
 import userLogModel from "../models/userLogModel";
+import { presentLogs } from "./userLogPresenter";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -113,7 +114,8 @@ export async function listLogs(query: ListLogQuery) {
     userLogModel.countDocuments(filter),
   ]);
 
-  return { items, meta: buildMeta(total, query.pagination) };
+  // before/after: เหลือเฉพาะที่เปลี่ยน + id อ้างอิง → ชื่อ (userLogPresenter)
+  return { items: await presentLogs(items), meta: buildMeta(total, query.pagination) };
 }
 
 export async function getLogById(id: string) {
@@ -124,5 +126,5 @@ export async function getLogById(id: string) {
     .populate("user_id", "user_fullname email")
     .lean();
   if (!doc) throw notFound("ไม่พบ log ที่ระบุ");
-  return doc;
+  return (await presentLogs([doc]))[0];
 }

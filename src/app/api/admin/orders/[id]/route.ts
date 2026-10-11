@@ -5,7 +5,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBool } from "@/lib/queryParams";
 import * as orderService from "@/services/orderService";
 import { withRefundAccount } from "@/services/userService";
@@ -20,7 +20,15 @@ export const GET = withPermission("orders", "view", async (_s, req, ctx: Ctx) =>
 
 export const DELETE = withPermission("orders", "delete", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
+  const before = await orderService.getOrderById(id).catch(() => undefined);
   const result = await orderService.deleteOrder(id);
-  audit(req, { action: "ลบออเดอร์", action_type: "DELETE", entity: "Order", entity_id: id });
+  auditChange(req, {
+    op: "delete",
+    noun: "ออเดอร์",
+    entity: "Order",
+    entity_id: id,
+    before,
+    keys: ["order_status", "payment_status", "total_amount"],
+  });
   return ok(result);
 });

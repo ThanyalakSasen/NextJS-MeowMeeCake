@@ -7,7 +7,7 @@
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { badRequest } from "@/lib/httpError";
 import { parseBool, parsePagination, parseSort } from "@/lib/queryParams";
@@ -51,12 +51,14 @@ export const POST = withPermission("employees", "create", async (session, req) =
   await assertMayAssignRole(session, body.role_id);
   await assertMayAssignRoleWithin(session, body.role_id);
   const result = await userService.createUser(body);
-  audit(req, {
-    action: "สร้างผู้ใช้ใหม่",
-    action_type: "CREATE",
+  const userId = result?._id ? String(result._id) : null;
+  auditChange(req, {
+    op: "create",
+    noun: "ผู้ใช้",
     entity: "User",
-    entity_id: result?._id ? String(result._id) : null,
-    details: { email: body.email, role_id: body.role_id },
+    entity_id: userId,
+    after: (userId && await userService.getUserById(userId, { includeDeleted: true }).catch(() => undefined)) || result,
+    keys: Object.keys(body),
   });
   return created(result);
 });
