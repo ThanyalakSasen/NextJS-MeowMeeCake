@@ -1,10 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { beforeAll, describe, it, expect } from "vitest";
 import { Types } from "mongoose";
 import roleModel from "@/models/roleModel";
 import orderModel from "@/models/orderModel";
 import orderItemModel from "@/models/orderItemModel";
 import preorderItemModel from "@/models/preorderItemModel";
 import reviewModel from "@/models/reviewModel";
+import pointTransactionModel from "@/models/pointTransactionModel";
 import productModel from "@/models/productModel";
 import aspectModel from "@/models/aspectModel";
 import * as reviewService from "@/services/reviewService";
@@ -15,6 +16,12 @@ import { aspectService, listActiveAspects, reorderAspects } from "@/services/sen
 import { parsePagination } from "@/lib/queryParams";
 import { runReviewMigration } from "../../scripts/migrate-reviews";
 import { makeUser, makeProduct, makePreorder } from "./helpers";
+
+// แต้มรีวิวกันให้ซ้ำด้วย unique index (user_id + dedupe_key) ซึ่ง mongoose สร้างแบบ async — บน CI เทสต์เคยรันก่อน
+// index เสร็จ แล้วรีวิวใหม่หลังลบได้แต้มซ้ำ (expected 50 to be 35) · init() = รอ index ของ model นี้สร้างเสร็จ
+beforeAll(async () => {
+  await pointTransactionModel.init();
+});
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
