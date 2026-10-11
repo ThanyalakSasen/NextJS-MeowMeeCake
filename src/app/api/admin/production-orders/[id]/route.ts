@@ -8,6 +8,8 @@ import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { parseBool } from "@/lib/queryParams";
 import * as productionOrderService from "@/services/productionOrderService";
+import { auditChange } from "@/lib/audit";
+import { orderForAudit } from "@/services/productionAudit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -20,10 +22,32 @@ export const GET = withPermission("production", "view", async (_s, req, ctx: Ctx
 export const PATCH = withPermission("production", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await req.json();
-  return ok(await productionOrderService.updateProductionOrder(id, body));
+  const keys = Object.keys(body ?? {});
+  const before = await productionOrderService.getProductionOrderById(id, { includeDeleted: true }).catch(() => undefined);
+  const result = await productionOrderService.updateProductionOrder(id, body);
+  auditChange(req, {
+    op: "update",
+    noun: "ใบสั่งผลิต",
+    entity: "ProductionOrder",
+    entity_id: id,
+    before: orderForAudit(before),
+    after: orderForAudit(result as any),
+    keys,
+  });
+  return ok(result);
 });
 
-export const DELETE = withPermission("production", "delete", async (_s, _r, ctx: Ctx) => {
+export const DELETE = withPermission("production", "delete", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
-  return ok(await productionOrderService.deleteProductionOrder(id));
+  const before = await productionOrderService.getProductionOrderById(id, { includeDeleted: true }).catch(() => undefined);
+  const result = await productionOrderService.deleteProductionOrder(id);
+  auditChange(req, {
+    op: "delete",
+    noun: "ใบสั่งผลิต",
+    entity: "ProductionOrder",
+    entity_id: id,
+    before: orderForAudit(before),
+    keys: ["production_status", "production_date", "items_summary"],
+  });
+  return ok(result);
 });

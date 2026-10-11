@@ -21,7 +21,7 @@ const SECRET_RE = /password|token|secret|otp/i;
 
 /** ฟิลด์ชื่อที่ใช้เป็นป้ายของรายการ — เรียงตามลำดับความเจาะจง (fallback: คีย์แรกที่ลงท้าย _name) */
 const LABEL_KEYS = [
-  "order_no", "preorder_no", "product_name_th", "promotion_name", "coupon_code", "ingredient_name", "recipe_name",
+  "order_no", "preorder_no", "production_no", "product_name_th", "promotion_name", "coupon_code", "ingredient_name", "recipe_name",
   "component_name", "category_name", "unit_name", "role_name", "user_fullname", "expense_name", "zone_name",
   "store_name", "aspect_name", "term", "name", "title",
 ];

@@ -8,7 +8,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import * as preorderRoundService from "@/services/preorderRoundService";
 import type { RoundStatus } from "@/services/preorderRoundService";
@@ -19,15 +19,26 @@ export const PATCH = withPermission("preorder", "update", async (session, req, c
   const { id } = await ctx.params;
   const body = await req.json();
   if (!body.round_status) throw badRequest("กรุณาระบุ round_status");
+  const before = await preorderRoundService.getRoundById(id, { includeDeleted: true }).catch(() => undefined);
   const round: any = await preorderRoundService.updateRoundStatus(id, body.round_status as RoundStatus, {
     by: session.user_id,
     close_date: body.close_date ?? undefined,
   });
-  audit(req, {
-    action: `เปลี่ยนสถานะรอบพรีออเดอร์เป็น "${body.round_status}"`,
-    action_type: "UPDATE",
+  // ผลพ่วงของการเปลี่ยนสถานะ (ยกเลิกพรีออเดอร์ที่ค้าง / ใบสั่งผลิตที่สร้างตอนปิดรอบ) เป็นฟิลด์ฝั่ง "หลัง"
+  const effects = {
+    cancelled_preorders: round?.cancel_cascade?.cancelled?.length ?? null,
+    unpaid_cancelled: round?.close_result?.unpaid?.cancelled?.length ?? null,
+    production_no: round?.close_result?.production?.production_no ?? null,
+  };
+  auditChange(req, {
+    op: "update",
+    verb: "เปลี่ยนสถานะ",
+    noun: "รอบพรีออเดอร์",
     entity: "PreorderRound",
     entity_id: id,
+    before,
+    after: { ...(await preorderRoundService.getRoundById(id, { includeDeleted: true }).catch(() => undefined) ?? round), ...effects },
+    keys: ["round_status", "close_date", ...Object.keys(effects)],
     details: {
       round_status: body.round_status,
       // ยกเลิกรอบ → ยกเลิกพรีออเดอร์ที่ค้างให้ด้วย (docs/preorder-round-flow.md ปัญหา 1)

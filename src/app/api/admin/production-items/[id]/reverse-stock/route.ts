@@ -4,19 +4,26 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import * as productionItemService from "@/services/productionItemService";
+import { stockUsageLines } from "@/services/productionAudit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
 export const POST = withPermission("production", "approve", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
+  const before: any = await productionItemService.getItemById(id).catch(() => undefined);
   const result = await productionItemService.reverseStock(id, { performed_by: session.user_id });
-  audit(req, {
-    action: "คืนสต็อกวัตถุดิบ (รายการผลิต)",
-    action_type: "UPDATE",
+  auditChange(req, {
+    op: "update",
+    verb: "คืนสต็อกวัตถุดิบของ",
+    noun: "รายการผลิต",
+    label: (before as any)?.product_id?.product_name_th,
     entity: "ProductionItem",
     entity_id: id,
+    before: { stock_returned: null },
+    after: { stock_returned: await stockUsageLines(before ? [before] : []) },
+    keys: ["stock_returned"],
   });
   return ok(result);
 });

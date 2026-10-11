@@ -555,6 +555,19 @@ export async function listRoundItems(
   return items.map(presentRoundItem);
 }
 
+/** รายการสินค้าในรอบ 1 แถว (รวมที่ลบแล้ว) + ชื่อสินค้า/ชื่อรอบ — ใช้ทำ log ก่อน/หลัง */
+export async function getRoundItemById(itemId: string) {
+  await dbConnect();
+  assertObjectId(itemId, "id");
+  const item = await preorderRoundItemModel
+    .findById(itemId)
+    .populate("product_id", "product_name_th")
+    .populate("round_id", "round_name")
+    .lean<any>();
+  if (!item) throw notFound("ไม่พบรายการสินค้าในรอบที่ระบุ");
+  return presentRoundItem(item);
+}
+
 export async function addRoundItem(roundId: string, input: RoundItemInput) {
   await dbConnect();
   assertObjectId(roundId, "round_id");

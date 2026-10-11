@@ -6,9 +6,10 @@
  */
 import { created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import * as productionOrderService from "@/services/productionOrderService";
+import { orderForAudit } from "@/services/productionAudit";
 
 export const POST = withPermission("production", "create", async (_s, req) => {
   const body = await req.json();
@@ -19,12 +20,16 @@ export const POST = withPermission("production", "create", async (_s, req) => {
     assigned_to: body.assigned_to ?? null,
     production_note: body.production_note ?? null,
   });
-  audit(req, {
-    action: `สร้างใบสั่งผลิตจากรอบพรีออเดอร์ ${order?.production_no ?? ""}`.trim(),
-    action_type: "CREATE",
+  const full = order?._id ? await productionOrderService.getProductionOrderById(String(order._id), { includeDeleted: true }).catch(() => undefined) : undefined;
+  auditChange(req, {
+    op: "create",
+    noun: "ใบสั่งผลิต",
+    suffix: full?.round_id?.round_name ? ` จากรอบพรีออเดอร์ "${full.round_id.round_name}"` : " จากรอบพรีออเดอร์",
     entity: "ProductionOrder",
     entity_id: order?._id ? String(order._id) : null,
-    details: { round_id: body.round_id, item_count: order?.items?.length ?? 0 },
+    after: orderForAudit(full ?? order),
+    keys: ["production_date", "assigned_to", "production_note", "items_summary"],
+    details: { round_id: body.round_id },
   });
   return created(order);
 });

@@ -39,6 +39,8 @@ const REF_SOURCES: Record<string, Source> = {
   verified_by: USERS,
   cancelled_by: USERS,
   revoked_by: USERS,
+  replied_by: USERS,
+  read_by: USERS,
   phone_primary_user_id: USERS,
   phone_secondary_user_id: USERS,
   product_id: { model: productModel, field: "product_name_th" },
