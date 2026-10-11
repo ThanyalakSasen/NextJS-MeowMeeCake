@@ -7,7 +7,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import * as orderService from "@/services/orderService";
 import type { OrderStatus } from "@/services/orderService";
@@ -18,16 +18,20 @@ export const PATCH = withPermission("orders", "update", async (session, req, ctx
   const { id } = await ctx.params;
   const body = await req.json();
   if (!body.order_status) throw badRequest("กรุณาระบุ order_status");
+  const before = await orderService.getOrderById(id).catch(() => undefined);
   const result = await orderService.updateOrderStatus(id, body.order_status as OrderStatus, {
     cancelled_by: session.user_id,
     cancelled_reason: body.cancelled_reason ?? undefined,
   });
-  audit(req, {
-    action: `เปลี่ยนสถานะออเดอร์เป็น "${body.order_status}"`,
-    action_type: "UPDATE",
+  auditChange(req, {
+    op: "update",
+    verb: "เปลี่ยนสถานะ",
+    noun: "ออเดอร์",
     entity: "Order",
     entity_id: id,
-    details: { order_status: body.order_status, cancelled_reason: body.cancelled_reason ?? null },
+    before,
+    after: await orderService.getOrderById(id).catch(() => result),
+    keys: ["order_status", "payment_status", "cancelled_reason"],
   });
   return ok(result);
 });

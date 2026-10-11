@@ -7,7 +7,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { requireRole, withAuth } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import * as storeService from "@/services/storeService";
 
@@ -35,7 +35,19 @@ export const PUT = withAuth(async (session, req) => {
   } else {
     body = await req.json().catch(() => null);
   }
+  const before = await storeService.getProfile().catch(() => undefined);
   const doc = await storeService.updateProfile(body, logo);
-  audit(req, { action: logo ? "แก้ไขข้อมูลร้าน + โลโก้" : "แก้ไขข้อมูลร้าน", action_type: "UPDATE", entity: "StoreProfile", entity_id: String(doc._id ?? "") });
+  auditChange(req, {
+    op: "update",
+    noun: "ข้อมูลร้าน",
+    label: "",
+    suffix: logo ? " + โลโก้" : "",
+    entity: "StoreProfile",
+    entity_id: doc?._id ? String(doc._id) : null,
+    before,
+    after: doc,
+    // weekly_markets มี endpoint ของตัวเอง (log แยก) · โลโก้เปลี่ยน = logo_url ใหม่ บอกในข้อความแทน
+    keys: Object.keys((body as Record<string, unknown> | null) ?? {}).filter((k) => k !== "weekly_markets"),
+  });
   return ok(doc);
 });

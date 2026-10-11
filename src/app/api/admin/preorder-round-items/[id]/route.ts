@@ -6,7 +6,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { updateRoundItemBody } from "@/schemas/preorderRound";
 import * as preorderRoundService from "@/services/preorderRoundService";
@@ -16,24 +16,36 @@ type Ctx = { params: Promise<{ id: string }> };
 export const PATCH = withPermission("preorder", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await parseBody(req, updateRoundItemBody);
+  const before: any = await preorderRoundService.getRoundItemById(id).catch(() => undefined);
   const item = await preorderRoundService.updateRoundItem(id, body);
-  audit(req, {
-    action: "แก้ไขรายการสินค้าในรอบพรีออเดอร์",
-    action_type: "UPDATE",
+  auditChange(req, {
+    op: "update",
+    noun: "สินค้า",
+    label: before?.product_id?.product_name_th,
+    suffix: before?.round_id?.round_name ? ` ในรอบ "${before.round_id.round_name}"` : "",
     entity: "PreorderRoundItem",
     entity_id: id,
+    before,
+    after: item,
+    keys: Object.keys(body),
   });
   return ok(item);
 });
 
 export const DELETE = withPermission("preorder", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
+  const before: any = await preorderRoundService.getRoundItemById(id).catch(() => undefined);
   const result = await preorderRoundService.removeRoundItem(id);
-  audit(req, {
-    action: "ลบรายการสินค้าออกจากรอบพรีออเดอร์",
-    action_type: "DELETE",
+  auditChange(req, {
+    op: "delete",
+    verb: "ลบ",
+    noun: "สินค้า",
+    label: before?.product_id?.product_name_th,
+    suffix: before?.round_id?.round_name ? ` ออกจากรอบ "${before.round_id.round_name}"` : " ออกจากรอบพรีออเดอร์",
     entity: "PreorderRoundItem",
     entity_id: id,
+    before,
+    keys: ["price_override", "max_qty_total"],
   });
   return ok(result);
 });

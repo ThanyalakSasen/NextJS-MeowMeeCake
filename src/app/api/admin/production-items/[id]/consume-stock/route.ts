@@ -4,8 +4,9 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import * as productionItemService from "@/services/productionItemService";
+import { stockUsageLines } from "@/services/productionAudit";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -17,11 +18,17 @@ export const POST = withPermission("production", "approve", async (session, req,
     use_actual: !!body.use_actual,
     allowNegative: !!body.allowNegative,
   });
-  audit(req, {
-    action: "หักสต็อกวัตถุดิบตามสูตร (รายการผลิต)",
-    action_type: "UPDATE",
+  const item: any = await productionItemService.getItemById(id).catch(() => undefined);
+  auditChange(req, {
+    op: "update",
+    verb: "หักสต็อกวัตถุดิบของ",
+    noun: "รายการผลิต",
+    label: (item as any)?.product_id?.product_name_th,
     entity: "ProductionItem",
     entity_id: id,
+    before: { stock_used: null },
+    after: { stock_used: await stockUsageLines(item ? [item] : [result as any]) },
+    keys: ["stock_used"],
   });
   return ok(result);
 });

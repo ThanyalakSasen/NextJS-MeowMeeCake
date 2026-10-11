@@ -346,6 +346,20 @@ function isLockedOut(user: { lockout_until?: Date | null }): boolean {
   return !!user.lockout_until && new Date(user.lockout_until).getTime() > Date.now();
 }
 
+/** เหตุผลของ 423 — หน้า login ใช้แยกเคสแล้วนับถอยหลังจาก lockout_until */
+export const ACCOUNT_LOCKED = "ACCOUNT_LOCKED";
+
+/** 423 บัญชีถูกล็อก + เวลาที่ปลดล็อก (details ให้หน้า login แสดงเวลา/นับถอยหลังได้) */
+function lockedError(until: Date): HttpError {
+  const seconds = Math.max(1, Math.ceil((until.getTime() - Date.now()) / 1000));
+  return new HttpError(
+    `บัญชีถูกล็อกชั่วคราวจากการเข้าสู่ระบบผิดหลายครั้ง กรุณาลองใหม่ในอีก ${Math.ceil(seconds / 60)} นาที`,
+    423,
+    "FORBIDDEN",
+    { reason: ACCOUNT_LOCKED, lockout_until: until.toISOString(), retry_after_seconds: seconds },
+  );
+}
+
 /**
  * ตรวจอีเมล/รหัสผ่าน
  *  - สำเร็จ  → คืนข้อมูลผู้ใช้ (ตัดฟิลด์ลับออก) + รีเซ็ตตัวนับ + อัปเดต last_login_at
@@ -366,13 +380,7 @@ export async function verifyCredentials(email: string, password: string) {
   // ข้อความเดียวกันทุกกรณีที่หา user ไม่เจอ/รหัสผิด กัน user enumeration
   if (!user) throw unauthorized("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
   if (!user.is_active) throw forbidden("บัญชีนี้ถูกระงับการใช้งาน");
-  if (isLockedOut(user)) {
-    throw new HttpError(
-      "บัญชีถูกล็อกชั่วคราวจากการเข้าสู่ระบบผิดหลายครั้ง กรุณาลองใหม่ภายหลัง",
-      423,
-      "FORBIDDEN"
-    );
-  }
+  if (isLockedOut(user)) throw lockedError(new Date(user.lockout_until!));
   // ไม่ดู auth_provider — บัญชีที่สมัครด้วยรหัสผ่านแล้วผูก Google/LINE ทีหลังยังใช้รหัสผ่านได้ (แบบฝั่งลูกค้า)
   if (!user.password) {
     throw badRequest(
@@ -389,6 +397,8 @@ export async function verifyCredentials(email: string, password: string) {
       update.failed_login_attempts = 0;
     }
     await userModel.updateOne({ _id: user._id }, { $set: update });
+    // ครั้งที่ทำให้ล็อก → บอกทันทีว่าล็อกกี่นาที (เดิมตอบ "รหัสผิด" แล้วผู้ใช้เพิ่งรู้ตอนลองครั้งถัดไป)
+    if (update.lockout_until) throw lockedError(update.lockout_until);
     throw unauthorized("อีเมลหรือรหัสผ่านไม่ถูกต้อง");
   }
 

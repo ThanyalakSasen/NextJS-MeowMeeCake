@@ -5,7 +5,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBool } from "@/lib/queryParams";
 import * as preorderService from "@/services/preorderService";
 import { withRefundAccount } from "@/services/userService";
@@ -20,12 +20,15 @@ export const GET = withPermission("preorder", "view", async (_s, req, ctx: Ctx) 
 
 export const DELETE = withPermission("preorder", "delete", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
+  const before = await preorderService.getPreorderById(id).catch(() => undefined);
   const result = await preorderService.deletePreorder(id);
-  audit(req, {
-    action: "ลบพรีออเดอร์",
-    action_type: "DELETE",
+  auditChange(req, {
+    op: "delete",
+    noun: "พรีออเดอร์",
     entity: "Preorder",
     entity_id: id,
+    before,
+    keys: ["order_status", "payment_status", "total_amount"],
   });
   return ok(result);
 });

@@ -4,17 +4,30 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import * as reviewService from "@/services/reviewService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
+const reviewLabel = (r: any) => (r ? [r.product_id?.product_name_th, r.user_id?.user_fullname].filter(Boolean).join(" · ") || undefined : undefined);
+
 export const PATCH = withPermission("reports", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await req.json().catch(() => null);
   if (typeof body?.is_visible !== "boolean") throw badRequest("is_visible ต้องเป็น true หรือ false");
+  const before = await reviewService.getReviewById(id).catch(() => undefined);
   const doc = await reviewService.setReviewVisibility(id, body.is_visible);
-  audit(req, { action: body.is_visible ? "แสดงรีวิว" : "ซ่อนรีวิว", action_type: "UPDATE", entity: "Review", entity_id: id });
+  auditChange(req, {
+    op: "update",
+    verb: body.is_visible ? "แสดง" : "ซ่อน",
+    noun: "รีวิว",
+    label: reviewLabel(before),
+    entity: "Review",
+    entity_id: id,
+    before,
+    after: await reviewService.getReviewById(id).catch(() => undefined) ?? doc,
+    keys: ["is_visible", "status"],
+  });
   return ok(doc);
 });

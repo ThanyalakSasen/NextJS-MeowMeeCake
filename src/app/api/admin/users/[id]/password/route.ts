@@ -6,7 +6,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import * as userService from "@/services/userService";
 import { assertMayManageUser } from "@/services/ownerProtection";
@@ -22,11 +22,7 @@ export const PUT = withPermission("employees", "update", async (session, req, ct
   const next = body.new_password ?? body.newPassword;
   if (!next) throw badRequest("ต้องระบุ new_password");
   const result = await userService.adminSetPassword(id, next);
-  audit(req, {
-    action: "แอดมินตั้งรหัสผ่านใหม่ให้ผู้ใช้",
-    action_type: "UPDATE",
-    entity: "User",
-    entity_id: id,
-  });
+  // ไม่มีค่าก่อน/หลัง (รหัสผ่านไม่บันทึกเด็ดขาด) — แค่ระบุว่าตั้งให้ใคร
+  auditChange(req, { op: "update", verb: "ตั้งรหัสผ่านใหม่ให้", noun: "ผู้ใช้", entity: "User", entity_id: id, after: await userService.getUserById(id, { includeDeleted: true }).catch(() => undefined), keys: [] });
   return ok(result);
 });

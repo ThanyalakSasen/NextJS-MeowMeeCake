@@ -9,6 +9,8 @@ import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { parseBool, parsePagination } from "@/lib/queryParams";
 import * as productionOrderService from "@/services/productionOrderService";
+import { auditChange } from "@/lib/audit";
+import { orderForAudit } from "@/services/productionAudit";
 import type { ProductionStatus } from "@/services/productionOrderService";
 
 export const GET = withPermission("production", "view", async (_s, req) => {
@@ -29,5 +31,14 @@ export const GET = withPermission("production", "view", async (_s, req) => {
 
 export const POST = withPermission("production", "create", async (_s, req) => {
   const body = await req.json();
-  return created(await productionOrderService.createProductionOrder(body));
+  const order: any = await productionOrderService.createProductionOrder(body);
+  auditChange(req, {
+    op: "create",
+    noun: "ใบสั่งผลิต",
+    entity: "ProductionOrder",
+    entity_id: order?._id ? String(order._id) : null,
+    after: orderForAudit(order),
+    keys: ["production_date", "assigned_to", "production_note", "items_summary"],
+  });
+  return created(order);
 });

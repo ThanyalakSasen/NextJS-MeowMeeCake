@@ -7,7 +7,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { shippingZoneUpdate } from "@/schemas/shipping";
 import * as shippingService from "@/services/shippingService";
@@ -18,13 +18,15 @@ export const PATCH = withPermission("store_info", "update", async (_s, req, ctx:
   const { zone_code } = await ctx.params;
   const body = await parseBody(req, shippingZoneUpdate);
   const { before, after } = await shippingService.updateShippingZone(zone_code.toUpperCase(), body);
-  audit(req, {
-    action: `แก้ไขค่าส่งเว็บ โซน ${after.zone_code}`,
-    action_type: "UPDATE",
+  auditChange(req, {
+    op: "update",
+    noun: "ค่าส่งเว็บ โซน",
+    label: after.zone_code,
     entity: "ShippingZone",
-    entity_id: after.zone_code,
+    entity_id: null,
     before,
     after,
+    keys: Object.keys(body),
   });
   return ok(after);
 });

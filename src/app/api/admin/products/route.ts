@@ -5,7 +5,7 @@
  */
 import { okList, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBool, parsePagination } from "@/lib/queryParams";
 import * as productService from "@/services/productService";
 import { isPreorderFilterFrom } from "@/lib/productCode";
@@ -28,12 +28,13 @@ export const GET = withPermission("products", "view", async (_s, req) => {
 export const POST = withPermission("products", "create", async (_s, req) => {
   const body = await req.json();
   const result: any = await productService.createProduct(body);
-  audit(req, {
-    action: `สร้างสินค้า ${result?.product_id ?? ""}`.trim(),
-    action_type: "CREATE",
+  auditChange(req, {
+    op: "create",
+    noun: "สินค้า",
     entity: "Product",
     entity_id: result?._id ? String(result._id) : null,
-    details: { name: body.product_name_th, is_preorder: body.is_preorder ?? false, price: body.product_price },
+    after: result,
+    keys: Object.keys(body ?? {}),
   });
   return created(result);
 });

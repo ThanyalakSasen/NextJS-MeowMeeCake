@@ -5,7 +5,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import * as paymentService from "@/services/paymentService";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -17,7 +17,16 @@ export const GET = withPermission("payments", "view", async (_s, _r, ctx: Ctx) =
 
 export const DELETE = withPermission("payments", "delete", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
+  const before = await paymentService.getPaymentById(id).catch(() => undefined);
   const result = await paymentService.deletePayment(id);
-  audit(req, { action: "ลบรายการชำระเงิน", action_type: "DELETE", entity: "Payment", entity_id: id });
+  auditChange(req, {
+    op: "delete",
+    noun: "รายการชำระเงินของ",
+    label: before ? await paymentService.paymentDocNo(before) : undefined,
+    entity: "Payment",
+    entity_id: id,
+    before,
+    keys: ["status", "amount"],
+  });
   return ok(result);
 });

@@ -10,7 +10,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { parseBool } from "@/lib/queryParams";
 import { updateUserBody } from "@/schemas/user";
@@ -32,17 +32,18 @@ export const PATCH = withPermission("employees", "update", async (session, req, 
   await assertMayManageUser(session, id);
   if (body.role_id !== undefined) await assertMayAssignRole(session, body.role_id);
   await assertMayManageUserWithin(session, id, body.role_id);
+  const before = await userService.getUserById(id, { includeDeleted: true }).catch(() => undefined);
   const result = await userService.updateUser(id, body);
-  // เปลี่ยน role / เปิด-ปิดใช้งาน = เหตุการณ์สำคัญ log แยกให้ชัด
-  if (body.role_id !== undefined || body.is_active !== undefined) {
-    audit(req, {
-      action: "แก้ไขสิทธิ์/สถานะบัญชีผู้ใช้",
-      action_type: "UPDATE",
-      entity: "User",
-      entity_id: id,
-      details: { role_id: body.role_id, is_active: body.is_active },
-    });
-  }
+  // ทุกการแก้ไข log ก่อน/หลังรายฟิลด์ (เดิม log เฉพาะเปลี่ยนบทบาท/เปิด-ปิดบัญชี โดยไม่มีค่า)
+  auditChange(req, {
+    op: "update",
+    noun: "ผู้ใช้",
+    entity: "User",
+    entity_id: id,
+    before,
+    after: (await userService.getUserById(id, { includeDeleted: true }).catch(() => undefined)) ?? result,
+    keys: Object.keys(body),
+  });
   return ok(result);
 });
 
@@ -50,7 +51,15 @@ export const DELETE = withPermission("employees", "delete", async (session, req,
   const { id } = await ctx.params;
   await assertMayManageUser(session, id);
   await assertMayManageUserWithin(session, id);
+  const before = await userService.getUserById(id, { includeDeleted: true }).catch(() => undefined);
   const result = await userService.deleteUser(id);
-  audit(req, { action: "ลบผู้ใช้", action_type: "DELETE", entity: "User", entity_id: id });
+  auditChange(req, {
+    op: "delete",
+    noun: "ผู้ใช้",
+    entity: "User",
+    entity_id: id,
+    before,
+    keys: ["user_fullname", "email", "role_id"],
+  });
   return ok(result);
 });

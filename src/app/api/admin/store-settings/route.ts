@@ -6,7 +6,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { requireRole, withAuth } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import * as storeService from "@/services/storeService";
 
 export const dynamic = "force-dynamic";
@@ -18,7 +18,18 @@ export const GET = withAuth(async (session) => {
 
 export const PUT = withAuth(async (session, req) => {
   requireRole(session, "owner");
-  const doc = await storeService.updateSettings(await req.json().catch(() => null));
-  audit(req, { action: "แก้ไขที่อยู่ร้าน", action_type: "UPDATE", entity: "StoreSettings", entity_id: String(doc?._id ?? "") });
+  const body = await req.json().catch(() => null);
+  const before = await storeService.getSettings().catch(() => undefined);
+  const doc = await storeService.updateSettings(body);
+  auditChange(req, {
+    op: "update",
+    noun: "ที่อยู่ร้าน",
+    label: "",
+    entity: "StoreSettings",
+    entity_id: doc?._id ? String(doc._id) : null,
+    before,
+    after: doc,
+    keys: Object.keys((body as Record<string, unknown> | null) ?? {}),
+  });
   return ok(doc);
 });

@@ -6,7 +6,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBool } from "@/lib/queryParams";
 import { parseBody } from "@/lib/validate";
 import { promotionUpdate } from "@/schemas/promotion";
@@ -23,20 +23,16 @@ export const GET = withPermission("promotions", "view", async (_s, req, ctx: Ctx
 export const PATCH = withPermission("promotions", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await parseBody(req, promotionUpdate);
+  const keys = Object.keys(body);
+  const before = await promotionService.getPromotionById(id, { includeDeleted: true }).catch(() => undefined);
   const result = await promotionService.updatePromotion(id, body);
-  audit(req, {
-    action: "แก้ไขโปรโมชัน",
-    action_type: "UPDATE",
-    entity: "Promotion",
-    entity_id: id,
-    details: Object.keys(body),
-  });
+  auditChange(req, { op: "update", noun: "โปรโมชัน", entity: "Promotion", entity_id: id, before, after: result, keys });
   return ok(result);
 });
 
 export const DELETE = withPermission("promotions", "delete", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const result = await promotionService.deletePromotion(id);
-  audit(req, { action: "ลบโปรโมชัน", action_type: "DELETE", entity: "Promotion", entity_id: id });
+  auditChange(req, { op: "delete", noun: "โปรโมชัน", entity: "Promotion", entity_id: id, before: result });
   return ok(result);
 });

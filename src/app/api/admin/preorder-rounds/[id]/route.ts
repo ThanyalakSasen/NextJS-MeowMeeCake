@@ -6,7 +6,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { parseBool } from "@/lib/queryParams";
 import { updateRoundBody } from "@/schemas/preorderRound";
@@ -23,24 +23,31 @@ export const GET = withPermission("preorder", "view", async (_s, req, ctx: Ctx) 
 export const PATCH = withPermission("preorder", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await parseBody(req, updateRoundBody);
+  const before = await preorderRoundService.getRoundById(id, { includeDeleted: true }).catch(() => undefined);
   const round = await preorderRoundService.updateRound(id, body);
-  audit(req, {
-    action: `แก้ไขรอบพรีออเดอร์ "${round?.round_name ?? ""}"`,
-    action_type: "UPDATE",
+  auditChange(req, {
+    op: "update",
+    noun: "รอบพรีออเดอร์",
     entity: "PreorderRound",
     entity_id: id,
+    before,
+    after: round,
+    keys: Object.keys(body),
   });
   return ok(round);
 });
 
 export const DELETE = withPermission("preorder", "delete", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
+  const before = await preorderRoundService.getRoundById(id, { includeDeleted: true }).catch(() => undefined);
   const result = await preorderRoundService.deleteRound(id);
-  audit(req, {
-    action: "ลบรอบพรีออเดอร์",
-    action_type: "DELETE",
+  auditChange(req, {
+    op: "delete",
+    noun: "รอบพรีออเดอร์",
     entity: "PreorderRound",
     entity_id: id,
+    before,
+    keys: ["round_status", "open_date", "close_date", "pickup_date"],
   });
   return ok(result);
 });

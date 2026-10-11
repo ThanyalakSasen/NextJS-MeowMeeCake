@@ -7,7 +7,7 @@
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { parseBool, parsePagination, parseSort } from "@/lib/queryParams";
 import { createRoundBody } from "@/schemas/preorderRound";
@@ -30,12 +30,15 @@ export const GET = withPermission("preorder", "view", async (_s, req) => {
 export const POST = withPermission("preorder", "create", async (session, req) => {
   const body = await parseBody(req, createRoundBody);
   const round = await preorderRoundService.createRound(body, session.user_id);
-  audit(req, {
-    action: `สร้างรอบพรีออเดอร์ "${round?.round_name ?? ""}"`,
-    action_type: "CREATE",
+  auditChange(req, {
+    op: "create",
+    noun: "รอบพรีออเดอร์",
     entity: "PreorderRound",
     entity_id: round?._id ? String(round._id) : null,
-    details: { round_status: round?.round_status, item_count: round?.items?.length ?? 0 },
+    after: round,
+    // สินค้าในรอบ log แยกตอนเพิ่มทีละรายการ — ที่นี่เก็บแค่หัวรอบ
+    keys: Object.keys(body).filter((k) => k !== "items").concat("round_status"),
+    details: { item_count: round?.items?.length ?? 0 },
   });
   return created(round);
 });

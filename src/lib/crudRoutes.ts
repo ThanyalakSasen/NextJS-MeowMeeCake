@@ -37,7 +37,7 @@ import { parseBool, parsePagination, parseSort } from "./queryParams";
 import { parseBody } from "./validate";
 import { authenticate, requireAuth, requirePermission, type PermAction } from "./authGuard";
 import type { SessionUser } from "./session";
-import { audit } from "./audit";
+import { auditChange } from "./audit";
 import type { MenuKey } from "../services/permissionService";
 import type { CrudService } from "./crudService";
 
@@ -114,26 +114,56 @@ async function runAuthorize(
   await authorize(session, args);
 }
 
-const ACTION_LABEL: Record<string, string> = {
-  create: "สร้าง",
-  update: "แก้ไข",
-  delete: "ลบ",
-  restore: "กู้คืน",
+/** ชื่อชนิดข้อมูลภาษาไทยในข้อความ log (เดิมเป็น "แก้ไขIngredient") — ไม่อยู่ในนี้ใช้ชื่อ entity ตรง ๆ */
+const ENTITY_NOUN: Record<string, string> = {
+  Aspect: "หัวข้อรีวิว",
+  Banner: "แบนเนอร์",
+  Component: "ส่วนประกอบ",
+  ComponentCategory: "หมวดหมู่ส่วนประกอบ",
+  DeliveryZone: "โซนค่าจัดส่ง",
+  Expense: "ค่าใช้จ่าย",
+  Ingredient: "วัตถุดิบ",
+  IngredientCategory: "หมวดหมู่วัตถุดิบ",
+  ProductCategory: "หมวดหมู่สินค้า",
+  ProductOption: "ตัวเลือกสินค้า",
+  ProductVariant: "รูปแบบสินค้า",
+  Recipe: "สูตร",
+  Role: "บทบาท",
+  SemanticTerm: "คำค้นเชิงความหมาย",
+  Unit: "หน่วยนับ",
 };
 
+/**
+ * log ของ crud factory — ชื่อรายการ + ก่อน/หลัง (auditChange)
+ * update: before = doc ก่อนแก้ (อ่านก่อนเขียน) · keys = ฟิลด์ใน body เท่านั้น (ไม่ปนฟิลด์ที่ระบบคำนวณเอง)
+ */
 function logMutation(
   req: NextRequest,
   cfg: CrudAudit | undefined,
   op: "create" | "update" | "delete" | "restore",
-  doc: { _id?: unknown } | null | undefined
+  doc: { _id?: unknown } | null | undefined,
+  extra: { before?: unknown; keys?: string[] } = {}
 ): void {
   if (!cfg) return;
-  audit(req, {
-    action: `${ACTION_LABEL[op]}${cfg.entity}`,
-    action_type: op === "create" ? "CREATE" : op === "delete" ? "DELETE" : "UPDATE",
+  auditChange(req, {
+    op,
+    noun: ENTITY_NOUN[cfg.entity] ?? cfg.entity,
     entity: cfg.entity,
     entity_id: doc?._id ? String(doc._id) : null,
+    before: op === "delete" ? doc : extra.before,
+    after: op === "delete" ? undefined : doc,
+    keys: extra.keys,
   });
+}
+
+/** doc ก่อนแก้สำหรับ log — อ่านไม่ได้ปล่อยว่าง (update จะโยน 404 เองตามปกติ) */
+async function beforeForAudit(
+  service: Pick<CrudService, "getById">,
+  cfg: CrudAudit | undefined,
+  id: string
+): Promise<unknown> {
+  if (!cfg) return undefined;
+  return service.getById(id, true).catch(() => undefined);
 }
 
 export interface CollectionRoutesOptions {
@@ -180,7 +210,7 @@ export function collectionRoutes(
     await runAuthorize(opts.authorize, session, { op: "create", body });
     const injected = opts.createInject ? opts.createInject(requireAuth(req)) : undefined;
     const doc = await service.create(injected ? { ...body, ...injected } : body);
-    logMutation(req, opts.audit, "create", doc);
+    logMutation(req, opts.audit, "create", doc, { keys: Object.keys(body) });
     return created(doc);
   });
 
@@ -216,8 +246,9 @@ export function itemRoutes(
     const body = await readBody(req, opts.validate?.update);
     await runAuthorize(opts.authorize, session, { op: "update", id, body });
     const injected = opts.updateInject ? opts.updateInject(requireAuth(req)) : undefined;
+    const before = await beforeForAudit(service, opts.audit, id);
     const doc = await service.update(id, injected ? { ...body, ...injected } : body);
-    logMutation(req, opts.audit, "update", doc ?? { _id: id });
+    logMutation(req, opts.audit, "update", doc ?? { _id: id }, { before, keys: Object.keys(body) });
     return ok(doc);
   });
 
