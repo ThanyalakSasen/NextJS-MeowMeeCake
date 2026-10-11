@@ -68,6 +68,8 @@ export interface UploadFilesMigrationResult {
   /** สลิปใน public/uploads/slips ที่ย้าย (หรือจะย้ายตอน --apply) ไปเป็นไฟล์ส่วนตัว */
   slipsToPrivate: Array<{ _id: string; from: string }>;
   receipts: Array<{ _id: string; value: string; problem: "not-uploaded" | "missing-file"; deleted: boolean }>;
+  /** ใบเสร็จใน public/uploads/receipts ที่ย้าย (หรือจะย้าย) เป็นไฟล์ส่วนตัว /api/files/receipts/… */
+  receiptsToPrivate: Array<{ _id: string; from: string }>;
   backupFile: string | null;
 }
 
@@ -88,6 +90,7 @@ export async function runMigration(
     slips: [],
     slipsToPrivate: [],
     receipts: [],
+    receiptsToPrivate: [],
     backupFile: null,
   };
   const toConvert: Array<{ _id: mongoose.Types.ObjectId; old: string }> = [];
@@ -147,11 +150,24 @@ export async function runMigration(
     .collection("expenses")
     .find({ receipt_url: { $nin: [null, ""] } }, { projection: { receipt_url: 1, deleted_at: 1 } })
     .toArray();
+  // ใบเสร็จ — เอกสารการเงินภายใน ย้ายจาก public/uploads/receipts เป็นไฟล์ส่วนตัว (เหมือนสลิป) + รายงานที่ไม่มีไฟล์
+  const expenseCol = db.collection("expenses");
   for (const e of receipts) {
     const v = String(e.receipt_url);
     const deleted = !!e.deleted_at;
-    if (!isUploadedUrl(v, UPLOAD_DIRS.receipts)) result.receipts.push({ _id: String(e._id), value: v, problem: "not-uploaded", deleted });
-    else if (!localFileExists(v)) result.receipts.push({ _id: String(e._id), value: v, problem: "missing-file", deleted });
+    if (isPrivateFileUrl(v, UPLOAD_DIRS.receipts)) {
+      if (!(await readPrivateFile(UPLOAD_DIRS.receipts, v.split("/").pop() ?? ""))) {
+        result.receipts.push({ _id: String(e._id), value: v, problem: "missing-file", deleted });
+      }
+    } else if (isUploadedUrl(v, UPLOAD_DIRS.receipts) && localFileExists(v)) {
+      result.receiptsToPrivate.push({ _id: String(e._id), from: v });
+      if (!dryRun) {
+        const to = await movePublicToPrivate(v, UPLOAD_DIRS.receipts);
+        if (to) await expenseCol.updateOne({ _id: e._id, receipt_url: v }, { $set: { receipt_url: to } });
+      }
+    } else {
+      result.receipts.push({ _id: String(e._id), value: v, problem: isUploadedUrl(v, UPLOAD_DIRS.receipts) ? "missing-file" : "not-uploaded", deleted });
+    }
   }
 
   // ── รายงาน ──
@@ -169,6 +185,7 @@ export async function runMigration(
   console.log(`  สลิปใน public/uploads/slips → ย้ายเป็นไฟล์ส่วนตัว (/api/files/slips/…)${dryRun ? " (จะย้าย)" : ""}: ${result.slipsToPrivate.length}`);
   console.log(`  สลิปโอนเงินที่ไม่มีไฟล์จริง (ไม่แก้ — ให้ลูกค้าแนบใหม่): ${result.slips.length}`);
   for (const s of result.slips) console.log(`    - payment ${s._id} [${s.status}] ${s.value} (${s.problem})`);
+  console.log(`  ใบเสร็จใน public/uploads/receipts → ย้ายเป็นไฟล์ส่วนตัว (/api/files/receipts/…)${dryRun ? " (จะย้าย)" : ""}: ${result.receiptsToPrivate.length}`);
   console.log(`  ใบเสร็จค่าใช้จ่ายที่ไม่มีไฟล์จริง (ไม่แก้ — แนบใหม่ผ่านหน้าค่าใช้จ่าย): ${result.receipts.length}`);
   for (const r of result.receipts) console.log(`    - expense ${r._id} ${r.value} (${r.problem})${r.deleted ? " [ถูกลบ]" : ""}`);
 
