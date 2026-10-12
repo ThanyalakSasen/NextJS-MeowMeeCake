@@ -1,0 +1,99 @@
+# Render Blueprint — backend MeowMeeCake (แพ็กเกจฟรี) · ขั้นตอนเต็ม → docs/DEPLOY-RENDER.md
+#
+# - key ที่เป็น `sync: false` → Render ถามค่าตอนสร้าง Blueprint (ไม่เก็บค่าจริงใน git)
+# - key ที่เป็น `generateValue: true` → Render สุ่มค่าให้เอง (ดู/คัดลอกได้ที่แท็บ Environment)
+# - ค่าที่ไม่ได้ใส่ไว้ที่นี่ = ใช้ค่าเริ่มต้นใน docs/env.md
+services:
+  - type: web
+    name: meowmeecake-api
+    runtime: node
+    plan: free
+    region: singapore
+    # --include=dev: next build ต้องใช้ typescript (devDependency)
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      # ── runtime / build ─────────────────────────────────
+      - key: NODE_VERSION
+        value: "22" # ตรงกับ CI
+      - key: MONGOMS_DISABLE_POSTINSTALL
+        value: "1" # ไม่ต้องโหลด MongoDB binary (~120MB) ของ mongodb-memory-server ตอน npm ci
+      - key: LOG_LEVEL
+        value: info
+
+      # ── จำเป็น ──────────────────────────────────────────
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+      - key: CRON_SECRET
+        generateValue: true
+
+      # ── URL ของ frontend (ใส่หลังรู้ URL จริงของ frontend) ──
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: NEXTAUTH_URL
+        sync: false
+      - key: STOREFRONT_URL
+        sync: false
+      - key: ADMIN_APP_URL
+        sync: false
+
+      # ── ไฟล์อัปโหลด → Cloudflare R2 (Render ไม่มีดิสก์ถาวรในแพ็กเกจฟรี) ──
+      - key: UPLOAD_DRIVER
+        value: s3
+      - key: S3_REGION
+        value: auto
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_PRIVATE_BUCKET
+        sync: false
+      - key: S3_PUBLIC_URL_BASE
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+
+      # ── อีเมล (สมัครสมาชิก / ลืมรหัสผ่าน) ───────────────────
+      - key: EMAIL_SERVICE
+        value: gmail
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+
+      # ── Google login ──────────────────────────────────────
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+
+      # ── LINE ──────────────────────────────────────────────
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+      - key: LINE_TARGET_ID
+        sync: false
+      - key: LINE_LOGIN_CHANNEL_ID
+        sync: false
+      - key: LINE_LOGIN_CHANNEL_SECRET
+        sync: false
+      - key: LINE_LOGIN_CALLBACK_URL
+        sync: false
+      - key: LINE_LINK_RETURN_URL
+        sync: false
+      - key: LINE_AUTH_CALLBACK_URL
+        sync: false
+      - key: LINE_AUTH_RETURN_URL
+        sync: false
+
+      # ── ชำระเงิน ──────────────────────────────────────────
+      - key: PROMPTPAY_ID
+        sync: false
