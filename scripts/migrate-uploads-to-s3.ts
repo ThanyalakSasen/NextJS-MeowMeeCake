@@ -16,6 +16,12 @@ import dbConnect from "../src/lib/dbConnect";
  *    อัปโหลด <PRIVATE_UPLOAD_DIR>/<dir>/<ไฟล์> → `S3_PRIVATE_BUCKET` key `private/<dir>/<ไฟล์>` (เหมือน privateFiles.ts)
  * 3) `/uploads/slips/…` · `/uploads/receipts/…` (ยังไม่ได้ย้ายเป็นไฟล์ส่วนตัว) — ไม่แตะ รายงานให้รัน
  *    `npm run migrate:upload-files -- --apply` (localDisk) ก่อน แล้วค่อยรันสคริปต์นี้ — กันสลิปหลุดไป bucket สาธารณะ
+ * 4) ไฟล์จาก backend ฝั่งลูกค้าตัวเก่า (พอร์ต 4000 — customer-backend-merge.md) — ส่ง `--legacy-root=<โฟลเดอร์ public ของมัน>`:
+ *    - `/products/<ไฟล์>` · `/pictures/<ไฟล์>` → `S3_BUCKET` key `<dir>/<ไฟล์>` · URL → `<S3_PUBLIC_URL_BASE>/<dir>/<ไฟล์>`
+ *    - `/uploads/<dir>/<ไฟล์>` (รีวิว · โลโก้ร้าน) ที่ไม่มีใน public/uploads/ ของเรา → หาใน `<legacy-root>/uploads/<dir>/` ต่อ
+ *    - `/uploads/slip-<…>` (สลิปเก่า — อยู่ใน public/uploads/ ตรง ๆ) → `S3_PRIVATE_BUCKET` key `private/slips/<ไฟล์>` ·
+ *      URL → `/api/files/slips/<ไฟล์>` (เปิดผ่าน route ที่ตรวจสิทธิ์ — ไม่ขึ้น bucket สาธารณะ)
+ *    ไม่ส่ง `--legacy-root` = รายงานเป็นไฟล์ที่ไม่มีบนเครื่อง ไม่แตะ
  *
  * หา URL จากทุก collection ทุกฟิลด์ (รวม array / sub-document) เทียบค่าทั้ง string ตรงตัว — ไม่ต้องไล่ชื่อฟิลด์เอง
  * ยกเว้น `userlogs` (ประวัติการใช้งาน — ไม่แก้ย้อนหลัง)
@@ -29,11 +35,17 @@ import dbConnect from "../src/lib/dbConnect";
  *
  * รัน: npm run migrate:uploads-to-s3              (dry-run)
  *      npm run migrate:uploads-to-s3 -- --apply   (เขียนจริง)
+ *      npm run migrate:uploads-to-s3 -- --legacy-root=<path>/backend/public [--apply]
  */
 
 const FILE = "[A-Za-z0-9._-]+";
+const MEDIA_FILE = `${FILE}\\.(?:jpe?g|png|webp|avif|mp4|mov|webm)`;
 const PUBLIC_RE = new RegExp(`^/uploads/([a-z0-9_-]+)/(${FILE})$`);
 const PRIVATE_RE = new RegExp(`^/api/files/([a-z0-9_-]+)/(${FILE})$`);
+/** backend เก่า: รูปสินค้า `/products/…` · โลโก้ `/pictures/…` (ต้องเป็นนามสกุลรูป/วิดีโอ — กันชน path หน้าเว็บ) */
+const LEGACY_PUBLIC_RE = new RegExp(`^/(products|pictures)/(${MEDIA_FILE})$`, "i");
+/** backend เก่า: สลิปใน public/uploads/ ตรง ๆ */
+const LEGACY_SLIP_RE = new RegExp(`^/uploads/(slip-${MEDIA_FILE})$`, "i");
 /** โฟลเดอร์ที่ต้องเป็นไฟล์ส่วนตัว — ถ้ายังเป็น /uploads/<dir>/… ต้องรัน migrate:upload-files ก่อน */
 const PRIVATE_DIRS = new Set(["slips", "receipts"]);
 const SKIP_COLLECTIONS = new Set(["userlogs"]);
@@ -107,8 +119,12 @@ interface FileTarget {
   bucket: string;
   key: string;
   refs: Ref[];
-  newUrl: string | null; // null = ไฟล์ส่วนตัว (URL ไม่เปลี่ยน)
+  private: boolean;
+  newUrl: string | null; // null = URL ไม่เปลี่ยน (ไฟล์ส่วนตัวที่เป็น /api/files/… อยู่แล้ว)
 }
+
+/** ไฟล์บนเครื่องที่ URL นี้ชี้ (ลองตามลำดับ) + ปลายทางใน bucket */
+type Plan = Omit<FileTarget, "local" | "refs"> & { candidates: string[] };
 
 /** ไล่ทุก string ใน document (รวม array / sub-document) */
 function walk(value: unknown, path: string, out: Array<{ path: string; value: string }>): void {
@@ -133,6 +149,8 @@ export interface UploadsToS3Options {
   publicRoot?: string;
   /** ค่าเริ่มต้น `PRIVATE_UPLOAD_DIR` หรือ `<cwd>/storage/private` (เหมือน privateFiles.ts) */
   privateRoot?: string;
+  /** โฟลเดอร์ `public` ของ backend ฝั่งลูกค้าตัวเก่า (`--legacy-root`) — ไม่ส่ง = ไม่หาไฟล์ของมัน */
+  legacyRoot?: string;
   bucket?: string;
   privateBucket?: string;
   publicUrlBase?: string;
@@ -168,7 +186,50 @@ export async function runUploadsToS3(opts: UploadsToS3Options = {}): Promise<Upl
   const publicRoot = opts.publicRoot ?? join(process.cwd(), "public", "uploads");
   const rawPrivate = opts.privateRoot ?? (process.env.PRIVATE_UPLOAD_DIR?.trim() || join("storage", "private"));
   const privateRoot = isAbsolute(rawPrivate) ? rawPrivate : join(process.cwd(), rawPrivate);
+  const legacyRoot = opts.legacyRoot;
+  if (legacyRoot && !existsSync(legacyRoot)) throw new Error(`ไม่พบโฟลเดอร์ --legacy-root: ${legacyRoot}`);
   const dryRun = !opts.apply;
+
+  /** URL นี้เป็นไฟล์ที่ต้องย้ายไหม — null = ไม่ใช่ · "needs-private" = สลิป/ใบเสร็จที่ยังเป็นไฟล์สาธารณะ */
+  const planFor = (value: string): Plan | "needs-private" | null => {
+    let m: RegExpExecArray | null;
+    if ((m = LEGACY_SLIP_RE.exec(value))) {
+      const file = m[1];
+      return {
+        candidates: legacyRoot ? [join(legacyRoot, "uploads", file)] : [],
+        bucket: privateBucket,
+        key: `private/slips/${file}`,
+        private: true,
+        newUrl: `/api/files/slips/${file}`,
+      };
+    }
+    if ((m = LEGACY_PUBLIC_RE.exec(value))) {
+      const [, dir, file] = m;
+      return {
+        candidates: legacyRoot ? [join(legacyRoot, dir, file)] : [],
+        bucket,
+        key: `${dir}/${file}`,
+        private: false,
+        newUrl: `${base}/${dir}/${file}`,
+      };
+    }
+    if ((m = PUBLIC_RE.exec(value))) {
+      const [, dir, file] = m;
+      if (PRIVATE_DIRS.has(dir)) return "needs-private";
+      return {
+        candidates: [join(publicRoot, dir, file), ...(legacyRoot ? [join(legacyRoot, "uploads", dir, file)] : [])],
+        bucket,
+        key: `${dir}/${file}`,
+        private: false,
+        newUrl: `${base}/${dir}/${file}`,
+      };
+    }
+    if ((m = PRIVATE_RE.exec(value))) {
+      const [, dir, file] = m;
+      return { candidates: [join(privateRoot, dir, file)], bucket: privateBucket, key: `private/${dir}/${file}`, private: true, newUrl: null };
+    }
+    return null;
+  };
 
   await dbConnect();
   const db = mongoose.connection.db;
@@ -200,33 +261,31 @@ export async function runUploadsToS3(opts: UploadsToS3Options = {}): Promise<Upl
       const strings: Array<{ path: string; value: string }> = [];
       walk(doc, "", strings);
       for (const s of strings) {
+        if (s.value.includes("..")) continue;
+        const plan = planFor(s.value);
+        if (!plan) continue;
         const ref: Ref = { collection: name, _id: doc._id, ...s };
-        const pub = PUBLIC_RE.exec(s.value);
-        const priv = pub ? null : PRIVATE_RE.exec(s.value);
-        if (!pub && !priv) continue;
-        const [, dir, file] = (pub ?? priv)!;
-        if (file.includes("..")) continue;
-        if (pub && PRIVATE_DIRS.has(dir)) {
+        if (plan === "needs-private") {
           result.needsPrivateMigration.push(show(ref));
           continue;
         }
-        const local = pub ? join(publicRoot, dir, file) : join(privateRoot, dir, file);
-        if (!existsSync(local)) {
+        const local = plan.candidates.find((p) => existsSync(p));
+        if (!local) {
           result.missingLocal.push(show(ref));
           continue;
         }
-        const t: FileTarget = pub
-          ? { local, bucket, key: `${dir}/${file}`, refs: [], newUrl: `${base}/${dir}/${file}` }
-          : { local, bucket: privateBucket, key: `private/${dir}/${file}`, refs: [], newUrl: null };
-        const id = `${t.bucket}/${t.key}`;
-        if (!targets.has(id)) targets.set(id, t);
+        const id = `${plan.bucket}/${plan.key}`;
+        if (!targets.has(id)) {
+          const { candidates: _candidates, ...dest } = plan;
+          targets.set(id, { ...dest, local, refs: [] });
+        }
         targets.get(id)!.refs.push(ref);
       }
     }
   }
   const all = [...targets.values()];
-  result.publicFiles = all.filter((t) => t.newUrl).length;
-  result.privateFiles = all.length - result.publicFiles;
+  result.privateFiles = all.filter((t) => t.private).length;
+  result.publicFiles = all.length - result.privateFiles;
 
   // ── 2) อัปโหลด ──
   const ready: FileTarget[] = [];
@@ -275,6 +334,7 @@ export async function runUploadsToS3(opts: UploadsToS3Options = {}): Promise<Upl
   // ── รายงาน ──
   console.log(`migrate-uploads-to-s3 ${dryRun ? "(DRY-RUN — ไม่ได้เขียนอะไร · ใส่ --apply เพื่อเขียนจริง)" : "(APPLY)"}`);
   console.log(`  bucket สาธารณะ: ${bucket} → ${base} · bucket ส่วนตัว: ${privateBucket}`);
+  console.log(`  backend เก่า (--legacy-root): ${legacyRoot ?? "ไม่ได้ส่ง — /products/… · /pictures/… · /uploads/slip-… จะนับเป็นไฟล์ที่ไม่มี"}`);
   console.log(`  ไฟล์ที่ต้องขึ้น bucket: สาธารณะ ${result.publicFiles} · ส่วนตัว ${result.privateFiles}`);
   console.log(`  ${dryRun ? "จะอัปโหลด" : "อัปโหลดแล้ว"}: ${result.uploaded.length}${dryRun ? "" : ` · มีใน bucket แล้ว (ข้าม) ${result.alreadyInBucket.length}`}`);
   for (const f of result.failed) console.log(`    ✗ ${f.key}: ${f.error}`);
@@ -293,7 +353,10 @@ export async function runUploadsToS3(opts: UploadsToS3Options = {}): Promise<Upl
 // รันจริงเฉพาะตอนเรียกไฟล์นี้ตรง ๆ ผ่าน CLI (`npm run migrate:uploads-to-s3`)
 const isDirectRun = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isDirectRun) {
-  runUploadsToS3({ apply: process.argv.includes("--apply") })
+  const args = process.argv.slice(2);
+  const legacyArg = args.find((a) => a.startsWith("--legacy-root="))?.slice("--legacy-root=".length)
+    ?? (args.includes("--legacy-root") ? args.at(args.indexOf("--legacy-root") + 1) : undefined);
+  runUploadsToS3({ apply: args.includes("--apply"), legacyRoot: legacyArg })
     .catch((err) => {
       console.error(err);
       process.exitCode = 1;

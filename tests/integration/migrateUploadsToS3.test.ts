@@ -90,6 +90,40 @@ describe("scripts/migrate-uploads-to-s3", () => {
     expect(again.rewritten).toBe(0);
   });
 
+  it("--legacy-root: /products · /uploads/<dir> ที่อยู่แค่ใน backend เก่า · สลิปเก่า → bucket ส่วนตัว + /api/files/slips", async () => {
+    const disk = setupDisk();
+    const legacy = join(root!, "legacy");
+    for (const f of ["products/product-1.jpg", "uploads/reviews/review-video-1.mp4", "uploads/slip-order-1.png"]) {
+      mkdirSync(join(legacy, f, ".."), { recursive: true });
+      writeFileSync(join(legacy, f), Buffer.from(f));
+    }
+    const { store, objects } = fakeStore();
+    const product = await col("products").insertOne({
+      product_img: ["/products/product-1.jpg", "/products/gone.jpg"],
+      link: "/products/123", // ไม่ใช่ไฟล์ — ไม่แตะ ไม่รายงาน
+    });
+    const review = await col("reviews").insertOne({ media: ["/uploads/reviews/review-video-1.mp4"] });
+    const payment = await col("payments").insertOne({ slip_image_url: "/uploads/slip-order-1.png" });
+
+    // ไม่ส่ง legacyRoot → นับเป็นไฟล์ที่ไม่มี ไม่แตะ
+    const plain = await runUploadsToS3({ ...opts, ...disk, store });
+    expect(plain.missingLocal.map((m) => m.value).sort()).toEqual(
+      ["/products/gone.jpg", "/products/product-1.jpg", "/uploads/reviews/review-video-1.mp4", "/uploads/slip-order-1.png"].sort()
+    );
+
+    const res = await runUploadsToS3({ ...opts, ...disk, legacyRoot: legacy, store, apply: true });
+    expect(res.uploaded.sort()).toEqual(["priv/private/slips/slip-order-1.png", "pub/products/product-1.jpg", "pub/reviews/review-video-1.mp4"]);
+    expect(objects.get("priv/private/slips/slip-order-1.png")!.contentType).toBe("image/png");
+    expect(res.privateFiles).toBe(1);
+    expect(res.missingLocal.map((m) => m.value)).toEqual(["/products/gone.jpg"]);
+
+    const p = (await col("products").findOne({ _id: product.insertedId }))!;
+    expect(p.product_img).toEqual([`${BASE}/products/product-1.jpg`, "/products/gone.jpg"]);
+    expect(p.link).toBe("/products/123");
+    expect((await col("reviews").findOne({ _id: review.insertedId }))!.media).toEqual([`${BASE}/reviews/review-video-1.mp4`]);
+    expect((await col("payments").findOne({ _id: payment.insertedId }))!.slip_image_url).toBe("/api/files/slips/slip-order-1.png");
+  });
+
   it("อัปโหลดไม่สำเร็จ → ไม่เปลี่ยน URL ของไฟล์นั้น", async () => {
     const disk = setupDisk();
     const { store } = fakeStore();
