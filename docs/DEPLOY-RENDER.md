@@ -33,6 +33,36 @@
 2. R2 → Manage API Tokens → Create token สิทธิ์ **Object Read & Write** จำกัดเฉพาะ 2 bucket นี้ → ได้ Access Key ID + Secret
 3. Endpoint = `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` (ดู Account ID ในหน้า R2)
 
+### 2.1 ย้ายไฟล์เดิมขึ้น R2 (`npm run migrate:uploads-to-s3`)
+
+ไฟล์ที่อัปโหลดไว้ก่อนหน้าอยู่ใน `public/uploads/` + `storage/private/` บนเครื่อง dev และ DB เก็บ URL เป็น `/uploads/…`
+→ บน Render ไม่มีไฟล์เหล่านี้ (รูปเดิมไม่ขึ้น) · สคริปต์ `scripts/migrate-uploads-to-s3.ts` ทำให้:
+
+| ใน DB | ไฟล์บนเครื่อง | ขึ้น bucket | URL ใน DB |
+|---|---|---|---|
+| `/uploads/<dir>/<ไฟล์>` (สินค้า · แบนเนอร์ · รีวิว · ร้าน) | `public/uploads/<dir>/` | `S3_BUCKET` key `<dir>/<ไฟล์>` | เปลี่ยนเป็น `<S3_PUBLIC_URL_BASE>/<dir>/<ไฟล์>` |
+| `/api/files/<dir>/<ไฟล์>` (สลิป · ใบเสร็จ) | `storage/private/<dir>/` | `S3_PRIVATE_BUCKET` key `private/<dir>/<ไฟล์>` | ไม่เปลี่ยน |
+| `/uploads/slips/…` · `/uploads/receipts/…` | — | ไม่แตะ — รายงานให้รัน `npm run migrate:upload-files -- --apply` ก่อน | — |
+| `/products/<ไฟล์>` · `/pictures/<ไฟล์>` (backend ฝั่งลูกค้าตัวเก่า) | `<legacy-root>/<dir>/` | `S3_BUCKET` key `<dir>/<ไฟล์>` | เปลี่ยนเป็น `<S3_PUBLIC_URL_BASE>/<dir>/<ไฟล์>` |
+| `/uploads/slip-…` (สลิปของ backend เก่า) | `<legacy-root>/uploads/` | `S3_PRIVATE_BUCKET` key `private/slips/<ไฟล์>` | เปลี่ยนเป็น `/api/files/slips/<ไฟล์>` |
+
+หาทุกฟิลด์ทุก collection ให้เอง (ยกเว้น `userlogs`) · ไม่ลบไฟล์บนเครื่อง · รันซ้ำได้ ·
+`/uploads/<dir>/…` ที่ไม่มีใน `public/uploads/` ของเราจะหาใน `<legacy-root>/uploads/<dir>/` ต่อ (รีวิว · โลโก้ร้านของ backend เก่า)
+
+`<legacy-root>` = โฟลเดอร์ `public` ของ backend ฝั่งลูกค้าตัวเก่า (พอร์ต 4000) ส่งด้วย `--legacy-root=<path>` ·
+ไม่ส่ง = path ของ backend เก่าถูกนับเป็น "ไฟล์ที่ไม่มีบนเครื่อง" ไม่แตะ
+
+รันบน**เครื่อง dev** (ที่มีโฟลเดอร์ `public/uploads/`) โดยชี้ไป DB + bucket ของ production:
+
+1. ใส่ใน `.env.local` ชั่วคราว: `MONGODB_URI` (Atlas production) + `S3_ENDPOINT` · `S3_BUCKET` · `S3_PRIVATE_BUCKET` ·
+   `S3_PUBLIC_URL_BASE` · `S3_ACCESS_KEY_ID` · `S3_SECRET_ACCESS_KEY` (ชุดเดียวกับ Render) — **ไม่ต้อง**ตั้ง `UPLOAD_DRIVER`
+2. `npm run migrate:upload-files` → ถ้ามีสลิป/ใบเสร็จต้องย้าย → `-- --apply` (ย้ายเป็นไฟล์ส่วนตัวบนเครื่องก่อน)
+3. `npm run migrate:uploads-to-s3 -- --legacy-root=<path>/backend/public` (dry-run) → ดูจำนวนไฟล์ / ค่าที่จะเปลี่ยน / ไฟล์ที่ไม่มีบนเครื่อง
+4. คำสั่งเดิม + `--apply` → ค่าเดิมสำรองไว้ที่ `scripts/backups/uploads-to-s3-*.json`
+5. เปิดหน้าสินค้า/แบนเนอร์ → รูปต้องขึ้นจาก `https://pub-…r2.dev/…` · คืนค่า `.env.local` เป็นของ dev
+
+> frontend (`resolveUploadUrl()` — frontend `src/lib/uploads.ts`) ปล่อย URL แบบเต็ม (`https://…`) ผ่านตรง ๆ แล้ว — ไม่ต้องแก้ frontend
+
 ## 3. สร้าง service บน Render
 
 1. push `render.yaml` ขึ้น GitHub (branch `main`)
