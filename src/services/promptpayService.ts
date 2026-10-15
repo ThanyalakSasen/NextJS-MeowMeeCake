@@ -24,9 +24,16 @@ export async function getPromptPayAccount(): Promise<{ id: string; accountName: 
   return { id, accountName };
 }
 
-/** QR พร้อมเพย์ (data URL รูป PNG) สำหรับยอดเงินที่ระบุ (บาท) */
-export async function buildPromptPayQr(amount: number): Promise<{ qr_image: string; account_name: string }> {
+/**
+ * QR พร้อมเพย์ (data URL รูป PNG) สำหรับยอดเงินที่ระบุ (บาท) — ใช้ทั้งหน้าชำระเงินออนไลน์และ POS
+ * 400px + ขอบขาว 2 โมดูล: เดิมใช้ค่าเริ่มต้น (~164px) แล้วหน้าเว็บขยายเป็น 230px ภาพเบลอ สแกนจากจอยากขึ้น
+ */
+export async function buildPromptPayQr(amount: number): Promise<{ qr_image: string; account_name: string; promptpay_id: string }> {
   const account = await getPromptPayAccount();
   const payload = generatePayload(account.id, { amount });
-  return { qr_image: await QRCode.toDataURL(payload), account_name: account.accountName };
+  return {
+    qr_image: await QRCode.toDataURL(payload, { width: 400, margin: 2, errorCorrectionLevel: "M" }),
+    account_name: account.accountName,
+    promptpay_id: account.id,
+  };
 }
