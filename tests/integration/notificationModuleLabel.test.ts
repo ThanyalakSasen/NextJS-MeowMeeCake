@@ -65,6 +65,8 @@ describe("notification module → ป้ายภาษาไทยตอนแ�
     expect(notificationModuleLabel("employee")).toBe("พนักงาน"); // ค่าเลิกใช้ในเอกสารเก่า
     expect(parseNotificationModule("คำสั่งซื้อ")).toBe("order");
     expect(parseNotificationModule("ingredient")).toBe("ingredient");
+    expect(parseNotificationModule("สินค้า")).toBe("product");
+    expect(notificationModuleLabel("product")).toBe("สินค้า");
     expect(parseNotificationModule("ไม่มี")).toBeNull();
   });
 

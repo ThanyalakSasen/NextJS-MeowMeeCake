@@ -26,6 +26,7 @@ describe("สินค้าใกล้หมด — ปรับสต็อ�
     expect(res.product_stock_quantity).toBe(3);
     await vi.waitFor(async () => expect(await lowStockNotes(p.product_name_th)).toHaveLength(1));
     expect((await lowStockNotes(p.product_name_th))[0].message).toContain("3");
+    expect((await lowStockNotes(p.product_name_th))[0].module).toBe("product"); // หมวด "สินค้า" (เดิมใช้ ingredient ร่วม)
   });
 
   it("setStock ที่ต่ำอยู่แล้ว (4 → 2) → ไม่แจ้งซ้ำ", async () => {
@@ -56,7 +57,7 @@ describe("สินค้าใกล้หมด — ปรับสต็อ�
 });
 
 describe("พรีออเดอร์ใหม่ → แจ้งเจ้าของร้าน", () => {
-  it("createPreorder → มี notification 'เปิดพรีออเดอร์รอบใหม่ PRE-…' พร้อมชื่อรอบและยอด", async () => {
+  it("createPreorder → มี notification 'พรีออเดอร์ใหม่ PRE-…' พร้อมชื่อรอบและยอด", async () => {
     const user = await makeUser();
     const product = await makeProduct({ is_preorder: true, product_price: 120 });
     const roundName = `รอบแจ้งเตือน-${Date.now()}`;
@@ -79,9 +80,9 @@ describe("พรีออเดอร์ใหม่ → แจ้งเจ้�
     })) as { preorder_no: string };
 
     await vi.waitFor(async () =>
-      expect(await notificationModel.findOne({ title: `เปิดพรีออเดอร์รอบใหม่ ${preorder.preorder_no}` })).toBeTruthy()
+      expect(await notificationModel.findOne({ title: `พรีออเดอร์ใหม่ ${preorder.preorder_no}` })).toBeTruthy()
     );
-    const note = await notificationModel.findOne({ title: `เปิดพรีออเดอร์รอบใหม่ ${preorder.preorder_no}` }).lean<{
+    const note = await notificationModel.findOne({ title: `พรีออเดอร์ใหม่ ${preorder.preorder_no}` }).lean<{
       message: string;
       module: string;
     }>();

@@ -14,11 +14,12 @@ import { trackBackground } from "../lib/backgroundTasks";
 import { log } from "../lib/logger";
 
 /** ค่าที่เก็บใน DB — ภาษาอังกฤษ (enum ของ notificationModel · ใช้กรอง ?module=) ห้ามเปลี่ยนเป็นภาษาไทย */
-export type NotificationModule = "order" | "ingredient" | "production" | "finance" | "customer" | "system";
+export type NotificationModule = "order" | "product" | "ingredient" | "production" | "finance" | "customer" | "system";
 
 /** ป้ายภาษาไทยสำหรับแสดงผล — ใส่ใน response เป็น `module_label` และหัวข้อความ LINE */
 export const NOTIFICATION_MODULE_LABELS: Record<NotificationModule, string> = {
   order: "คำสั่งซื้อ",
+  product: "สินค้า",
   ingredient: "วัตถุดิบ",
   production: "การผลิต",
   finance: "การเงิน",
