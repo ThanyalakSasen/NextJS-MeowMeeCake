@@ -6,6 +6,7 @@
  *     รูป ≤ 5 MB (jpg/png/webp/avif) · วิดีโอ ≤ 30 MB (mp4/mov/webm) · โฟลเดอร์ reviews · ชื่อไฟล์ขึ้นต้นด้วย user id
  *   - ลบไฟล์ค้าง (ส่งรีวิวไม่สำเร็จ): เฉพาะไฟล์ของตัวเอง (user id ในชื่อไฟล์) และยังไม่มีรีวิวไหนอ้างถึง — ไม่ผ่านข้ามเงียบ ๆ
  *   - เก็บกวาดไฟล์ค้าง > 24 ชม. (localDisk): npm run cleanup:review-media — รีวิวที่ถูก soft delete ยังนับว่าใช้อยู่
+ *     (UPLOAD_DRIVER=s3: storageCleanupService · /api/cron/storage-cleanup — docs/uploads.md §7)
  */
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
@@ -58,7 +59,7 @@ export async function deleteOwnReviewMedia(userId: string, rawUrls: unknown): Pr
   return { deleted };
 }
 
-/** เก็บกวาดไฟล์รีวิวที่ค้าง (localDisk เท่านั้น — S3 ตั้ง lifecycle rule ที่ bucket แทน) → จำนวนที่ลบ */
+/** เก็บกวาดไฟล์รีวิวที่ค้าง (localDisk เท่านั้น — S3 ใช้ storageCleanupService แทน) → จำนวนที่ลบ */
 export async function cleanupOrphanReviewMedia(now = Date.now()): Promise<number> {
   if (process.env.UPLOAD_DRIVER === "s3") return 0;
   const dir = join(process.cwd(), "public", "uploads", DIR);

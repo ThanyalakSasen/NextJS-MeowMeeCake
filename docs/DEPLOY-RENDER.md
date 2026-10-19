@@ -126,10 +126,11 @@
 | `preorder-reminders` | ทุกวัน 18:00 | เตือนลูกค้าก่อนวันรับพรีออเดอร์ทาง LINE |
 | `data-integrity` | ทุกวัน 07:30 | ตรวจข้อมูลสินค้าผิดปกติ แจ้งเจ้าของร้าน |
 | `monthly-summary` | วันที่ 1 08:00 | สรุปยอดเดือนที่แล้ว |
+| `storage-cleanup?apply=true` | ทุกวันอาทิตย์ 03:00 | ลบไฟล์ใน R2 ที่ไม่มีข้อมูลอ้างถึง + เก่ากว่า 60 วัน (ลองแบบไม่ใส่ `?apply=true` ก่อน — docs/uploads.md §7) |
 
 ทดสอบ: กด "Test run" ของ `preorder-reminders` → ต้องได้ 200 (ถ้า 401 = `CRON_SECRET` ไม่ตรง)
 
-> `cleanup:review-media` (ลบรูปรีวิวที่ค้าง) ไม่มี endpoint — Render free ไม่มี shell/cron ให้รันสคริปต์ · ไม่จำเป็นสำหรับนำเสนอ ถ้าต้องการรันจากเครื่อง dev ที่ตั้ง env ชุดเดียวกับ production: `npm run cleanup:review-media`
+> `cleanup:review-media` (ลบรูปรีวิวที่ค้าง) ใช้กับ localDisk เท่านั้น — บน R2 ใช้ `storage-cleanup` ด้านบนแทน (ครอบคลุมรูปรีวิวด้วย)
 
 ## 5. ตรวจรับ
 
