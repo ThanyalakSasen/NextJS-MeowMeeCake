@@ -160,7 +160,7 @@ describe("ปัญหา 4 — กู้คืนรอบได้รายก
 
 describe("ปัญหา 6 — เลื่อนวันรับ", () => {
   it("อัปเดต pickup_date ในรายการพรีออเดอร์ · ล้างสถานะเตือนแล้ว · แจ้งลูกค้าทาง LINE", async () => {
-    resetQuotaCache();
+    await resetQuotaCache();
     process.env.LINE_CHANNEL_ACCESS_TOKEN = "token-test";
     const fetchSpy = vi.fn(async (url: string, _init?: { body: string }) =>
       url.endsWith("/message/push") ? { ok: true } : { ok: false, status: 500, json: async () => ({}) }
@@ -192,7 +192,7 @@ describe("ปัญหา 6 — เลื่อนวันรับ", () => {
   });
 
   it("แก้ชื่อรอบอย่างเดียว → ไม่แจ้งลูกค้า", async () => {
-    resetQuotaCache();
+    await resetQuotaCache();
     process.env.LINE_CHANNEL_ACCESS_TOKEN = "token-test";
     const fetchSpy = vi.fn(async (_url: string, _init?: { body: string }) => ({ ok: true }));
     vi.stubGlobal("fetch", fetchSpy);

@@ -59,6 +59,36 @@ export interface UnpaidCancelResult {
 }
 
 /**
+ * พรีออเดอร์ถูกยกเลิกแล้วแต่มีสลิปรอตรวจ (แนบสลิปชนกับการยกเลิกอัตโนมัติ) → แจ้งร้านให้ตรวจสลิปแล้วคืนเงิน
+ * (พรีออเดอร์เปิดกลับอัตโนมัติไม่ได้ — โควตารอบคืนไปแล้ว/รอบอาจปิดแล้ว) · คืน true = แจ้งแล้ว
+ */
+export async function warnSlipOnCancelledPreorder(preorderId: string): Promise<boolean> {
+  await dbConnect();
+  const preorder = await preorderModel
+    .findOne({ _id: preorderId, deleted_at: null, order_status: "cancelled" })
+    .select("preorder_no")
+    .lean<{ preorder_no?: string } | null>();
+  if (!preorder) return false;
+  const hasSlip = await paymentModel.exists({
+    preorder_id: preorderId,
+    status: "pending",
+    slip_image_url: { $nin: [null, ""] },
+    deleted_at: null,
+  });
+  if (!hasSlip) return false;
+  await notificationService
+    .notify({
+      title: `สลิปเข้ามาหลังพรีออเดอร์ ${preorder.preorder_no ?? ""} ถูกยกเลิก`,
+      message: "ตรวจสลิป ถ้าโอนจริงให้ติดต่อลูกค้าและโอนคืน (หรือให้ลูกค้าสั่งใหม่)",
+      module: "finance",
+      type: "warning",
+      link: adminLinks.preorder(preorderId),
+    })
+    .catch((err) => log.error("preorder.late_slip_notify_failed", { preorder_id: preorderId, err }));
+  return true;
+}
+
+/**
  * @param opts.roundId  จำกัดเฉพาะรอบนี้
  * @param opts.allInRound  ยกเลิกทุกรายการที่ยังไม่จ่ายในรอบ ไม่สนกำหนด (ใช้ตอนปิดรอบ — ปิดก่อนเวลาก็ถือว่าหมดเวลาจ่าย)
  */
@@ -101,6 +131,8 @@ export async function cancelUnpaidPreorders(
         cancelled_reason: "ไม่ได้ชำระเงินภายในกำหนด — ระบบยกเลิกอัตโนมัติ",
       });
       result.cancelled.push(p.preorder_no);
+      // สลิปอาจเข้ามาระหว่างเช็คด้านบนกับการยกเลิก — ตรวจซ้ำ (คู่กับ paymentService ที่ตรวจซ้ำหลังบันทึกสลิป)
+      await warnSlipOnCancelledPreorder(String(p._id));
     } catch (err) {
       result.failed.push({ preorder_no: p.preorder_no, error: err instanceof Error ? err.message : String(err) });
     }

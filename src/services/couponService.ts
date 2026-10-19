@@ -105,6 +105,13 @@ export async function redeemCoupon(userId: string, promotionId: unknown) {
       points_spent: Number(promo.points_cost),
       expires_at: couponExpiry(promo.end_date),
     });
+    // นับซ้ำหลังสร้าง (optimistic แบบ promotionUsageService.recordUsage) — กดแลกพร้อมกันหลายคำขอผ่านการเช็คด้านบน
+    // ได้ทุกคำขอ → ถ้านับแล้วเกินสิทธิ์ ลบใบของตัวเองแล้วคืนแต้ม (catch ด้านล่าง)
+    // รับประกันว่าไม่เกินสิทธิ์: คำขอที่นับทีหลังสุดเห็นทุกใบที่ยังอยู่ · ข้อเสีย: กดพร้อมกันอาจล้มทุกคำขอ (แต้มคืน กดใหม่ได้)
+    if (perUser !== null && (await userCouponModel.countDocuments({ user_id: userId, promotion_id: promotionId })) > perUser) {
+      await userCouponModel.deleteOne({ _id: doc._id });
+      throw badRequest(`แลกคูปองนี้ได้สูงสุด ${perUser} ครั้งต่อคน`);
+    }
     return doc.toObject();
   } catch (err) {
     await pointsService.refundRedemption("coupon", String(couponId)).catch((e) =>

@@ -1,10 +1,11 @@
 /**
  * /api/admin/user-logs
  *   GET  — ค้น log กิจกรรม (employees.view) ?user_id= ?entity= ?entity_id= ?action_type= ?date_from= ?date_to=
- *   POST — เขียน log 1 รายการ (employees.create)
+ *   POST — เขียน log 1 รายการ (employees.create) · ผู้กระทำ = ผู้ล็อกอินเสมอ (user_id/ip_address ใน body ถูกเมิน)
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
+import { clientIp } from "@/lib/request";
 import { parsePagination } from "@/lib/queryParams";
 import * as userLogService from "@/services/userLogService";
 import type { ActionType } from "@/services/userLogService";
@@ -23,7 +24,21 @@ export const GET = withPermission("employees", "view", async (_s, req) => {
   return ok(result);
 });
 
-export const POST = withPermission("employees", "create", async (_s, req) => {
-  const body = await req.json();
-  return created(await userLogService.writeLogStrict(body));
+export const POST = withPermission("employees", "create", async (session, req) => {
+  const body = await req.json().catch(() => ({}));
+  // ผู้กระทำ + IP มาจาก session/คำขอเสมอ — ไม่รับ user_id / ip_address จาก body
+  // (เดิมรับทั้งก้อน → พนักงานเขียน log ในชื่อเจ้าของร้านหรือคนอื่นได้ = ปลอมหลักฐาน audit)
+  return created(
+    await userLogService.writeLogStrict({
+      user_id: session.user_id,
+      action: body?.action,
+      action_type: body?.action_type,
+      entity: body?.entity,
+      entity_id: body?.entity_id ?? null,
+      ip_address: clientIp(req),
+      details: body?.details,
+      before: body?.before,
+      after: body?.after,
+    })
+  );
 });

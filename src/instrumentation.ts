@@ -1,25 +1,16 @@
 /**
  * instrumentation — Next.js เรียก register() ครั้งเดียวตอนเซิร์ฟเวอร์เริ่ม
  *
- * docs/BACKLOG4.md Y8 — state หลายตัวอยู่ในหน่วยความจำของ process (rate limit, permission cache,
- * delivery-zone cache, cache โควตา LINE) ไม่แชร์ข้าม instance → ออกแบบให้รัน "instance เดียว" (docs/DEPLOY.md §⑤)
- * เตือนใน log ถ้าตรวจพบว่ากำลังรันหลาย instance (pm2 cluster / -i N) หรือบน serverless
+ * docs/BACKLOG5.md G6 — rate limit / permission cache / delivery-zone cache / cache คำพ้อง / โควตา LINE แชร์ผ่าน MongoDB แล้ว
+ * → รันหลาย instance ได้ (pm2 cluster ฯลฯ) · ที่เหลือคือไฟล์อัปโหลด: driver `local` เขียนลงดิสก์ของเครื่อง
+ * → บน serverless เขียนไม่ได้/หาย ต้องใช้ `UPLOAD_DRIVER=s3` — เตือนใน log ถ้าตรวจพบว่ายังไม่ได้ตั้ง
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
-
-  const reasons: string[] = [];
-  const pm2Instance = process.env.NODE_APP_INSTANCE;
-  if (process.env.exec_mode === "cluster_mode") reasons.push("pm2 cluster mode");
-  if (pm2Instance && pm2Instance !== "0") reasons.push(`pm2 instance #${pm2Instance}`);
-  if (process.env.VERCEL) reasons.push("Vercel (serverless)");
-  if (reasons.length === 0) return;
+  if (!process.env.VERCEL || process.env.UPLOAD_DRIVER === "s3") return;
 
   const { log } = await import("./lib/logger");
-  log.warn("runtime.multi_instance", {
-    reasons,
-    hint:
-      "rate limit / permission cache / delivery-zone cache / โควตา LINE อยู่ในหน่วยความจำ ไม่แชร์ข้าม instance — " +
-      "รัน pm2 แบบ fork instance เดียว (docs/DEPLOY.md §⑤, BACKLOG4 Y8)",
+  log.warn("runtime.serverless_local_uploads", {
+    hint: "serverless เขียนไฟล์ลง public/uploads ไม่ได้ — ตั้ง UPLOAD_DRIVER=s3 (docs/uploads.md)",
   });
 }

@@ -114,7 +114,7 @@ async function notifyNow(input: NotifyInput) {
     `[${notificationModuleLabel(input.module)}] ${input.title}\n${input.message}` + (url ? `\n🔗 ${url}` : "");
   const result = await pushLineMessage(lineText);
   if (result.ok) {
-    recordPushed(); // หักโควตาใน cache ของ lib/lineQuota (ใช้ตัดสินว่าส่งหาลูกค้าต่อได้ไหม)
+    await recordPushed(); // หักโควตาที่เก็บไว้ใน DB ของ lib/lineQuota (ใช้ตัดสินว่าส่งหาลูกค้าต่อได้ไหม)
     await notificationModel.updateOne({ _id: doc._id }, { $set: { line_sent: true } });
   } else {
     log.warn("notification.line_push_failed", { notification_id: String(doc._id), error: result.error });

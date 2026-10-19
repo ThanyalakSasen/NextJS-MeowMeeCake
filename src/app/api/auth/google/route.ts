@@ -15,7 +15,7 @@ import * as authService from "@/services/authService";
 
 export const POST = route(async (req: NextRequest) => {
   const ip = clientIp(req);
-  rateLimit(ip, "auth:google", { limit: 10, windowMs: 60_000 });
+  await rateLimit(ip, "auth:google", { limit: 10, windowMs: 60_000 });
   const { credential } = await req.json().catch(() => ({}));
   if (!credential) throw badRequest("กรุณาส่ง credential (Google ID token)");
   const { user, token } = await authService.loginWithGoogle(credential, { ip });

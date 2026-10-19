@@ -21,6 +21,7 @@ import {
   DEFAULT_SHIPPING_ZONES,
   categoryShipsNationwide,
   checkDeliveryArea,
+  productShipsNationwide,
   computeShippingFee,
   type ShippingZone,
 } from "../lib/shipping";
@@ -111,11 +112,14 @@ export async function quoteStorefrontDelivery(input: {
     getShippingZones(),
     storeSettingsModel.findOne().select("province").lean<{ province?: string } | null>(),
     productCategoryModel.find({ deleted_at: null }).select("product_category_name ships_nationwide").lean<any[]>(),
-    productModel.find({ _id: { $in: input.productIds } }).select("category_id").lean<any[]>(),
+    productModel.find({ _id: { $in: input.productIds } }).select("category_id ships_nationwide").lean<any[]>(),
   ]);
 
   const nationwide = new Set(categories.filter(categoryShipsNationwide).map((c) => String(c._id)));
-  const hasLocalOnlyItems = products.some((p) => !nationwide.has(String(p.category_id ?? "")));
+  // รายสินค้าก่อน (ตั้งยกเว้นไว้) แล้วค่อยตามหมวด — lib/shipping.ts productShipsNationwide
+  const hasLocalOnlyItems = products.some(
+    (p) => !productShipsNationwide(p, nationwide.has(String(p.category_id ?? "")))
+  );
   const area = checkDeliveryArea(province, String(settings?.province ?? ""), hasLocalOnlyItems);
   if (!area.ok) throw badRequest(area.message);
 
@@ -244,4 +248,187 @@ export async function resolvePickupSelection(
       note: formatLocationSchedule(loc),
     },
   };
+}
+
+// ── ขอบเขตจัดส่งรายหมวดหมู่สินค้า (หน้า "ค่าจัดส่งหน้าร้านออนไลน์" · สิทธิ์ store_info) ─────────
+// ย้ายมาจากตัวจัดการหมวดหมู่ในหน้าสินค้า — ตั้งได้ด้วยสิทธิ์เดียวกับโซนค่าส่ง ไม่ต้องมีสิทธิ์จัดการสินค้า
+
+export interface CategoryShipping {
+  _id: string;
+  product_category_name: string;
+  /** ค่าที่มีผลจริง (ตั้งไว้ หรือเดาจากชื่อเมื่อยังไม่ตั้ง — lib/shipping.ts categoryShipsNationwide) */
+  ships_nationwide: boolean;
+  /** true = ยังไม่เคยตั้ง ใช้ค่าที่เดาจากชื่อหมวด */
+  ships_nationwide_auto: boolean;
+}
+
+function toCategoryShipping(c: AnyDoc): CategoryShipping {
+  return {
+    _id: String(c._id),
+    product_category_name: String(c.product_category_name ?? ""),
+    ships_nationwide: categoryShipsNationwide(c),
+    ships_nationwide_auto: typeof c.ships_nationwide !== "boolean",
+  };
+}
+
+/** หมวดหมู่สินค้าทั้งหมด (ที่ยังไม่ลบ) + ขอบเขตจัดส่ง — เรียงตามชื่อ */
+export async function listCategoryShipping(): Promise<CategoryShipping[]> {
+  await dbConnect();
+  const rows = await productCategoryModel
+    .find({ deleted_at: null })
+    .select("product_category_name ships_nationwide")
+    .sort({ product_category_name: 1 })
+    .lean<AnyDoc[]>();
+  return rows.map(toCategoryShipping);
+}
+
+/**
+ * ตั้งว่าหมวดนี้ส่งทั่วประเทศได้ไหม → { before, after, products_reset } สำหรับ audit log
+ * resetProducts = ล้างค่ายกเว้นรายสินค้าในหมวดด้วย (ทุกชิ้นกลับไปตามหมวด) — สวิตช์หัวหมวดในหน้า "จัดส่งนอกจังหวัด"
+ * ใช้ความหมาย "เปิด/ปิดทั้งหมวด" · ไม่ส่ง = แตะเฉพาะค่าของหมวด (สวิตช์ในหน้าต่างจัดการหมวดหมู่สินค้า)
+ */
+export async function setCategoryShipsNationwide(
+  id: string,
+  value: boolean,
+  opts: { resetProducts?: boolean } = {}
+): Promise<{ before: CategoryShipping; after: CategoryShipping; products_reset: number }> {
+  await dbConnect();
+  if (!mongoose.isValidObjectId(id)) throw notFound("ไม่พบหมวดหมู่สินค้าที่ระบุ");
+  const before = await productCategoryModel
+    .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { ships_nationwide: value } })
+    .select("product_category_name ships_nationwide")
+    .lean<AnyDoc | null>();
+  if (!before) throw notFound("ไม่พบหมวดหมู่สินค้าที่ระบุ");
+  let products_reset = 0;
+  if (opts.resetProducts) {
+    const res = await productModel.updateMany(
+      { category_id: id, deleted_at: null, ships_nationwide: { $type: "bool" } },
+      { $set: { ships_nationwide: null } },
+      { strict: false } // ดู setProductShipping — กัน schema เก่าที่ค้างใน process ตัดฟิลด์ทิ้งเงียบ ๆ
+    );
+    products_reset = res.modifiedCount;
+  }
+  return {
+    before: toCategoryShipping(before),
+    after: toCategoryShipping({ ...before, ships_nationwide: value }),
+    products_reset,
+  };
+}
+
+// ── ขอบเขตจัดส่งรายสินค้า (ยกเว้นจากหมวด) — "จัดส่งนอกจังหวัด" · สิทธิ์ store_info ─────────
+
+export interface ProductShipping {
+  _id: string;
+  product_name_th: string;
+  /** รหัสสินค้า pos-/pre- */
+  product_code: string | null;
+  category_id: string | null;
+  category_name: string;
+  is_preorder: boolean;
+  /** ค่าที่ตั้งยกเว้นไว้ที่ตัวสินค้า · null = ตามหมวด */
+  ships_nationwide: boolean | null;
+  /** ค่าของหมวด (ที่มีผลจริง) */
+  category_ships_nationwide: boolean;
+  /** ค่าที่ใช้คิดจริง = ยกเว้นก่อน ไม่มีค่อยตามหมวด */
+  effective_ships_nationwide: boolean;
+}
+
+/** สินค้าทั้งหมดที่ยังไม่ลบ + ขอบเขตจัดส่ง — เรียงตามชื่อหมวด แล้วชื่อสินค้า */
+export async function listProductShipping(): Promise<ProductShipping[]> {
+  await dbConnect();
+  const [products, categories] = await Promise.all([
+    productModel
+      .find({ deleted_at: null })
+      .select("product_name_th product_id category_id is_preorder ships_nationwide")
+      .limit(2000)
+      .lean<AnyDoc[]>(),
+    productCategoryModel.find({}).select("product_category_name ships_nationwide").lean<AnyDoc[]>(),
+  ]);
+  const catById = new Map(categories.map((c) => [String(c._id), c]));
+  const rows = products.map((p): ProductShipping => {
+    const cat = p.category_id ? catById.get(String(p.category_id)) : undefined;
+    const catNationwide = cat ? categoryShipsNationwide(cat) : false;
+    const override = typeof p.ships_nationwide === "boolean" ? p.ships_nationwide : null;
+    return {
+      _id: String(p._id),
+      product_name_th: String(p.product_name_th ?? ""),
+      product_code: typeof p.product_id === "string" ? p.product_id : null,
+      category_id: p.category_id ? String(p.category_id) : null,
+      category_name: String(cat?.product_category_name ?? ""),
+      is_preorder: p.is_preorder === true,
+      ships_nationwide: override,
+      category_ships_nationwide: catNationwide,
+      effective_ships_nationwide: productShipsNationwide(p, catNationwide),
+    };
+  });
+  return rows.sort(
+    (a, b) =>
+      a.category_name.localeCompare(b.category_name, "th") || a.product_name_th.localeCompare(b.product_name_th, "th")
+  );
+}
+
+/**
+ * ตั้งยกเว้นหลายสินค้าพร้อมกัน — true = ส่งทั่วประเทศ · false = เฉพาะจังหวัดร้าน · null = กลับไปใช้ค่าตามหมวด
+ * คืน before/after (ชื่อ + ค่าเดิม/ใหม่) สำหรับ audit log · id ที่ไม่พบ/ถูกลบ = 404 ทั้งชุด (ไม่แก้บางส่วน)
+ */
+export async function setProductShipping(
+  productIds: string[],
+  value: boolean | null
+): Promise<{ updated: number; before: AnyDoc[]; after: AnyDoc[] }> {
+  await dbConnect();
+  const ids = [...new Set(productIds)];
+  const existing = await productModel
+    .find({ _id: { $in: ids }, deleted_at: null })
+    .select("product_name_th ships_nationwide")
+    .lean<AnyDoc[]>();
+  if (existing.length !== ids.length) throw notFound("ไม่พบสินค้าบางรายการ หรือถูกลบไปแล้ว — กรุณาโหลดหน้าใหม่");
+  // strict: false — model ของ mongoose ถูก cache ไว้ใน process (mongoose.models.Products || …) ถ้า process เริ่มก่อน
+  // schema มีฟิลด์ ships_nationwide (dev hot-reload / deploy ที่ไม่ได้ restart) $set จะถูกตัดทิ้งเงียบ ๆ แต่ตอบสำเร็จ
+  // (เจอจริง 2026-10-19: บันทึก 5 ครั้ง log ว่าสำเร็จ แต่ไม่มีค่าใน DB เลย) — ฟิลด์นี้ผ่าน zod (boolean | null) มาแล้ว
+  const res = await productModel.updateMany(
+    { _id: { $in: ids }, deleted_at: null },
+    { $set: { ships_nationwide: value } },
+    { strict: false }
+  );
+  const label = (p: AnyDoc) => String(p.product_name_th ?? p._id);
+  return {
+    updated: res.matchedCount,
+    before: existing.map((p) => ({ product: label(p), ships_nationwide: typeof p.ships_nationwide === "boolean" ? p.ships_nationwide : null })),
+    after: existing.map((p) => ({ product: label(p), ships_nationwide: value })),
+  };
+}
+
+export interface ShippingException {
+  _id: string;
+  product_name_th: string;
+  category_name: string;
+}
+
+/**
+ * สินค้าที่ตั้งยกเว้นต่างจากหมวด (สาธารณะ — หน้า "การจัดส่ง" ของลูกค้า · GET /api/catalog/shipping-exceptions)
+ *   nationwide    = หมวดส่งเฉพาะจังหวัด แต่สินค้าชิ้นนี้ส่งทั่วประเทศได้
+ *   province_only = หมวดส่งทั่วประเทศ แต่สินค้าชิ้นนี้ส่งได้เฉพาะจังหวัดร้าน
+ * เฉพาะสินค้าที่เปิดขาย (is_visible) · ค่าเดียวกับหมวด (ตั้งซ้ำ) ไม่นับ — ไม่ต้องบอกลูกค้าซ้ำกับรายชื่อหมวด
+ */
+export async function listShippingExceptions(): Promise<{ nationwide: ShippingException[]; province_only: ShippingException[] }> {
+  await dbConnect();
+  const [products, categories] = await Promise.all([
+    productModel
+      .find({ deleted_at: null, is_visible: { $ne: false }, ships_nationwide: { $type: "bool" } })
+      .select("product_name_th category_id ships_nationwide")
+      .lean<AnyDoc[]>(),
+    productCategoryModel.find({}).select("product_category_name ships_nationwide").lean<AnyDoc[]>(),
+  ]);
+  const catById = new Map(categories.map((c) => [String(c._id), c]));
+  const nationwide: ShippingException[] = [];
+  const provinceOnly: ShippingException[] = [];
+  for (const p of products) {
+    const cat = p.category_id ? catById.get(String(p.category_id)) : undefined;
+    const catNationwide = cat ? categoryShipsNationwide(cat) : false;
+    if (p.ships_nationwide === catNationwide) continue;
+    const row = { _id: String(p._id), product_name_th: String(p.product_name_th ?? ""), category_name: String(cat?.product_category_name ?? "") };
+    (p.ships_nationwide ? nationwide : provinceOnly).push(row);
+  }
+  const byName = (a: ShippingException, b: ShippingException) => a.product_name_th.localeCompare(b.product_name_th, "th");
+  return { nationwide: nationwide.sort(byName), province_only: provinceOnly.sort(byName) };
 }

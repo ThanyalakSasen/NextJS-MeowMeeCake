@@ -14,7 +14,7 @@ export const POST = withAuth(async (session, req) => {
   if (!isObjectId(body?.product_id)) throw badRequest("product_id ไม่ถูกต้อง");
   await dbConnect();
   const product = await productModel
-    .findOne({ _id: body.product_id, deleted_at: null })
+    .findOne({ _id: body.product_id, deleted_at: null, is_visible: { $ne: false } }) // แชร์ได้แต้มเฉพาะสินค้าที่เปิดขาย
     .select("product_name_th")
     .lean<{ _id: unknown; product_name_th?: string } | null>();
   if (!product) throw notFound("ไม่พบสินค้า");

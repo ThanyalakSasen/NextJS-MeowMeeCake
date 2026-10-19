@@ -15,7 +15,7 @@ import { clientIp } from "@/lib/request";
 import * as accountService from "@/services/accountService";
 
 export const POST = route(async (req: NextRequest) => {
-  rateLimit(clientIp(req), "auth:register", { limit: 5, windowMs: 60_000 });
+  await rateLimit(clientIp(req), "auth:register", { limit: 5, windowMs: 60_000 });
   const body = await parseBody(req, registerBody);
   const birthday = body.user_birthdate ?? body.user_birthday ?? null;
   const result = await accountService.signup({

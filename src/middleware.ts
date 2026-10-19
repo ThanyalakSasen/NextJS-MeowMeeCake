@@ -87,6 +87,7 @@ export async function middleware(req: NextRequest) {
   headers.delete(USER_HEADER); // กัน client ปลอม header
 
   let user: SessionUser | null = null;
+  let clearStaleCookie = false;
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   if (token) {
     try {
@@ -96,6 +97,10 @@ export async function middleware(req: NextRequest) {
       if (!isPublic(pathname)) {
         return respond(deny("SESSION_INVALID", "เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่", 401, true));
       }
+      // cookie เสีย (หมดอายุ / เซ็นด้วย JWT_SECRET อื่น) แล้วถาม /api/auth/me → ลบทิ้งด้วย ไม่งั้น frontend เห็นว่า
+      // "มี cookie" แล้วพา /login → /owner/dashboard → /auth/me 401 → /login วนไม่จบ (เข้าหน้าล็อกอินไม่ได้)
+      // จำกัดแค่ GET /api/auth/me — route ล็อกอินตั้ง cookie ใหม่เอง ถ้าแนบคำสั่งลบไปด้วยอาจทับ cookie ใหม่
+      clearStaleCookie = req.method === "GET" && pathname === "/api/auth/me";
     }
   }
 
@@ -128,7 +133,8 @@ export async function middleware(req: NextRequest) {
     if (!user) return respond(deny("UNAUTHORIZED", "กรุณาเข้าสู่ระบบ", 401));
   }
 
-  return respond(NextResponse.next({ request: { headers } }));
+  const res = respond(NextResponse.next({ request: { headers } }));
+  return clearStaleCookie ? clearSession(res) : res;
 }
 
 export const config = {

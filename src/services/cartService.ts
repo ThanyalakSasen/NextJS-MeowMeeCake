@@ -62,6 +62,13 @@ export async function getOrCreateCart(userId: string) {
   return cartModel.create({ user_id: userId });
 }
 
+/** เหตุผลที่รายการในตะกร้าสั่งไม่ได้แล้ว (product = ค่าที่ populate มา) · null = สั่งได้ */
+export function cartItemUnavailableReason(product: any): string | null {
+  if (!product || typeof product !== "object" || product.deleted_at) return "สินค้านี้ถูกนำออกจากร้านแล้ว";
+  if (product.is_visible === false) return "สินค้านี้ปิดการขายอยู่";
+  return null;
+}
+
 /** ตะกร้าพร้อมรายการและยอดรวม */
 export async function getCartDetail(userId: string) {
   await dbConnect();
@@ -70,7 +77,7 @@ export async function getCartDetail(userId: string) {
   const items = await cartItemModel
     .find({ cart_id: cart._id, deleted_at: null })
     .sort({ added_at: 1 })
-    .populate("product_id", "product_name_th product_name_eng product_img is_preorder is_visible")
+    .populate("product_id", "product_name_th product_name_eng product_img is_preorder is_visible deleted_at")
     .populate("variant_id", "variant_name variant_price")
     .lean();
 
@@ -79,8 +86,12 @@ export async function getCartDetail(userId: string) {
   const line = (items as any[]).map((it) => {
     const lineTotal = (it.price_snapshot ?? 0) * (it.quantity ?? 0);
     const presented = presentCartItem(it);
+    const unavailable_reason = cartItemUnavailableReason(it.product_id);
     return {
       ...presented,
+      // สินค้าถูกลบ/ปิดการขายหลังหยิบใส่ตะกร้า — หน้าเว็บใช้แสดงป้าย + ให้ลูกค้านำออกก่อนสั่ง
+      is_available: unavailable_reason === null,
+      unavailable_reason,
       variant_id:
         presented.variant_id && typeof presented.variant_id === "object"
           ? toBahtFields(presented.variant_id, ["variant_price"] as const)
@@ -99,6 +110,7 @@ export async function getCartDetail(userId: string) {
     items: line,
     summary: {
       item_count: line.length,
+      unavailable_count: line.filter((it) => !it.is_available).length,
       total_quantity: line.reduce((s, it) => s + (it.quantity ?? 0), 0),
       subtotal,
     },

@@ -11,7 +11,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import dbConnect from "../lib/dbConnect";
 import { badRequest } from "../lib/httpError";
-import { deleteImages, saveImages, type MediaKind } from "../lib/upload";
+import { deleteImages, isUploadedUrl, saveImages, type MediaKind } from "../lib/upload";
 import reviewModel from "../models/reviewModel";
 
 const DIR = "reviews";
@@ -25,6 +25,37 @@ const ownerKey = (userId: string) => userId.replace(/[^a-z0-9]/gi, "").toLowerCa
 function fileNameOf(url: string): string | null {
   const m = /\/reviews\/([^/\\?#]+)$/.exec(url);
   return m ? m[1] : null;
+}
+
+const MEDIA_EXT: Record<MediaKind, RegExp> = {
+  image: /\.(jpe?g|png|webp|avif)$/i,
+  video: /\.(mp4|mov|webm)$/i,
+};
+
+/**
+ * รูป/วิดีโอที่แนบกับรีวิวต้องเป็นไฟล์ที่ลูกค้าคนนี้อัปโหลดผ่าน POST /api/shop/reviews/upload เท่านั้น
+ * (โฟลเดอร์ reviews · ชื่อไฟล์ขึ้นต้นด้วย user id · นามสกุลตรงชนิด) — เดิมรับ string อะไรก็ได้: ใส่รูปจากเว็บภายนอก
+ * ขึ้นหน้าสินค้าสาธารณะได้ และใส่ url ปลอมเพื่อรับแต้ม "รีวิวมีรูป"
+ * `keep` = url ที่ติดกับรีวิวนี้อยู่แล้ว (ตอนแก้รีวิว — รีวิวเก่าที่ย้ายมาจากระบบเดิมอาจเป็นรูปแบบอื่น) ผ่านได้เสมอ
+ */
+export function assertOwnReviewMedia(
+  userId: string,
+  media: { image?: string[] | null; video?: string | null },
+  keep: Iterable<string> = []
+): void {
+  const kept = new Set(keep);
+  const prefix = `${ownerKey(userId)}-`;
+  const check = (url: string, kind: MediaKind) => {
+    if (kept.has(url)) return;
+    const name = fileNameOf(url) ?? "";
+    if (!isUploadedUrl(url, DIR) || !name.startsWith(prefix) || !MEDIA_EXT[kind].test(name)) {
+      throw badRequest(
+        `${kind === "image" ? "รูป" : "วิดีโอ"}ประกอบรีวิวต้องเป็นไฟล์ที่อัปโหลดผ่าน POST /api/shop/reviews/upload เท่านั้น`
+      );
+    }
+  };
+  for (const url of media.image ?? []) check(url, "image");
+  if (media.video) check(media.video, "video");
 }
 
 export async function uploadReviewMedia(userId: string, file: File | null, type: unknown): Promise<{ url: string; type: MediaKind }> {

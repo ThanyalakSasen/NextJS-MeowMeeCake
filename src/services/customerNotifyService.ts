@@ -134,7 +134,7 @@ export interface WebNotice {
   type: WebNoticeType;
   /** path ในหน้าเว็บลูกค้า เช่น /customer/account/purchases/<id> */
   link: string | null;
-  ref_type: "order" | "preorder" | null;
+  ref_type: "order" | "preorder" | "review" | null;
   ref_id: unknown;
   /** เลขเอกสาร — ใช้ข้ามบิลหน้าร้าน (POS-) */
   doc_no?: string | null;
@@ -146,11 +146,32 @@ function docPath(kind: CustomerDocKind, id: unknown): string {
   return kind === "order" ? `/customer/account/purchases/${String(id)}` : `/customer/account/preorders/${String(id)}`;
 }
 
-/** ข้อความ LINE + บรรทัดลิงก์หน้าคำสั่งซื้อ — เฉพาะ path ในเว็บลูกค้า และตั้ง URL หน้าเว็บไว้แล้ว */
+/** หน้า "รีวิวของฉัน" ของลูกค้า — ลิงก์จากแจ้งเตือน "ร้านตอบกลับรีวิว" */
+export const MY_REVIEWS_PATH = "/customer/account/reviews";
+
+/** ข้อความ LINE + บรรทัดลิงก์หน้าคำสั่งซื้อ (หรือหน้ารีวิวของฉัน) — เฉพาะ path ในเว็บลูกค้า และตั้ง URL หน้าเว็บไว้แล้ว */
 export function withDocLink(text: string, link: string | null | undefined): string {
   const base = storefrontBase();
   if (!base || !link || !link.startsWith("/customer/")) return text;
-  return `${text}\n\n👉 ดูคำสั่งซื้อ / ชำระเงิน\n${base}${link}`;
+  const label = link.startsWith(MY_REVIEWS_PATH) ? "👉 ดูรีวิวของคุณ" : "👉 ดูคำสั่งซื้อ / ชำระเงิน";
+  return `${text}\n\n${label}\n${base}${link}`;
+}
+
+/** ข้อความ LINE + กระดิ่ง เมื่อร้านตอบกลับรีวิว (ตัดข้อความยาวให้สั้นพอดูในแจ้งเตือน) */
+export function reviewReplyNotice(reviewId: unknown, productName: string, replyText: string): { text: string; notice: WebNotice } {
+  const excerpt = replyText.length > 120 ? `${replyText.slice(0, 120)}…` : replyText;
+  const product = productName || "สินค้า";
+  return {
+    text: `💬 ร้านตอบกลับรีวิว "${product}" ของคุณแล้ว\n"${excerpt}"`,
+    notice: {
+      title: `ร้านตอบกลับรีวิว ${product}`,
+      message: excerpt,
+      type: "info",
+      link: MY_REVIEWS_PATH,
+      ref_type: "review",
+      ref_id: reviewId ?? null,
+    },
+  };
 }
 function docTitle(kind: CustomerDocKind, docNo: string): string {
   return kind === "order" ? `คำสั่งซื้อ #${docNo}` : `พรีออเดอร์ #${docNo}`;
@@ -274,7 +295,7 @@ export async function notifyCustomer(userId: unknown, text: string | null, notic
 
     const result = await pushLineMessage(withDocLink(text, notice?.link), user.line_user_id);
     if (result.ok) {
-      recordPushed();
+      await recordPushed();
     } else {
       log.warn("customer_notify.line_push_failed", { user_id: id, error: result.error });
       if (isQuotaExceededError(result.error)) await alertQuotaExhausted();

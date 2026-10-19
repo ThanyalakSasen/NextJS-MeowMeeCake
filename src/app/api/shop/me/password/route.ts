@@ -15,7 +15,7 @@ import { attachSession } from "@/lib/session";
 import * as userService from "@/services/userService";
 
 export const PATCH = withAuth(async (session, req) => {
-  rateLimit(clientIp(req), "me:password", { limit: 5, windowMs: 60_000 });
+  await rateLimit(clientIp(req), "me:password", { limit: 5, windowMs: 60_000 });
   const body = await req.json().catch(() => ({}));
   const current = body.current_password ?? body.currentPassword;
   const next = body.new_password ?? body.newPassword;

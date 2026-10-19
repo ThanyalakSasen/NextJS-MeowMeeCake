@@ -13,7 +13,7 @@ export const dynamic = "force-dynamic";
 
 export const POST = withAuth(async (session, req) => {
   requireRole(session, "owner");
-  rateLimit(session.user_id, "admin:map-link", { limit: 20, windowMs: 10 * 60_000 });
+  await rateLimit(session.user_id, "admin:map-link", { limit: 20, windowMs: 10 * 60_000 });
   const body = await req.json().catch(() => null);
   return ok(await storeService.resolveMapLink(body?.url));
 });

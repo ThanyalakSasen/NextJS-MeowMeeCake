@@ -29,7 +29,7 @@ export async function sendContactMessage(userId: string, body: { topic?: unknown
   if (!user) throw notFound("ไม่พบบัญชีผู้ใช้");
 
   // 1 ข้อความต่อนาทีต่อบัญชี (429) — นับหลังตรวจข้อมูลผ่าน (กรอกผิดแล้วแก้ส่งใหม่ได้ทันที)
-  rateLimit(userId, "shop:contact", { limit: 1, windowMs: 60_000 });
+  await rateLimit(userId, "shop:contact", { limit: 1, windowMs: 60_000 });
 
   const email = user.email && !isPlaceholderEmail(user.email) ? user.email : "";
   const contact = [user.user_phone ? `โทร ${user.user_phone}` : "", email ? `อีเมล ${email}` : ""]

@@ -28,7 +28,7 @@ export const GET = route(async (req: NextRequest) => {
   if (!config) throw badRequest("ระบบยังไม่ได้ตั้งค่าการเข้าสู่ระบบด้วย LINE");
 
   try {
-    rateLimit(clientIp(req), "auth:line", { limit: 10, windowMs: 60_000 });
+    await rateLimit(clientIp(req), "auth:line", { limit: 10, windowMs: 60_000 });
   } catch (err) {
     if (!isHttpError(err)) throw err;
     const back = new URL(config.returnUrl);

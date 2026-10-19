@@ -110,7 +110,7 @@ cd /srv/meowmeecake/app && git pull && npm ci && npm run build && pm2 reload meo
 curl -s http://127.0.0.1:3000/api/health   # → {"ok":true,"db":"connected"}
 ```
 
-รัน **instance เดียว** เท่านั้น (ห้าม `pm2 -i max` / cluster — [`docs/DEPLOY.md`](docs/DEPLOY.md) ⑤)
+รันหลาย instance ได้ (rate limit / cache / โควตา LINE แชร์ผ่าน MongoDB — BACKLOG5 G6) · หลายเครื่องต้อง `UPLOAD_DRIVER=s3` ([`docs/DEPLOY.md`](docs/DEPLOY.md) ⑤)
 
 ### 4. หลัง deploy
 

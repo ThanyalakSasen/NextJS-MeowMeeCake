@@ -14,6 +14,7 @@ import mongoose from "mongoose";
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict } from "../lib/httpError";
 import { log } from "../lib/logger";
+import { bangkokDateString } from "../lib/datetime";
 import pointTransactionModel from "../models/pointTransactionModel";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
@@ -38,6 +39,8 @@ export const POINT_RULES = {
   REVIEW: 15,
   REVIEW_PHOTO: 20,
   SHARE: 5,
+  /** ได้แต้มแชร์สูงสุดกี่ครั้งต่อวัน (เวลาไทย) — ตรวจไม่ได้ว่าแชร์จริง จึงจำกัดเพดานกันปั๊มแต้มจากทุกสินค้าในร้าน */
+  SHARE_DAILY_LIMIT: 3,
   PROFILE: 10,
 } as const;
 
@@ -427,8 +430,26 @@ export async function getMyPoints(userId: string) {
   };
 }
 
-/** แชร์สินค้า — ได้แต้มครั้งเดียวต่อสินค้า */
+/** จำนวนครั้งที่ได้แต้มแชร์ตั้งแต่เที่ยงคืนวันนี้ (เวลาไทย) */
+async function shareAwardsToday(userId: string): Promise<number> {
+  const startOfDay = new Date(`${bangkokDateString()}T00:00:00+07:00`);
+  return pointTransactionModel.countDocuments({
+    user_id: userId,
+    type: "earn",
+    source: "share",
+    created_at: { $gte: startOfDay },
+  });
+}
+
+/**
+ * แชร์สินค้า — ได้แต้มครั้งเดียวต่อสินค้า และไม่เกิน SHARE_DAILY_LIMIT ครั้งต่อวัน
+ * (backend ตรวจไม่ได้ว่าแชร์จริง — เดิมยิง API วนทุกสินค้าในร้านได้แต้มทันที)
+ */
 export async function awardShare(userId: string, product: { _id: unknown; product_name_th?: string }) {
+  await dbConnect();
+  if ((await shareAwardsToday(userId)) >= POINT_RULES.SHARE_DAILY_LIMIT) {
+    return { awarded: 0, daily_limit_reached: true };
+  }
   const lot = await awardPoints({
     userId,
     source: "share",
@@ -438,6 +459,13 @@ export async function awardShare(userId: string, product: { _id: unknown; produc
     refType: "product",
     refId: product._id,
   });
-  return { awarded: lot ? POINT_RULES.SHARE : 0 };
+  if (!lot) return { awarded: 0, daily_limit_reached: false };
+  // นับซ้ำหลังให้ (optimistic) — ยิงพร้อมกันหลายสินค้าผ่านเช็คด้านบนได้ทุกคำขอ → นับแล้วเกินเพดาน ลบล็อตของตัวเองทิ้ง
+  // (ล็อตเพิ่งสร้าง ยังไม่ถูกใช้ ลบได้ปลอดภัย · ลบแล้วแชร์สินค้านี้ใหม่วันอื่นได้) · ไม่เกินเพดานแน่นอน แต่ยิงพร้อมกันอาจได้น้อยกว่า
+  if ((await shareAwardsToday(userId)) > POINT_RULES.SHARE_DAILY_LIMIT) {
+    await pointTransactionModel.deleteOne({ _id: lot._id, remaining: lot.points });
+    return { awarded: 0, daily_limit_reached: true };
+  }
+  return { awarded: POINT_RULES.SHARE, daily_limit_reached: false };
 }
 

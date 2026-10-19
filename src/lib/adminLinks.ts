@@ -15,4 +15,6 @@ export const adminLinks = {
   products: "/owner/products",
   ingredients: "/owner/ingredients",
   dashboard: "/owner/dashboard",
+  /** หน้ารายงานความคิดเห็น แท็บจัดการรีวิว กรอง "รีวิวแย่ที่ยังไม่ตอบ" ไว้ให้ (frontend อ่าน ?view=) */
+  reviewsNeedsReply: "/owner/reports/reviews?view=negative_unreplied",
 } as const;

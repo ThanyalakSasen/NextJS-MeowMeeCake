@@ -65,6 +65,12 @@ const productSchema = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    ships_nationwide: {
+      // ออเดอร์เว็บส่งทั่วประเทศได้ไหม — ยกเว้นรายสินค้า · null/ไม่มี = ตามหมวด (ProductCategories.ships_nationwide)
+      // ตั้งที่ "จัดส่งนอกจังหวัด" (/api/admin/shipping-zones/products) · ใช้คิดใน lib/shipping.ts productShipsNationwide
+      type: Boolean,
+      default: null,
+    },
     product_img: {
       type: [String],
       default: [],

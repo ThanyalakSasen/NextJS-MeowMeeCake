@@ -190,7 +190,10 @@ interface PricedLine {
 // ประการต่อรายการ มีต่างแค่ "ลำดับ" ของ error เมื่อมีหลายรายการผิดพร้อมกัน (เช็ค quantity/รูปแบบ id
 // ของทุกรายการก่อน แล้วค่อยเช็คสิ่งที่ต้องรู้ผลจาก DB ทีละรายการตามลำดับเดิม — ไม่มีเทสไหนอิงลำดับ error
 // ข้ามรายการอยู่แล้ว)
-async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
+async function resolveLines(
+  inputs: OrderLineInput[],
+  opts: { storefront?: boolean } = {}
+): Promise<PricedLine[]> {
   // 1) validate รูปแบบ (sync, ไม่ต้องรอ DB) ให้ครบทุกรายการก่อน
   const quantities = inputs.map((input) => {
     const quantity = Number(input.quantity);
@@ -216,6 +219,11 @@ async function resolveLines(inputs: OrderLineInput[]): Promise<PricedLine[]> {
 
     const product = productById.get(String(input.product_id));
     if (!product) throw notFound(`ไม่พบสินค้า ${input.product_id}`);
+    // หน้าเว็บลูกค้า: สินค้าที่ร้านปิดการขายสั่งไม่ได้ (ตะกร้าบล็อกตอนหยิบแล้ว แต่ต้องตรวจซ้ำตอนสั่ง —
+    // ของที่ค้างในตะกร้าก่อนร้านปิดขาย / ยิง source "items" ตรง ๆ) · หลังร้าน/POS ยังขายได้ตามเดิม
+    if (opts.storefront && product.is_visible === false) {
+      throw badRequest(`สินค้า "${product.product_name_th}" ปิดการขายอยู่ กรุณานำออกจากรายการก่อนสั่งซื้อ`);
+    }
     if (isPreorderProduct(product)) {
       throw badRequest(
         `สินค้า "${product.product_name_th}" เป็นสินค้าพรีออเดอร์ ต้องสั่งผ่านระบบพรีออเดอร์ (Preorders) ไม่ใช่ออเดอร์ปกติ`
@@ -524,6 +532,24 @@ export async function createOrderFromCart(
   const detail = await cartService.getCartDetail(userId);
   if (detail.items.length === 0) throw badRequest("ตะกร้าว่าง ไม่สามารถสร้างออเดอร์ได้");
 
+  // สินค้าที่ถูกลบ/ปิดการขายหลังหยิบใส่ตะกร้า — บอกชัดว่าชิ้นไหน (เดิมได้ error "product_id ไม่ถูกต้อง" ที่ลูกค้าแก้เองไม่ได้)
+  const unavailable = (detail.items as any[]).filter((it) => it.is_available === false);
+  if (unavailable.length > 0) {
+    const names = unavailable.map((it) => it.product_id?.product_name_th).filter(Boolean);
+    throw badRequest(
+      `ในตะกร้ามีสินค้าที่สั่งไม่ได้แล้ว ${unavailable.length} รายการ` +
+        (names.length ? ` (${names.join(", ")})` : "") +
+        " — กรุณานำออกจากตะกร้าก่อนสั่งซื้อ",
+      {
+        unavailable_items: unavailable.map((it) => ({
+          cart_item_id: String(it._id),
+          product_name_th: it.product_id?.product_name_th ?? null,
+          reason: it.unavailable_reason,
+        })),
+      }
+    );
+  }
+
   // ออเดอร์ปกติเก็บเฉพาะ inStore/online — สินค้าพรีออเดอร์ต้องไปทางระบบ Preorders (preorderModel)
   const preorderInCart = (detail.items as any[]).find(
     (it) => isPreorderProduct(it.product_id)
@@ -557,7 +583,7 @@ export async function createOrderFromCart(
       quantity: it.quantity,
     };
   });
-  const lines = await resolveLines(lineInputs);
+  const lines = await resolveLines(lineInputs, { storefront: input.storefront });
 
   const order = await persistOrder(userId, lines, input);
   // เคลียร์ตะกร้า — best-effort เหมือน notify ด้านบน: ออเดอร์ commit สำเร็จไปแล้ว (persistOrder
@@ -577,7 +603,7 @@ export async function createOrder(userId: string, input: CreateOrderInput) {
   if (!Array.isArray(input.items) || input.items.length === 0) {
     throw badRequest("ต้องระบุ items อย่างน้อย 1 รายการ");
   }
-  const lines = await resolveLines(input.items);
+  const lines = await resolveLines(input.items, { storefront: input.storefront });
 
   return persistOrder(userId, lines, input);
 }
@@ -702,16 +728,38 @@ export async function updateOrderStatus(
     throw badRequest(`order_status ต้องเป็นหนึ่งใน: ${ORDER_STATUSES.join(", ")}`);
   }
 
-  const order = await orderModel.findOne({ _id: id, deleted_at: null });
-  if (!order) throw notFound("ไม่พบออเดอร์ที่ระบุ");
+  const existing = await orderModel.findOne({ _id: id, deleted_at: null });
+  if (!existing) throw notFound("ไม่พบออเดอร์ที่ระบุ");
 
-  const current = order.order_status as OrderStatus;
+  const current = existing.order_status as OrderStatus;
   // BACKLOG3 §5 — เดิม getOrderById(id) ทุกจุด (re-query ทั้ง header + items ทั้งที่มี document อยู่
   // ในมือแล้ว) เปลี่ยนมา populate user_id บน document นี้ตรง ๆ แทน — ประหยัด query header ได้เสมอ
   // ส่วนสาขา cancelled ประหยัด query items ได้ด้วย (มี items อยู่ในมือแล้วจากตอนคำนวณ stockItems)
-  if (current === next) return presentOrderWithItems(order);
+  if (current === next) return presentOrderWithItems(existing);
   if (!NEXT_STATUS[current].includes(next)) {
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
+  }
+  if (next === "cancelled" && opts.cancelled_by) assertObjectId(opts.cancelled_by, "cancelled_by");
+
+  // จองการเปลี่ยนสถานะแบบ atomic ก่อนทำ side effect (คืนสต็อก/สิทธิ์โปร/คืนเงิน) — เดิมอ่าน → คืนสต็อก → save
+  // ทำให้คำขอยกเลิกที่มาพร้อมกัน (cron หมดเวลาชำระ + หน้าเว็บที่ยกเลิกแบบ lazy หลาย endpoint + ลูกค้ากดเอง)
+  // ต่างคนต่างคืนสต็อก → สต็อกเกินจริง · ตอนนี้มีคำขอเดียวที่เปลี่ยนจาก `current` ได้ คำขออื่นไม่แตะสต็อก
+  const set: Record<string, unknown> = { order_status: next };
+  if (next === "cancelled") {
+    set.cancelled_at = new Date();
+    set.cancelled_reason = opts.cancelled_reason ?? null;
+    if (opts.cancelled_by) set.cancelled_by = opts.cancelled_by;
+  }
+  const order = await orderModel.findOneAndUpdate(
+    { _id: existing._id, order_status: current, deleted_at: null },
+    { $set: set },
+    { returnDocument: "after" }
+  );
+  if (!order) {
+    // มีคำขออื่นเปลี่ยนสถานะไปก่อน — ถ้าไปถึงสถานะเดียวกันแล้วถือว่าสำเร็จ (idempotent) ไม่งั้น 409
+    const latest = await orderModel.findOne({ _id: existing._id, deleted_at: null });
+    if (latest && latest.order_status === next) return presentOrderWithItems(latest);
+    throw conflict("สถานะออเดอร์เปลี่ยนไปแล้ว กรุณาโหลดหน้าใหม่");
   }
 
   let cancelledItems: any[] | undefined;
@@ -749,17 +797,8 @@ export async function updateOrderStatus(
     }
 
     await cleanup.rollback();
-
-    order.cancelled_at = new Date();
-    if (opts.cancelled_by) {
-      assertObjectId(opts.cancelled_by, "cancelled_by");
-      order.cancelled_by = opts.cancelled_by;
-    }
-    order.cancelled_reason = opts.cancelled_reason ?? null;
   }
 
-  order.order_status = next;
-  await order.save();
   // แต้ม + คูปอง (customer-backend-merge.md §8.11): completed = ให้แต้ม · cancelled = คืนแต้มที่ใช้/ดึงแต้มที่ได้ + คืนคูปอง
   if (next === "completed" || next === "cancelled") {
     await pointsService.syncOrderPoints("order", order.toObject());
@@ -945,13 +984,53 @@ export async function expireUnpaidOrders(
     if (await hasSubmittedSlip(o._id)) continue;
     try {
       await updateOrderStatus(String(o._id), "cancelled", { cancelled_reason: PAYMENT_EXPIRED_REASON });
-      expired.push(String(o.order_no ?? o._id));
+      // ลูกค้าอาจแนบสลิปเข้ามาระหว่างเช็คด้านบนกับการยกเลิก → ตรวจซ้ำหลังยกเลิก (คู่กับ paymentService ที่ตรวจซ้ำหลังบันทึกสลิป)
+      const reopened = await reconcileExpiredWithSlip(String(o._id));
+      if (!reopened) expired.push(String(o.order_no ?? o._id));
     } catch (err) {
       log.error("order.expire_failed", { order_id: String(o._id), err });
     }
   }
   if (expired.length) log.info("order.expired_unpaid", { count: expired.length, orders: expired });
   return { expired };
+}
+
+/**
+ * ออเดอร์ถูกยกเลิกเพราะหมดเวลาชำระ "ทั้งที่มีสลิปรอตรวจ" (แนบสลิปชนกับ cron/การยกเลิกแบบ lazy) → เปิดกลับให้
+ * เรียกทั้งหลังยกเลิกเพราะหมดเวลา (expireUnpaidOrders) และหลังบันทึกสลิป (paymentService) — ฝั่งใดฝั่งหนึ่งจะเห็นอีกฝั่งเสมอ
+ * เปิดกลับไม่ได้ (ใช้แต้ม/คูปองที่คืนไปแล้ว หรือของหมด) → แจ้งร้านให้ตรวจสลิปแล้วคืนเงิน · คืน true = เปิดกลับแล้ว
+ */
+export async function reconcileExpiredWithSlip(orderId: string): Promise<boolean> {
+  await dbConnect();
+  const load = () =>
+    orderModel
+      .findOne({ _id: orderId, deleted_at: null })
+      .select("order_no order_status payment_status cancelled_reason points_redeemed user_coupon_id")
+      .lean<any>();
+  const order = await load();
+  if (!order || order.order_status !== "cancelled" || order.cancelled_reason !== PAYMENT_EXPIRED_REASON) return false;
+  if (!(await hasSubmittedSlip(order._id))) return false;
+
+  if (canReopenWithLateSlip(order)) {
+    try {
+      await reopenExpiredOrder(orderId);
+      return true;
+    } catch (err) {
+      if (!(isHttpError(err) && err.status === 409)) throw err;
+      // 409 = ของหมด หรือมีคำขออื่นเปิดกลับไปก่อนแล้ว — ถ้าไม่ได้ถูกยกเลิกอยู่แล้ว ไม่ต้องแจ้งร้าน
+      if ((await load())?.order_status !== "cancelled") return true;
+    }
+  }
+  notificationService
+    .notify({
+      title: `สลิปเข้ามาหลังออเดอร์ ${order.order_no ?? ""} ถูกยกเลิกเพราะหมดเวลาชำระ`.replace(/\s+/g, " "),
+      message: "เปิดคำสั่งซื้อกลับอัตโนมัติไม่ได้ (ของหมด หรือใช้แต้ม/คูปองไว้) — ตรวจสลิป ถ้าโอนจริงให้ติดต่อลูกค้าและโอนคืน",
+      module: "finance",
+      type: "warning",
+      link: adminLinks.order(orderId),
+    })
+    .catch((err) => log.error("order.late_slip_notify_failed", { order_id: orderId, err }));
+  return false;
 }
 
 /** ออเดอร์นี้ถูกยกเลิกเพราะหมดเวลาชำระ และยังไม่ได้จ่าย → ลูกค้าแนบสลิปย้อนหลังเพื่อเปิดกลับได้ */
