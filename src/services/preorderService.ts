@@ -437,7 +437,7 @@ export async function createPreorder(
     // link → หน้าพรีออเดอร์ (เปิด drawer ด้วย ?id= — frontend PR #16)
     notificationService
       .notify({
-        title: `เปิดพรีออเดอร์รอบใหม่ ${preorder.preorder_no}`,
+        title: `พรีออเดอร์ใหม่ ${preorder.preorder_no}`,
         message: `รอบ ${round.round_name ?? "-"} · ยอดรวม ${toBaht(total_amount).toLocaleString("th-TH")} บาท`,
         module: "order",
         type: "info",

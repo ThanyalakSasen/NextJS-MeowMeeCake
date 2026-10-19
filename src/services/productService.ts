@@ -43,12 +43,11 @@ function notifyIfLowStockCrossed(
 ): void {
   const threshold = effectiveLowStockThreshold(product);
   if (!crossedLowStock(threshold, before, after)) return;
-  // หมายเหตุ: enum module ไม่มีหมวด "product" แยก — ใช้ "ingredient" ร่วมกัน (หมวดสต็อกสินค้าคงคลัง)
   notificationService
     .notify({
       title: `สินค้าใกล้จะหมด: ${product.product_name_th}`,
       message: `คงเหลือ ${after} ชิ้น (เกณฑ์แจ้งเตือน ${threshold})`,
-      module: "ingredient",
+      module: "product",
       type: "warning",
       link: adminLinks.product(product._id),
     })

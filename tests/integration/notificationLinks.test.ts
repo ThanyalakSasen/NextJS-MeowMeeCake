@@ -59,7 +59,7 @@ describe("ลิงก์แจ้งเตือน → หน้าหลั�
 
   it("พรีออเดอร์ใหม่ + สลิปของพรีออเดอร์ → หน้าพรีออเดอร์ ?tab=orders&id=", async () => {
     const { user, pre } = await preorderSetup();
-    const created = await waitNote(new RegExp(`^เปิดพรีออเดอร์รอบใหม่ ${pre.preorder_no}`));
+    const created = await waitNote(new RegExp(`^พรีออเดอร์ใหม่ ${pre.preorder_no}`));
     expect(created.link).toBe(adminLinks.preorder(pre._id));
 
     const payment = (await paymentService.createPayment({
