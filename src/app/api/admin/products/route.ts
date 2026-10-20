@@ -10,7 +10,7 @@ import { parseBool, parsePagination } from "@/lib/queryParams";
 import * as productService from "@/services/productService";
 import { isPreorderFilterFrom } from "@/lib/productCode";
 
-export const GET = withPermission("products", "view", async (_s, req) => {
+export const GET = withPermission(["products", "pricing", "promotions", "recipes", "production", "preorder", "reports_sales", "search_synonyms"], "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await productService.getProducts({
     pagination: parsePagination(sp),

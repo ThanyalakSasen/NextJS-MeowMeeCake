@@ -7,7 +7,7 @@ import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
 import { reorderAspects } from "@/services/sentimentService";
 
-export const PATCH = withPermission("reports", "update", async (_s, req) => {
+export const PATCH = withPermission("reports_reviews", "update", async (_s, req) => {
   const body = await req.json().catch(() => null);
   const items = await reorderAspects(body?.orderedIds);
   audit(req, { action: "จัดลำดับแง่มุมรีวิว", action_type: "UPDATE", entity: "Aspect" });

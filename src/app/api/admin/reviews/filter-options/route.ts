@@ -8,4 +8,4 @@ import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import * as reviewModerationService from "@/services/reviewModerationService";
 
-export const GET = withPermission("reports", "view", async () => ok(await reviewModerationService.getFilterOptions()));
+export const GET = withPermission("reports_reviews", "view", async () => ok(await reviewModerationService.getFilterOptions()));

@@ -10,7 +10,7 @@ import { assertMayGrantExisting } from "@/services/permissionCeiling";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const POST = withPermission("employees", "update", async (session, req, ctx: Ctx) => {
+export const POST = withPermission("permissions", "update", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   await assertMayGrantExisting(session, id);
   const result = await permissionService.restorePermission(id);

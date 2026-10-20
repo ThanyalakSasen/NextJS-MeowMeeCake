@@ -7,4 +7,4 @@ import { okList } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import * as shippingService from "@/services/shippingService";
 
-export const GET = withPermission("store_info", "view", async () => okList(await shippingService.listCategoryShipping()));
+export const GET = withPermission("shipping", "view", async () => okList(await shippingService.listCategoryShipping()));

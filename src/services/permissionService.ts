@@ -16,6 +16,8 @@ import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import permissionModel from "../models/permissionModel";
 import roleModel from "../models/roleModel";
 import userModel from "../models/userModel";
+import migrationModel from "../models/migrationModel";
+import { log } from "../lib/logger";
 import type { z } from "zod";
 import type { permissionUpdate } from "../schemas/rbac";
 
@@ -23,22 +25,9 @@ import type { permissionUpdate } from "../schemas/rbac";
 
 type UpdatePermissionInput = z.infer<typeof permissionUpdate>;
 
-export const MENU_KEYS = [
-  "orders",
-  "preorder",
-  "payments",
-  "products",
-  "ingredients",
-  "stock",
-  "recipes",
-  "production",
-  "employees",
-  "dashboard",
-  "promotions",
-  "reports",
-  "store_info",
-] as const;
-export type MenuKey = (typeof MENU_KEYS)[number];
+// รายชื่อ key + ที่มาของ key หน้าย่อย อยู่ที่ src/lib/menuKeys.ts (model · schema · authGuard ใช้ร่วมกัน)
+export { MENU_KEYS, LEGACY_MENU_KEYS, SUBMENU_PARENT, type MenuKey } from "../lib/menuKeys";
+import { MENU_KEYS, SUBMENU_PARENT, type MenuKey } from "../lib/menuKeys";
 
 const FLAG_FIELDS = [
   "can_view",
@@ -137,6 +126,7 @@ export async function createPermission(input: CreatePermissionInput) {
 // ── READ (list) ──────────────────────────────────────────────
 export async function listPermissions(query: ListPermissionQuery) {
   await dbConnect();
+  await ensureSubmenuPermissions();
 
   const filter: Record<string, any> = {};
   if (!query.includeDeleted) filter.deleted_at = null;
@@ -231,6 +221,7 @@ export async function restorePermission(id: string) {
 export async function getEffectivePermissions(roleId: string): Promise<EffectivePermissions> {
   await dbConnect();
   assertObjectId(roleId, "role_id");
+  await ensureSubmenuPermissions();
 
   return permissionCache.getOrLoad(roleId, async () => {
     const now = new Date();
@@ -270,4 +261,63 @@ export async function getMenuAccess(session: { role_id: string; role_type: strin
       Object.fromEntries(FLAG_FIELDS.map((f) => [f, isOwner ? true : !!effective?.permissions[menu]?.[f]])),
     ])
   ) as MenuAccess;
+}
+
+// ── ย้ายสิทธิ์ไปหน้าย่อย (ครั้งเดียว) ───────────────────────────────
+// แยก key ตามหน้าย่อย (src/lib/menuKeys.ts) — บทบาทที่มีแถวสิทธิ์ของ key เดิม ได้แถวของ key หน้าย่อยที่ยังไม่มี
+// ด้วยค่าเดียวกัน (ดู/เพิ่ม/แก้/ลบ/อนุมัติ + วันหมดอายุ) → ทุกคนเข้าหน้าเดิมได้เหมือนก่อนแยก
+// รันอัตโนมัติก่อนอ่านสิทธิ์ครั้งแรกของ process (ไม่ต้องสั่งสคริปต์ตอน deploy) · ทำแล้วบันทึกใน Migrations ไม่รันซ้ำ —
+// รันซ้ำจะคืนสิทธิ์หน้าย่อยที่เจ้าของร้านลบไปแล้ว · หลาย instance รันพร้อมกัน = unique index (role_id, menu_key) กันแถวซ้ำ
+const SUBMENU_MIGRATION_ID = "submenu-permissions-v1";
+let submenuMigration: Promise<void> | null = null;
+
+export function ensureSubmenuPermissions(): Promise<void> {
+  submenuMigration ??= migrateSubmenuPermissions().catch((err) => {
+    submenuMigration = null; // ล้มแล้วลองใหม่รอบถัดไป — ไม่ปล่อยให้ทุก request พังตาม (อ่านสิทธิ์ต่อได้ตามแถวที่มี)
+    log.error("submenu permission migration failed", { err: String(err) });
+  });
+  return submenuMigration;
+}
+
+/** ตัวย้ายจริง (export ให้เทสต์เรียกซ้ำได้หลังล้าง DB) — โค้ดปกติเรียกผ่าน ensureSubmenuPermissions */
+export async function migrateSubmenuPermissions(): Promise<void> {
+  await dbConnect();
+  if (await migrationModel.exists({ _id: SUBMENU_MIGRATION_ID })) return;
+
+  const children = Object.entries(SUBMENU_PARENT) as [MenuKey, MenuKey][];
+  const parents = [...new Set(children.map(([, p]) => p))];
+  const rows = await permissionModel
+    .find({ menu_key: { $in: parents }, deleted_at: null })
+    .lean<Array<Record<string, any>>>();
+  const existing = await permissionModel
+    .find({ menu_key: { $in: children.map(([c]) => c) }, deleted_at: null })
+    .select("role_id menu_key")
+    .lean<Array<{ role_id: unknown; menu_key: string }>>();
+  const has = new Set(existing.map((r) => `${String(r.role_id)}:${r.menu_key}`));
+
+  let created = 0;
+  for (const row of rows) {
+    for (const [child, parent] of children) {
+      if (parent !== row.menu_key || has.has(`${String(row.role_id)}:${child}`)) continue;
+      try {
+        await permissionModel.create({
+          role_id: row.role_id,
+          menu_key: child,
+          granted_by: row.granted_by,
+          expires_at: row.expires_at ?? null,
+          ...Object.fromEntries(FLAG_FIELDS.map((f) => [f, !!row[f]])),
+        });
+        created++;
+      } catch (err: any) {
+        if (err?.code !== 11000) throw err; // instance อื่นสร้างไปแล้ว
+      }
+    }
+  }
+  try {
+    await migrationModel.create({ _id: SUBMENU_MIGRATION_ID, detail: { created } });
+  } catch (err: any) {
+    if (err?.code !== 11000) throw err;
+  }
+  if (created) await invalidatePermissionCache();
+  log.info("submenu permissions migrated", { created });
 }

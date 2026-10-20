@@ -11,7 +11,7 @@ export const { GET, POST } = collectionRoutes(unitService, {
     usage_context: sp.get("usage_context") ?? undefined,
   }),
   // อ่านหน่วยนับได้จากหน้าวัตถุดิบ · สูตร · สต็อกด้วย (เดิมต้องมี products.view — frontend Final-Backlog P2)
-  auth: { menu: "products", readMenus: ["ingredients", "recipes", "stock"] },
+  auth: { menu: "units", readMenus: ["products", "ingredients", "recipes", "stock", "production"] },
   audit: { entity: "Unit" },
   validate: { create: unitCreate },
 });

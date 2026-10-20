@@ -4,7 +4,7 @@ import { aspectUpdate } from "@/schemas/sentiment";
 import { aspectService } from "@/services/sentimentService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(aspectService, {
-  auth: { menu: "reports" },
+  auth: { menu: "reports_reviews" },
   audit: { entity: "Aspect" },
   validate: { update: aspectUpdate },
 });

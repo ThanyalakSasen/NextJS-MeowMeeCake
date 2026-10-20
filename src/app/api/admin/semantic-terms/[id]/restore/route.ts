@@ -3,6 +3,6 @@ import { restoreRoute } from "@/lib/crudRoutes";
 import { semanticTermService } from "@/services/sentimentService";
 
 export const { POST } = restoreRoute(semanticTermService, {
-  auth: { menu: "reports" },
+  auth: { menu: "reports_reviews" },
   audit: { entity: "SemanticTerm" },
 });

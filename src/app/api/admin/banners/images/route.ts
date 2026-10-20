@@ -15,7 +15,7 @@ import { audit } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import { saveImages } from "@/lib/upload";
 
-export const POST = withPermission("products", "update", async (_s, req) => {
+export const POST = withPermission("store_design", "update", async (_s, req) => {
   const form = await req.formData().catch(() => null);
   if (!form) throw badRequest("ต้องส่งเป็น multipart/form-data");
 

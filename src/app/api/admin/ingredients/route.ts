@@ -9,7 +9,7 @@ export const { GET, POST } = collectionRoutes(ingredientService, {
   filterFromQuery: (sp) => ({
     ingredient_category_id: sp.get("ingredient_category_id") ?? undefined,
   }),
-  auth: { menu: "ingredients" },
+  auth: { menu: "ingredients", readMenus: ["ingredient_stock", "ingredient_history", "recipes"] },
   audit: { entity: "Ingredient" },
   validate: { create: ingredientCreate },
 });

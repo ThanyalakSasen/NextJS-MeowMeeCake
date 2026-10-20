@@ -20,12 +20,12 @@ const MODERATE_FIELDS: Record<string, string[]> = {
   shop_reply_text: ["shop_reply"],
 };
 
-export const GET = withPermission("reports", "view", async (_s, _r, ctx: Ctx) => {
+export const GET = withPermission("reports_reviews", "view", async (_s, _r, ctx: Ctx) => {
   const { id } = await ctx.params;
   return ok(await reviewService.getReviewById(id));
 });
 
-export const PATCH = withPermission("reports", "update", async (session, req, ctx: Ctx) => {
+export const PATCH = withPermission("reports_reviews", "update", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await req.json().catch(() => null);
   const before = await reviewService.getReviewById(id).catch(() => undefined);
@@ -45,7 +45,7 @@ export const PATCH = withPermission("reports", "update", async (session, req, ct
   return ok(doc);
 });
 
-export const DELETE = withPermission("reports", "delete", async (_s, req, ctx: Ctx) => {
+export const DELETE = withPermission("reports_reviews", "delete", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const before = await reviewService.getReviewById(id).catch(() => undefined);
   const result = await reviewService.deleteReview(id);

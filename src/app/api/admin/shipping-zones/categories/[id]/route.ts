@@ -13,7 +13,7 @@ import * as shippingService from "@/services/shippingService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const PATCH = withPermission("store_info", "update", async (_s, req, ctx: Ctx) => {
+export const PATCH = withPermission("shipping", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const { ships_nationwide, reset_products } = await parseBody(req, categoryShippingUpdate);
   const { before, after, products_reset } = await shippingService.setCategoryShipsNationwide(id, ships_nationwide, {

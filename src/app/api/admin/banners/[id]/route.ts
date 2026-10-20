@@ -4,7 +4,7 @@ import { bannerUpdate } from "@/schemas/catalog";
 import { bannerService } from "@/services/bannerService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(bannerService, {
-  auth: { menu: "products" },
+  auth: { menu: "store_design" },
   audit: { entity: "Banner" },
   validate: { update: bannerUpdate },
 });

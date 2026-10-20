@@ -10,7 +10,7 @@ import { withPermission } from "@/lib/authGuard";
 import { parsePagination } from "@/lib/queryParams";
 import * as reviewModerationService from "@/services/reviewModerationService";
 
-export const GET = withPermission("reports", "view", async (_s, req) => {
+export const GET = withPermission("reports_reviews", "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   return ok(await reviewModerationService.listAdminReviews(sp, parsePagination(sp)));
 });

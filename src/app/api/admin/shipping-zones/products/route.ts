@@ -11,9 +11,9 @@ import { parseBody } from "@/lib/validate";
 import { productShippingUpdate } from "@/schemas/shipping";
 import * as shippingService from "@/services/shippingService";
 
-export const GET = withPermission("store_info", "view", async () => okList(await shippingService.listProductShipping()));
+export const GET = withPermission("shipping", "view", async () => okList(await shippingService.listProductShipping()));
 
-export const PATCH = withPermission("store_info", "update", async (_s, req) => {
+export const PATCH = withPermission("shipping", "update", async (_s, req) => {
   const { product_ids, ships_nationwide } = await parseBody(req, productShippingUpdate);
   const { updated, before, after } = await shippingService.setProductShipping(product_ids, ships_nationwide);
   auditChange(req, {

@@ -3,6 +3,6 @@ import { restoreRoute } from "@/lib/crudRoutes";
 import { unitService } from "@/services/unitService";
 
 export const { POST } = restoreRoute(unitService, {
-  auth: { menu: "products" },
+  auth: { menu: "units" },
   audit: { entity: "Unit" },
 });

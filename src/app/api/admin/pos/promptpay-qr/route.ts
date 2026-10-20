@@ -25,7 +25,7 @@ const query = z.object({
     }),
 });
 
-export const GET = withPermission("orders", "view", async (_s, req) => {
+export const GET = withPermission("pos", "view", async (_s, req) => {
   const { amount } = parseQuery(req.nextUrl.searchParams, query);
   const rounded = Math.round(amount * 100) / 100;
   return ok({ ...(await buildPromptPayQr(rounded)), amount: rounded });

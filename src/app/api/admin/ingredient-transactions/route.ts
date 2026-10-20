@@ -15,7 +15,7 @@ import { ingredientService } from "@/services/ingredientService";
 
 const TXN_VERB: Record<TransactionType, string> = { receive: "รับ", use: "เบิก", adjust: "ปรับยอด" };
 
-export const GET = withPermission("ingredients", "view", async (_s, req) => {
+export const GET = withPermission(["ingredient_history", "ingredient_stock"], "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await txnService.listTransactions({
     pagination: parsePagination(sp),
@@ -29,7 +29,7 @@ export const GET = withPermission("ingredients", "view", async (_s, req) => {
   return ok(result);
 });
 
-export const POST = withPermission("ingredients", "update", async (session, req) => {
+export const POST = withPermission("ingredient_stock", "update", async (session, req) => {
   const body = await req.json();
   const result: any = await txnService.createTransaction({
     ...body,

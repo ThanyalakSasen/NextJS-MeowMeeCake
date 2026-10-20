@@ -6,7 +6,7 @@ import { aspectService } from "@/services/sentimentService";
 export const { GET, POST } = collectionRoutes(aspectService, {
   sortable: ["created_at", "aspect_name_th", "aspect_name_eng"],
   defaultSort: "aspect_name_th",
-  auth: { menu: "reports" },
+  auth: { menu: "reports_reviews" },
   audit: { entity: "Aspect" },
   validate: { create: aspectCreate },
 });

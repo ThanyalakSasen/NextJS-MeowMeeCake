@@ -4,7 +4,7 @@ import { ingredientUpdate } from "@/schemas/inventory";
 import { ingredientService } from "@/services/ingredientService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(ingredientService, {
-  auth: { menu: "ingredients" },
+  auth: { menu: "ingredients", readMenus: ["ingredient_stock", "ingredient_history", "recipes"] },
   audit: { entity: "Ingredient" },
   validate: { update: ingredientUpdate },
 });

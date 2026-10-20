@@ -14,7 +14,7 @@ import * as shippingService from "@/services/shippingService";
 
 type Ctx = { params: Promise<{ zone_code: string }> };
 
-export const PATCH = withPermission("store_info", "update", async (_s, req, ctx: Ctx) => {
+export const PATCH = withPermission("shipping", "update", async (_s, req, ctx: Ctx) => {
   const { zone_code } = await ctx.params;
   const body = await parseBody(req, shippingZoneUpdate);
   const { before, after } = await shippingService.updateShippingZone(zone_code.toUpperCase(), body);

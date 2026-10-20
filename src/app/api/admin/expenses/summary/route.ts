@@ -3,7 +3,7 @@ import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import * as expenseService from "@/services/expenseService";
 
-export const GET = withPermission("reports", "view", async (_s, req) => {
+export const GET = withPermission(["finance_summary", "finance_expenses"], "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   return ok(
     await expenseService.summary({

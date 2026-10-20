@@ -5,6 +5,7 @@
  */
 import { z } from "zod";
 import { objectId } from "./common";
+import { MENU_KEYS } from "../lib/menuKeys";
 
 const ROLE_TYPES = ["owner", "staff", "customer"] as const;
 
@@ -15,21 +16,6 @@ export const roleCreate = z.object({
 });
 export const roleUpdate = roleCreate.partial();
 
-const MENU_KEYS = [
-  "orders",
-  "preorder",
-  "payments",
-  "products",
-  "ingredients",
-  "stock",
-  "recipes",
-  "production",
-  "employees",
-  "dashboard",
-  "promotions",
-  "reports",
-  "store_info",
-] as const;
 
 const permissionFlags = {
   can_view: z.boolean().optional(),

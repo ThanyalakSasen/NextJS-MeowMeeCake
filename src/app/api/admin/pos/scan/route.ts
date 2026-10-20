@@ -11,7 +11,7 @@ import { withPermission } from "@/lib/authGuard";
 import { badRequest } from "@/lib/httpError";
 import * as productService from "@/services/productService";
 
-export const GET = withPermission("orders", "view", async (_s, req) => {
+export const GET = withPermission("pos", "view", async (_s, req) => {
   const code = req.nextUrl.searchParams.get("code");
   if (!code) throw badRequest("กรุณาระบุ ?code=");
   return ok(await productService.resolveScan(code));

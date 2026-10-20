@@ -11,7 +11,7 @@ import { withPermission } from "@/lib/authGuard";
 import { parsePagination } from "@/lib/queryParams";
 import * as productService from "@/services/productService";
 
-export const GET = withPermission("orders", "view", async (_s, req) => {
+export const GET = withPermission("pos", "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await productService.getPosProducts({
     pagination: parsePagination(sp),

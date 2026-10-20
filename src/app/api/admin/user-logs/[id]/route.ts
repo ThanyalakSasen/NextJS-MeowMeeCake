@@ -5,7 +5,7 @@ import * as userLogService from "@/services/userLogService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = withPermission("employees", "view", async (_s, _r, ctx: Ctx) => {
+export const GET = withPermission("user_log", "view", async (_s, _r, ctx: Ctx) => {
   const { id } = await ctx.params;
   return ok(await userLogService.getLogById(id));
 });

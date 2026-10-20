@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { MENU_KEYS } from "../lib/menuKeys";
 
 const permissionSchema = new mongoose.Schema({
   role_id: {
@@ -11,21 +12,8 @@ const permissionSchema = new mongoose.Schema({
   menu_key: {
     type: String,
     required: true,
-    enum: [
-      "orders",
-      "preorder", // มีใน MENU_KEYS (permissionService) อยู่แล้วแต่ตกหล่นจาก enum นี้ — บันทึกสิทธิ์เมนูพรีออเดอร์ไม่ได้
-      "payments",
-      "products",
-      "ingredients",
-      "stock",
-      "recipes", 
-      "production",
-      "employees",
-      "dashboard",
-      "promotions",
-      "reports",
-      "store_info", // หน้าร้านประจำสัปดาห์ (customer-backend-merge.md §8.19) — ข้อมูลร้านส่วนอื่นเป็นของ owner เท่านั้น
-    ],
+    // รายชื่ออยู่ที่ src/lib/menuKeys.ts (แยกตามหน้าย่อย 2026-10-21) — เดิมเขียนซ้ำที่นี่จนตกหล่น (preorder)
+    enum: [...MENU_KEYS],
   },
   // + เพิ่ม expires_at สำหรับสิทธิ์ชั่วคราว
   expires_at: {

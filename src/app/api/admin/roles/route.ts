@@ -8,7 +8,7 @@ export const { GET, POST } = collectionRoutes(roleService, {
   sortable: ["created_at", "role_name", "role_type"],
   defaultSort: "role_name",
   filterFromQuery: (sp) => ({ role_type: sp.get("role_type") ?? undefined }),
-  auth: { menu: "employees" },
+  auth: { menu: "permissions", readMenus: ["employees", "user_log", "production", "store_info"] },
   audit: { entity: "Role" },
   validate: { create: roleCreate },
   authorize: (session, { body }) => assertMayCreateRoleType(session, body?.role_type),

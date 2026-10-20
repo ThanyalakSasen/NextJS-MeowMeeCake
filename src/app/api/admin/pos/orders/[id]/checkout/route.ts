@@ -12,7 +12,7 @@ import { checkoutPosOrder } from "@/services/posCheckoutService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const POST = withPermission("orders", "create", async (session, req, ctx: Ctx) => {
+export const POST = withPermission("pos", "create", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const result = await checkoutPosOrder(id, session.user_id);
   auditChange(req, {

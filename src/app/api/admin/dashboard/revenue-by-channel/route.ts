@@ -8,7 +8,7 @@ import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import * as dashboardService from "@/services/dashboardService";
 
-export const GET = withPermission("reports", "view", async (_s, req) => {
+export const GET = withPermission(["finance_summary", "finance_expenses"], "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   return ok(
     await dashboardService.revenueByChannel({

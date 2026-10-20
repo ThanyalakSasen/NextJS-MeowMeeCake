@@ -3,6 +3,6 @@ import { restoreRoute } from "@/lib/crudRoutes";
 import { aspectService } from "@/services/sentimentService";
 
 export const { POST } = restoreRoute(aspectService, {
-  auth: { menu: "reports" },
+  auth: { menu: "reports_reviews" },
   audit: { entity: "Aspect" },
 });
