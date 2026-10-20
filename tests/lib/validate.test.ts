@@ -80,6 +80,13 @@ describe("schemas/auth", () => {
     }).success).toBe(false);
   });
 
+  it("registerBody: เบอร์โทรต้องครบ 10 หลัก", () => {
+    const base = { user_fullname: "มีมี่", email: "a@b.co", password: "secret12" };
+    expect(registerBody.safeParse({ ...base, user_phone: "0812345678" }).success).toBe(true);
+    expect(registerBody.safeParse({ ...base, user_phone: "021234567" }).success).toBe(false);
+    expect(registerBody.safeParse({ ...base, user_phone: "08123456789" }).success).toBe(false);
+  });
+
   it("loginBody: อีเมลผิดรูปแบบ → fail", () => {
     expect(loginBody.safeParse({ email: "not-an-email", password: "x" }).success).toBe(false);
   });

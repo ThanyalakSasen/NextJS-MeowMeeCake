@@ -18,6 +18,7 @@ import "../../models/productCategoryModel";
 import { toPublicProduct } from "../../lib/publicProduct";
 import {
   catalogCacheTtl,
+  getAllergenWarnings,
   getRecommendations,
   getSimilarProducts,
   RecommendationError,
@@ -160,6 +161,15 @@ export async function similar(productId: string, limit: number, userId?: string)
   try {
     const recommendations = await getSimilarProducts({ productId, limit, userId });
     return { recommendations: recommendations.map((r: any) => ({ ...r, product: publicProduct(r.product) })) };
+  } catch (err) {
+    throw toHttp(err);
+  }
+}
+
+/** คำเตือนสารก่อภูมิแพ้ของสินค้าทุกชิ้นตามอาหารที่ผู้ใช้แพ้ — { warnings: { [product _id]: AllergenWarning } } */
+export async function allergenWarnings(userId: string) {
+  try {
+    return { warnings: await getAllergenWarnings(userId) };
   } catch (err) {
     throw toHttp(err);
   }

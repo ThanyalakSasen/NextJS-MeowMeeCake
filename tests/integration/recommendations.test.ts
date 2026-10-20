@@ -55,6 +55,18 @@ describe("แนะนำสินค้า", () => {
     expect(safe.recommendations.map((r) => String(r.product._id))).not.toContain(String(withMilk._id));
   });
 
+  it("คำเตือนแพ้อาหารของทุกสินค้า: เฉพาะสินค้าที่มีวัตถุดิบที่แพ้ · ไม่บันทึกอาหารที่แพ้ = ว่าง", async () => {
+    const { withMilk, plain } = await catalog();
+    const allergic = await customer(["นม"]);
+    const { warnings } = await recommendationService.allergenWarnings(String(allergic._id));
+    expect(warnings[String(withMilk._id)]?.level).toBe("warning");
+    expect(warnings[String(withMilk._id)]?.matchedAllergens.map((m) => m.name)).toEqual(["นม"]);
+    expect(warnings[String(plain._id)]).toBeUndefined();
+
+    const none = await customer();
+    expect((await recommendationService.allergenWarnings(String(none._id))).warnings).toEqual({});
+  });
+
   it("สินค้าคล้ายกัน: ไม่รวมตัวเอง · สินค้าไม่มี = 404 · วัตถุดิบสาธารณะส่งแค่ชื่อ", async () => {
     const { plain, milk } = await catalog();
     const { recommendations } = await recommendationService.similar(String(plain._id), 6);
