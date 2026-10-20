@@ -166,3 +166,30 @@ meowmeecake-private  (ไม่เปิด public · อ่านผ่าน b
 **เทส:** `tests/integration/privateSlips.test.ts` (5 เคส — เขียนนอก public · เจ้าของ/ลูกค้าอื่น/ไม่ล็อกอิน · owner/staff
 ไม่มีสิทธิ์/มีสิทธิ์ · traversal + ไม่มีไฟล์ = 404 · migration ย้ายไฟล์+URL) · `tests/lib/uploadUrl.test.ts` (+2 เคส `isPrivateFileUrl` /
 `isSafeFilename`) · ผลรวม unit 195 ✅ · integration 189 ✅ · `next build` ✅
+
+---
+
+## 7. ลบไฟล์ใน R2 ที่ไม่ได้ใช้แล้ว (2026-10-20)
+
+**ปัญหา:** อัปโหลดรูปเกิดก่อนกดบันทึกฟอร์มเสมอ (สินค้า · แบนเนอร์ · รีวิว · สลิป · ใบเสร็จ) — ยกเลิก/ปิดหน้า = ไฟล์ค้างใน bucket
+ตลอดไป · `cleanup:review-media` ทำงานเฉพาะ localDisk (บน s3 ข้าม) → R2 โตเรื่อย ๆ จนชนโควตา
+
+**ทำไมไม่ใช้ lifecycle rule ของ R2:** R2 ลบตามอายุนับจากวันอัปโหลดเท่านั้น ไม่รู้ว่าไฟล์ยังถูกใช้ไหม (R2 ไม่เก็บเวลาเปิดดูล่าสุด) —
+ตั้ง 60 วัน = รูปสินค้า/แบนเนอร์ที่ยังใช้อยู่หายไปด้วย · **"ไม่ได้ใช้" = ไม่มีข้อมูลใน DB อ้างถึง**
+
+**โค้ด:** `src/services/storageCleanupService.ts` · endpoint `GET /api/cron/storage-cleanup` · สคริปต์ `npm run cleanup:unused-uploads`
+
+| ขั้น | ทำอะไร |
+|---|---|
+| 1. หาไฟล์ที่ใช้อยู่ | ไล่ทุก string ในทุก collection (ยกเว้น `userlogs`) เก็บ `<โฟลเดอร์>/<ไฟล์>` ที่เจอ — ไม่ผูกโดเมน (เปลี่ยน `S3_PUBLIC_URL_BASE` เป็น custom domain ได้) · นับ `/uploads/…` · `/api/files/…` · รายการที่ soft delete (กู้คืนได้) ด้วย |
+| 2. ไล่ bucket | `S3_BUCKET` + `S3_PRIVATE_BUCKET` · สนใจเฉพาะ key ที่ระบบสร้าง (`<dir>/<ไฟล์>` · `private/<dir>/<ไฟล์>` นามสกุลรูป/วิดีโอ) — key อื่นไม่แตะ |
+| 3. ลบ | เฉพาะที่ **ไม่มีใครอ้างถึง และอัปโหลดมานานกว่า 60 วัน** (`?days=` ต่ำสุด 7) · ไม่เกิน 500 ไฟล์ต่อรอบ เก่าสุดก่อน |
+
+**ความปลอดภัย:** ค่าเริ่มต้น dry-run (`?apply=true` / `--apply` ถึงลบจริง) · อ่าน DB ไม่สำเร็จ = error ก่อนแตะ bucket ·
+ไม่เจอการอ้างถึงเลยสักไฟล์ = หยุด ไม่ลบ (กันต่อ DB ผิด/DB ว่าง) · ลบไม่สำเร็จรายไฟล์ = รายงานใน `failed` รอบหน้าลองใหม่ ·
+สลิป/ใบเสร็จที่ผูกกับรายการแล้วไม่ถูกลบ (ลบเฉพาะที่อัปโหลดแล้วไม่ได้ผูกกับรายการไหนเลย)
+
+**ตั้ง cron:** cron-job.org สัปดาห์ละครั้ง `GET /api/cron/storage-cleanup?apply=true` (docs/DEPLOY-RENDER.md §4) ·
+แนะนำเรียกแบบไม่มี `apply` ก่อน 1 ครั้ง ดู `deleted` ในผลลัพธ์ว่าไม่มีไฟล์ที่ยังใช้อยู่
+
+**เทส:** `tests/integration/storageCleanup.test.ts` (4 เคส)
