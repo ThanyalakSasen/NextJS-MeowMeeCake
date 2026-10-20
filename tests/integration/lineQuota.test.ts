@@ -48,8 +48,8 @@ const pushes = (spy: ReturnType<typeof vi.fn>, to?: string) =>
 const quotaAlerts = (prefix: string) =>
   notificationModel.find({ title: new RegExp(`^${prefix} \\(\\d{4}-\\d{2}\\)$`) }).lean();
 
-beforeEach(() => {
-  resetQuotaCache();
+beforeEach(async () => {
+  await resetQuotaCache();
   process.env.LINE_CHANNEL_ACCESS_TOKEN = "token-test";
   process.env.LINE_TARGET_ID = "U_OWNER";
   delete process.env.LINE_OWNER_QUOTA_RESERVE;

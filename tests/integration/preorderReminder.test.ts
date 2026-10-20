@@ -34,7 +34,7 @@ async function makeRound(pickup: string, over: Record<string, unknown> = {}) {
 }
 
 beforeEach(async () => {
-  resetQuotaCache();
+  await resetQuotaCache();
   process.env.LINE_CHANNEL_ACCESS_TOKEN = "token-test";
   // quota API ตอบ error → fail-open (ไม่ใช่เรื่องที่เทสนี้ตรวจ) · push ตอบสำเร็จ
   fetchSpy = vi.fn(async (url: string) =>

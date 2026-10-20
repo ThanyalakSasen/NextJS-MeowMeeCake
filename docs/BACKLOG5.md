@@ -14,7 +14,7 @@
 |---|---|---|
 | 🔴 ต้องแก้ก่อนใช้งานจริง | 1 (✅ R1 แก้แล้ว 2026-10-06) | ~~ต้นทุนสินค้า + สูตรหลุดทาง API สาธารณะ~~ |
 | 🟡 ควรแก้ | 5 (✅ ครบ Y1–Y5 แก้แล้ว 2026-10-06) | ~~session แบบ cookie หลักไม่ตรวจบัญชีกับ DB~~ · ~~`.env.example` ขาดตัวแปรใหม่~~ · ~~`npm audit`~~ · ~~ล็อกอินผ่าน next-auth ไม่มี rate limit ต่อ IP~~ · ~~sortBy สาธารณะไม่จำกัด field~~ |
-| 🟢 เล็กน้อย / เก็บกวาด | 6 | คอมเมนต์ยุคสตางค์ค้าง 54 บรรทัด · หน้าแนะนำสินค้าโหลดทั้งร้านทุกครั้ง · ตัวกรองรีวิวที่ยังดู `is_visible` อย่างเดียว ฯลฯ |
+| 🟢 เล็กน้อย / เก็บกวาด | 6 (✅ ครบ G1–G5 2026-10-06 · G6 2026-10-19) | ~~คอมเมนต์ยุคสตางค์ค้าง 54 บรรทัด~~ · ~~หน้าแนะนำสินค้าโหลดทั้งร้านทุกครั้ง~~ · ~~ตัวกรองรีวิวที่ยังดู `is_visible` อย่างเดียว~~ · ~~state in-memory ต่อ instance~~ ฯลฯ |
 | ⏸ รอ FrontEnd / ทีม | 3 (✅ ปิด `product_stock_quantity` ใน PATCH แล้ว 2026-10-08) | R5 แดชบอร์ดรีวิว · P4/P5 หลังร้าน + ปิดพอร์ต 4000 · FrontOffice เขียน DB ตรง |
 | ✅ ตรวจแล้วไม่พบปัญหา | — | §6 |
 
@@ -165,7 +165,7 @@ IP อ่านด้วย `clientIpFromHeaders` (ใหม่ใน `src/lib/r
 | ~~G3~~ ✅ | สรุปความรู้สึกรายแง่มุมของสินค้า (สาธารณะ) `$lookup` จาก **SentimentResults ทั้ง collection** ก่อนกรองสินค้า | `sentimentService.ts:213` | `$match` รีวิวของสินค้าก่อน (หา review_id ของสินค้า → `$in`) |
 | ~~G4~~ ✅ | ตัวกรองรีวิวที่แสดงยังดู `is_visible` อย่างเดียว (ไม่ใช้ `VISIBLE_REVIEW` ของ §8.20) — ตรงกันตราบที่ status/is_visible sync กัน (`migrate:reviews` รายงานรายการที่ขัดกัน) | `sentimentService.ts:228` · `recommendationEngine.ts:385/627/657` (ตรวจบน main 2026-10-06 — `recommendationService.ts` เป็นตัวกรองสินค้า ไม่ใช่รีวิว) | ใช้ `VISIBLE_REVIEW` จาก `reviewService` |
 | ~~G5~~ ✅ (branch `fix/backlog5-g5-aspect-names`) | seed แง่มุมเริ่มต้นพร้อมกัน 2 คำขอแรก → ได้ชุดซ้ำ (ไม่มี unique index ชื่อแง่มุม) | `sentimentService.ensureDefaultAspects` | unique partial index `aspect_name_th` (deleted_at null) + ข้าม 11000 — โอกาสเกิดน้อยมาก (ครั้งแรกครั้งเดียว) |
-| G6 | `rateLimit` / cache สิทธิ์ / cache แนะนำสินค้า เป็น in-memory ต่อ instance | `rateLimit.ts` · `permissionService.ts:82` · `recommendationEngine` | ตามที่บันทึกไว้แล้ว (BACKLOG4 Y8) — รัน instance เดียว (DEPLOY ⑤) |
+| ~~G6~~ ✅ (2026-10-19) | `rateLimit` / cache สิทธิ์ / cache แนะนำสินค้า เป็น in-memory ต่อ instance | `rateLimit.ts` · `permissionService.ts:82` · `recommendationEngine` | แชร์ผ่าน MongoDB (ไม่ใช้ Redis) — ดู §7.1 PR D |
 
 ---
 
@@ -254,7 +254,7 @@ merge ครบแล้ว (§8) — ไม่มี PR ค้างให้�
 | **A** ✅ | 3 | **G3** สรุปแง่มุมรายสินค้า `$lookup` ทั้ง collection | endpoint สาธารณะ · ช้าลงตามจำนวนผลวิเคราะห์ | — | เล็ก |
 | **B** ✅ | 4 | **G5** seed แง่มุมเริ่มต้นซ้ำ (unique index ชื่อแง่มุม) | สร้าง unique index บน collection ที่ backend ฝั่งลูกค้า (พอร์ต 4000) เขียนอยู่ด้วย — **ต้องตรวจชื่อซ้ำใน DB จริงก่อน** (มีซ้ำ = สร้าง index ไม่ได้) | ผู้ใช้รันสคริปต์ตรวจ (dry-run) บน DB จริง | เล็ก + สคริปต์ |
 | **C** ✅ | 5 | **G1** คอมเมนต์ยุคสตางค์ 54 บรรทัด / 19 ไฟล์ | แก้คอมเมนต์อย่างเดียว แต่แตะไฟล์มากสุด — PR แยกให้ review ง่าย ไม่ปนโค้ด | — | กลาง (คอมเมนต์ล้วน) |
-| — | — | **G6** in-memory ต่อ instance | ไม่ต้องแก้ตราบที่รัน instance เดียว (DEPLOY ⑤) | ตอนจะขยายหลาย instance (Redis) | ใหญ่ |
+| **D** ✅ | 6 | **G6** in-memory ต่อ instance | เดิมเลี่ยงด้วยการรัน instance เดียว (DEPLOY ⑤) — ผู้ใช้สั่งแก้ 2026-10-19 | — | กลาง |
 
 **✅ PR A ทำแล้ว 2026-10-06 (branch `fix/backlog5-g4-g2-g3`):**
 - **G4:** นิยาม `VISIBLE_REVIEW` ย้ายไป `src/lib/reviewVisibility.ts` (+ `visibleReviewMatch(prefix)`) · `reviewService` re-export ของเดิม ·
@@ -289,6 +289,23 @@ merge ครบแล้ว (§8) — ไม่มี PR ค้างให้�
 - ตรวจค่าคงที่เงินอื่นแล้ว (`MAX_PRICE` · ค่าส่ง · เกณฑ์ data-integrity · แต้ม) ไม่พบค่าที่ค้างจากยุคสตางค์ · เทส 607/607 · build ✅
 
 **PR C** แยกให้ review ง่าย — ส่วนใหญ่เป็นคอมเมนต์ล้วน ยกเว้นบั๊ก `AMOUNT_TOLERANCE` (แก้โค้ด 1 บรรทัด + เทส) ที่เจอระหว่างไล่คอมเมนต์
+
+**✅ PR D (G6) ทำแล้ว 2026-10-19 — แชร์ state ข้าม instance ผ่าน MongoDB (ไม่เพิ่ม Redis / ไม่ต้องตั้งเซิร์ฟเวอร์ใหม่):**
+- **rate limit** (`src/lib/rateLimit.ts`): ตัวนับอยู่ใน collection `RateLimits` — update pipeline ครั้งเดียว (ตัดคำขอที่พ้น window → ยังไม่ถึง limit
+  ค่อยเพิ่ม) จึง atomic แม้ยิงพร้อมกันหลาย instance · sliding window เหมือนเดิม · คำขอที่ถูกปฏิเสธไม่นับเพิ่ม · TTL index `expire_at` ลบ key เก่าเอง ·
+  DB ใช้ไม่ได้ชั่วคราว → นับในหน่วยความจำแทน (log `rate_limit.store_failed`) · `RATE_LIMIT_STORE=memory` สำหรับ unit test ·
+  `rateLimit()` เป็น async แล้ว — เพิ่ม `await` ทั้ง 17 จุดที่เรียก
+- **cache สิทธิ์ / โซนค่าส่ง / คำพ้องค้นหา** (`src/lib/sharedCache.ts`): ค่ายังอยู่ในหน่วยความจำ (อ่านเร็ว) แต่ผูกเลขเวอร์ชันใน `CacheVersions` ·
+  แก้ข้อมูล → `$inc` เลข → instance อื่นทิ้ง cache ภายใน `SHARED_CACHE_SYNC_MS` (ค่าเริ่มต้น 2 วิ — ถามเลขอย่างมากครั้งเดียวต่อช่วง) ·
+  เดิม instance อื่นเห็นสิทธิ์ที่ถอนแล้วได้นานถึง 30 วิ / โซนค่าส่งเก่า 60 วิ
+- **โควตา LINE** (`src/lib/lineQuota.ts`): ตัวเลขอยู่ใน `LineQuotaStates` (เอกสารเดียว) · `recordPushed` หักแบบ `$inc` (ไม่ติดลบ) ·
+  `markQuotaExhausted` ตั้งเหลือ 0 ให้ทุก instance · ถามโควตาจาก LINE ใหม่ทุก 5 นาทีเหมือนเดิม · ทั้งสองฟังก์ชันเป็น async แล้ว
+- **ไม่แก้:** cache แคตตาล็อก/สินค้ายอดนิยมของระบบแนะนำ — หมดอายุตามเวลาอย่างเดียว (ไม่มีจุด invalidate) ผลเหมือนเดิมไม่ว่ากี่ instance
+- `src/instrumentation.ts`: เลิกเตือน `runtime.multi_instance` · เหลือเตือน `runtime.serverless_local_uploads` (serverless แต่ไม่ได้ตั้ง `UPLOAD_DRIVER=s3`)
+- เอกสาร: DEPLOY ⑤ (หลาย instance ได้) · `env.md` / `.env.example` (`SHARED_CACHE_SYNC_MS` · `RATE_LIMIT_STORE`) · README · BACKLOG4 Y8
+- เทส `tests/integration/sharedState.test.ts` 10 เคส (จำลอง instance ที่ 2 ด้วย `vi.resetModules()`: นับรวมข้าม instance · ยิงพร้อมกัน 12 ครั้ง limit 5 ผ่านพอดี 5 ·
+  ล้าง cache ข้าม instance · โควตา LINE ที่หักแล้วเห็นใน instance อื่น) · ทั้งหมด 117 ไฟล์ 770/770 · typecheck ✅ · lint 0 error · build ✅
+- **DB จริง:** collection ใหม่ 3 ตัวถูกสร้างเองตอนใช้งาน · TTL index ของ `RateLimits` สร้างเองตอนแอปเริ่ม (mongoose autoIndex) · **ห้ามใช้ `npm run sync-indexes` สร้างแทน** ระหว่างที่ backend พอร์ต 4000 ยังใช้ DB เดียวกัน (README)
 
 ---
 

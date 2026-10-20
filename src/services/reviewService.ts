@@ -12,6 +12,10 @@
 import { Types } from "mongoose";
 import dbConnect from "../lib/dbConnect";
 import * as pointsService from "./pointsService";
+import { assertOwnReviewMedia } from "./reviewMediaService";
+import { notificationService } from "./notificationService";
+import { adminLinks } from "../lib/adminLinks";
+import { log } from "../lib/logger";
 import { badRequest, conflict, forbidden, HttpError, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { buildMeta, type Pagination } from "../lib/queryParams";
@@ -97,7 +101,8 @@ function assertRating(raw: unknown): number {
   return rating;
 }
 
-async function buildContent(input: ReviewContentInput) {
+async function buildContent(input: ReviewContentInput, userId: string) {
+  assertOwnReviewMedia(userId, { image: input.image, video: input.video });
   return {
     rating: assertRating(input.rating),
     review_text: input.review_text ?? null,
@@ -155,12 +160,41 @@ async function createOne(userId: string, kind: ReviewTargetKind, itemId: string,
   }
 }
 
+/** รีวิวที่นับว่า "แย่" — แจ้งเจ้าของร้านทันที (เกณฑ์เดียวกับแดชบอร์ด/ตัวกรองรีวิวแย่) */
+export const NEGATIVE_REVIEW_MAX_RATING = 2;
+
+/**
+ * รีวิว 1–2 ดาวใหม่ → แจ้งเจ้าของร้าน (หน้าแจ้งเตือนหลังร้าน + LINE) พร้อมลิงก์ไปหน้ารีวิวที่กรอง "แย่ + ยังไม่ตอบ"
+ * รีวิวรวมหลายชิ้นในครั้งเดียว = แจ้งครั้งเดียว · fire-and-forget ไม่ทำให้การรีวิวล้ม
+ */
+function notifyNegativeReviews(docs: Array<{ product_id: unknown; rating?: number; review_text?: string | null }>): void {
+  const negative = docs.filter((d) => typeof d.rating === "number" && d.rating <= NEGATIVE_REVIEW_MAX_RATING);
+  if (negative.length === 0) return;
+  void (async () => {
+    const names = await productModel
+      .find({ _id: { $in: negative.map((d) => d.product_id) } })
+      .select("product_name_th")
+      .lean<Array<{ product_name_th?: string }>>();
+    const first = negative[0];
+    const productLabel = names.map((p) => p.product_name_th).filter(Boolean).join(", ") || "สินค้า";
+    const text = (first.review_text ?? "").trim();
+    await notificationService.notify({
+      title: `รีวิว ${first.rating} ดาว — ${productLabel}`.slice(0, 200),
+      message: text ? (text.length > 200 ? `${text.slice(0, 200)}…` : text) : "ลูกค้าไม่ได้เขียนความเห็น — ควรตอบกลับลูกค้า",
+      module: "customer",
+      type: "warning",
+      link: adminLinks.reviewsNeedsReply,
+    });
+  })().catch((err) => log.error("review.negative_notify_failed", { err }));
+}
+
 /**
  * หลังสร้าง: คำนวณคะแนนสินค้า (ครั้งเดียวต่อสินค้า) แล้วให้แต้มทีละรีวิว — ไม่มีรูป 15 / มีรูป 20 ·
  * ครั้งเดียวต่อรายการ (ลบแล้วเขียนใหม่ไม่ได้ซ้ำ · key เดียวกับฝั่งลูกค้า) · แต้มไม่ใช่ขั้นตอนหลัก — พังแค่ log
  */
-async function afterCreate(docs: Array<{ _id: unknown; user_id: unknown; product_id: unknown; order_item_id?: unknown; preorder_order_item_id?: unknown; image?: string[] }>) {
+async function afterCreate(docs: Array<{ _id: unknown; user_id: unknown; product_id: unknown; order_item_id?: unknown; preorder_order_item_id?: unknown; image?: string[]; rating?: number; review_text?: string | null }>) {
   for (const productId of new Set(docs.map((d) => String(d.product_id)))) await recomputeProductRating(productId);
+  notifyNegativeReviews(docs);
   for (const doc of docs) {
     const withPhoto = (doc.image?.length ?? 0) > 0;
     const dedupeKey = doc.preorder_order_item_id
@@ -184,7 +218,7 @@ async function afterCreate(docs: Array<{ _id: unknown; user_id: unknown; product
 export async function createReview(input: CreateReviewInput) {
   await dbConnect();
   if (!!input.order_item_id === !!input.preorder_item_id) throw badRequest("ระบุ order_item_id หรือ preorder_item_id อย่างใดอย่างหนึ่ง");
-  const content = await buildContent(input);
+  const content = await buildContent(input, input.user_id);
   const kind: ReviewTargetKind = input.preorder_item_id ? "preorder" : "order";
   const doc = await createOne(input.user_id, kind, (input.preorder_item_id ?? input.order_item_id)!, content);
   await afterCreate([doc]);
@@ -197,7 +231,7 @@ export async function createReviews(userId: string, kind: ReviewTargetKind, rawI
   const ids = [...new Set(rawIds.map(String).filter(Boolean))];
   if (ids.length === 0) throw badRequest("กรุณาเลือกสินค้าที่ต้องการรีวิวอย่างน้อย 1 รายการ");
   if (ids.length > MAX_BULK_ITEMS) throw badRequest(`รีวิวรวมได้สูงสุด ${MAX_BULK_ITEMS} รายการต่อครั้ง`);
-  const content = await buildContent(input);
+  const content = await buildContent(input, userId);
 
   const created: any[] = [];
   const failed: Array<{ item_id: string; error: HttpError }> = [];
@@ -257,9 +291,16 @@ export async function listReviews(query: ListReviewQuery) {
     .skip(query.pagination.skip)
     .limit(query.pagination.limit)
     .populate("user_id", "user_fullname user_img")
-    .populate("product_id", "product_name_th product_name_eng");
+    // รูปสินค้า — หน้า "รีวิวของฉัน" ของลูกค้าแสดงรูปคู่กับรีวิว
+    .populate("product_id", "product_name_th product_name_eng product_img");
   if (query.ownOnly) q = q.select(INTERNAL_FIELDS);
-  const [items, total] = await Promise.all([q.lean(), reviewModel.countDocuments(filter)]);
+  const [rows, total] = await Promise.all([q.lean<any[]>(), reviewModel.countDocuments(filter)]);
+  // ลูกค้าเห็นคำตอบของร้าน (ข้อความ + เวลา) แต่ไม่เห็นว่าพนักงานคนไหนตอบ (replied_by)
+  const items = query.ownOnly
+    ? rows.map((r) =>
+        r.shop_reply ? { ...r, shop_reply: { text: r.shop_reply.text ?? "", replied_at: r.shop_reply.replied_at ?? null } } : r
+      )
+    : rows;
   return { items, meta: buildMeta(total, query.pagination) };
 }
 
@@ -366,6 +407,11 @@ export async function updateReview(
   if (String(review.user_id) !== String(userId)) {
     throw forbidden("แก้ไขได้เฉพาะรีวิวของตัวเอง");
   }
+  // ไฟล์ที่ติดรีวิวนี้อยู่แล้วคงไว้ได้ · ไฟล์ใหม่ต้องเป็นของผู้รีวิวที่อัปโหลดผ่านระบบ
+  assertOwnReviewMedia(userId, { image: input.image, video: input.video }, [
+    ...((review.image as string[] | undefined) ?? []),
+    ...(review.video ? [String(review.video)] : []),
+  ]);
 
   if (input.rating !== undefined) review.rating = assertRating(input.rating);
   if (input.review_text !== undefined) review.review_text = input.review_text;

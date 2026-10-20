@@ -10,7 +10,7 @@ import { rateLimit } from "@/lib/rateLimit";
 import * as reviewMediaService from "@/services/reviewMediaService";
 
 export const POST = withAuth(async (session, req) => {
-  rateLimit(session.user_id, "shop:review-upload", { limit: 30, windowMs: 10 * 60_000 });
+  await rateLimit(session.user_id, "shop:review-upload", { limit: 30, windowMs: 10 * 60_000 });
   const form = await req.formData();
   const file = form.get("file");
   return created(

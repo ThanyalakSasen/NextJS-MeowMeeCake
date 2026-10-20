@@ -85,7 +85,7 @@ describe("รีวิวสินค้าพรีออเดอร์", () =
   it("รีวิวได้เมื่อ completed + ชำระแล้ว · ได้แต้ม (key แยกจากออเดอร์) · 2 รายการในระบบไม่ชน index · ซ้ำ = 409", async () => {
     const c = await customer();
     const { ids, productId } = await preorderItems(c.uid, 2);
-    const r1 = (await reviewService.createReview({ user_id: c.uid, preorder_item_id: ids[0], rating: 5, image: ["/a.png"] })) as any;
+    const r1 = (await reviewService.createReview({ user_id: c.uid, preorder_item_id: ids[0], rating: 5, image: [`/uploads/reviews/${c.uid}-1-aa.png`] })) as any;
     expect(String(r1.preorder_order_item_id)).toBe(ids[0]);
     expect(r1.order_item_id).toBeNull();
     expect(r1.status).toBe("approved");

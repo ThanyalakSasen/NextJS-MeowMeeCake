@@ -13,7 +13,7 @@ import { clientIp } from "@/lib/request";
 import * as promotionService from "@/services/promotionService";
 
 export const POST = withAuth(async (session, req) => {
-  rateLimit(clientIp(req), "promotions:validate", { limit: 20, windowMs: 60_000 });
+  await rateLimit(clientIp(req), "promotions:validate", { limit: 20, windowMs: 60_000 });
   const body = await req.json();
   if (!body.code && !body.promotion_id) throw badRequest("กรุณาระบุ code หรือ promotion_id");
   const result = await promotionService.previewForCart(session.user_id, {

@@ -2,7 +2,7 @@
  * reviewModerationService — จัดการรีวิวในหลังร้าน (ย้ายมาจากฝั่งลูกค้า Owner/reviewController · customer-backend-merge.md §8.20)
  *
  *   - รายการรีวิว: กรอง/ค้นหา/เรียง/แบ่งหน้า + สรุปของชุดที่กรอง · เห็นทุกสถานะ (รวมที่ซ่อน) และข้อมูลภายใน
- *   - จัดการทีละรีวิว: สถานะ (ซ่อน/แสดง) · ปักหมุด · ตอบกลับ (ลูกค้าเห็น) · แท็ก/โน้ตภายใน · อ่านแล้ว
+ *   - จัดการทีละรีวิว: สถานะ (ซ่อน/แสดง) · ปักหมุด · ตอบกลับ (ลูกค้าเห็น + แจ้งลูกค้าตอนตอบครั้งแรก) · แท็ก/โน้ตภายใน · อ่านแล้ว
  *   - ทำหลายรายการ: อ่านแล้ว / ยังไม่อ่าน
  *   - ตัวเลือกตัวกรอง: สินค้า/หมวดที่มีรีวิว + คำตอบเก่าไว้แนะนำตอนพิมพ์
  * สิทธิ์เมนู "reports" (ผู้ใช้เลือก 2026-10-05) — ตรวจที่ route
@@ -24,6 +24,7 @@ import "../models/orderModel";
 import "../models/preorderItemModel";
 import "../models/preorderModel";
 import { REVIEW_STATUSES, recomputeProductRating, statusPatch, type ReviewStatus } from "./reviewService";
+import { notifyCustomerLater, reviewReplyNotice } from "./customerNotifyService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -347,11 +348,23 @@ export async function moderateReview(id: string, input: ModerateInput | null, ac
   }
   if (Object.keys(set).length === 0) throw badRequest("ไม่มีข้อมูลที่จะแก้ไข");
 
+  // ตอบครั้งแรก (ก่อนหน้านี้ยังไม่มีคำตอบ) → แจ้งลูกค้า · แก้คำตอบเดิมไม่แจ้งซ้ำ (กันสแปม/เปลืองโควตา LINE)
+  const newReply = (set.shop_reply as { text?: string } | null | undefined)?.text;
+  const hadReply = newReply
+    ? !!(await reviewModel.findOne({ _id: id, deleted_at: null }).select("shop_reply").lean<any>())?.shop_reply?.text
+    : true;
+
   const doc = await reviewModel
     .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: set }, { returnDocument: "after", runValidators: true })
     .lean<any>();
   if (!doc) throw notFound("ไม่พบรีวิวที่ระบุ");
   if ("status" in set) await recomputeProductRating(String(doc.product_id));
+
+  if (newReply && !hadReply) {
+    const product = await productModel.findById(doc.product_id).select("product_name_th").lean<{ product_name_th?: string } | null>();
+    const { text, notice } = reviewReplyNotice(doc._id, product?.product_name_th ?? "", newReply);
+    notifyCustomerLater(doc.user_id, text, notice); // กระดิ่งในเว็บ + LINE (ถ้าผูกไว้) · ไม่ทำให้การตอบล้ม
+  }
   return doc;
 }
 
@@ -404,6 +417,8 @@ export async function getFilterOptions() {
           _id: 0,
           product_id: "$_id",
           product_name_th: { $ifNull: ["$product.product_name_th", "(สินค้าที่ถูกลบ)"] },
+          // หลังร้านกรองรายการสินค้าตามหมวดที่เลือกในตัวกรอง
+          category_id: { $ifNull: ["$product.category_id", null] },
           is_deleted: { $ne: [{ $ifNull: ["$product.deleted_at", null] }, null] },
           review_count: 1,
           avg_rating: { $round: ["$avg_rating", 2] },

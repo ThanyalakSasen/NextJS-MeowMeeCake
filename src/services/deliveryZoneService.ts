@@ -12,6 +12,7 @@
  */
 import type { Model } from "mongoose";
 import dbConnect from "../lib/dbConnect";
+import { createSharedCache } from "../lib/sharedCache";
 import { createCrudService } from "../lib/crudService";
 import deliveryZoneModel from "../models/deliveryZoneModel";
 import { toSatang, toBahtFields } from "../lib/money";
@@ -40,25 +41,23 @@ export interface DeliveryZoneRow {
 // เพราะ 0 เป็น falsy ใน JS ถ้าใช้ `||` ตรง ๆ จะไม่มีทางตั้งเป็น 0 ได้เลย)
 const envTtl = Number(process.env.DELIVERY_ZONE_CACHE_TTL_MS);
 const CACHE_TTL_MS = Number.isFinite(envTtl) && envTtl >= 0 ? envTtl : 60_000;
-let cache: { rows: DeliveryZoneRow[]; expiresAt: number } | null = null;
+// ข้าม instance: sharedCache (BACKLOG5 G6) — แก้โซนแล้ว instance อื่นเห็นภายใน SHARED_CACHE_SYNC_MS ไม่ต้องรอ TTL
+const cache = createSharedCache<DeliveryZoneRow[]>("delivery_zones", () => CACHE_TTL_MS);
 
-function invalidateCache(): void {
-  cache = null;
+async function invalidateCache(): Promise<void> {
+  await cache.invalidate();
 }
 
 /** โซน active ทั้งหมด เรียงตาม sort_order (ใช้โดย deliveryService.calcDeliveryFee) — cache ไว้ TTL วิ
  *  `.fee` เป็นค่าดิบจาก DB (บาท · ไม่ผ่าน presenter) — ผู้เรียก (deliveryService.ts) ปัดเองตรงจุดที่ใช้จริง */
 export async function getActiveZonesCached(): Promise<DeliveryZoneRow[]> {
-  if (cache && cache.expiresAt > Date.now()) return cache.rows;
-
-  await dbConnect();
-  const rows = await deliveryZoneModel
-    .find({ deleted_at: null, is_active: true })
-    .sort({ sort_order: 1 })
-    .lean<DeliveryZoneRow[]>();
-
-  cache = { rows, expiresAt: Date.now() + CACHE_TTL_MS };
-  return rows;
+  return cache.getOrLoad("active", async () => {
+    await dbConnect();
+    return deliveryZoneModel
+      .find({ deleted_at: null, is_active: true })
+      .sort({ sort_order: 1 })
+      .lean<DeliveryZoneRow[]>();
+  });
 }
 
 async function unsetOtherCatchAll(exceptId?: string): Promise<void> {
@@ -84,7 +83,7 @@ export const deliveryZoneService = {
     if (input.is_catch_all === true) await unsetOtherCatchAll();
     const payload = input.fee != null ? { ...input, fee: toSatang(Number(input.fee)) } : input;
     const doc = await base.create(payload);
-    invalidateCache();
+    await invalidateCache();
     return doc;
   },
 
@@ -92,19 +91,19 @@ export const deliveryZoneService = {
     if (input.is_catch_all === true) await unsetOtherCatchAll(id);
     const payload = input.fee != null ? { ...input, fee: toSatang(Number(input.fee)) } : input;
     const doc = await base.update(id, payload);
-    invalidateCache();
+    await invalidateCache();
     return doc;
   },
 
   async remove(id: string) {
     const doc = await base.remove(id);
-    invalidateCache();
+    await invalidateCache();
     return doc;
   },
 
   async restore(id: string) {
     const doc = await base.restore(id);
-    invalidateCache();
+    await invalidateCache();
     return doc;
   },
 };

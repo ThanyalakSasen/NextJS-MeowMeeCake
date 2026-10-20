@@ -10,12 +10,12 @@ import { clientIp } from "@/lib/request";
 import * as accountService from "@/services/accountService";
 
 export const GET = route(async (req: NextRequest) => {
-  rateLimit(clientIp(req), "auth:verify-email", { limit: 20, windowMs: 60_000 });
+  await rateLimit(clientIp(req), "auth:verify-email", { limit: 20, windowMs: 60_000 });
   return ok(await accountService.verifyEmail(req.nextUrl.searchParams.get("token")));
 });
 
 export const POST = route(async (req: NextRequest) => {
-  rateLimit(clientIp(req), "auth:verify-email", { limit: 20, windowMs: 60_000 });
+  await rateLimit(clientIp(req), "auth:verify-email", { limit: 20, windowMs: 60_000 });
   const body = await req.json().catch(() => ({}));
   return ok(await accountService.verifyEmail(body?.token));
 });

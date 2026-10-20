@@ -28,6 +28,7 @@ import { isPrivateFileUrl } from "../lib/privateFiles";
 import type { PaymentStatus } from "./orderService";
 import { adminLinks } from "../lib/adminLinks";
 import { buildPromptPayQr } from "./promptpayService";
+import { warnSlipOnCancelledPreorder } from "./preorderRoundLifecycleService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -80,6 +81,20 @@ async function propagateStatus(payment: any, status: PaymentStatus) {
     await orderService.setPaymentStatus(String(payment.order_id), status, String(payment._id));
   } else if (payment.preorder_id) {
     await preorderService.setPaymentStatus(String(payment.preorder_id), status, String(payment._id));
+  }
+}
+
+/**
+ * ตรวจซ้ำหลังบันทึกสลิป — ระหว่างที่เราเช็คสถานะกับบันทึกสลิป cron อาจยกเลิกเอกสารเพราะหมดเวลาชำระไปแล้ว
+ * (cron เองก็ตรวจสลิปซ้ำหลังยกเลิก — ฝั่งใดฝั่งหนึ่งจะเห็นอีกฝั่งเสมอ) · ออเดอร์ → เปิดกลับ · พรีออเดอร์ → แจ้งร้าน
+ * best-effort: สลิปบันทึกแล้ว ไม่ให้คำขอของลูกค้าพังเพราะขั้นนี้
+ */
+async function reconcileAfterSlip(payment: { _id: unknown; order_id?: unknown; preorder_id?: unknown }): Promise<void> {
+  try {
+    if (payment.order_id) await orderService.reconcileExpiredWithSlip(String(payment.order_id));
+    else if (payment.preorder_id) await warnSlipOnCancelledPreorder(String(payment.preorder_id));
+  } catch (err) {
+    log.error("payment.reconcile_after_slip_failed", { payment_id: String(payment._id), err });
   }
 }
 
@@ -184,6 +199,7 @@ export async function createPayment(input: CreatePaymentInput) {
       { $set: { payment_id: payment._id } }
     );
   }
+  if (payment.slip_image_url) await reconcileAfterSlip(payment);
 
   return presentPayment(payment.toObject());
 }
@@ -280,12 +296,20 @@ export async function submitSlip(
     } else if (order?.order_status === "cancelled") {
       throw conflict("ออเดอร์นี้ถูกยกเลิกแล้ว");
     }
+  } else if (payment.preorder_id) {
+    // เดิมไม่ตรวจเลย — แนบสลิปกับพรีออเดอร์ที่ถูกยกเลิกได้ แล้วแอดมินอนุมัติจนได้ "ยกเลิก + ชำระแล้ว"
+    const preorder = await preorderModel
+      .findOne({ _id: payment.preorder_id, deleted_at: null })
+      .select("order_status")
+      .lean<{ order_status?: string } | null>();
+    if (preorder?.order_status === "cancelled") throw conflict("พรีออเดอร์นี้ถูกยกเลิกแล้ว");
   }
 
   payment.slip_image_url = input.slip_image_url;
   if (input.promptpay_ref !== undefined) payment.promptpay_ref = input.promptpay_ref;
   payment.status = "pending"; // ส่งใหม่หลังเคยถูกปฏิเสธ → กลับมารอตรวจ
   await payment.save();
+  await reconcileAfterSlip(payment);
 
   // แจ้งเตือนสลิปเข้าใหม่ (DB + LINE) — best-effort ไม่ทำให้แนบสลิปล้มเหลวถ้าแจ้งเตือนพัง
   // หัวข้อแสดงเลขเอกสารที่คนอ่านรู้เรื่อง (ORD-/POS-/PRE-…) ไม่ใช่ ObjectId — หาเลขหลังตอบลูกค้าแล้ว (ไม่หน่วง response)
@@ -318,17 +342,22 @@ export async function verifyPayment(
   if (!isObjectId(input.verified_by)) throw badRequest("verified_by ต้องเป็น ObjectId");
   await assertRefExists(userModel, input.verified_by, "ผู้ตรวจสอบ", "verified_by");
 
-  const payment = await paymentModel.findOne({ _id: id, deleted_at: null });
-  if (!payment) throw notFound("ไม่พบรายการชำระเงินที่ระบุ");
-  if (payment.status === "paid") throw conflict("รายการนี้ยืนยันไปแล้ว");
-  if (payment.status === "refunded") throw conflict("รายการนี้ถูกคืนเงินแล้ว");
+  // เปลี่ยนสถานะแบบมีเงื่อนไข (atomic) — แอดมิน 2 คนกดพร้อมกัน / กดซ้ำ ได้ผลสำเร็จแค่ครั้งเดียว
+  // (เดิมอ่าน → เช็ค → save ทำให้ทั้งสองคำขอผ่าน แล้วอัปเดตออเดอร์/แจ้งลูกค้าซ้ำ)
+  const status = input.approved ? "paid" : "failed";
+  const payment = await paymentModel.findOneAndUpdate(
+    { _id: id, deleted_at: null, status: { $in: ["pending", "failed"] } },
+    { $set: { status, verified_by: input.verified_by, verified_at: new Date() } },
+    { returnDocument: "after" }
+  );
+  if (!payment) {
+    const current = await paymentModel.findOne({ _id: id, deleted_at: null }).select("status").lean<{ status: string } | null>();
+    if (!current) throw notFound("ไม่พบรายการชำระเงินที่ระบุ");
+    if (current.status === "refunded") throw conflict("รายการนี้ถูกคืนเงินแล้ว");
+    throw conflict("รายการนี้ยืนยันไปแล้ว");
+  }
 
-  payment.status = input.approved ? "paid" : "failed";
-  payment.verified_by = input.verified_by as any;
-  payment.verified_at = new Date();
-  await payment.save();
-
-  await propagateStatus(payment, payment.status as PaymentStatus);
+  await propagateStatus(payment, status);
   return presentPayment(payment.toObject());
 }
 
@@ -339,14 +368,16 @@ export async function refundPayment(id: string, input: { verified_by: string }) 
   if (!isObjectId(input.verified_by)) throw badRequest("verified_by ต้องเป็น ObjectId");
   await assertRefExists(userModel, input.verified_by, "ผู้ดำเนินการ", "verified_by");
 
-  const payment = await paymentModel.findOne({ _id: id, deleted_at: null });
-  if (!payment) throw notFound("ไม่พบรายการชำระเงินที่ระบุ");
-  if (payment.status !== "paid") throw conflict("คืนเงินได้เฉพาะรายการที่ชำระแล้ว (paid)");
-
-  payment.status = "refunded";
-  payment.verified_by = input.verified_by as any;
-  payment.verified_at = new Date();
-  await payment.save();
+  // atomic เหมือน verifyPayment — คืนเงินซ้ำพร้อมกันได้ผลครั้งเดียว
+  const payment = await paymentModel.findOneAndUpdate(
+    { _id: id, deleted_at: null, status: "paid" },
+    { $set: { status: "refunded", verified_by: input.verified_by, verified_at: new Date() } },
+    { returnDocument: "after" }
+  );
+  if (!payment) {
+    if (!(await paymentModel.exists({ _id: id, deleted_at: null }))) throw notFound("ไม่พบรายการชำระเงินที่ระบุ");
+    throw conflict("คืนเงินได้เฉพาะรายการที่ชำระแล้ว (paid)");
+  }
 
   await propagateStatus(payment, "refunded");
   return presentPayment(payment.toObject());

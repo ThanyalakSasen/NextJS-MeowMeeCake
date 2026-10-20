@@ -7,6 +7,7 @@
  *  - soft delete ผ่าน deleted_at (ต้องมี field นี้ใน permissionModel)
  */
 import dbConnect from "../lib/dbConnect";
+import { createSharedCache } from "../lib/sharedCache";
 import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
@@ -79,15 +80,14 @@ export interface EffectivePermissions {
 // ไหนถูกกระทบ (เขียน permission ไม่ใช่ path ที่ถี่ เทียบกับ read ที่ถี่กว่ามาก ล้างทั้งหมดไม่แพง)
 // TTL ตั้งสั้นกว่า deliveryZoneService (30s ไม่ใช่ 60s) เพราะเป็น access-control ไม่ใช่แค่ตัวเลขค่าส่ง —
 // ตั้ง PERMISSION_CACHE_TTL_MS=0 ปิด cache ได้ (เช่นตอนเทส) เหมือน DELIVERY_ZONE_CACHE_TTL_MS
-// ⚠️ in-memory ต่อ instance เหมือน rateLimit.ts/deliveryZoneService.ts — deploy หลาย instance พร้อมกัน
-// ต้องเปลี่ยนเป็น Redis (หรือ pub/sub invalidate ข้าม instance) ไม่งั้น instance อื่นเห็นสิทธิ์เก่าค้างได้
-// จนกว่า TTL หมดอายุ
+// ข้าม instance: ใช้ sharedCache (BACKLOG5 G6) — invalidate เพิ่มเลขเวอร์ชันใน DB → instance อื่นทิ้ง cache
+// ภายใน SHARED_CACHE_SYNC_MS (ค่าเริ่มต้น 2 วิ) ไม่ต้องรอ TTL
 const envTtl = Number(process.env.PERMISSION_CACHE_TTL_MS);
 const CACHE_TTL_MS = Number.isFinite(envTtl) && envTtl >= 0 ? envTtl : 30_000;
-const permissionCache = new Map<string, { data: EffectivePermissions; expiresAt: number }>();
+const permissionCache = createSharedCache<EffectivePermissions>("permissions", () => CACHE_TTL_MS);
 
-function invalidatePermissionCache(): void {
-  permissionCache.clear();
+async function invalidatePermissionCache(): Promise<void> {
+  await permissionCache.invalidate();
 }
 
 // ── CREATE ───────────────────────────────────────────────────
@@ -124,7 +124,7 @@ export async function createPermission(input: CreatePermissionInput) {
       can_delete: input.can_delete,
       can_approve: input.can_approve,
     });
-    invalidatePermissionCache();
+    await invalidatePermissionCache();
     return doc.toObject();
   } catch (err: any) {
     if (err?.code === 11000) {
@@ -195,7 +195,7 @@ export async function updatePermission(id: string, input: UpdatePermissionInput)
     )
     .lean();
   if (!doc) throw notFound("ไม่พบสิทธิ์ที่ระบุ");
-  invalidatePermissionCache();
+  await invalidatePermissionCache();
   return doc;
 }
 
@@ -205,7 +205,7 @@ export async function deletePermission(id: string) {
   const doc = await softDeleteDoc(permissionModel, id, {
     notFoundMsg: "ไม่พบสิทธิ์ที่ระบุ หรือถูกลบไปแล้ว",
   });
-  invalidatePermissionCache();
+  await invalidatePermissionCache();
   return doc;
 }
 
@@ -213,7 +213,7 @@ export async function deletePermission(id: string) {
 export async function restorePermission(id: string) {
   try {
     const doc = await restoreDoc(permissionModel, id, { notFoundMsg: "ไม่พบสิทธิ์ที่ถูกลบไว้" });
-    invalidatePermissionCache();
+    await invalidatePermissionCache();
     return doc;
   } catch (err: any) {
     if (err?.code === 11000) {
@@ -232,28 +232,25 @@ export async function getEffectivePermissions(roleId: string): Promise<Effective
   await dbConnect();
   assertObjectId(roleId, "role_id");
 
-  const cached = permissionCache.get(roleId);
-  if (cached && cached.expiresAt > Date.now()) return cached.data;
+  return permissionCache.getOrLoad(roleId, async () => {
+    const now = new Date();
+    const rows = await permissionModel
+      .find({
+        role_id: roleId,
+        deleted_at: null,
+        $or: [{ expires_at: null }, { expires_at: { $gt: now } }],
+      })
+      .select(`menu_key ${FLAG_FIELDS.join(" ")} expires_at`)
+      .lean<Array<Record<string, any>>>();
 
-  const now = new Date();
-  const rows = await permissionModel
-    .find({
-      role_id: roleId,
-      deleted_at: null,
-      $or: [{ expires_at: null }, { expires_at: { $gt: now } }],
-    })
-    .select(`menu_key ${FLAG_FIELDS.join(" ")} expires_at`)
-    .lean<Array<Record<string, any>>>();
-
-  const byMenu: Record<string, Record<string, boolean>> = {};
-  for (const row of rows) {
-    byMenu[row.menu_key] = Object.fromEntries(
-      FLAG_FIELDS.map((f) => [f, !!row[f]])
-    );
-  }
-  const result = { role_id: roleId, permissions: byMenu };
-  permissionCache.set(roleId, { data: result, expiresAt: Date.now() + CACHE_TTL_MS });
-  return result;
+    const byMenu: Record<string, Record<string, boolean>> = {};
+    for (const row of rows) {
+      byMenu[row.menu_key] = Object.fromEntries(
+        FLAG_FIELDS.map((f) => [f, !!row[f]])
+      );
+    }
+    return { role_id: roleId, permissions: byMenu };
+  });
 }
 
 // ── สิทธิ์เมนูของ "ตัวเอง" (ให้ frontend ซ่อน/แสดงเมนู) ──────────

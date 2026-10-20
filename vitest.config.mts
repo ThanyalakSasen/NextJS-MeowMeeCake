@@ -14,7 +14,12 @@ export default defineConfig({
           include: ["tests/lib/**/*.test.ts"],
           // service บางตัว import src/lib/dbConnect ที่ throw ถ้าไม่มี MONGODB_URI ตั้งแต่ตอน load module
           // unit test ในกลุ่มนี้ไม่ได้ต่อ DB จริง
-          env: { MONGODB_URI: "mongodb://127.0.0.1:27017/meowmeecake_test", NODE_ENV: "test" },
+          // RATE_LIMIT_STORE=memory: rateLimit ค่าเริ่มต้นเก็บใน MongoDB (BACKLOG5 G6) — unit test ไม่มี DB
+          env: {
+            MONGODB_URI: "mongodb://127.0.0.1:27017/meowmeecake_test",
+            NODE_ENV: "test",
+            RATE_LIMIT_STORE: "memory",
+          },
         },
       },
       {

@@ -240,6 +240,8 @@ export async function createPreorder(
 
   // 2) ตรวจขั้นต่ำต่อรายการ + สูงสุดต่อลูกค้า (รวมทุกแถวของสินค้าเดียวกัน + พรีออเดอร์เดิมในรอบ)
   const orderedByRoundItem = new Map<string, number>();
+  // เพดานต่อคนต่อรอบ — เก็บไว้ตรวจซ้ำหลังบันทึก (กันสั่งพร้อมกันหลายใบแล้วรวมกันเกินเพดาน)
+  const maxByRoundItem = new Map<string, { max: number; name: string }>();
   const lines = [...groups.values()].map(({ item, product, unit_price, custom, quantity, special_request }) => {
     const cfg = product.preorder_config ?? {};
     // ขั้นต่ำ = ค่าที่มากกว่าระหว่างรายการในรอบกับตัวสินค้า (ต่อแถว — แบบฝั่งลูกค้า)
@@ -252,6 +254,7 @@ export async function createPreorder(
     const inThisOrder = (orderedByRoundItem.get(roundItemKey) ?? 0) + quantity;
     orderedByRoundItem.set(roundItemKey, inThisOrder);
     if (cfg.max_order_qty != null) {
+      maxByRoundItem.set(roundItemKey, { max: cfg.max_order_qty, name: product.product_name_th });
       const already = alreadyByRoundItem.get(roundItemKey) ?? 0;
       if (already + inThisOrder > cfg.max_order_qty) {
         throw badRequest(
@@ -430,6 +433,17 @@ export async function createPreorder(
       preorderItemModel.deleteMany({ preorder_id: preorder._id })
     );
 
+    // ตรวจเพดานต่อคนซ้ำหลังบันทึก (optimistic แบบ recordUsage) — การเช็คก่อนสร้างผ่านได้ทุกใบถ้าสั่งพร้อมกัน
+    // เกิน = throw → saga ลบใบนี้ + คืนโควตา/คูปอง/แต้ม (ใบที่สั่งพร้อมกันอาจล้มทั้งคู่ — ลูกค้าสั่งใหม่ได้)
+    if (maxByRoundItem.size > 0) {
+      const totals = await quantityAlreadyOrdered(userId, round._id);
+      for (const [roundItemKey, { max, name }] of maxByRoundItem) {
+        if ((totals.get(roundItemKey) ?? 0) > max) {
+          throw badRequest(`"${name}" สั่งได้สูงสุด ${max} ชิ้นต่อคนต่อรอบ`);
+        }
+      }
+    }
+
     // ทุกขั้นสำเร็จ → ทิ้ง undo ก่อนอ่านผลลัพธ์ (getPreorderById อาจ throw โดยไม่ต้อง rollback)
     saga.commit();
 
@@ -562,14 +576,34 @@ export async function updatePreorderStatus(
     throw badRequest(`order_status ต้องเป็นหนึ่งใน: ${PREORDER_STATUSES.join(", ")}`);
   }
 
-  const preorder = await preorderModel.findOne({ _id: id, deleted_at: null });
-  if (!preorder) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
+  const existing = await preorderModel.findOne({ _id: id, deleted_at: null });
+  if (!existing) throw notFound("ไม่พบพรีออเดอร์ที่ระบุ");
 
-  const current = preorder.order_status as PreorderStatus;
+  const current = existing.order_status as PreorderStatus;
   // BACKLOG3 §5 — เทียบ orderService.updateOrderStatus: populate แทน re-query ทั้ง header+items
-  if (current === next) return presentPreorderWithItems(preorder);
+  if (current === next) return presentPreorderWithItems(existing);
   if (!NEXT_STATUS[current].includes(next)) {
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
+  }
+  if (next === "cancelled" && opts.cancelled_by) assertObjectId(opts.cancelled_by, "cancelled_by");
+
+  // จองการเปลี่ยนสถานะแบบ atomic ก่อนคืนโควตา/คืนเงิน — กันยกเลิกพร้อมกัน (cron ไม่จ่ายตามกำหนด + ปิดรอบ +
+  // ลูกค้ากดเอง) แล้วต่างคนต่างคืนโควตารอบ → รับจองเกินโควตา (เทียบ orderService.updateOrderStatus)
+  const set: Record<string, unknown> = { order_status: next };
+  if (next === "cancelled") {
+    set.cancelled_at = new Date();
+    set.cancelled_reason = opts.cancelled_reason ?? null;
+    if (opts.cancelled_by) set.cancelled_by = opts.cancelled_by;
+  }
+  const preorder = await preorderModel.findOneAndUpdate(
+    { _id: existing._id, order_status: current, deleted_at: null },
+    { $set: set },
+    { returnDocument: "after" }
+  );
+  if (!preorder) {
+    const latest = await preorderModel.findOne({ _id: existing._id, deleted_at: null });
+    if (latest && latest.order_status === next) return presentPreorderWithItems(latest);
+    throw conflict("สถานะพรีออเดอร์เปลี่ยนไปแล้ว กรุณาโหลดหน้าใหม่");
   }
 
   // จำไว้ก่อน cleanup — auto-refund ด้านล่างเปลี่ยน payment_status ใน DB เป็น refunded ไปแล้วตอนเช็คทีหลัง
@@ -605,17 +639,8 @@ export async function updatePreorderStatus(
     });
 
     await cleanup.rollback();
-
-    preorder.cancelled_at = new Date();
-    if (opts.cancelled_by) {
-      assertObjectId(opts.cancelled_by, "cancelled_by");
-      preorder.cancelled_by = opts.cancelled_by;
-    }
-    preorder.cancelled_reason = opts.cancelled_reason ?? null;
   }
 
-  preorder.order_status = next;
-  await preorder.save();
   // แต้ม + คูปอง (customer-backend-merge.md §8.11)
   if (next === "completed" || next === "cancelled") {
     await pointsService.syncOrderPoints("preorder", preorder.toObject());

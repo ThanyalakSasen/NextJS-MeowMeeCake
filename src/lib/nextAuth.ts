@@ -46,7 +46,7 @@ function providers(): NextAuthOptions["providers"] {
             const v = headers[name];
             return Array.isArray(v) ? v[0] : v;
           };
-          rateLimit(clientIpFromHeaders(header), "auth:login", { limit: 10, windowMs: 60_000 });
+          await rateLimit(clientIpFromHeaders(header), "auth:login", { limit: 10, windowMs: 60_000 });
           const user: any = await userService.verifyCredentials(credentials.email, credentials.password);
           const roleType = user.role_id?.role_type === "admin" ? "owner" : user.role_id?.role_type;
           return {

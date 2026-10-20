@@ -9,7 +9,7 @@ import { clientIp } from "@/lib/request";
 import * as accountService from "@/services/accountService";
 
 export const POST = route(async (req: NextRequest) => {
-  rateLimit(clientIp(req), "auth:resend-verification", { limit: 3, windowMs: 60_000 });
+  await rateLimit(clientIp(req), "auth:resend-verification", { limit: 3, windowMs: 60_000 });
   const body = await req.json().catch(() => ({}));
   return ok(await accountService.resendVerification(body?.email));
 });

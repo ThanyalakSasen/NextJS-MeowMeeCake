@@ -8,6 +8,7 @@
  * cache กลุ่มคำ 60 วินาที · แก้แล้วล้าง cache ทันที
  */
 import dbConnect from "../lib/dbConnect";
+import { createSharedCache } from "../lib/sharedCache";
 import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { normalizeText } from "../lib/search/normalize";
@@ -24,22 +25,22 @@ const MAX_SYNONYMS = 50;
 const MIN_WORD_LENGTH = 2;
 const CACHE_TTL_MS = 60_000;
 
-let cache: { groups: SynonymGroup[]; expiresAt: number } | null = null;
-export function clearSynonymCache(): void {
-  cache = null;
+// ข้าม instance: sharedCache (BACKLOG5 G6) — แก้คำพ้องแล้ว instance อื่นเห็นภายใน SHARED_CACHE_SYNC_MS
+const cache = createSharedCache<SynonymGroup[]>("search_synonyms", () => CACHE_TTL_MS);
+export async function clearSynonymCache(): Promise<void> {
+  await cache.invalidate();
 }
 
 /** กลุ่มคำพ้องทั้งหมด (ข้อความดิบ ไม่ normalize) — cache 60 วิ */
 export async function getSynonymGroups(): Promise<SynonymGroup[]> {
-  if (cache && Date.now() < cache.expiresAt) return cache.groups;
-  await dbConnect();
-  const docs = await searchSynonymModel
-    .find({ deleted_at: null })
-    .select("term synonyms")
-    .lean<SynonymGroup[]>();
-  const groups = docs.map((d) => ({ term: d.term, synonyms: d.synonyms ?? [] }));
-  cache = { groups, expiresAt: Date.now() + CACHE_TTL_MS };
-  return groups;
+  return cache.getOrLoad("all", async () => {
+    await dbConnect();
+    const docs = await searchSynonymModel
+      .find({ deleted_at: null })
+      .select("term synonyms")
+      .lean<SynonymGroup[]>();
+    return docs.map((d) => ({ term: d.term, synonyms: d.synonyms ?? [] }));
+  });
 }
 
 /** คำพ้องที่สั้นกว่านี้ไม่นำมาจับแบบ "ขึ้นต้นด้วย" (กันพิมพ์ 1 ตัวอักษรแล้วตรงทุกกลุ่ม) */
@@ -125,7 +126,7 @@ export async function createSynonym(raw: unknown) {
   const body = parseBody(raw, false);
   await assertNoDuplicateTerm(body.term!);
   const doc = await searchSynonymModel.create({ term: body.term, synonyms: body.synonyms ?? [] });
-  clearSynonymCache();
+  await clearSynonymCache();
   return doc.toObject();
 }
 
@@ -138,7 +139,7 @@ export async function updateSynonym(id: string, raw: unknown) {
     .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: body }, { returnDocument: "after", runValidators: true })
     .lean();
   if (!doc) throw notFound("ไม่พบกลุ่มคำพ้อง");
-  clearSynonymCache();
+  await clearSynonymCache();
   return doc;
 }
 
@@ -149,6 +150,6 @@ export async function deleteSynonym(id: string) {
     .findOneAndUpdate({ _id: id, deleted_at: null }, { $set: { deleted_at: new Date() } }, { returnDocument: "after" })
     .lean();
   if (!doc) throw notFound("ไม่พบกลุ่มคำพ้อง");
-  clearSynonymCache();
+  await clearSynonymCache();
   return doc;
 }

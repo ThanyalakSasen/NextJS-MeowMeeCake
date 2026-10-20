@@ -169,12 +169,11 @@ pm2 startup systemd -u meowmee --hp /home/meowmee   # ทำตามคำส�
 curl -s http://127.0.0.1:3000/api/health             # → {"ok":true,"db":"connected"}
 ```
 
-> ⚠️ **รัน instance เดียวเท่านั้น (BACKLOG4 Y8)** — ห้าม `pm2 start ... -i max` / `-i 2` / `exec_mode: cluster`
-> rate limit (`src/lib/rateLimit.ts`) · permission cache (30 วิ) · delivery-zone cache · cache โควตา LINE
-> (`src/lib/lineQuota.ts`) เก็บในหน่วยความจำของ process — หลาย instance = rate limit หลวมเป็น N เท่า, สิทธิ์ที่เพิ่งถอน
-> ยังใช้ได้ใน instance อื่นจน cache หมดอายุ, โควตา LINE ถูกตัดสินจากตัวเลขคนละชุด · ถ้าแอปตรวจพบว่ารันหลาย instance
-> จะเขียน log `runtime.multi_instance` ตอนเริ่ม (`src/instrumentation.ts`) — ร้านขนาดนี้ instance เดียวรับได้สบาย
-> ถ้าวันหนึ่งต้องขยายจริง ให้ย้าย 4 จุดนี้ไป Redis ก่อน (แก้เฉพาะไฟล์ละตัว)
+> ℹ️ **หลาย instance ได้แล้ว (BACKLOG5 G6 · เดิม BACKLOG4 Y8 ให้รัน instance เดียว)** — rate limit (`RateLimits`) ·
+> permission cache / delivery-zone cache / cache คำพ้อง (ล้างข้าม instance ผ่าน `CacheVersions` ภายใน `SHARED_CACHE_SYNC_MS` = 2 วิ) ·
+> โควตา LINE (`LineQuotaStates`) แชร์ผ่าน MongoDB · `pm2 start ... -i 2` / cluster ใช้ได้ถ้าต้องการ (ร้านขนาดนี้ instance เดียวก็พอ)
+> · ไฟล์อัปโหลดแบบ `local` อยู่บนดิสก์เครื่องนี้ — หลาย instance **บนเครื่องเดียวกัน** ใช้ได้ · หลายเครื่อง/serverless ต้อง `UPLOAD_DRIVER=s3`
+> · cache แคตตาล็อกระบบแนะนำสินค้า (3 นาที) ยังต่อ instance — หมดอายุตามเวลาอย่างเดียว ผลเหมือนเดิมไม่ว่ากี่ instance
 
 **deploy รอบถัด ๆ ไป:**
 
@@ -372,6 +371,6 @@ git checkout <commit ก่อนหน้า> && npm ci && npm run build && pm2
 | ล็อกอินแล้ว frontend ยังได้ 401 | cookie ไม่ข้าม origin | `COOKIE_DOMAIN=.example.com` + `ALLOWED_ORIGINS=https://app.example.com` · ใช้ HTTPS ทั้งคู่ |
 | ผูก LINE ขึ้น `Invalid redirect_uri` | ยังไม่ได้เพิ่ม Callback URL โดเมนจริงในแท็บ LINE Login | ② + [`LINE.md`](LINE.md) §6.1 |
 | cron ไม่ทำงาน | PATH ของ cron หา `npm` ไม่เจอ / timezone | ใส่ `PATH` ในหัว crontab · ตั้งเครื่องเป็น `Asia/Bangkok` · ดู log |
-| log มี `runtime.multi_instance` | รัน pm2 แบบ cluster / หลาย instance | `pm2 delete meowmeecake-api` แล้ว start ใหม่ตาม §⑤ (fork instance เดียว) |
+| log มี `runtime.serverless_local_uploads` | รันบน serverless แต่ยังเก็บไฟล์อัปโหลดลงดิสก์ | ตั้ง `UPLOAD_DRIVER=s3` + ค่า S3 ([`uploads.md`](uploads.md)) |
 | แจ้งเตือน "ตรวจพบข้อมูลสินค้าผิดปกติ" | มีการแก้ DB ตรงนอกแอป (ราคาเป็นบาท ฯลฯ) | ดู `logs/data-integrity.log` · แก้ผ่านหน้าหลังบ้าน · หาว่าใครใช้ user ที่เขียนได้ (§ผู้ใช้ DB) |
 | อัปโหลดรูปได้ `413` | nginx จำกัดขนาด body | `client_max_body_size 45m` |

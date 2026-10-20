@@ -47,8 +47,8 @@ export function computeShippingFee(province: string, zones: ShippingZone[]): num
 }
 
 // ── ขอบเขตการจัดส่ง ────────────────────────────────────────────────────────────
-// แต่ละหมวดหมู่สินค้ามีสวิตช์ ships_nationwide (ตั้งที่หน้า /owner/shipping)
-// เปิด = ส่งได้ทั่วประเทศ, ปิด = ส่งได้เฉพาะในจังหวัดเดียวกับร้าน
+// แต่ละหมวดหมู่สินค้ามีสวิตช์ ships_nationwide (ตั้งที่ "จัดส่งนอกจังหวัด" หน้า /owner/shipping หรือจัดการหมวดหมู่สินค้า)
+// เปิด = ส่งได้ทั่วประเทศ, ปิด = ส่งได้เฉพาะในจังหวัดเดียวกับร้าน · สินค้าแต่ละชิ้นตั้งยกเว้นจากหมวดได้ (productShipsNationwide)
 // หมวดที่ยังไม่เคยตั้งค่า (ไม่มี field) ใช้ค่าเริ่มต้นจากชื่อหมวด: ซาวโดว์เก็บได้นาน → ส่งทั่วประเทศ
 const NATIONWIDE_CATEGORY_KEYWORDS = ["ซาวโดว์", "sourdough"];
 
@@ -59,6 +59,17 @@ export function categoryShipsNationwide(category: {
   if (typeof category.ships_nationwide === "boolean") return category.ships_nationwide;
   const name = String(category.product_category_name ?? "").toLowerCase();
   return NATIONWIDE_CATEGORY_KEYWORDS.some((k) => name.includes(k));
+}
+
+/**
+ * สินค้าชิ้นนี้ส่งทั่วประเทศได้ไหม — ตั้งยกเว้นรายสินค้าไว้ (true/false) ใช้ค่านั้นก่อน · ไม่ได้ตั้ง (null) = ตามหมวด
+ * เช่น หมวดเค้กส่งเฉพาะจังหวัด แต่ "เค้กกล้วยหอม" ตั้งให้ส่งทั่วประเทศได้
+ */
+export function productShipsNationwide(
+  product: { ships_nationwide?: unknown },
+  categoryNationwide: boolean
+): boolean {
+  return typeof product.ships_nationwide === "boolean" ? product.ships_nationwide : categoryNationwide;
 }
 
 export type DeliveryCheck = { ok: true } | { ok: false; message: string };

@@ -4,6 +4,7 @@
  */
 import { z } from "zod";
 import { isThaiProvince } from "@/lib/thaiProvinces";
+import { objectId } from "./common";
 
 export const shippingZoneUpdate = z
   .object({
@@ -25,3 +26,16 @@ export const shippingZoneUpdate = z
     message: "ต้องระบุอย่างน้อย 1 ฟิลด์ที่จะแก้ไข",
   });
 export type ShippingZoneUpdate = z.infer<typeof shippingZoneUpdate>;
+
+/** PATCH /api/admin/shipping-zones/categories/:id — หมวดนี้ส่งทั่วประเทศได้ไหม (ออเดอร์เว็บ) */
+export const categoryShippingUpdate = z.object({
+  ships_nationwide: z.boolean(),
+  /** true = ล้างค่ายกเว้นรายสินค้าในหมวดด้วย (เปิด/ปิดทั้งหมวด) */
+  reset_products: z.boolean().optional(),
+});
+
+/** PATCH /api/admin/shipping-zones/products — ตั้งยกเว้นหลายสินค้า · null = กลับไปใช้ค่าตามหมวด */
+export const productShippingUpdate = z.object({
+  product_ids: z.array(objectId).min(1, "เลือกสินค้าอย่างน้อย 1 รายการ").max(500),
+  ships_nationwide: z.boolean().nullable(),
+});

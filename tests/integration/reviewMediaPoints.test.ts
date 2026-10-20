@@ -102,11 +102,11 @@ describe("แต้มรีวิว", () => {
     const r = (await reviewService.createReview({ user_id: a.uid, order_item_id: a.itemId, rating: 5 })) as { _id: unknown };
     expect(await pointsService.getBalance(a.uid)).toBe(15);
     await reviewService.deleteReview(String(r._id), { by_user_id: a.uid });
-    await reviewService.createReview({ user_id: a.uid, order_item_id: a.itemId, rating: 5, image: ["/x.png"] });
+    await reviewService.createReview({ user_id: a.uid, order_item_id: a.itemId, rating: 5, image: [`/uploads/reviews/${a.uid}-1-aa.png`] });
     expect(await pointsService.getBalance(a.uid)).toBe(15);
 
     const b = await completedOrder(true);
-    await reviewService.createReview({ user_id: b.uid, order_item_id: b.itemId, rating: 4, image: ["/y.png"], video: "/v.mp4" });
+    await reviewService.createReview({ user_id: b.uid, order_item_id: b.itemId, rating: 4, image: [`/uploads/reviews/${b.uid}-1-bb.png`], video: `/uploads/reviews/${b.uid}-1-cc.mp4` });
     expect(await pointsService.getBalance(b.uid)).toBe(20);
   });
 
