@@ -1299,6 +1299,26 @@ async function getCoOccurrenceScores(
  * FIND SIMILAR — GET /api/recommendations/similar/:productId (Auth: Optional)
  * คะแนน = 0.7 × (cosine feature vector + taste) + 0.3 × co-occurrence
  */
+/**
+ * คำเตือนสารก่อภูมิแพ้ของสินค้าทุกชิ้นที่ยังแสดงบนเว็บ ตาม user_allergies ของผู้ใช้ — ให้การ์ดสินค้าทุกหน้าแสดงป้ายเตือนได้
+ * คืนเฉพาะสินค้าที่มีคำเตือน (level ≠ none) · ไม่ได้บันทึกอาหารที่แพ้ = {}
+ */
+export async function getAllergenWarnings(userId: string): Promise<Record<string, AllergenWarning>> {
+  await connectMongoDB();
+  const userDoc = await User.findById(userId).select("user_allergies allergenProfile").lean().catch(() => null);
+  const profile = parseAllergenProfile((userDoc as any)?.user_allergies, (userDoc as any)?.allergenProfile);
+  if (profile.items.length === 0) return {};
+
+  const { items } = await loadCatalog();
+  const warnings: Record<string, AllergenWarning> = {};
+  for (const item of items) {
+    if (item.doc?.is_visible === false) continue;
+    const warning = checkAllergenForProduct(item.allergenInfo, profile);
+    if (warning.level !== "none") warnings[String(item.doc._id)] = warning;
+  }
+  return warnings;
+}
+
 export async function getSimilarProducts(
   query: SimilarProductsQuery
 ): Promise<RecommendationItem[]> {
