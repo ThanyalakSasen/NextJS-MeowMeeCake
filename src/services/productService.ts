@@ -673,6 +673,15 @@ export async function hardDeleteProduct(id: string) {
  *  เอกสารที่ยังไม่มีฟิลด์ is_preorder เป็นสินค้าปกติด้วย (ค่าเริ่มต้นของ schema) */
 const STOCKABLE_MATCH = { is_preorder: { $ne: true } } as const;
 
+/** สินค้าปกติที่สต็อกเป็น null / ไม่มีฟิลด์ (ข้อมูลที่เขียนนอกแอป เช่น Atlas / backend ตัวเก่า — ในแอปตั้ง 0 ให้เสมอ) → ตั้งเป็น 0 ก่อน $inc
+ *  — $inc กับ null = MongoServerError "Cannot apply $inc to a value of non-numeric type" (500 ตอนรับเข้าสต็อก) */
+async function ensureNumericStock(id: string): Promise<void> {
+  await productModel.updateOne(
+    { _id: id, deleted_at: null, ...STOCKABLE_MATCH, product_stock_quantity: null },
+    { $set: { product_stock_quantity: 0 } }
+  );
+}
+
 export interface StockItemInput {
   product_id: string;
   quantity: number;
@@ -743,6 +752,7 @@ export async function adjustStock(
     throw new ProductError("delta ต้องเป็นตัวเลขที่ไม่ใช่ 0", 400);
   }
   await loadStockableProduct(id);
+  await ensureNumericStock(id);
 
   const filter: Filter = {
     _id: id,
@@ -926,6 +936,7 @@ export async function restockForOrder(items: StockItemInput[]) {
 
   const restocked: { product_id: string; quantity: number }[] = [];
   for (const [product_id, quantity] of merged) {
+    await ensureNumericStock(product_id);
     const updated = await productModel.updateOne(
       { _id: product_id, deleted_at: null, ...STOCKABLE_MATCH },
       { $inc: { product_stock_quantity: quantity } }
