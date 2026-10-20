@@ -43,7 +43,7 @@ const names = (body: { data: { items: PosItem[] } }): string[] => body.data.item
 describe("GET /api/admin/pos/products", () => {
   it("พนักงานที่มีแค่ orders.view → 200 · ไม่มีสิทธิ์ orders → 403", async () => {
     await makeProduct();
-    expect((await get(await staff(["orders"]))).status).toBe(200);
+    expect((await get(await staff(["pos"]))).status).toBe(200);
     expect((await get(await staff(["products"]))).status).toBe(403);
   });
 
@@ -52,7 +52,7 @@ describe("GET /api/admin/pos/products", () => {
     await makeProduct({ product_name_th: "ข ซ่อนจากเว็บ", is_visible: false });
     await makeProduct({ product_name_th: "ค ลบแล้ว", deleted_at: new Date() });
     await makeProduct({ product_name_th: "ง พรีออเดอร์", product_id: "pre-0000001", is_preorder: true });
-    const { body } = await get(await staff(["orders"]));
+    const { body } = await get(await staff(["pos"]));
     expect(names(body)).toEqual(["ก ปกติ", "ข ซ่อนจากเว็บ"]);
     expect(body.data.meta.total).toBe(2);
   });
@@ -60,7 +60,7 @@ describe("GET /api/admin/pos/products", () => {
   it("search ค้นจากรหัสสินค้า ชื่อไทย และชื่ออังกฤษ (ไม่สนตัวพิมพ์)", async () => {
     await makeProduct({ product_id: "pos-1234567", product_name_th: "เค้กช็อกโกแลต", product_name_eng: "Chocolate Cake" });
     await makeProduct({ product_id: "pos-7654321", product_name_th: "ครัวซองต์", product_name_eng: "Croissant" });
-    const session = await staff(["orders"]);
+    const session = await staff(["pos"]);
     expect(names((await get(session, "?search=pos-12")).body)).toEqual(["เค้กช็อกโกแลต"]);
     expect(names((await get(session, "?search=ครัว")).body)).toEqual(["ครัวซองต์"]);
     expect(names((await get(session, "?search=CHOCO")).body)).toEqual(["เค้กช็อกโกแลต"]);
@@ -75,7 +75,7 @@ describe("GET /api/admin/pos/products", () => {
     await makeVariant(String(withVariant._id));
     await makeOption(String(withOption._id));
     await makeVariant(String(deletedOnly._id), { deleted_at: new Date() });
-    const { body } = await get(await staff(["orders"]));
+    const { body } = await get(await staff(["pos"]));
     const flags = Object.fromEntries(body.data.items.map((p: PosItem) => [String(p._id), p.has_customization]));
     expect(flags).toEqual({
       [String(plain._id)]: false,
@@ -87,7 +87,7 @@ describe("GET /api/admin/pos/products", () => {
 
   it("ฟิลด์ที่ POS ใช้ครบ · ราคาเป็นบาท · ไม่มี purchase_cost", async () => {
     await makeProduct({ product_id: "pos-0000042", product_price: 120, sale_price: 99, purchase_cost: 4000, product_img: ["a.jpg"], product_stock_quantity: 7 });
-    const [p] = (await get(await staff(["orders"]))).body.data.items;
+    const [p] = (await get(await staff(["pos"]))).body.data.items;
     expect(p).toMatchObject({
       product_id: "pos-0000042",
       product_price: 120,
@@ -103,7 +103,7 @@ describe("GET /api/admin/pos/products", () => {
 
   it("แบ่งหน้าตาม page/limit · meta.total = ทั้งหมด", async () => {
     for (const n of ["ก", "ข", "ค", "ง", "จ"]) await makeProduct({ product_name_th: n });
-    const session = await staff(["orders"]);
+    const session = await staff(["pos"]);
     const page2 = (await get(session, "?page=2&limit=2")).body;
     expect(names(page2)).toEqual(["ค", "ง"]);
     expect(page2.data.meta).toMatchObject({ page: 2, limit: 2, total: 5 });

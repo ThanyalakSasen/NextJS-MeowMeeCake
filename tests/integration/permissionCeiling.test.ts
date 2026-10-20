@@ -39,6 +39,8 @@ async function hrActor() {
   const role = await roleModel.create({ role_name: name("hr"), role_type: "staff" });
   const user = await makeUser({ role_id: role._id });
   await createPermission({ role_id: String(role._id), menu_key: "employees", granted_by: String(user._id), ...FULL });
+  // หน้าจัดการสิทธิ์/ตำแหน่งแยก key แล้ว (permissions) — HR ที่ดูแลพนักงานครบได้ทั้งสองหน้า
+  await createPermission({ role_id: String(role._id), menu_key: "permissions", granted_by: String(user._id), ...FULL });
   await createPermission({ role_id: String(role._id), menu_key: "products", granted_by: String(user._id), can_view: true });
   return { session: sessionOf(user, role, "staff"), role, user };
 }

@@ -102,7 +102,7 @@ describe("GET /api/files/receipts/[filename] — ตรวจสิทธิ์ 
     const session = await sessionOf(staff, "staff");
     expect((await open(session, saved.filename)).status).toBe(403);
 
-    await permissionModel.create({ role_id: role._id, menu_key: "reports", can_view: true, granted_by: owner._id });
+    await permissionModel.create({ role_id: role._id, menu_key: "finance_expenses", can_view: true, granted_by: owner._id });
     expect((await open(session, saved.filename)).status).toBe(200);
   });
 

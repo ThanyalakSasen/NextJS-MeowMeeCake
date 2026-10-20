@@ -23,7 +23,7 @@ async function sessionFor(roleType: "owner" | "staff", perms: { can_view?: boole
   const role = await roleModel.create({ role_name: `${roleType}-${Math.random()}`, role_type: roleType });
   const user = await makeUser({ role_id: role._id });
   if (roleType === "staff" && (perms.can_view || perms.can_update)) {
-    await createPermission({ role_id: String(role._id), menu_key: "store_info", granted_by: String(user._id), ...perms });
+    await createPermission({ role_id: String(role._id), menu_key: "shipping", granted_by: String(user._id), ...perms });
   }
   const session: SessionUser = {
     user_id: String(user._id), role_id: String(role._id), role_type: roleType,

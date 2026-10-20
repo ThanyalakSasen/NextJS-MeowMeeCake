@@ -41,7 +41,7 @@ async function seedGuest(over: Record<string, unknown> = {}) {
 describe("GET /api/admin/pos/guest-customer", () => {
   it("พนักงานที่มีแค่ orders.view ได้ id บัญชีลูกค้าทั่วไป — ไม่ต้องมี employees", async () => {
     const guest = await seedGuest();
-    const { status, body } = await call(await staff({ orders: { can_view: true } }));
+    const { status, body } = await call(await staff({ pos: { can_view: true } }));
     expect(status).toBe(200);
     expect(body.data._id).toBe(String(guest._id));
     expect(body.data.email).toBe(GUEST_CUSTOMER_EMAIL);
@@ -54,7 +54,7 @@ describe("GET /api/admin/pos/guest-customer", () => {
   });
 
   it("ยังไม่ได้ seed หรือบัญชีถูกปิดใช้งาน = 404", async () => {
-    const session = await staff({ orders: { can_view: true } });
+    const session = await staff({ pos: { can_view: true } });
     expect((await call(session)).status).toBe(404);
     await seedGuest({ is_active: false });
     expect((await call(session)).status).toBe(404);
