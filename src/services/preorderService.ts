@@ -531,7 +531,22 @@ export async function listPreorders(query: ListPreorderQuery) {
     preorderModel.countDocuments(filter),
   ]);
 
-  return { items: items.map(presentPreorder), meta: buildMeta(total, query.pagination) };
+  // รายการสินค้าของทุกใบในหน้านี้ — query เดียว แล้วจัดกลุ่มตาม preorder_id (ตารางหลังร้านโชว์ว่าแต่ละใบสั่งอะไร)
+  // ตัด cost_per_unit — endpoint นี้ใช้ร่วมกับฝั่งลูกค้า (/shop/preorders)
+  const lines = await preorderItemModel
+    .find({ preorder_id: { $in: items.map((p: any) => p._id) }, deleted_at: null })
+    .select("-cost_per_unit")
+    .lean();
+  const linesByPreorder = new Map<string, any[]>();
+  for (const l of lines) {
+    const key = String(l.preorder_id);
+    linesByPreorder.set(key, [...(linesByPreorder.get(key) ?? []), presentPreorderItem(l)]);
+  }
+
+  return {
+    items: items.map((p: any) => ({ ...presentPreorder(p), items: linesByPreorder.get(String(p._id)) ?? [] })),
+    meta: buildMeta(total, query.pagination),
+  };
 }
 
 export async function getPreorderById(id: string, opts: { includeDeleted?: boolean } = {}) {
