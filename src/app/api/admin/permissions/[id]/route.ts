@@ -6,7 +6,7 @@
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { audit } from "@/lib/audit";
+import { audit, auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { permissionUpdate } from "@/schemas/rbac";
 import * as permissionService from "@/services/permissionService";
@@ -23,13 +23,22 @@ export const PATCH = withPermission("permissions", "update", async (session, req
   const { id } = await ctx.params;
   const body = await parseBody(req, permissionUpdate);
   await assertMayGrantExisting(session, id, body);
+  const before = await permissionService.getPermissionById(id);
   const result = await permissionService.updatePermission(id, body);
-  audit(req, {
-    action: "แก้ไขสิทธิ์เมนู",
-    action_type: "UPDATE",
+  // ก่อน/หลังของ flag ที่แก้ + บทบาท/เมนูใน details (หน้า "บันทึกการทำงาน" แสดงเป็นบริบท — userLogPresenter)
+  const role = before.role_id as { _id?: unknown } | string | null;
+  auditChange(req, {
+    op: "update",
+    noun: "สิทธิ์เมนู",
     entity: "Permission",
     entity_id: id,
-    details: body,
+    before,
+    after: result,
+    keys: Object.keys(body),
+    details: {
+      role_id: role && typeof role === "object" ? String(role._id) : role,
+      menu_key: before.menu_key,
+    },
   });
   return ok(result);
 });

@@ -160,6 +160,8 @@ export interface ListOrderQuery {
   date_to?: string;
   includeDeleted?: boolean;
   sort?: Record<string, 1 | -1>;
+  /** แนบ items[] ของแต่ละออเดอร์ (query เดียว) — ใช้กับรายการสั้น ๆ เช่น ออเดอร์ล่าสุดในแดชบอร์ด */
+  withItems?: boolean;
 }
 
 interface PricedLine {
@@ -675,7 +677,19 @@ export async function listOrders(query: ListOrderQuery) {
     orderModel.countDocuments(filter),
   ]);
 
-  return { items: items.map(presentOrder), meta: buildMeta(total, query.pagination) };
+  const presented = items.map(presentOrder);
+  if (query.withItems && items.length) {
+    const lines = await orderItemModel
+      .find({ order_id: { $in: items.map((o: any) => o._id) }, deleted_at: null })
+      .lean<any[]>();
+    const byOrder = new Map<string, any[]>();
+    for (const it of lines) {
+      const key = String(it.order_id);
+      byOrder.set(key, [...(byOrder.get(key) ?? []), presentOrderItem(it)]);
+    }
+    for (const o of presented) o.items = byOrder.get(String(o._id)) ?? [];
+  }
+  return { items: presented, meta: buildMeta(total, query.pagination) };
 }
 
 export async function getOrderById(id: string, opts: { includeDeleted?: boolean } = {}) {

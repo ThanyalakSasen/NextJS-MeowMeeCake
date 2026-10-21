@@ -180,6 +180,21 @@ export async function listByOrder(orderId: string) {
     .lean();
 }
 
+/** รายการผลิตของหลายใบในครั้งเดียว (หน้ารายการใบสั่งผลิต) — Map<production_order_id, items[]> เรียงเหมือน listByOrder */
+export async function listByOrders(orderIds: string[]) {
+  await dbConnect();
+  const byOrder = new Map<string, any[]>(orderIds.map((id) => [id, []]));
+  if (orderIds.length === 0) return byOrder;
+  const items = await productionItemModel
+    .find({ production_order_id: { $in: orderIds }, deleted_at: null })
+    .populate("product_id", "product_name_th product_name_eng")
+    .populate("recipe_id", "recipe_name yield_qty")
+    .sort({ created_at: 1 })
+    .lean<any[]>();
+  for (const it of items) byOrder.get(String(it.production_order_id))?.push(it);
+  return byOrder;
+}
+
 export async function getItemById(id: string) {
   await dbConnect();
   assertObjectId(id);

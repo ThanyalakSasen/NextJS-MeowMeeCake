@@ -1,6 +1,7 @@
 /**
  * /api/admin/orders
  *   GET  — รายการออเดอร์ทั้งหมด (orders.view) — กรอง ?user_id= ?order_status= ?payment_status= ?order_type= ?search= ?date_from= ?date_to=
+ *          ?with_items=true แนบ items[] ของแต่ละออเดอร์ (แดชบอร์ด — ออเดอร์ล่าสุด)
  *   POST — สร้างออเดอร์แทนลูกค้า (orders.create) — validate ด้วย schemas/order.adminCreateOrderBody
  *          body: { user_id, source?: "cart"|"items", order_type,
  *                  address_id? (จากสมุดที่อยู่ของ user_id + recipient_name/recipient_phone) | delivery_address?,
@@ -29,6 +30,7 @@ export const GET = withPermission("orders", "view", async (_s, req) => {
     date_to: sp.get("date_to") ?? undefined,
     includeDeleted: parseBool(sp.get("includeDeleted")) ?? false,
     sort: parseSort(sp, ["created_at", "total_amount", "order_no"], "created_at"),
+    withItems: parseBool(sp.get("with_items")) ?? false,
   });
   return ok(result);
 });
