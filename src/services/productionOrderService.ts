@@ -127,6 +127,131 @@ export async function createProductionOrder(input: CreateProductionOrderInput) {
 }
 
 /**
+ * รวมยอดสั่งต่อสินค้าของรอบ — เฉพาะพรีออเดอร์ที่ยังไม่ถูกลบ/ยกเลิก · paid=true นับเฉพาะ "ยืนยันการชำระเงินแล้ว"
+ * paid=false นับเฉพาะที่ยังไม่จ่าย (ให้ preview บอกว่ามีอะไรไม่ถูกนับ) · ใช้ร่วมกันระหว่างสร้างจริงกับ preview
+ * docs/preorder-round-flow.md ประเด็น 3 (ตัดสินใจ 2026-10-01) — เดิมนับทุกรายการรวมที่ยังไม่จ่าย → ผลิตให้คนไม่จ่าย
+ * รายการที่จ่ายทีหลัง (เช่น สลิปรอตรวจตอนปิดรอบ) บวกเข้าใบผลิตให้ที่ preorderRoundLifecycleService.onPreorderPaid
+ */
+async function roundDemand(
+  roundId: unknown,
+  paid: boolean
+): Promise<Array<{ _id: unknown; round_item_id: unknown; qty: number; preorder_ids: unknown[] }>> {
+  return preorderItemModel.aggregate([
+    {
+      $lookup: {
+        from: preorderModel.collection.name,
+        localField: "preorder_id",
+        foreignField: "_id",
+        as: "preorder",
+      },
+    },
+    { $unwind: "$preorder" },
+    {
+      $match: {
+        "preorder.round_id": roundId,
+        "preorder.deleted_at": null,
+        "preorder.order_status": { $ne: "cancelled" },
+        "preorder.payment_status": paid ? "paid" : { $ne: "paid" },
+      },
+    },
+    {
+      $group: {
+        _id: "$product_id",
+        round_item_id: { $first: "$round_item_id" },
+        qty: { $sum: "$quantity" },
+        preorder_ids: { $addToSet: "$preorder_id" },
+      },
+    },
+  ]);
+}
+
+/**
+ * สูตรล่าสุดต่อสินค้า — เรียงใหม่→เก่า แล้วเอาตัวแรก คล้าย recipeService.getUnitCostByProduct() แต่เพิ่ม
+ * _id เป็น tie-breaker ด้วย (created_at ละเอียดแค่ระดับมิลลิวินาที ถ้าสร้าง 2 สูตรในมิลลิวินาทีเดียวกัน
+ * Mongo ไม่การันตีลำดับผลลัพธ์ที่ค่าเท่ากัน — ยืนยันจริงจากเทสที่เพิ่มใหม่ ObjectId มีตัวนับเพิ่มขึ้นเสมอ
+ * ต่อการสร้างในโปรเซสเดียวกัน จึงเรียงได้ deterministic เสมอ) กันกรณีสินค้าหนึ่งมีสูตรที่ยังไม่ถูกลบ
+ * มากกว่า 1 สูตร (เดิมไม่มี .sort() เลย ทำให้ผลลัพธ์ไม่แน่นอนขึ้นกับ Mongo ไม่ใช่เจตนา — docs/BACKLOG2.md §12.2)
+ */
+async function latestRecipeByProduct(productIds: string[]): Promise<Map<string, any>> {
+  const recipes = await recipeModel
+    .find({ product_id: { $in: productIds }, deleted_at: null })
+    .sort({ created_at: -1, _id: -1 })
+    .lean<any[]>();
+  const recipeByProduct = new Map<string, any>();
+  for (const r of recipes) {
+    if (!recipeByProduct.has(String(r.product_id))) recipeByProduct.set(String(r.product_id), r);
+  }
+  return recipeByProduct;
+}
+
+export type FromRoundBlocker = "round_not_closed" | "already_has_production" | "no_paid_orders" | "missing_recipe";
+
+/**
+ * ดูล่วงหน้าก่อนสร้างใบสั่งผลิตจากรอบ — ใช้ roundDemand/latestRecipeByProduct ชุดเดียวกับ
+ * createProductionFromRound ตัวเลขจึงตรงกับที่จะสร้างจริง · blockers = เหตุที่ createProductionFromRound
+ * จะปฏิเสธ (ว่าง = สร้างได้) · unpaid = ยอดที่ยังไม่จ่าย จะไม่ถูกนับ (จ่ายทีหลังค่อยบวกเข้าใบเอง)
+ */
+export async function previewProductionFromRound(roundId: string) {
+  await dbConnect();
+  assertObjectId(roundId, "round_id");
+
+  const round = await preorderRoundModel
+    .findOne({ _id: roundId, deleted_at: null })
+    .select("round_name pickup_date round_status")
+    .lean<any>();
+  if (!round) throw notFound("ไม่พบรอบพรีออเดอร์ที่ระบุ");
+
+  const [existing, paid, unpaid] = await Promise.all([
+    productionOrderModel
+      .findOne({ round_id: round._id, deleted_at: null, production_status: { $ne: "cancelled" } })
+      .select("production_no production_status")
+      .lean<any>(),
+    roundDemand(round._id, true),
+    roundDemand(round._id, false),
+  ]);
+
+  const productIds = [...new Set([...paid, ...unpaid].map((g) => String(g._id)))];
+  const [recipeByProduct, products] = await Promise.all([
+    latestRecipeByProduct(productIds),
+    productModel.find({ _id: { $in: productIds } }).select("product_name_th").lean<any[]>(),
+  ]);
+  const nameById = new Map(products.map((p) => [String(p._id), p.product_name_th as string]));
+  const unpaidByProduct = new Map(unpaid.map((g) => [String(g._id), g.qty]));
+
+  const lines = productIds
+    .map((id) => {
+      const recipe = recipeByProduct.get(id);
+      return {
+        product_id: id,
+        product_name_th: nameById.get(id) ?? "-",
+        planned_qty: paid.find((g) => String(g._id) === id)?.qty ?? 0,
+        unpaid_qty: unpaidByProduct.get(id) ?? 0,
+        recipe: recipe ? { _id: String(recipe._id), recipe_name: recipe.recipe_name as string } : null,
+      };
+    })
+    .sort((a, b) => b.planned_qty - a.planned_qty || a.product_name_th.localeCompare(b.product_name_th, "th"));
+
+  const blockers: FromRoundBlocker[] = [];
+  if (round.round_status !== "closed") blockers.push("round_not_closed");
+  if (existing) blockers.push("already_has_production");
+  if (!paid.length) blockers.push("no_paid_orders");
+  // สินค้าที่ยังไม่มีคนจ่าย ไม่เข้าใบผลิต — ไม่มีสูตรก็ไม่ขวาง
+  if (lines.some((l) => l.planned_qty > 0 && !l.recipe)) blockers.push("missing_recipe");
+
+  const count = (groups: { preorder_ids: unknown[] }[]) => new Set(groups.flatMap((g) => g.preorder_ids.map(String))).size;
+  return {
+    round: { _id: String(round._id), round_name: round.round_name, pickup_date: round.pickup_date, round_status: round.round_status },
+    existing_production: existing
+      ? { _id: String(existing._id), production_no: existing.production_no, production_status: existing.production_status }
+      : null,
+    products: lines,
+    paid_order_count: count(paid),
+    unpaid_order_count: count(unpaid),
+    blockers,
+  };
+}
+
+/**
  * สร้างใบสั่งผลิตจาก "รอบพรีออเดอร์" ที่ปิดรับแล้ว — รวมยอดสั่งจริงต่อสินค้าจากพรีออเดอร์ที่ยังไม่
  * ยกเลิกทั้งหมดในรอบนั้น (join preorderItems → preorders ด้วย round_id) แล้วสร้างเป็น production
  * item 1 แถวต่อสินค้า (planned_qty = ผลรวมจำนวนที่ลูกค้าสั่ง) ผูก round_item_id ไว้ด้วยเพื่อย้อนดูที่มา
@@ -156,51 +281,11 @@ export async function createProductionFromRound(input: CreateProductionFromRound
     await assertRefExists(userModel, input.assigned_to, "ผู้รับผิดชอบ", "assigned_to");
   }
 
-  // รวมยอดสั่งจริงต่อสินค้า — เฉพาะพรีออเดอร์ที่ยังไม่ถูกลบ/ยกเลิก และ "ยืนยันการชำระเงินแล้ว" (paid) ในรอบนี้
-  // docs/preorder-round-flow.md ประเด็น 3 (ตัดสินใจ 2026-10-01) — เดิมนับทุกรายการรวมที่ยังไม่จ่าย → ผลิตให้คนไม่จ่าย
-  // รายการที่จ่ายทีหลัง (เช่น สลิปรอตรวจตอนปิดรอบ) บวกเข้าใบผลิตให้ที่ preorderRoundLifecycleService.onPreorderPaid
-  const grouped = await preorderItemModel.aggregate([
-    {
-      $lookup: {
-        from: preorderModel.collection.name,
-        localField: "preorder_id",
-        foreignField: "_id",
-        as: "preorder",
-      },
-    },
-    { $unwind: "$preorder" },
-    {
-      $match: {
-        "preorder.round_id": round._id,
-        "preorder.deleted_at": null,
-        "preorder.order_status": { $ne: "cancelled" },
-        "preorder.payment_status": "paid",
-      },
-    },
-    {
-      $group: {
-        _id: "$product_id",
-        round_item_id: { $first: "$round_item_id" },
-        qty: { $sum: "$quantity" },
-      },
-    },
-  ]);
+  const grouped = await roundDemand(round._id, true);
   if (!grouped.length) throw badRequest("รอบนี้ยังไม่มีพรีออเดอร์ที่ชำระเงินแล้ว (นับเฉพาะรายการที่ยืนยันการชำระเงิน)");
 
   const productIds = grouped.map((g) => String(g._id));
-  // เรียงใหม่→เก่า แล้วเอาตัวแรก (ล่าสุด) ต่อสินค้า — คล้าย recipeService.getUnitCostByProduct() แต่เพิ่ม
-  // _id เป็น tie-breaker ด้วย (created_at ละเอียดแค่ระดับมิลลิวินาที ถ้าสร้าง 2 สูตรในมิลลิวินาทีเดียวกัน
-  // Mongo ไม่การันตีลำดับผลลัพธ์ที่ค่าเท่ากัน — ยืนยันจริงจากเทสที่เพิ่มใหม่ ObjectId มีตัวนับเพิ่มขึ้นเสมอ
-  // ต่อการสร้างในโปรเซสเดียวกัน จึงเรียงได้ deterministic เสมอ) กันกรณีสินค้าหนึ่งมีสูตรที่ยังไม่ถูกลบ
-  // มากกว่า 1 สูตร (เดิมไม่มี .sort() เลย ทำให้ผลลัพธ์ไม่แน่นอนขึ้นกับ Mongo ไม่ใช่เจตนา — docs/BACKLOG2.md §12.2)
-  const recipes = await recipeModel
-    .find({ product_id: { $in: productIds }, deleted_at: null })
-    .sort({ created_at: -1, _id: -1 })
-    .lean<any[]>();
-  const recipeByProduct = new Map<string, any>();
-  for (const r of recipes) {
-    if (!recipeByProduct.has(String(r.product_id))) recipeByProduct.set(String(r.product_id), r);
-  }
+  const recipeByProduct = await latestRecipeByProduct(productIds);
   const missing = productIds.filter((id) => !recipeByProduct.has(id));
   if (missing.length) {
     throw badRequest(`มีสินค้า ${missing.length} รายการในรอบนี้ที่ยังไม่มีสูตรผูกไว้ — ผูกสูตรให้ครบก่อนสร้างใบสั่งผลิต`);
