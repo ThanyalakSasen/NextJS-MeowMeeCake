@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import roleModel from "@/models/roleModel";
 import permissionModel from "@/models/permissionModel";
 import migrationModel from "@/models/migrationModel";
-import { createPermission, ensureSubmenuPermissions, getMenuAccess, migrateSubmenuPermissions, SUBMENU_PARENT } from "@/services/permissionService";
+import { createPermission, ensureSubmenuPermissions, getMenuAccess, migrateSubmenuPermissions, SUBMENU_PARENT, type MenuKey } from "@/services/permissionService";
 import { requirePermission } from "@/lib/authGuard";
 import type { SessionUser } from "@/lib/session";
 import { makeUser } from "./helpers";
@@ -44,9 +44,13 @@ describe("ย้ายสิทธิ์ไปหน้าย่อย", () => {
     await migrate();
 
     const access = await getMenuAccess(session);
+    // parent เป็น MenuKey ทั้ง union — ต้องประกาศเป็น Partial<Record<MenuKey,…>> ถึงจะ index ได้
+    const expected: Partial<Record<MenuKey, { v: boolean; u: boolean }>> = {
+      reports: { v: true, u: true }, products: { v: true, u: false }, orders: { v: true, u: false },
+      ingredients: { v: true, u: true }, employees: { v: true, u: false }, store_info: { v: true, u: true },
+    };
     for (const [child, parent] of Object.entries(SUBMENU_PARENT)) {
-      const p = { reports: { v: true, u: true }, products: { v: true, u: false }, orders: { v: true, u: false },
-        ingredients: { v: true, u: true }, employees: { v: true, u: false }, store_info: { v: true, u: true } }[parent!]!;
+      const p = expected[parent!]!;
       expect(access[child as keyof typeof access].can_view, child).toBe(p.v);
       expect(access[child as keyof typeof access].can_update, child).toBe(p.u);
     }
