@@ -12,13 +12,13 @@ import * as productService from "@/services/productService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = withPermission("products", "view", async (_s, req, ctx: Ctx) => {
+export const GET = withPermission(["products", "pricing", "promotions", "recipes", "production", "preorder", "reports_sales", "search_synonyms"], "view", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const includeDeleted = parseBool(req.nextUrl.searchParams.get("includeDeleted")) ?? false;
   return ok(await productService.getProductById(id, { includeDeleted }));
 });
 
-export const PATCH = withPermission("products", "update", async (_s, req, ctx: Ctx) => {
+export const PATCH = withPermission(["products", "pricing"], "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await req.json();
   // อ่าน keys ก่อน — updateProduct ปรับ input ในตัว (normalizeTypesInput)

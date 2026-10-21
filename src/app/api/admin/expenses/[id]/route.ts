@@ -4,7 +4,7 @@ import { expenseUpdate } from "@/schemas/expense";
 import { expenseService } from "@/services/expenseService";
 
 export const { GET, PATCH, DELETE } = itemRoutes(expenseService, {
-  auth: { menu: "reports" },
+  auth: { menu: "finance_expenses", readMenus: ["finance_summary"] },
   audit: { entity: "Expense" },
   validate: { update: expenseUpdate },
 });

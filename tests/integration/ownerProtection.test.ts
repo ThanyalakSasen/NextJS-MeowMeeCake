@@ -26,6 +26,8 @@ async function actor(roleType: "owner" | "staff") {
   const user = await makeUser({ role_id: role._id });
   if (roleType === "staff") {
     await createPermission({ role_id: String(role._id), menu_key: "employees", granted_by: String(user._id), ...FULL });
+    // หน้าจัดการสิทธิ์/ตำแหน่งแยก key แล้ว (permissions) — HR ที่ดูแลพนักงานครบได้ทั้งสองหน้า
+    await createPermission({ role_id: String(role._id), menu_key: "permissions", granted_by: String(user._id), ...FULL });
   }
   const session: SessionUser = {
     user_id: String(user._id),

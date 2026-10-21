@@ -10,7 +10,7 @@ import { audit } from "@/lib/audit";
 import { savePrivateImage } from "@/lib/privateFiles";
 import { readSingleUpload, UPLOAD_DIRS } from "@/lib/upload";
 
-export const POST = withPermission("reports", "create", async (_s, req) => {
+export const POST = withPermission("finance_expenses", "create", async (_s, req) => {
   const { file } = await readSingleUpload(req, ["file", "receipt"]);
   const saved = await savePrivateImage(file, UPLOAD_DIRS.receipts);
   audit(req, {

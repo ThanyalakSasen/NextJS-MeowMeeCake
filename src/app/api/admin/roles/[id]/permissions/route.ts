@@ -5,7 +5,7 @@ import { getEffectivePermissions } from "@/services/permissionService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = withPermission("employees", "view", async (_s, _r, ctx: Ctx) => {
+export const GET = withPermission(["permissions", "employees"], "view", async (_s, _r, ctx: Ctx) => {
   const { id } = await ctx.params;
   return ok(await getEffectivePermissions(id));
 });

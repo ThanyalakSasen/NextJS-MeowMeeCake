@@ -10,6 +10,6 @@ import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import * as userService from "@/services/userService";
 
-export const GET = withPermission("orders", "view", async () => {
+export const GET = withPermission("pos", "view", async () => {
   return ok(await userService.getPosGuestCustomer());
 });

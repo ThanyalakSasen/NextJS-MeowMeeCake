@@ -14,7 +14,7 @@ import { parseBody } from "@/lib/validate";
 import { promotionCreate } from "@/schemas/promotion";
 import * as promotionService from "@/services/promotionService";
 
-export const GET = withPermission("promotions", "view", async (_s, req) => {
+export const GET = withPermission(["promotions", "pos"], "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await promotionService.listPromotions({
     pagination: parsePagination(sp),

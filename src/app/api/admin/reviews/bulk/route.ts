@@ -6,6 +6,6 @@ import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import * as reviewModerationService from "@/services/reviewModerationService";
 
-export const POST = withPermission("reports", "update", async (session, req) =>
+export const POST = withPermission("reports_reviews", "update", async (session, req) =>
   ok(await reviewModerationService.bulkMarkRead(await req.json().catch(() => null), session.user_id))
 );

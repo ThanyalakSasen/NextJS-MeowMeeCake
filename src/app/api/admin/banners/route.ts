@@ -8,7 +8,7 @@ export const { GET, POST } = collectionRoutes(bannerService, {
   sortable: ["sort_order", "created_at", "banner_name"],
   defaultSort: "sort_order",
   filterFromQuery: (sp) => ({ is_active: parseBool(sp.get("is_active")) }),
-  auth: { menu: "products" },
+  auth: { menu: "store_design" },
   audit: { entity: "Banner" },
   validate: { create: bannerCreate },
 });

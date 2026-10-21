@@ -17,7 +17,7 @@ type Ctx = { params: Promise<{ filename: string }> };
 
 export const GET = route(async (req: NextRequest, ctx: Ctx) => {
   const session = await authenticate(req); // ตรวจบัญชีกับ DB ด้วย (BACKLOG5 Y1)
-  await requirePermission(session, "reports", "view").catch(() => {
+  await requirePermission(session, ["finance_expenses", "finance_summary"], "view").catch(() => {
     throw forbidden("ไม่มีสิทธิ์เปิดดูใบเสร็จค่าใช้จ่าย");
   });
 

@@ -23,7 +23,7 @@ const query = z.object({
   product_id: objectId.optional(),
 });
 
-export const GET = withPermission("reports", "view", async (_s, req) => {
+export const GET = withPermission("reports_reviews", "view", async (_s, req) => {
   const q = parseQuery(req.nextUrl.searchParams, query);
   if (q.until <= q.since) throw badRequest("until ต้องอยู่หลัง since");
   if (!!q.prev_since !== !!q.prev_until) throw badRequest("ต้องส่ง prev_since และ prev_until คู่กัน");

@@ -27,7 +27,7 @@ function parseRoleTypes(raw: string | null): (typeof ROLE_TYPES)[number][] | und
   return parts as (typeof ROLE_TYPES)[number][];
 }
 
-export const GET = withPermission("employees", "view", async (_s, req) => {
+export const GET = withPermission(["employees", "permissions", "user_log"], "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await userService.listUsers({
     pagination: parsePagination(sp),

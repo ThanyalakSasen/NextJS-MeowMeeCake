@@ -3,6 +3,6 @@ import { restoreRoute } from "@/lib/crudRoutes";
 import { bannerService } from "@/services/bannerService";
 
 export const { POST } = restoreRoute(bannerService, {
-  auth: { menu: "products" },
+  auth: { menu: "store_design" },
   audit: { entity: "Banner" },
 });

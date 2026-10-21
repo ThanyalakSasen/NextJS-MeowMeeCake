@@ -10,12 +10,12 @@ import * as txnService from "@/services/ingredientTransactionService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = withPermission("ingredients", "view", async (_s, _r, ctx: Ctx) => {
+export const GET = withPermission(["ingredient_history", "ingredient_stock"], "view", async (_s, _r, ctx: Ctx) => {
   const { id } = await ctx.params;
   return ok(await txnService.getTransactionById(id));
 });
 
-export const DELETE = withPermission("ingredients", "delete", async (_s, req, ctx: Ctx) => {
+export const DELETE = withPermission("ingredient_history", "delete", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const result = await txnService.voidTransaction(id);
   audit(req, {

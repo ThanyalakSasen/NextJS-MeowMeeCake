@@ -38,13 +38,14 @@ import { parseBody } from "./validate";
 import { authenticate, requireAuth, requirePermission, type PermAction } from "./authGuard";
 import type { SessionUser } from "./session";
 import { auditChange } from "./audit";
-import type { MenuKey } from "../services/permissionService";
+import type { MenuKey } from "./menuKeys";
+import type { MenuSpec } from "./authGuard";
 import type { CrudService } from "./crudService";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
 export interface CrudAuth {
-  menu: MenuKey;
+  menu: MenuSpec;
   /** GET (list/get) เปิดสาธารณะ ไม่ต้องล็อกอิน */
   publicRead?: boolean;
   /** GET ผ่านได้ด้วย view ของเมนูเหล่านี้ด้วย (นอกจาก menu) — เขียนยังต้องใช้ menu (ดูหัวไฟล์) */

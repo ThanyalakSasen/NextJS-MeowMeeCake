@@ -8,9 +8,9 @@ import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
 import * as searchSynonymService from "@/services/searchSynonymService";
 
-export const GET = withPermission("products", "view", async () => okList(await searchSynonymService.listSynonyms()));
+export const GET = withPermission("search_synonyms", "view", async () => okList(await searchSynonymService.listSynonyms()));
 
-export const POST = withPermission("products", "create", async (_s, req) => {
+export const POST = withPermission("search_synonyms", "create", async (_s, req) => {
   const doc = (await searchSynonymService.createSynonym(await req.json().catch(() => null))) as { _id: unknown; term: string };
   audit(req, { action: `เพิ่มคำพ้องค้นหา "${doc.term}"`, action_type: "CREATE", entity: "SearchSynonym", entity_id: String(doc._id) });
   return created(doc);

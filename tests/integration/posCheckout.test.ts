@@ -51,7 +51,7 @@ async function call(session: SessionUser, orderId: string) {
 
 describe("POST /api/admin/pos/orders/[id]/checkout", () => {
   it("พนักงานหน้าร้าน (orders.create ไม่มีสิทธิ์การชำระเงินเลย) รับเงินได้ · ชำระแล้ว + ออเดอร์ completed · ผู้ยืนยัน = ผู้ขาย", async () => {
-    const session = await staff({ orders: { can_view: true, can_create: true } });
+    const session = await staff({ pos: { can_view: true, can_create: true } });
     const oid = await placeOrder("instore");
     const { status, body } = await call(session, oid);
     expect(status).toBe(200);
@@ -67,18 +67,18 @@ describe("POST /api/admin/pos/orders/[id]/checkout", () => {
 
   it("มีแค่ orders.view (ดูได้แต่ขายไม่ได้) = 403", async () => {
     const oid = await placeOrder("instore");
-    expect((await call(await staff({ orders: { can_view: true } }), oid)).status).toBe(403);
+    expect((await call(await staff({ pos: { can_view: true } }), oid)).status).toBe(403);
   });
 
   it("ออเดอร์เว็บ (ORD-) = 400 — ยังต้องตรวจสลิปผ่าน payments.approve", async () => {
     const oid = await placeOrder("online");
-    const { status } = await call(await staff({ orders: { can_view: true, can_create: true } }), oid);
+    const { status } = await call(await staff({ pos: { can_view: true, can_create: true } }), oid);
     expect(status).toBe(400);
     expect(await paymentModel.countDocuments({ order_id: oid })).toBe(0);
   });
 
   it("กดรับเงินซ้ำ = 409 ไม่สร้างรายการชำระเพิ่ม", async () => {
-    const session = await staff({ orders: { can_view: true, can_create: true } });
+    const session = await staff({ pos: { can_view: true, can_create: true } });
     const oid = await placeOrder("instore");
     expect((await call(session, oid)).status).toBe(200);
     expect((await call(session, oid)).status).toBe(409);

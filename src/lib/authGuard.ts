@@ -19,7 +19,14 @@ import { getEffectivePermissions } from "../services/permissionService";
 import dbConnect from "./dbConnect";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
-import type { MenuKey } from "../services/permissionService";
+import type { MenuKey } from "./menuKeys";
+
+/**
+ * เมนูที่ให้สิทธิ์ action นี้ — ส่งหลาย key = มีสิทธิ์ใน key ใดก็ผ่าน (API ที่หลายหน้าใช้ร่วมกัน
+ * เช่นรายชื่อสินค้าที่หน้าสินค้า · ตั้งราคา · คูปอง · สูตร อ่านได้) · ต้องเป็น key หน้าที่ใช้ API นั้นจริงเท่านั้น
+ */
+export type MenuSpec = MenuKey | readonly MenuKey[];
+const menusOf = (m: MenuSpec): readonly MenuKey[] => (typeof m === "string" ? [m] : m);
 
 export type PermAction = "view" | "create" | "update" | "delete" | "approve";
 
@@ -37,14 +44,15 @@ export function requireRole(session: SessionUser, ...roles: RoleType[]): void {
 
 export async function requirePermission(
   session: SessionUser,
-  menu: MenuKey,
+  menu: MenuSpec,
   action: PermAction
 ): Promise<void> {
   if (session.role_type === "owner") return; // เจ้าของร้านผ่านทุกสิทธิ์
   const { permissions } = await getEffectivePermissions(session.role_id);
-  const allowed = permissions[menu]?.[`can_${action}`];
+  const menus = menusOf(menu);
+  const allowed = menus.some((m) => permissions[m]?.[`can_${action}`]);
   if (!allowed) {
-    throw forbidden(`ไม่มีสิทธิ์ "${action}" ในเมนู "${menu}"`);
+    throw forbidden(`ไม่มีสิทธิ์ "${action}" ในเมนู "${menus.join(" / ")}"`);
   }
 }
 
@@ -79,7 +87,7 @@ export function requireSelfOrRole(
 export async function requireOwnerOrPermission(
   session: SessionUser,
   ownerId: unknown,
-  menu: MenuKey,
+  menu: MenuSpec,
   action: PermAction
 ): Promise<void> {
   const owner =
@@ -141,7 +149,7 @@ export function withAuth<A extends unknown[]>(handler: GuardedHandler<A>) {
 }
 
 export function withPermission<A extends unknown[]>(
-  menu: MenuKey,
+  menu: MenuSpec,
   action: PermAction,
   handler: GuardedHandler<A>
 ) {

@@ -42,7 +42,7 @@ afterEach(() => {
 describe("GET /api/admin/pos/promptpay-qr", () => {
   it("พนักงานที่มี orders.view ได้ QR + ชื่อบัญชี + เลขพร้อมเพย์จากข้อมูลร้าน", async () => {
     await storeProfileModel.create({ store_name: "MeowMee", promptpay_id: "0812345678", promptpay_account_name: "ร้านเหมียว" });
-    const { status, body } = await call(await staff({ orders: { can_view: true } }), "amount=150.5");
+    const { status, body } = await call(await staff({ pos: { can_view: true } }), "amount=150.5");
     expect(status).toBe(200);
     expect(body.data.qr_image.startsWith("data:image/png;base64,")).toBe(true);
     expect(body.data.account_name).toBe("ร้านเหมียว");
@@ -57,7 +57,7 @@ describe("GET /api/admin/pos/promptpay-qr", () => {
 
   it("ยอดเงินไม่ถูกต้อง (ไม่ส่ง · ≤ 0 · ทศนิยมเกิน 2 ตำแหน่ง) = 400", async () => {
     await storeProfileModel.create({ store_name: "MeowMee", promptpay_id: "0812345678" });
-    const session = await staff({ orders: { can_view: true } });
+    const session = await staff({ pos: { can_view: true } });
     expect((await call(session, "")).status).toBe(400);
     expect((await call(session, "amount=0")).status).toBe(400);
     expect((await call(session, "amount=10.555")).status).toBe(400);
@@ -67,7 +67,7 @@ describe("GET /api/admin/pos/promptpay-qr", () => {
   it("ร้านยังไม่ตั้งเลขพร้อมเพย์ และไม่มี env PROMPTPAY_ID = 422", async () => {
     delete process.env.PROMPTPAY_ID;
     await storeProfileModel.create({ store_name: "MeowMee", promptpay_id: "" });
-    const { status, body } = await call(await staff({ orders: { can_view: true } }), "amount=100");
+    const { status, body } = await call(await staff({ pos: { can_view: true } }), "amount=100");
     expect(status).toBe(422);
     expect(body.error.message).toContain("พร้อมเพย์");
   });

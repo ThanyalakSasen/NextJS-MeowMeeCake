@@ -10,7 +10,7 @@ import { parsePagination } from "@/lib/queryParams";
 import * as userLogService from "@/services/userLogService";
 import type { ActionType } from "@/services/userLogService";
 
-export const GET = withPermission("employees", "view", async (_s, req) => {
+export const GET = withPermission("user_log", "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await userLogService.listLogs({
     pagination: parsePagination(sp),
@@ -24,7 +24,7 @@ export const GET = withPermission("employees", "view", async (_s, req) => {
   return ok(result);
 });
 
-export const POST = withPermission("employees", "create", async (session, req) => {
+export const POST = withPermission("user_log", "create", async (session, req) => {
   const body = await req.json().catch(() => ({}));
   // ผู้กระทำ + IP มาจาก session/คำขอเสมอ — ไม่รับ user_id / ip_address จาก body
   // (เดิมรับทั้งก้อน → พนักงานเขียน log ในชื่อเจ้าของร้านหรือคนอื่นได้ = ปลอมหลักฐาน audit)

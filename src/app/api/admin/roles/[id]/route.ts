@@ -8,7 +8,7 @@ import { roleService } from "@/services/roleService";
 import { assertMayManageRole } from "@/services/ownerProtection";
 
 export const { GET, PATCH, DELETE } = itemRoutes(roleService, {
-  auth: { menu: "employees" },
+  auth: { menu: "permissions", readMenus: ["employees", "user_log", "production", "store_info"] },
   audit: { entity: "Role" },
   validate: { update: roleUpdate },
   authorize: (session, { id }) => assertMayManageRole(session, id as string),

@@ -14,12 +14,12 @@ import { assertMayGrantExisting } from "@/services/permissionCeiling";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = withPermission("employees", "view", async (_s, _r, ctx: Ctx) => {
+export const GET = withPermission(["permissions", "employees"], "view", async (_s, _r, ctx: Ctx) => {
   const { id } = await ctx.params;
   return ok(await permissionService.getPermissionById(id));
 });
 
-export const PATCH = withPermission("employees", "update", async (session, req, ctx: Ctx) => {
+export const PATCH = withPermission("permissions", "update", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await parseBody(req, permissionUpdate);
   await assertMayGrantExisting(session, id, body);
@@ -34,7 +34,7 @@ export const PATCH = withPermission("employees", "update", async (session, req, 
   return ok(result);
 });
 
-export const DELETE = withPermission("employees", "delete", async (_s, req, ctx: Ctx) => {
+export const DELETE = withPermission("permissions", "delete", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const result = await permissionService.deletePermission(id);
   audit(req, {

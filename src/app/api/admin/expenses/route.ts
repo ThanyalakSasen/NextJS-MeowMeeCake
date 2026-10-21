@@ -27,7 +27,7 @@ export const { GET, POST } = collectionRoutes(expenseService, {
     }
     return filter;
   },
-  auth: { menu: "reports" },
+  auth: { menu: "finance_expenses", readMenus: ["finance_summary"] },
   audit: { entity: "Expense" },
   validate: { create: expenseCreate },
 });

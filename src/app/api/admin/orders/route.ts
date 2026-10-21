@@ -33,7 +33,7 @@ export const GET = withPermission("orders", "view", async (_s, req) => {
   return ok(result);
 });
 
-export const POST = withPermission("orders", "create", async (_s, req) => {
+export const POST = withPermission(["orders", "pos"], "create", async (_s, req) => {
   const body = await parseBody(req, adminCreateOrderBody);
   const delivery_address = await addressService.resolveDeliverySnapshot(body.user_id, body);
   const common = {

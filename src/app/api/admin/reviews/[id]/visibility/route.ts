@@ -12,7 +12,7 @@ type Ctx = { params: Promise<{ id: string }> };
 
 const reviewLabel = (r: any) => (r ? [r.product_id?.product_name_th, r.user_id?.user_fullname].filter(Boolean).join(" · ") || undefined : undefined);
 
-export const PATCH = withPermission("reports", "update", async (_s, req, ctx: Ctx) => {
+export const PATCH = withPermission("reports_reviews", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await req.json().catch(() => null);
   if (typeof body?.is_visible !== "boolean") throw badRequest("is_visible ต้องเป็น true หรือ false");

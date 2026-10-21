@@ -15,7 +15,7 @@ import * as permissionService from "@/services/permissionService";
 import type { MenuKey } from "@/services/permissionService";
 import { assertMayGrant } from "@/services/permissionCeiling";
 
-export const GET = withPermission("employees", "view", async (_s, req) => {
+export const GET = withPermission(["permissions", "employees"], "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await permissionService.listPermissions({
     pagination: parsePagination(sp),
@@ -26,7 +26,7 @@ export const GET = withPermission("employees", "view", async (_s, req) => {
   return ok(result);
 });
 
-export const POST = withPermission("employees", "create", async (session, req) => {
+export const POST = withPermission("permissions", "create", async (session, req) => {
   const body = await parseBody(req, permissionCreate);
   await assertMayGrant(session, body.menu_key as MenuKey, body);
   const result = await permissionService.createPermission({

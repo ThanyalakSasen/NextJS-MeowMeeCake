@@ -4,7 +4,7 @@ import { roleService } from "@/services/roleService";
 import { assertMayManageRole } from "@/services/ownerProtection";
 
 export const { POST } = restoreRoute(roleService, {
-  auth: { menu: "employees" },
+  auth: { menu: "permissions" },
   audit: { entity: "Role" },
   authorize: (session, { id }) => assertMayManageRole(session, id as string),
 });
