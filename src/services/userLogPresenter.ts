@@ -74,6 +74,7 @@ interface LogLike {
   action?: string;
   before?: unknown;
   after?: unknown;
+  details?: unknown;
   context?: Record<string, unknown> | null;
 }
 
@@ -111,16 +112,25 @@ function eachRef(changes: Changes, fn: (src: Source, id: string, set: (v: unknow
   for (const path of Object.keys(changes)) visit(changes, path, REF_SOURCES[leafOf(path)]);
 }
 
-/** log เก่าเก็บทั้งเอกสาร (มี _id) — ชื่อรายการ/ฟิลด์ระบุตัวตนอ่านจากเอกสารนั้น */
+/** ฟิลด์ระบุตัวตนจาก object หนึ่ง (null = ไม่มีสักตัว) */
+function contextOf(doc: unknown): Record<string, unknown> | null {
+  if (!isRecord(doc)) return null;
+  const context = Object.fromEntries(CONTEXT_KEYS.filter((k) => doc[k] != null).map((k) => [k, String(doc[k])]));
+  return Object.keys(context).length ? context : null;
+}
+
+/**
+ * log เก่าเก็บทั้งเอกสาร (มี _id) — ชื่อรายการ/ฟิลด์ระบุตัวตนอ่านจากเอกสารนั้น
+ * log ใหม่ที่ diff แล้วของเอกสารไม่มีชื่อ (เช่น แก้ไขสิทธิ์เมนู) ส่งฟิลด์ระบุตัวตนมาใน details แทน
+ */
 function identify(log: LogLike): Pick<LogLike, "action" | "context"> {
   let action = log.action ?? "";
   for (const [en, th] of Object.entries(LEGACY_NOUN)) action = action.replace(en, th);
   const full = [log.after, log.before].find((d): d is Record<string, unknown> => isRecord(d) && "_id" in d);
-  if (!full) return { action };
+  if (!full) return { action, context: contextOf(log.details) };
   const label = docLabel(full);
   if (label) return { action: action.includes(`"`) ? action : `${action} "${label}"` };
-  const context = Object.fromEntries(CONTEXT_KEYS.filter((k) => full[k] != null).map((k) => [k, String(full[k])]));
-  return { action, context: Object.keys(context).length ? context : null };
+  return { action, context: contextOf(full) };
 }
 
 export async function presentLogs<T extends LogLike>(logs: T[]): Promise<T[]> {

@@ -363,7 +363,13 @@ export async function listProductionOrders(query: ListProductionOrderQuery) {
     productionOrderModel.countDocuments(filter),
   ]);
 
-  return { items, meta: buildMeta(total, query.pagination) };
+  // แนบ items[] ให้ทุกใบ (query เดียว) — หน้าจัดการการผลิตใช้ข้อมูลจากรายการนี้ทั้ง drawer รายละเอียด
+  // ฟอร์มปิดงาน (กรอกจำนวนที่ผลิตได้จริง) และสรุปประวัติการผลิต · เดิมมีเฉพาะ GET รายตัว
+  const itemsByOrder = await productionItemService.listByOrders(items.map((o) => String(o._id)));
+  return {
+    items: items.map((o) => ({ ...o, items: itemsByOrder.get(String(o._id)) ?? [] })),
+    meta: buildMeta(total, query.pagination),
+  };
 }
 
 export async function getProductionOrderById(id: string, opts: { includeDeleted?: boolean } = {}) {

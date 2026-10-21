@@ -19,7 +19,8 @@ export const expenseCreate = z.object({
   date: z.coerce.date(),
   description: z.string().trim().min(1).max(300),
   category: z.enum(CATEGORIES),
-  amount: z.number().nonnegative(),
+  // รายจ่าย 0 บาทไม่มีความหมาย — กันฟอร์มที่ลืมกรอกจำนวนเงินแล้วบันทึกเป็น 0 (TC-ADM-96)
+  amount: z.number().positive("จำนวนเงินต้องมากกว่า 0"),
   payment_method: z.enum(PAYMENT_METHODS),
   vendor: z.string().trim().max(200).optional(),
   note: z.string().trim().max(1000).optional(),

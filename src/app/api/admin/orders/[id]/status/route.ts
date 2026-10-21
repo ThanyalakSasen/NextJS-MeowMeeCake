@@ -2,8 +2,9 @@
  * PATCH /api/admin/orders/[id]/status — เปลี่ยนสถานะออเดอร์ (orders.update)
  *   body: { order_status, cancelled_reason? }
  *   state machine: pending→confirmed→preparing→ready→completed ; cancelled ได้ทุกสถานะที่ยังไม่ completed
- *   ตอน cancelled: คืนสต็อก + คืนสิทธิ์โปรโมชัน + ถ้า payment_status = "paid" → คืนเงินอัตโนมัติ
- *   (refundPayment โดยใช้ session.user_id เป็นผู้ดำเนินการ) — best-effort, ดู BACKLOG 2.8
+ *   ตอน cancelled: คืนสต็อก + คืนสิทธิ์โปรโมชัน · ถ้าชำระแล้ว **ไม่** ตั้ง payment เป็น refunded ให้ —
+ *   ออเดอร์เป็น "ยกเลิก + ชำระแล้ว" = รอโอนคืน แล้วร้านกดยืนยันหลังโอนจริง (POST /api/admin/payments/[id]/refund)
+ *   เหมือนตอนลูกค้ายกเลิกเอง — เดิมคืนอัตโนมัติทันทีทั้งที่ยังไม่ได้โอน (Test case TC-ADM-42)
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
@@ -22,6 +23,7 @@ export const PATCH = withPermission("orders", "update", async (session, req, ctx
   const result = await orderService.updateOrderStatus(id, body.order_status as OrderStatus, {
     cancelled_by: session.user_id,
     cancelled_reason: body.cancelled_reason ?? undefined,
+    skipAutoRefund: true,
   });
   auditChange(req, {
     op: "update",
