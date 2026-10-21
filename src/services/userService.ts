@@ -17,6 +17,7 @@ import { softDeleteDoc, restoreDoc } from "../lib/crudService";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
 import { GUEST_CUSTOMER_EMAIL } from "../lib/posGuest";
+import * as pointsService from "./pointsService";
 import type { z } from "zod";
 import type { updateProfileBody, createUserBody, updateUserBody } from "../schemas/user";
 
@@ -185,6 +186,40 @@ export async function getPosGuestCustomer() {
     .lean();
   if (!guest) throw notFound("ยังไม่มีบัญชีลูกค้าทั่วไปสำหรับหน้าร้าน — รัน npm run seed");
   return guest;
+}
+
+// ── หาสมาชิกด้วยเบอร์มือถือที่ POS (GET /admin/pos/member) ─────
+/** เบอร์ไทย 10 หลักขึ้นต้น 0 — ตัดขีด/ช่องว่างออกก่อน (รูปแบบเดียวกับ schemas/user phone) */
+const POS_MEMBER_PHONE = /^0\d{9}$/;
+/** เบอร์ซ้ำได้ (ไม่ได้ unique) — คืนให้เลือกไม่เกินเท่านี้ */
+const POS_MEMBER_LIMIT = 5;
+
+/**
+ * สมาชิก (role_type customer · ใช้งานอยู่ · ไม่ใช่บัญชีลูกค้าทั่วไป) ที่ใช้เบอร์นี้ + แต้มคงเหลือ
+ * ผูกออเดอร์หน้าร้านกับ _id ที่ได้ → ปิดงาน completed แล้ว pointsService.syncOrderPoints ให้แต้มเอง
+ * คืนเฉพาะชื่อ/เบอร์/แต้ม (ไม่มีอีเมล) — พนักงานเคาน์เตอร์ใช้ยืนยันตัวลูกค้าเท่านั้น
+ */
+export async function findPosMembersByPhone(rawPhone: string) {
+  const phone = rawPhone.replace(/[\s-]/g, "");
+  if (!POS_MEMBER_PHONE.test(phone)) throw badRequest("เบอร์โทรศัพท์ต้องเป็นตัวเลข 10 หลัก ขึ้นต้นด้วย 0");
+  await dbConnect();
+  const customerRoles = await roleModel.find({ role_type: "customer" }).select("_id").lean();
+  const users = await userModel
+    .find({
+      user_phone: phone,
+      role_id: { $in: customerRoles.map((r) => r._id) },
+      email: { $ne: GUEST_CUSTOMER_EMAIL.toLowerCase() },
+      deleted_at: null,
+      is_active: { $ne: false },
+    })
+    .select("_id user_fullname user_phone")
+    .sort({ updated_at: -1 })
+    .limit(POS_MEMBER_LIMIT)
+    .lean<{ _id: unknown; user_fullname: string; user_phone: string }[]>();
+  const members = await Promise.all(
+    users.map(async (u) => ({ ...u, points_balance: await pointsService.getBalance(String(u._id)) }))
+  );
+  return { members, baht_per_point: pointsService.POINT_RULES.BAHT_PER_POINT };
 }
 
 // ── UPDATE (โปรไฟล์ + ข้อมูลการจ้างงาน ไม่รวมรหัสผ่าน) ────────
