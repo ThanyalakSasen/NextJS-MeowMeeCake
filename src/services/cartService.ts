@@ -21,6 +21,9 @@ import userModel from "../models/userModel";
 import { toBaht, toBahtFields, toSatang } from "../lib/money";
 import { isPreorderProduct } from "../lib/productCode";
 import { assertCustomizationIds, getProductCustomization, resolveCustomization } from "./productCustomizationService";
+import { recordAddToCart } from "./interactionService";
+import { trackBackground } from "../lib/backgroundTasks";
+import { log } from "../lib/logger";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -77,7 +80,7 @@ export async function getCartDetail(userId: string) {
   const items = await cartItemModel
     .find({ cart_id: cart._id, deleted_at: null })
     .sort({ added_at: 1 })
-    .populate("product_id", "product_name_th product_name_eng product_img is_preorder is_visible deleted_at")
+    .populate("product_id", "product_name_th product_name_eng product_img is_preorder is_visible deleted_at category_id") // category_id = ป้าย "ส่งเฉพาะในจังหวัด" ในตะกร้า
     .populate("variant_id", "variant_name variant_price")
     .lean();
 
@@ -159,10 +162,17 @@ export async function addItem(userId: string, input: AddCartItemInput) {
       ? { customization_key: custom.key }
       : { customization_key: { $in: ["", null] }, variant_id: null, "selected_options.0": { $exists: false } }),
   });
+  // สัญญาณ add_to_cart ให้ระบบแนะนำสินค้า — ทำเบื้องหลัง พังก็ไม่กระทบการใส่ตะกร้า
+  const trackAddToCart = () =>
+    void trackBackground(recordAddToCart(userId, String(input.product_id), quantity)).catch((err) =>
+      log.warn("interaction.add_to_cart_failed", { user_id: userId, product_id: String(input.product_id), err })
+    );
+
   if (dup) {
     dup.quantity += quantity;
     dup.price_snapshot = price_snapshot; // อัปเดตให้เป็นราคาปัจจุบัน
     await dup.save();
+    trackAddToCart();
     return presentCartItem(dup.toObject());
   }
 
@@ -176,6 +186,7 @@ export async function addItem(userId: string, input: AddCartItemInput) {
     quantity,
     price_snapshot,
   });
+  trackAddToCart();
   return presentCartItem(doc.toObject());
 }
 

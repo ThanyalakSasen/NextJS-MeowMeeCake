@@ -122,17 +122,43 @@ export function normalizeWeeklyMarkets(raw: unknown): AnyDoc[] {
       close_time: closeTime,
       map_url: mapUrl,
       is_active: m.is_active !== false,
+      is_main: m.is_main === true,
     };
   });
+  // หน้าร้านหลักมีได้รายการเดียว (รายการแรกที่ติ๊กไว้)
+  let mainSeen = false;
+  for (const m of value) {
+    if (m.is_main && mainSeen) m.is_main = false;
+    if (m.is_main) mainSeen = true;
+  }
   if (!value.some((m) => m.is_active)) {
     throw badRequest("ต้องมีหน้าร้านประจำสัปดาห์ที่เปิดแสดงอย่างน้อย 1 แห่ง (ใช้เป็นเวลาเปิดร้านและจุดรับสินค้า)");
   }
   return value;
 }
 
-const MARKET_COMPARE_FIELDS = ["name", "location", "days", "open_time", "close_time", "map_url", "is_active"] as const;
+const MARKET_COMPARE_FIELDS = ["name", "location", "days", "open_time", "close_time", "map_url", "is_active", "is_main"] as const;
 // เอกสารเก่าบางรายการไม่มี field เหล่านี้ (ไม่งั้นจะนับว่า "ถูกแก้" ทั้งที่ไม่ได้แตะ)
-const MARKET_DEFAULTS: AnyDoc = { location: "", days: [], map_url: "", is_active: true };
+const MARKET_DEFAULTS: AnyDoc = { location: "", days: [], map_url: "", is_active: true, is_main: false };
+
+/** สถานที่ + ลิงก์แผนที่ของหน้าร้านหลัก — มาจากที่อยู่ร้าน (StoreSettings) ไม่ได้กรอกเอง */
+export function mainMarketPlace(settings: AnyDoc | null | undefined): { location: string; map_url: string } {
+  const location = [
+    settings?.house_no,
+    settings?.sub_district && `ต.${settings.sub_district}`,
+    settings?.district && `อ.${settings.district}`,
+    settings?.province && `จ.${settings.province}`,
+    settings?.zip_code,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .slice(0, 200);
+  const map_url =
+    typeof settings?.latitude === "number" && typeof settings?.longitude === "number"
+      ? `https://www.google.com/maps?q=${settings.latitude},${settings.longitude}`
+      : "";
+  return { location, map_url };
+}
 const marketChanged = (before: AnyDoc, after: AnyDoc) =>
   MARKET_COMPARE_FIELDS.some(
     (f) => JSON.stringify(before[f] ?? MARKET_DEFAULTS[f] ?? null) !== JSON.stringify(after[f] ?? MARKET_DEFAULTS[f] ?? null)
@@ -151,6 +177,9 @@ export async function updateWeeklyMarkets(session: SessionUser, body: unknown) {
   if (!isPlainObject(body)) throw badRequest("รูปแบบข้อมูลไม่ถูกต้อง");
   const markets = normalizeWeeklyMarkets(body.weekly_markets);
   await dbConnect();
+  // หน้าร้านหลัก: สถานที่/แผนที่มาจากที่อยู่ร้านเสมอ (ไม่ใช้ค่าที่ส่งมา)
+  const main = markets.find((m) => m.is_main);
+  if (main) Object.assign(main, mainMarketPlace(await storeSettingsModel.findOne().lean<AnyDoc>()));
   // ย้ายเวลาทำการเดิมก่อน — ไม่งั้นการย้ายครั้งแรกจะเติมหน้าร้านหลักซ้อนเข้ามาหลังบันทึก
   const profile = await ensureWeeklyMarketsReady();
 
@@ -327,7 +356,16 @@ export async function updateSettings(body: unknown) {
     update[f] = n;
   }
   await dbConnect();
-  return storeSettingsModel.findOneAndUpdate({}, { $set: update }, { returnDocument: "after", upsert: true, runValidators: true }).lean<AnyDoc>();
+  const settings = await storeSettingsModel
+    .findOneAndUpdate({}, { $set: update }, { returnDocument: "after", upsert: true, runValidators: true })
+    .lean<AnyDoc>();
+  // ที่อยู่ร้านเปลี่ยน → หน้าร้านหลักในรายการหน้าร้านประจำสัปดาห์ใช้สถานที่/แผนที่ใหม่ตาม
+  const place = mainMarketPlace(settings);
+  await storeProfileModel.updateOne(
+    { "weekly_markets.is_main": true },
+    { $set: { "weekly_markets.$.location": place.location, "weekly_markets.$.map_url": place.map_url } }
+  );
+  return settings;
 }
 
 // ── ลิงก์ Google Maps แบบย่อ → พิกัด ───────────────────────────

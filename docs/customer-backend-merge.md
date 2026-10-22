@@ -409,12 +409,12 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
 | เรื่อง | ทำอะไร |
 |---|---|
 | คะแนนแนะนำ (hybrid) | collaborative (ลูกค้าที่ซื้อ/ชอบคล้ายกัน) 35% · content (หมวด/ราคา/รสชาติจากสิ่งที่เคยซื้อ) 30% · ยอดนิยม 15% · สารก่อภูมิแพ้ 20% + boost หมวดที่ชอบ/ช่วงวัย · ข้อมูลจาก ออเดอร์ · ตะกร้า · รีวิว · รายการโปรด (`Interactions`) · ลูกค้าใหม่ (< 5 การใช้งาน) = cold start |
-| สารก่อภูมิแพ้ | `users.user_allergies` (ชื่อวัตถุดิบ · ใส่ `ชื่อ:severe` ได้ — ตั้งที่ `PATCH /api/shop/me`) เทียบกับวัตถุดิบในสูตร (แบบไม่สนวรรณยุกต์/ชื่อย่อย เช่น "นม" ตรง "นมสด") → `allergenWarning` (caution/warning/danger) + ลดคะแนน · `excludeAllergens=true` ตัดออก |
+| สารก่อภูมิแพ้ | `users.user_allergies` (ชื่อวัตถุดิบเท่านั้น ไม่มีระดับความรุนแรง — ตั้งที่ `PATCH /api/shop/me`) เทียบกับวัตถุดิบในสูตร (แบบไม่สนวรรณยุกต์/ชื่อย่อย เช่น "นม" ตรง "นมสด") → สินค้าที่ตรง **ไม่ถูกแนะนำ** (แนะนำเฉพาะตัว · หน้าแรก · สินค้าคล้ายกัน) · หน้าอื่นแสดงป้าย `allergenWarning` (caution/warning) จาก `GET /api/shop/allergen-warnings` |
 | ไม่แนะนำ | สินค้าที่ร้านซ่อน · พรีออเดอร์ · สต็อก 0 (ตามตัวกรองเดิมของฝั่งลูกค้า) |
 | ความเร็ว | cache แคตตาล็อก 3 นาที (`RECOMMENDATION_CACHE_TTL_MS` · 0 = ปิด) · คำนวณเกิน 4.5 วิ หรือ hybrid ล้ม → ถอยเป็น popular |
 
 **API:**
-- `GET /api/shop/recommendations?limit=&strategy=hybrid|collaborative|content|popular&excludeAllergens=` (ล็อกอิน) → `{ recommendations: [{ product, score, reasons, allergenWarning }], meta }`
+- `GET /api/shop/recommendations?limit=&strategy=hybrid|collaborative|content|popular` (ล็อกอิน) → `{ recommendations: [{ product, score, reasons, allergenWarning }], meta }`
 - `GET /api/catalog/products/recommended` (สาธารณะ · ล็อกอินอยู่ = เฉพาะตัว) → `{ products }` 10 ชิ้น — ไม่ล็อกอินเรียงตามคะแนนรีวิว
 - `GET /api/catalog/products/[id]/similar?limit=` (สาธารณะ · ล็อกอิน = เตือนสารก่อภูมิแพ้) → `{ recommendations }`
 - `GET /api/catalog/ingredients` (สาธารณะ) → `{ ingredients: [{ _id, ingredient_name }] }` ให้เลือกอาหารที่แพ้ — ไม่ส่งต้นทุน/สต็อก
@@ -435,6 +435,8 @@ callback ใน Google Console + LINE Login channel: `{NEXTAUTH_URL}/api/auth/ca
 - **ไฟล์:** `src/models/searchSynonymModel.ts` · `src/lib/search/normalize.ts` · `src/services/searchSynonymService.ts` · `productService.getProducts({ expandSynonyms })` · เทส `searchSynonyms.test.ts` 3 เคส
 
 ### 8.17 ขั้น 6 — ติดต่อร้าน (ฟอร์ม "ส่งข้อความหาเรา") (2026-10-05)
+
+> ⛔ **เลิกใช้แล้ว (2026-10-22)** — แทนด้วยแชทร้าน–ลูกค้า (§8.22) · ลบ `POST /api/shop/contact` · `GET /api/catalog/contact-topics` · `contactService` · `contactTopics` · `contact.test.ts` แล้ว
 
 ✏️ **แก้ข้อมูล §4 / §7.1 ข้อ 12:** ฝั่งลูกค้า**ไม่ได้ส่งอีเมล** — ส่งเป็นแจ้งเตือนหลังร้าน (หมวด "customer") อย่างเดียว
 
@@ -534,3 +536,20 @@ index ใหม่ `uniq_active_order_item` / `uniq_active_preorder_item` (uniqu
 | เทส integration มี log `MongoNotConnectedError` / แจ้งเตือนเขียนลง DB หลังล้าง | `src/lib/backgroundTasks.ts` + `flushBackground()` ใน `tests/integration/setup.ts` ([`infra-tooling.md`](infra-tooling.md) §3) · log หายหมด |
 | ปฏิเสธ `product_stock_quantity` ใน `PATCH /api/admin/products/[id]` | ✅ 2026-10-08 — ส่งเป็นตัวเลข = 400 ให้ใช้ `/stock` (`null` ยังรับ = ไม่เปลี่ยน) · FrontEnd เลิกส่งแล้วตั้งแต่ frontend PR #19 (`toUpdateInput` · `setStock`) · แก้พร้อมกัน: สินค้าที่มีสต็อกเปลี่ยนเป็นพรีออเดอร์โดยไม่ส่ง `product_stock_quantity: null` เคยได้ 400 (ตรวจสต็อกเดิม) → ตอนนี้ได้ (สต็อกถูกล้างเป็น null) |
 | worktree `feat/categories-delivery-status` · แจ้งเตือน POS · BACKLOG2 ของ frontend | งานของ repo FrontEnd (worktree ถูกลบไปแล้ว — `git worktree list` เหลือ main) · FrontEnd มีไฟล์แก้ค้างของคนอื่น (`docs/Debug.md` · `package.json`) ไม่แตะ |
+
+### 8.22 แชทร้าน–ลูกค้า (แทนฟอร์ม "ส่งข้อความหาเรา") (2026-10-22)
+
+ผู้ใช้เลือก: เลิกใช้ฟอร์ม → **ปุ่มแชทลอยมุมขวาล่าง** ทุกหน้าของหน้าร้าน · พนักงานตอบได้ตาม **สิทธิ์เมนู `chat`** · ไม่มีข้อความตอบอัตโนมัติ
+
+- ลูกค้า 1 คน = 1 ห้อง (`ChatConversations` · unique `user_id`) · ข้อความ `ChatMessages` (`sender: customer|shop` · `sender_user_id` · `text` ≤ 1000)
+- ไม่ใช้ WebSocket (Render ฟรีหลับได้ · Vercel ไม่ค้างการเชื่อมต่อ) — หน้าเว็บดึง `?after=` ทุก 4 วิระหว่างเปิดห้อง · จุดแดง/รายการห้องดึงทุก 30/10 วิ
+- แจ้งเตือน**ในเว็บเท่านั้น ไม่ส่ง LINE** (ผู้ใช้เลือก 2026-10-23): ลูกค้าส่ง → กระดิ่งหลังร้าน (`module: customer` · `line: false` · ลิงก์ `/owner/chat?c=<id>`) เฉพาะข้อความแรกที่ร้านยังไม่อ่าน · ร้านตอบ → กระดิ่งลูกค้า (`ref_type: "chat"` · ลิงก์ `/customer?chat=1`) เฉพาะข้อความแรกที่ลูกค้ายังไม่อ่าน
+- **การ์ดคำสั่งซื้อ:** ข้อความแนบ `ref: { kind: order|preorder, id }` ได้ (มี ref แล้ว text ว่างได้) — ต้องเป็นของลูกค้าเจ้าของห้อง (ไม่ใช่ = 404) · response คืน `card` ที่อ่านสถานะ/ยอดล่าสุดตอนแสดง (`missing` = เอกสารถูกลบ)
+- **ข้อความตอบเร็ว:** `ChatQuickReplies` (ใช้ร่วมทั้งร้าน · ≤ 50) — `GET /api/admin/chats/quick-replies` (chat.view) · `POST` / `PATCH|DELETE /:qid` (chat.update)
+- ลูกค้าไม่เห็นชื่อพนักงานที่ตอบ · หลังร้านเห็น · กันสแปม 20 ข้อความ/นาที/บัญชี (429)
+- **สิทธิ์:** `MENU_KEYS` + enum `Permissions.menu_key` เพิ่ม `chat` — `chat.view` = ดู/อ่าน · `chat.create` = ตอบ (owner ผ่านหมด)
+- **API ลูกค้า:** `GET /api/shop/chat` (`?after=` / `?before=`) · `POST /api/shop/chat/messages` `{ text }` · `POST /api/shop/chat/read` · `GET /api/shop/chat/unread`
+- **API หลังร้าน:** `GET /api/admin/chats` (`?filter=all|unanswered|unread&q=`) · `GET /api/admin/chats/unread` · `GET /api/admin/chats/:id` (ข้อมูลลูกค้า + คำสั่งซื้อ/พรีออเดอร์ล่าสุด) · `GET|POST /api/admin/chats/:id/messages` · `POST /api/admin/chats/:id/read`
+- **ไฟล์:** `src/models/chatConversationModel.ts` · `chatMessageModel.ts` · `chatQuickReplyModel.ts` · `src/services/chatService.ts` · route 11 เส้น · เทส `chat.test.ts` 8 เคส
+- หลังร้านแสดงตัวเลขห้องที่ยังไม่อ่านบนเมนู "แชทกับลูกค้า" จาก `GET /api/admin/chats/unread`
+- **ยังไม่ทำ:** แนบรูปในแชท

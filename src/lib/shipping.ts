@@ -1,8 +1,12 @@
 // src/lib/shipping.ts — ย้ายมาจาก backend ฝั่งลูกค้า (docs/customer-backend-merge.md §8.7) · pure ไม่มี import server-only
 // ค่าส่งออเดอร์/พรีออเดอร์จากหน้าเว็บลูกค้า (storefront) — หลังร้าน/POS ยังใช้ DeliveryZones (deliveryService)
 
+/** โซนสำรอง — ใช้กับทุกจังหวัดที่ไม่อยู่ในโซนอื่น (ไม่มีรายชื่อจังหวัด · ลบไม่ได้) */
+export const FALLBACK_ZONE_CODE = "D";
+
 export interface ShippingZone {
-  zone_code: "A" | "B" | "C" | "D";
+  /** ตัวอักษร A–Z — เริ่มต้น A–D · โซนที่เพิ่มใหม่ได้รหัสถัดไป */
+  zone_code: string;
   zone_label: string;
   provinces: string[];
   fee: number;
@@ -39,11 +43,11 @@ export function computeShippingFee(province: string, zones: ShippingZone[]): num
   const trimmed = (province || "").trim();
   if (trimmed) {
     const matched = zones.find(
-      (z) => z.zone_code !== "D" && z.provinces.some((p) => p.trim() === trimmed)
+      (z) => z.zone_code !== FALLBACK_ZONE_CODE && z.provinces.some((p) => p.trim() === trimmed)
     );
     if (matched) return matched.fee;
   }
-  return zones.find((z) => z.zone_code === "D")?.fee ?? 0;
+  return zones.find((z) => z.zone_code === FALLBACK_ZONE_CODE)?.fee ?? 0;
 }
 
 // ── ขอบเขตการจัดส่ง ────────────────────────────────────────────────────────────

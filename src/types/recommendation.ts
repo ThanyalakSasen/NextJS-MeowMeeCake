@@ -3,20 +3,19 @@
 // (backend คำนวณที่ src/services/recommendation/ · ย้ายมาจาก backend ฝั่งลูกค้า — customer-backend-merge.md §8.15)
 // ─────────────────────────────────────────────────────────────
 
-export type AllergenSeverity = "moderate" | "severe";
-
-export type AllergenWarningLevel = "none" | "caution" | "warning" | "danger";
+// ลูกค้าบันทึกแค่ชื่อวัตถุดิบที่แพ้ (users.user_allergies) — ไม่มีระดับความรุนแรง
+// caution = มีในส่วนผสมย่อย · warning = เป็นวัตถุดิบหลักในสูตร
+export type AllergenWarningLevel = "none" | "caution" | "warning";
 
 export interface AllergenMatchedItem {
   name: string;
-  severity: AllergenSeverity;
   isMainIngredient: boolean;
 }
 
 export interface AllergenWarning {
   level: AllergenWarningLevel;
   message: string | null;
-  // ค่าที่เอาไปปรับคะแนนของสินค้า (+0.2 / -0.3 / -0.5)
+  // ค่าที่เอาไปปรับคะแนนของสินค้า (+0.2 / -0.3)
   scoreAdjustment: number;
   matchedAllergens: AllergenMatchedItem[];
 }

@@ -14,7 +14,7 @@ const customerNotificationSchema = new mongoose.Schema(
     // ลิงก์ภายในเว็บ (path) เช่น /customer/account/purchases/<id>
     link: { type: String, default: null },
     // อ้างอิงคำสั่งซื้อที่เกี่ยวข้อง (ไว้ตรวจสอบย้อนหลัง)
-    ref_type: { type: String, enum: ["order", "preorder", "coupon", "bundle", "preorder_round", "review", null], default: null },
+    ref_type: { type: String, enum: ["order", "preorder", "coupon", "bundle", "preorder_round", "review", "chat", null], default: null },
     ref_id: { type: mongoose.Schema.Types.ObjectId, default: null },
     // เวลาที่เริ่มแสดงให้ลูกค้าเห็น — ปกติ = ตอนสร้าง · รอบพรีออเดอร์ที่ยังไม่เปิดรับ = วันเวลาเปิดรับ (บันทึกล่วงหน้า)
     // เอกสารเก่าที่ไม่มี field นี้ถือว่าแสดงตั้งแต่ created_at

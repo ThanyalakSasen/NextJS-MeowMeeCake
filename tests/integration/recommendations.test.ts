@@ -37,22 +37,29 @@ describe("แนะนำสินค้า", () => {
     expect(typeof products[0].avg_rating).toBe("number");
   });
 
-  it("ล็อกอิน + แพ้นม → สินค้าที่มีนมได้คำเตือน · excludeAllergens ตัดออก", async () => {
-    const { withMilk, plain } = await catalog();
+  it("ล็อกอิน + แพ้นม → ไม่แนะนำสินค้าที่มีนม ทั้งแนะนำเฉพาะตัว · หน้าแรก · สินค้าคล้ายกัน", async () => {
+    const { withMilk, plain, other } = await catalog();
     const user = await customer(["นม"]);
-    const all = await recommendationService.personalized({
-      userId: String(user._id), limit: 10, strategy: "hybrid", excludeAllergens: false,
-    });
-    const milkRec = all.recommendations.find((r) => String(r.product._id) === String(withMilk._id));
-    expect(milkRec?.allergenWarning?.level).toBeTruthy();
-    expect(milkRec?.allergenWarning?.level).not.toBe("none");
-    const plainRec = all.recommendations.find((r) => String(r.product._id) === String(plain._id));
-    expect(plainRec?.allergenWarning?.level ?? "none").toBe("none");
+    const uid = String(user._id);
+    const milkId = String(withMilk._id);
 
-    const safe = await recommendationService.personalized({
-      userId: String(user._id), limit: 10, strategy: "hybrid", excludeAllergens: true,
-    });
-    expect(safe.recommendations.map((r) => String(r.product._id))).not.toContain(String(withMilk._id));
+    const mine = await recommendationService.personalized({ userId: uid, limit: 10, strategy: "hybrid" });
+    const mineIds = mine.recommendations.map((r) => String(r.product._id));
+    expect(mineIds).not.toContain(milkId);
+    expect(mineIds).toContain(String(plain._id));
+    expect(mine.recommendations.every((r) => r.allergenWarning === null)).toBe(true);
+
+    const popular = await recommendationService.personalized({ userId: uid, limit: 10, strategy: "popular" });
+    expect(popular.recommendations.map((r) => String(r.product._id))).not.toContain(milkId);
+
+    const home = await recommendationService.recommendedProducts(uid);
+    expect(home.products.map((p) => String(p._id))).not.toContain(milkId);
+
+    const similar = await recommendationService.similar(String(other._id), 6, uid);
+    expect(similar.recommendations.map((r) => String(r.product._id))).not.toContain(milkId);
+    // ไม่ล็อกอิน = ไม่มีข้อมูลการแพ้ → ยังแนะนำได้
+    const guestSimilar = await recommendationService.similar(String(other._id), 6);
+    expect(guestSimilar.recommendations.map((r) => String(r.product._id))).toContain(milkId);
   });
 
   it("คำเตือนแพ้อาหารของทุกสินค้า: เฉพาะสินค้าที่มีวัตถุดิบที่แพ้ · ไม่บันทึกอาหารที่แพ้ = ว่าง", async () => {

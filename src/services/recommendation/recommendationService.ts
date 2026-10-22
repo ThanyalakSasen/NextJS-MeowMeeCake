@@ -4,8 +4,9 @@
  *
  *   - แนะนำเฉพาะตัว (ล็อกอิน): hybrid (collaborative 35% · content 30% · ยอดนิยม 15% · สารก่อภูมิแพ้ 20%) · คำนวณเกิน 4.5 วิ
  *     หรือ hybrid ล้ม → ถอยเป็น "popular" (เร็ว) · error ของ engine ที่รู้สถานะ (RecommendationError) ตอบตามนั้น
- *   - สินค้าแนะนำหน้าแรก: ไม่ล็อกอิน = เรียงตามคะแนนรีวิว 10 ชิ้น · ล็อกอิน = hybrid (ไม่ตัดสินค้าที่แพ้ออก — ให้คะแนนต่ำลง)
- *   - สินค้าคล้ายกัน: ล็อกอินหรือไม่ก็ได้ (ล็อกอิน = personalize + เตือนสารก่อภูมิแพ้)
+ *   - สินค้าแนะนำหน้าแรก: ไม่ล็อกอิน = เรียงตามคะแนนรีวิว 10 ชิ้น · ล็อกอิน = hybrid
+ *   - สินค้าคล้ายกัน: ล็อกอินหรือไม่ก็ได้
+ *   - ล็อกอินและบันทึกวัตถุดิบที่แพ้ไว้ → สินค้าที่มีวัตถุดิบนั้นไม่ถูกแนะนำทุกช่องทาง (รวมตอนถอยไปรายการยอดนิยม)
  *   - รายชื่อวัตถุดิบสาธารณะ (เลือกอาหารที่แพ้) — ส่งแค่ _id + ชื่อ ไม่ส่งต้นทุน/สต็อก
  */
 import dbConnect from "../../lib/dbConnect";
@@ -64,7 +65,6 @@ export async function personalized(opts: {
   userId: string;
   limit: number;
   strategy: RecommendationStrategy;
-  excludeAllergens: boolean;
 }): Promise<RecommendationsResult> {
   await dbConnect();
   try {
@@ -145,13 +145,25 @@ export async function recommendedProducts(userId: string | null): Promise<{ prod
   if (!userId) return popularProducts();
   try {
     const result = await withTimeout(
-      getRecommendations({ userId, limit: 10, strategy: "hybrid", excludeAllergens: false }),
+      getRecommendations({ userId, limit: 10, strategy: "hybrid" }),
       ENGINE_TIMEOUT_MS
     );
     return { products: sanitize(result.recommendations.map((r) => r.product)) };
   } catch (err) {
     log.warn("recommendation.recommended_fallback", { user_id: userId, err });
-    return popularProducts();
+    return popularWithoutAllergens(userId);
+  }
+}
+
+/** รายการยอดนิยม (ตอน engine ล้ม) แต่ตัดสินค้าที่มีวัตถุดิบที่ผู้ใช้แพ้ออก — ตรวจไม่ได้ = ไม่แนะนำอะไรเลย (หน้าเว็บมีรายการสำรองเอง) */
+async function popularWithoutAllergens(userId: string): Promise<{ products: any[] }> {
+  const { products } = await popularProducts();
+  try {
+    const warnings = await getAllergenWarnings(userId);
+    return { products: products.filter((p) => !warnings[String(p._id)]) };
+  } catch (err) {
+    log.warn("recommendation.allergen_filter_failed", { user_id: userId, err });
+    return { products: [] };
   }
 }
 

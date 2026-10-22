@@ -25,6 +25,7 @@ const permissionSchema = new mongoose.Schema({
       "promotions",
       "reports",
       "store_info", // หน้าร้านประจำสัปดาห์ (customer-backend-merge.md §8.19) — ข้อมูลร้านส่วนอื่นเป็นของ owner เท่านั้น
+      "chat", // แชทกับลูกค้า (view = ดู/อ่าน · create = ตอบ)
     ],
   },
   // + เพิ่ม expires_at สำหรับสิทธิ์ชั่วคราว

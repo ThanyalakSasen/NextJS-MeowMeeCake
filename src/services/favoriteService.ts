@@ -18,6 +18,8 @@ export interface FavoriteItem {
   name: string;
   nameeg: string;
   category: string;
+  /** _id หมวด — หน้าเว็บใช้ทำป้าย "ส่งเฉพาะในจังหวัด" */
+  category_id: string | null;
   /** ราคาขายจริง (ราคาลดถ้ามี) */
   price: number;
   /** ราคาปกติไว้แสดงขีดฆ่า — null ถ้าไม่มีราคาลด */
@@ -53,6 +55,7 @@ export async function listFavorites(userId: string): Promise<{ items: FavoriteIt
       name: String(p.product_name_th ?? ""),
       nameeg: String(p.product_name_eng ?? ""),
       category: String(p.category_id?.product_category_name ?? ""),
+      category_id: p.category_id?._id ? String(p.category_id._id) : null,
       price: Number(onSale ? p.sale_price : p.product_price ?? 0),
       originalPrice: onSale ? Number(p.product_price) : null,
       image: (p.product_img as string[] | undefined)?.[0] ?? "",

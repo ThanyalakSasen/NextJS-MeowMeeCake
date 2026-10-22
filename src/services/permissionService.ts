@@ -37,6 +37,7 @@ export const MENU_KEYS = [
   "promotions",
   "reports",
   "store_info",
+  "chat", // แชทกับลูกค้า (view = ดู/อ่าน · create = ตอบ)
 ] as const;
 export type MenuKey = (typeof MENU_KEYS)[number];
 

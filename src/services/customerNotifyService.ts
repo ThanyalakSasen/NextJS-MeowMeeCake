@@ -134,7 +134,7 @@ export interface WebNotice {
   type: WebNoticeType;
   /** path ในหน้าเว็บลูกค้า เช่น /customer/account/purchases/<id> */
   link: string | null;
-  ref_type: "order" | "preorder" | "review" | null;
+  ref_type: "order" | "preorder" | "review" | "chat" | null;
   ref_id: unknown;
   /** เลขเอกสาร — ใช้ข้ามบิลหน้าร้าน (POS-) */
   doc_no?: string | null;
@@ -153,7 +153,11 @@ export const MY_REVIEWS_PATH = "/customer/account/reviews";
 export function withDocLink(text: string, link: string | null | undefined): string {
   const base = storefrontBase();
   if (!base || !link || !link.startsWith("/customer/")) return text;
-  const label = link.startsWith(MY_REVIEWS_PATH) ? "👉 ดูรีวิวของคุณ" : "👉 ดูคำสั่งซื้อ / ชำระเงิน";
+  const label = link.startsWith(MY_REVIEWS_PATH)
+    ? "👉 ดูรีวิวของคุณ"
+    : link.includes("chat=1")
+      ? "👉 เปิดแชทกับร้าน"
+      : "👉 ดูคำสั่งซื้อ / ชำระเงิน";
   return `${text}\n\n${label}\n${base}${link}`;
 }
 

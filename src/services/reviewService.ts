@@ -293,7 +293,21 @@ export async function listReviews(query: ListReviewQuery) {
     .populate("user_id", "user_fullname user_img")
     // รูปสินค้า — หน้า "รีวิวของฉัน" ของลูกค้าแสดงรูปคู่กับรีวิว
     .populate("product_id", "product_name_th product_name_eng product_img");
-  if (query.ownOnly) q = q.select(INTERNAL_FIELDS);
+  if (query.ownOnly) {
+    // หน้า "รีวิวของฉัน" — รายละเอียดรายการที่รีวิว (เลขออเดอร์ · ตัวเลือก · จำนวน · ราคา) ไม่มีต้นทุน
+    q = q
+      .select(INTERNAL_FIELDS)
+      .populate({
+        path: "order_item_id",
+        select: "order_id selected_variants selected_options special_request quantity total_price",
+        populate: { path: "order_id", select: "order_no created_at" },
+      })
+      .populate({
+        path: "preorder_order_item_id",
+        select: "preorder_id pickup_date selected_variants selected_options special_request quantity total_price",
+        populate: { path: "preorder_id", select: "preorder_no created_at" },
+      });
+  }
   const [rows, total] = await Promise.all([q.lean<any[]>(), reviewModel.countDocuments(filter)]);
   // ลูกค้าเห็นคำตอบของร้าน (ข้อความ + เวลา) แต่ไม่เห็นว่าพนักงานคนไหนตอบ (replied_by)
   const items = query.ownOnly
