@@ -1,6 +1,6 @@
 /**
  * PATCH /api/admin/orders/[id]/delivery — อัปเดตสถานะจัดส่ง (orders.update)
- *   body: { delivery_status?, tracking_no?, shipped_at?, delivered_at?, delivered_note? }
+ *   body: { delivery_status?, tracking_no?, shipping_carrier?, shipped_at?, delivered_at?, delivered_note? }
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";

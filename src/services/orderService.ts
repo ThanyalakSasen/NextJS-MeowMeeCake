@@ -689,6 +689,22 @@ export async function listOrders(query: ListOrderQuery) {
     }
     for (const o of presented) o.items = byOrder.get(String(o._id)) ?? [];
   }
+
+  // slip_pending_review = แนบสลิปแล้ว รอแอดมินตรวจ (payment ใบล่าสุดยัง pending + มีสลิป) — หน้าจัดการคำสั่งซื้อ
+  // แยก "รอยืนยันการชำระเงิน" ออกจาก "ยังไม่แนบสลิป" (order.payment_status เป็น pending ทั้งคู่) · query เดียวทั้งหน้า
+  const paymentIds = items.map((o: any) => o.payment_id).filter(Boolean);
+  if (paymentIds.length) {
+    const withSlip = new Set(
+      (
+        await paymentModel
+          .find({ _id: { $in: paymentIds }, status: "pending", slip_image_url: { $ne: null }, deleted_at: null })
+          .select("_id")
+          .lean<{ _id: unknown }[]>()
+      ).map((p) => String(p._id))
+    );
+    for (const o of presented) o.slip_pending_review = !!o.payment_id && withSlip.has(String(o.payment_id));
+  }
+  for (const o of presented) o.slip_pending_review ??= false;
   return { items: presented, meta: buildMeta(total, query.pagination) };
 }
 

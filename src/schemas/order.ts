@@ -3,6 +3,7 @@
  */
 import { z } from "zod";
 import { objectId, deliveryAddress, phone } from "./common";
+import { SHIPPING_CARRIERS } from "../lib/shippingCarrier";
 
 const orderLine = z.object({
   product_id: objectId,
@@ -106,6 +107,7 @@ export type ListOrderQuery = z.infer<typeof listOrderQuery>;
 export const updateDeliveryBody = z.object({
   delivery_status: z.enum(["pending", "shipping", "delivered", "failed"]).optional(),
   tracking_no: z.string().trim().max(200).nullish(),
+  shipping_carrier: z.enum(SHIPPING_CARRIERS).nullish(),
   shipped_at: z.coerce.date().nullish(),
   delivered_at: z.coerce.date().nullish(),
   delivered_note: z.string().trim().max(1000).nullish(),

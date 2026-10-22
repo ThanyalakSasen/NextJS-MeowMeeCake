@@ -1,5 +1,6 @@
 // orderModel.ts
 import mongoose from "mongoose";
+import { SHIPPING_CARRIERS } from "../lib/shippingCarrier";
 
 const deliveryAddressSchema = new mongoose.Schema(
   {
@@ -57,6 +58,8 @@ const orderSchema = new mongoose.Schema(
     payment_link_expires_at: { type: Date, default: null, select: false },
     delivery_status: { type: String, enum: ["pending", "shipping", "delivered", "failed"], default: "pending" },
     tracking_no: { type: String, default: null },
+    // บริษัทขนส่ง — รหัสจาก lib/shippingCarrier.ts (null = ยังไม่ระบุ)
+    shipping_carrier: { type: String, enum: [...SHIPPING_CARRIERS, null], default: null },
     shipped_at: { type: Date, default: null },
     delivered_note: { type: String, default: null },
     delivered_at: { type: Date, default: null },

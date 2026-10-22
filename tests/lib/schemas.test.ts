@@ -134,6 +134,11 @@ describe("schemas/order — updateDeliveryBody (BACKLOG §3, รอบ 4b ข้
     const r = updateDeliveryBody.parse({ shipped_at: "2026-01-10T00:00:00Z" });
     expect(r.shipped_at).toBeInstanceOf(Date);
   });
+  it("shipping_carrier รับเฉพาะรหัสใน SHIPPING_CARRIERS หรือ null (ล้างค่า)", () => {
+    expect(updateDeliveryBody.safeParse({ shipping_carrier: "flash" }).success).toBe(true);
+    expect(updateDeliveryBody.safeParse({ shipping_carrier: null }).success).toBe(true);
+    expect(updateDeliveryBody.safeParse({ shipping_carrier: "dhl-ufo" }).success).toBe(false);
+  });
 });
 
 describe("schemas/order — listOrderQuery", () => {
