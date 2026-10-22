@@ -119,9 +119,10 @@ describe("hook เข้า lifecycle ของพรีออเดอร์", 
     const u = await makeUser({ line_user_id: "U_C" });
     const pre = await makePreorder(String(u._id), { order_type: "delivery" });
 
-    await preorderService.updateDelivery(String(pre._id), { delivery_status: "shipping", tracking_no: "TH1" });
+    await preorderService.updateDelivery(String(pre._id), { delivery_status: "shipping", tracking_no: "TH1", shipping_carrier: "flash" });
     await vi.waitFor(() => expect(pushedTo(fetchSpy, "U_C")).toHaveLength(1));
     expect(pushedTo(fetchSpy, "U_C")[0]).toContain("TH1");
+    expect(pushedTo(fetchSpy, "U_C")[0]).toContain("ขนส่ง: Flash Express");
 
     await preorderService.updateDelivery(String(pre._id), { delivery_status: "shipping", tracking_no: "TH2" });
     await flushBackground(); // รองานแจ้งเตือนเบื้องหลังจบจริง (แทนรอ 100ms)

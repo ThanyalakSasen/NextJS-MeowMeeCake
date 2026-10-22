@@ -35,6 +35,7 @@ import { isObjectId } from "../lib/objectId";
 import { trackBackground } from "../lib/backgroundTasks";
 import { notFound } from "../lib/httpError";
 import { storefrontBase } from "../lib/storefront";
+import { SHIPPING_CARRIER_TEXT, type ShippingCarrier } from "../lib/shippingCarrier";
 
 export type CustomerDocKind = "order" | "preorder";
 
@@ -64,6 +65,12 @@ const DELIVERY_STATUS_TEXT: Record<string, string> = {
 
 function header(kind: CustomerDocKind, docNo: string): string {
   return `🧁 MeowMeeCake\n${KIND_LABEL[kind]} ${docNo}`;
+}
+
+/** บรรทัดบริษัทขนส่ง + เลขพัสดุตอนเริ่มจัดส่ง (ไม่มีข้อมูล = ไม่ใส่บรรทัดนั้น) */
+function shippingLines(trackingNo?: string | null, carrier?: string | null): string {
+  const name = carrier ? SHIPPING_CARRIER_TEXT[carrier as ShippingCarrier] : null;
+  return `${name ? `\nขนส่ง: ${name}` : ""}${trackingNo ? `\nเลขพัสดุ: ${trackingNo}` : ""}`;
 }
 
 // ── ข้อความ (export ให้เทสตรวจได้) ─────────────────────────
@@ -118,10 +125,10 @@ export const customerMessages = {
     const text = PAYMENT_STATUS_TEXT[status];
     return text ? `${header(kind, docNo)}\n${text}` : null;
   },
-  deliveryStatus(kind: CustomerDocKind, docNo: string, status: string, trackingNo?: string | null): string | null {
+  deliveryStatus(kind: CustomerDocKind, docNo: string, status: string, trackingNo?: string | null, carrier?: string | null): string | null {
     const text = DELIVERY_STATUS_TEXT[status];
     if (!text) return null;
-    const tracking = status === "shipping" && trackingNo ? `\nเลขพัสดุ: ${trackingNo}` : "";
+    const tracking = status === "shipping" ? shippingLines(trackingNo, carrier) : "";
     return `${header(kind, docNo)}\n${text}${tracking}`;
   },
 };
@@ -222,9 +229,9 @@ export const customerWeb = {
     if (status === "refunded") return web(kind, id, docNo, "💸 ร้านคืนเงินให้เรียบร้อยแล้ว", "success");
     return null;
   },
-  deliveryStatus(kind: CustomerDocKind, id: unknown, docNo: string, status: string, trackingNo?: string | null): WebNotice | null {
+  deliveryStatus(kind: CustomerDocKind, id: unknown, docNo: string, status: string, trackingNo?: string | null, carrier?: string | null): WebNotice | null {
     if (status === "shipping") {
-      return web(kind, id, docNo, `🚚 จัดส่งสินค้าแล้ว${trackingNo ? `\nเลขพัสดุ: ${trackingNo}` : ""}`, "info");
+      return web(kind, id, docNo, `🚚 จัดส่งสินค้าแล้ว${shippingLines(trackingNo, carrier)}`, "info");
     }
     if (status === "delivered") return web(kind, id, docNo, "🏠 สินค้าจัดส่งถึงแล้ว", "success");
     if (status === "failed") return web(kind, id, docNo, "⚠️ การจัดส่งมีปัญหา ร้านจะติดต่อกลับโดยเร็ว", "warning");

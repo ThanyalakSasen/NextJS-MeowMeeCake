@@ -172,8 +172,8 @@ export async function applyEntityDeliveryUpdate(opts: {
     const { kind, docNo } = customerDocRef(updated);
     notifyCustomerLater(
       updated.user_id,
-      customerMessages.deliveryStatus(kind, docNo, String(updated.delivery_status), updated.tracking_no as string | null),
-      customerWeb.deliveryStatus(kind, updated._id, docNo, String(updated.delivery_status), updated.tracking_no as string | null)
+      customerMessages.deliveryStatus(kind, docNo, String(updated.delivery_status), updated.tracking_no as string | null, updated.shipping_carrier as string | null),
+      customerWeb.deliveryStatus(kind, updated._id, docNo, String(updated.delivery_status), updated.tracking_no as string | null, updated.shipping_carrier as string | null)
     );
   }
   return updated;

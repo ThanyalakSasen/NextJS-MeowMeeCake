@@ -1,6 +1,6 @@
 /**
  * PATCH /api/admin/preorders/[id]/delivery — อัปเดตสถานะจัดส่ง (preorder.update)
- *   body: { delivery_status?, tracking_no?, shipped_at?, delivered_at?, delivered_note? }
+ *   body: { delivery_status?, tracking_no?, shipping_carrier?, shipped_at?, delivered_at?, delivered_note? }
  *   BACKLOG2 §4 — คู่ขนานกับ PATCH /api/admin/orders/[id]/delivery (เดิมพรีออเดอร์ไม่มี route นี้เลย)
  */
 import { ok } from "@/lib/apiResponse";
