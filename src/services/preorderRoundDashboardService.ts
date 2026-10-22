@@ -17,6 +17,7 @@ import preorderRoundItemModel from "../models/preorderRoundItemModel";
 import preorderModel from "../models/preorderModel";
 import preorderItemModel from "../models/preorderItemModel";
 import { getRoundById, type RoundStatus } from "./preorderRoundService";
+import { syncRoundSchedule } from "./preorderRoundLifecycleService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -48,6 +49,8 @@ export interface DashboardQuery {
 }
 
 export async function getRoundsDashboard(query: DashboardQuery) {
+  // ปิดรอบที่เลยวันปิดรับก่อนสรุป (preorderRoundLifecycleService.syncRoundSchedule)
+  await syncRoundSchedule();
   await dbConnect();
 
   const filter: Record<string, any> = { deleted_at: null };

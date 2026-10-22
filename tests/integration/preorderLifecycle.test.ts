@@ -13,6 +13,7 @@ import {
   onPreorderCancelled,
   onPreorderPaid,
   paymentDeadlineHours,
+  resetRoundScheduleSync,
   runRoundScheduler,
 } from "@/services/preorderRoundLifecycleService";
 import { makeUser, makeProduct, makeRecipe } from "./helpers";
@@ -311,6 +312,27 @@ describe("ตัวตั้งเวลา (runRoundScheduler)", () => {
     expect(r2.opened.map(String)).not.toContain(expect.stringContaining(`จะเปิด-${now}`));
     expect(r2.closed).toHaveLength(0);
     expect(await productionOrderModel.countDocuments({ round_id: toClose._id })).toBe(1);
+  });
+});
+
+/** เจ้าของร้าน 2026-10-22 — รอบปิดเองเมื่อเลยวันปิดรับ แม้ cron ภายนอกไม่ยิง (syncRoundSchedule ตอนอ่านรอบ) */
+describe("ปิดรอบเองตอนเปิดดู (syncRoundSchedule)", () => {
+  it("รอบ open ที่เลย close_date → listRounds/getRoundDetail เห็นเป็น closed + สร้างใบผลิต", async () => {
+    const p = await preorderProduct();
+    const { round, itemOf } = await openRound([p]);
+    const pre = await order(round, itemOf(p)._id, 2);
+    await markPaid(pre._id);
+    // จำลองเวลาผ่านไปจนเลยวันปิดรับ
+    await preorderRoundModel.updateOne({ _id: round._id }, { $set: { close_date: new Date(Date.now() - 1000) } });
+
+    resetRoundScheduleSync();
+    const list = await preorderRoundService.listRounds({ pagination: { page: 1, limit: 100, skip: 0 } });
+    const listed = list.items.find((r: { _id: unknown }) => String(r._id) === String(round._id)) as { round_status: string };
+    expect(listed.round_status).toBe("closed");
+    expect(await productionOrderModel.countDocuments({ round_id: round._id })).toBe(1);
+
+    const detail = (await preorderRoundService.getRoundDetail(String(round._id))) as { round_status: string };
+    expect(detail.round_status).toBe("closed");
   });
 });
 

@@ -8,6 +8,7 @@
  *   scheduled → open → closed          (เดินหน้าตามลำดับ) · closed → open (ยังไม่มีใบสั่งผลิต)
  *   scheduled | open → cancelled       (ยกเลิกรอบ)
  *   เปิด/ปิดอัตโนมัติตามเวลาผ่าน cron (preorderRoundLifecycleService.runRoundScheduler) หรือแอดมินกดเอง ·
+ *   + อ่านรายการ/รายละเอียดรอบจะเรียก syncRoundSchedule() ก่อน (รอบที่เลยวันปิดรับจึงปิดเองแม้ cron ไม่ยิง) ·
  *   ปิดรอบ → ยกเลิกคนไม่จ่าย + สร้างใบสั่งผลิต (onRoundClosed) · ตอนลูกค้าสั่งเช็ค assertRoundOrderable() อีกชั้น
  *
  * PreorderRoundItems = สินค้าพรีออเดอร์ที่เปิดขายในรอบ + เพดานจำนวนรวม (max_qty_total) + ยอดจองปัจจุบัน (current_qty)
@@ -217,8 +218,15 @@ export async function createRound(input: CreateRoundInput, createdBy: string) {
 }
 
 // ── READ ─────────────────────────────────────────────────────
+/** ปิด/เปิดรอบที่ถึงเวลาก่อนอ่าน — import แบบ dynamic เพราะ lifecycle service import กลับมาไม่ได้ (วงจร) */
+async function syncSchedule(): Promise<void> {
+  const { syncRoundSchedule } = await import("./preorderRoundLifecycleService");
+  await syncRoundSchedule();
+}
+
 export async function listRounds(query: ListRoundQuery) {
   await dbConnect();
+  await syncSchedule();
 
   const filter: Record<string, any> = {};
   if (!query.includeDeleted) filter.deleted_at = null;
@@ -268,6 +276,7 @@ export async function getRoundDetail(
   opts: { includeDeleted?: boolean; activeItemsOnly?: boolean } = {}
 ) {
   await dbConnect();
+  await syncSchedule();
   const round = await getRoundById(id, opts);
 
   const itemFilter: Record<string, any> = { round_id: round._id, deleted_at: null };

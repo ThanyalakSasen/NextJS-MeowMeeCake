@@ -45,7 +45,8 @@ async function customers(s: SessionUser, id: unknown, qs = "") {
   return { status: res.status, body: await res.json() };
 }
 
-const day = (n: number) => new Date(Date.UTC(2026, 9, n));
+// ปีอนาคต — รอบ open/scheduled ที่เลยวันปิดจะถูกปิดเองตอนอ่าน (syncRoundSchedule) ทำให้สถานะในเทสต์เปลี่ยน
+const day = (n: number) => new Date(Date.UTC(2099, 9, n));
 
 async function makeRound(name: string, status = "open", openDay = 1) {
   return preorderRoundModel.create({
