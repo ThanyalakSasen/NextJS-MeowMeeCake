@@ -286,6 +286,10 @@ route เดิม `POST /api/admin/production-orders/from-preorder-round` ย�
 
 เปลี่ยนสถานะแบบมีเงื่อนไข (สถานะเดิม) → รันซ้ำ / แอดมินกดพร้อมกัน ไม่ทำขั้นตอนปิดรอบซ้ำ
 
+**ไม่ต้องพึ่ง cron อย่างเดียว** (2026-10-22 — เจ้าของร้าน: รอบต้องปิดเองเมื่อเลยวันปิดรับ) — `syncRoundSchedule()` รัน `runRoundScheduler` ก่อนอ่านรอบทุกครั้ง
+(`listRounds` / `getRoundDetail` / `getRoundsDashboard` — ทั้งหน้าร้านและหลังร้าน): มีรอบถึงเวลาเปิด/ปิด → รันทันที · ไม่มี → ไม่เกินนาทีละครั้งต่อ instance
+· frontend ส่ง `close_date` = 23:59:59 ของวันปิดรับ (`open_date` = 00:00 · `pickup_date` = 23:59:59) และหน้าจัดการพรีออเดอร์โหลดใหม่เองเมื่อถึงเวลาปิดรับ
+
 **เปิดรอบที่ปิดแล้วกลับ** `PATCH /api/admin/preorder-rounds/[id]/status { round_status: "open", close_date? }`
 
 | | ก่อน | หลัง |

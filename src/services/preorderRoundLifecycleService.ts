@@ -147,6 +147,48 @@ export async function cancelUnpaidPreorders(
   return result;
 }
 
+// ── ปิด/เปิดรอบตามเวลาเมื่อมีคนเปิดดู ─────────────────────────
+// เจ้าของร้าน 2026-10-22: รอบต้องปิดเองเมื่อเลยวันปิดรับ — เดิมพึ่ง cron ภายนอก (cron-job.org) อย่างเดียว
+// ถ้า cron ไม่ได้ตั้ง/ไม่ยิง (Render หลับ) รอบค้าง "เปิดรับ" ทั้งที่เลยวันแล้ว
+// → ทุกครั้งที่อ่านรายการ/รายละเอียดรอบ (หน้าร้าน + หลังร้าน) รัน runRoundScheduler ก่อน
+//   มีรอบถึงเวลาเปิด/ปิด (query เบา ๆ 1 ครั้ง) = รันทันที · ไม่มี = รันไม่เกินครั้งละ SYNC_INTERVAL_MS ต่อ instance
+//   (ยกเลิกคนไม่จ่าย) · คำขอที่มาพร้อมกันรอผลรอบเดียวกัน
+//   พังก็แค่ log — ไม่ทำให้หน้าที่เปิดดูพัง (cron ยังเป็นตัวหลักที่ทำซ้ำให้)
+const SYNC_INTERVAL_MS = 60 * 1000;
+let lastSyncAt = 0;
+let inflight: Promise<void> | null = null;
+
+export async function syncRoundSchedule(opts: { now?: Date } = {}): Promise<void> {
+  if (inflight) return inflight;
+  const now = opts.now ?? new Date();
+  if (now.getTime() - lastSyncAt < SYNC_INTERVAL_MS) {
+    // scheduled ที่ถึง open_date ครอบคลุมรอบที่เลย close_date ไปแล้วโดยไม่เคยเปิดด้วย (open < close เสมอ)
+    const due = await preorderRoundModel
+      .exists({
+        deleted_at: null,
+        $or: [
+          { round_status: "open", close_date: { $lte: now } },
+          { round_status: "scheduled", open_date: { $lte: now } },
+        ],
+      })
+      .catch(() => null);
+    if (!due || inflight) return inflight ?? undefined;
+  }
+  lastSyncAt = now.getTime();
+  inflight = runRoundScheduler({ now })
+    .then(() => undefined)
+    .catch((err) => log.error("preorder_lifecycle.sync_failed", { err }))
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
+}
+
+/** สำหรับเทสต์ — ล้างตัวจำเวลาให้ sync รอบถัดไปรันทันที */
+export function resetRoundScheduleSync(): void {
+  lastSyncAt = 0;
+}
+
 // ── สร้างใบสั่งผลิตอัตโนมัติ ─────────────────────────────────
 /** วันผลิต = วันรับ − lead_time_days ที่ยาวที่สุดของสินค้าในรอบ (ไม่ก่อนวันปิดรอบ) · ไม่มีค่า lead time = 1 วัน */
 export async function productionDateForRound(round: { _id: unknown; close_date: Date; pickup_date: Date }): Promise<Date> {
@@ -427,6 +469,7 @@ export interface SchedulerResult {
 
 /**
  * รันเป็นระยะจาก cron (แนะนำทุก 15 นาที — /api/cron/preorder-rounds หรือ npm run cron:preorder-rounds)
+ * + syncRoundSchedule() เรียกซ้ำตอนมีคนเปิดดูรอบ (ไม่ต้องพึ่ง cron ภายนอกอย่างเดียว)
  * 1) scheduled + ถึง open_date → open  2) open + เลย close_date → closed + onRoundClosed
  * 3) ยกเลิกพรีออเดอร์ที่เลยกำหนดชำระ (รอบที่ยังเปิดอยู่)
  * รันซ้ำได้ — เปลี่ยนสถานะแบบมีเงื่อนไข (สถานะเดิม) ไม่ทำซ้ำ
