@@ -9,12 +9,12 @@ import { makeUser, makeProduct, oid } from "./helpers";
 
 /**
  * BACKLOG §3.11 — dashboardService.overview() รวม revenue/cogs (satang, จาก orderModel/orderItemModel)
- * กับ expenseTotal (totalInRange() คืนบาทให้อยู่แล้วตั้งแต่เฟส 2) — เป็นจุดเสี่ยงสุดถ้าผสมหน่วยผิด
+ * กับ expenseTotal (totalsInRange() คืนบาทให้อยู่แล้วตั้งแต่เฟส 2) — เป็นจุดเสี่ยงสุดถ้าผสมหน่วยผิด
  * (กำไรเพี้ยน x100 เงียบ ๆ) ตั้งแต่เฟส 4 orderItem.cost_per_unit ก็เป็นสตางค์แล้วเช่นกัน (ก่อนหน้านี้
  * ยังเป็นบาทค้างอยู่ตัวเดียวในระบบ) เทสนี้ยืนยันว่า profit_estimate คำนวณถูกต้องครบทุกองค์ประกอบแล้ว
  */
 describe("dashboardService.overview — ผสม revenue (order) + expense ถูกหน่วย", () => {
-  it("profit_estimate = revenue - expenses - cogs เป็นบาทถูกต้อง ไม่มีหน่วยปนกัน", async () => {
+  it("profit_estimate = revenue - expenses (cogs = หมวดวัตถุดิบ/บรรจุภัณฑ์ ไม่หักซ้ำ) เป็นบาทถูกต้อง", async () => {
     const user = await makeUser();
     const product = await makeProduct();
 
@@ -36,10 +36,10 @@ describe("dashboardService.overview — ผสม revenue (order) + expense ถ�
       quantity: 1,
       unit_price: 1000,
       total_price: 1000,
-      cost_per_unit: 300, // 300 บาท — cogs = 300 × 1 = 300 บาท
+      cost_per_unit: 300, // 300 บาท — recipe_cogs = 300 × 1 = 300 บาท (อ้างอิง ไม่หักจากกำไร)
     });
 
-    // ค่าใช้จ่าย 200 บาท (สร้างผ่าน expenseService)
+    // ค่าใช้จ่าย 200 + 150 บาท (สร้างผ่าน expenseService) — 150 เป็นหมวดวัตถุดิบ = COGS
     await expenseService.create({
       date: new Date(),
       description: "ค่าไฟ",
@@ -47,13 +47,21 @@ describe("dashboardService.overview — ผสม revenue (order) + expense ถ�
       amount: 200,
       payment_method: "โอนเงิน",
     });
+    await expenseService.create({
+      date: new Date(),
+      description: "แป้ง",
+      category: "วัตถุดิบ",
+      amount: 150,
+      payment_method: "โอนเงิน",
+    });
 
     const result = await dashboardService.overview();
 
     expect(result.revenue).toBe(1000);
-    expect(result.expenses).toBe(200);
-    expect(result.cogs).toBe(300);
-    expect(result.profit_estimate).toBe(1000 - 200 - 300); // 500 — ไม่ใช่ 500*100 หรือ 5.00
+    expect(result.expenses).toBe(350);
+    expect(result.cogs).toBe(150); // เฉพาะหมวดวัตถุดิบ — อยู่ใน expenses แล้ว
+    expect(result.recipe_cogs).toBe(300);
+    expect(result.profit_estimate).toBe(1000 - 350); // 650 — ไม่หัก recipe_cogs / วัตถุดิบซ้ำ (Final-Backlog Q1)
   });
 });
 
@@ -88,6 +96,15 @@ describe("dashboardService — รวมพรีออเดอร์ (BACKLOG4
       product_snapshot: { product_name_th: bread.product_name_th, product_name_eng: "b" },
       quantity: 3, unit_price: 100, total_price: 300, cost_per_unit: 40,
     });
+    // ยกเลิกหลังชำระ รอโอนคืน (payment_status ยัง paid) — ต้องไม่นับ
+    const c = await orderModel.create({
+      order_no: `ORD-R5-C-${Date.now()}`, user_id: user._id, order_type: "takeaway", payment_status: "paid",
+      order_status: "cancelled", subtotal: 59, discount_amount: 0, total_amount: 59, created_at: at,
+    });
+    await orderItemModel.create({
+      order_id: c._id, product_id: cake._id, product_snapshot: { product_name_th: cake.product_name_th, product_name_eng: "c" },
+      quantity: 1, unit_price: 59, total_price: 59, cost_per_unit: 10,
+    });
     // ยังไม่จ่าย — ต้องไม่นับ
     await preorderModel.create({
       preorder_no: `PRE-R5-U-${Date.now()}`, user_id: user._id, round_id: oid(), order_type: "takeaway", payment_status: "pending",
@@ -101,12 +118,12 @@ describe("dashboardService — รวมพรีออเดอร์ (BACKLOG4
     const r = await dashboardService.overview(range);
     expect(r.revenue).toBe(390); // 90 (ออเดอร์) + 300 (พรีออเดอร์)
     expect(r.discount_given).toBe(10);
-    expect(r.cogs).toBe(20 + 120); // 2×10 + 3×40
+    expect(r.recipe_cogs).toBe(20 + 120); // 2×10 + 3×40
     expect(r.orders.paid).toBe(2);
-    expect(r.orders.total).toBe(3); // รวมพรีออเดอร์ที่ยังไม่จ่าย (นับจำนวนตามสถานะ)
+    expect(r.orders.total).toBe(4); // รวมพรีออเดอร์ที่ยังไม่จ่าย + ออเดอร์ที่ยกเลิก (นับจำนวนตามสถานะ)
     expect(r.avg_order_value).toBe(195);
-    expect(r.by_source.orders).toMatchObject({ total: 1, paid: 1, revenue: 90, cogs: 20 });
-    expect(r.by_source.preorders).toMatchObject({ total: 2, paid: 1, revenue: 300, cogs: 120 });
+    expect(r.by_source.orders).toMatchObject({ total: 2, paid: 1, revenue: 90, recipe_cogs: 20 });
+    expect(r.by_source.preorders).toMatchObject({ total: 2, paid: 1, revenue: 300, recipe_cogs: 120 });
   });
 
   it("topProducts: สินค้าพรีออเดอร์ติดอันดับด้วย เรียงตามจำนวน", async () => {
@@ -115,5 +132,14 @@ describe("dashboardService — รวมพรีออเดอร์ (BACKLOG4
     const ids = r.items.map((i) => i.product_id);
     expect(ids.indexOf(String(bread._id))).toBeLessThan(ids.indexOf(String(cake._id))); // 3 ชิ้น > 2 ชิ้น
     expect(r.items.find((i) => i.product_id === String(bread._id))).toMatchObject({ quantity_sold: 3, revenue: 300 });
+    expect(r.items.find((i) => i.product_id === String(cake._id))).toMatchObject({ quantity_sold: 2, revenue: 100 }); // ไม่รวมออเดอร์ที่ยกเลิก
+  });
+
+  it("revenueByChannel: ไม่นับออเดอร์ที่ยกเลิกแล้วแต่ยังรอโอนคืน", async () => {
+    await seed();
+    const r = await dashboardService.revenueByChannel(range);
+    expect(r.web).toBe(90);
+    expect(r.preorder).toBe(300);
+    expect(r.recipe_cogs).toBe(20 + 120);
   });
 });

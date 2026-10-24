@@ -3,7 +3,7 @@
  *
  * ตัวเลขทั้งหมดมาจาก dashboardService (ชุดเดียวกับหน้า dashboard — ไม่คิดซ้ำคนละสูตร):
  *   ยอดขาย (ออเดอร์ + พรีออเดอร์ที่ชำระแล้ว) เทียบเดือนก่อน · แยกช่องทาง เว็บ / หน้าร้าน / พรีออเดอร์ / อื่น ๆ ·
- *   ออเดอร์ที่ชำระแล้ว + ค่าเฉลี่ยต่อบิล · ค่าใช้จ่าย · ต้นทุนวัตถุดิบ (COGS) · กำไรโดยประมาณ · ขายดี 3 อันดับ ·
+ *   ออเดอร์ที่ชำระแล้ว + ค่าเฉลี่ยต่อบิล · ค่าใช้จ่าย (แยกยอดวัตถุดิบ/บรรจุภัณฑ์ = COGS) · กำไรโดยประมาณ · ขายดี 3 อันดับ ·
  *   สินค้า/วัตถุดิบที่ใกล้หมด ณ ตอนส่ง
  *
  * ตัดรอบเดือนตามเวลาไทย (UTC+7) · ส่งครั้งเดียวต่อเดือน (มีแจ้งเตือนหัวข้อเดือนนั้นแล้ว = ข้าม — รันซ้ำได้)
@@ -73,6 +73,7 @@ export interface MonthlySummary {
   paid_orders: number;
   avg_order_value: number;
   expenses: number;
+  /** ค่าใช้จ่ายหมวดวัตถุดิบ/บรรจุภัณฑ์ — รวมอยู่ใน expenses แล้ว (Final-Backlog Q1) */
   cogs: number;
   profit_estimate: number;
   top_products: Array<{ name: string; quantity: number; revenue: number }>;
@@ -121,7 +122,7 @@ export function formatSummaryMessage(s: MonthlySummary): string {
     `ยอดขาย ${baht(s.revenue)} บาท${change}`,
     `• เว็บ ${baht(ch.web)} · หน้าร้าน ${baht(ch.pos)} · พรีออเดอร์ ${baht(ch.preorder)}${ch.other ? ` · อื่น ๆ ${baht(ch.other)}` : ""}`,
     `ชำระแล้ว ${s.paid_orders} รายการ · เฉลี่ย ${baht(s.avg_order_value)} บาท/บิล`,
-    `ค่าใช้จ่าย ${baht(s.expenses)} · ต้นทุนวัตถุดิบ ${baht(s.cogs)} บาท`,
+    `ค่าใช้จ่าย ${baht(s.expenses)} บาท (วัตถุดิบ/บรรจุภัณฑ์ ${baht(s.cogs)})`,
     `กำไรโดยประมาณ ${baht(s.profit_estimate)} บาท`,
   ];
   if (s.top_products.length) {

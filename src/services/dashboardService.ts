@@ -2,8 +2,10 @@
  * dashboardService — สรุปตัวเลขสำหรับหน้า dashboard (aggregate จากหลายคอลเลกชัน)
  *
  * ข้อสังเกต:
- *  - "รายได้" นับจากออเดอร์ปกติ + พรีออเดอร์ ที่ payment_status = "paid" และไม่ถูกลบ (พรีออเดอร์รวมตั้งแต่ BACKLOG4 R5)
- *  - "กำไรโดยประมาณ" = รายได้ − ค่าใช้จ่ายในช่วง − ต้นทุนสินค้าขาย (COGS จาก cost_per_unit ของ orderItems + preorderItems)
+ *  - "รายได้" นับจากออเดอร์ปกติ + พรีออเดอร์ ที่ payment_status = "paid" ไม่ถูกยกเลิก และไม่ถูกลบ (พรีออเดอร์รวมตั้งแต่ BACKLOG4 R5)
+ *  - "กำไรโดยประมาณ" = รายได้ − ค่าใช้จ่ายในช่วง (ทุกหมวด) · cogs = ค่าใช้จ่ายหมวดวัตถุดิบ/บรรจุภัณฑ์ (อยู่ใน expenses แล้ว)
+ *    recipe_cogs = ต้นทุนตามสูตร (cost_per_unit × จำนวน) ไว้ดูอ้างอิงเท่านั้น ไม่หักจากกำไร — เดิมหักทั้งสองอย่าง
+ *    ค่าวัตถุดิบจึงถูกนับซ้ำ (Final-Backlog Q1 · เลือกแบบ ข. ให้ตรงกับหน้าสรุปการเงินฝั่ง frontend)
  *  - ช่วงวันที่อ้างอิง created_at ของออเดอร์
  */
 import dbConnect from "../lib/dbConnect";
@@ -19,6 +21,10 @@ import { toBaht, round2 } from "../lib/money";
 import { LOW_STOCK_EXPR } from "../lib/lowStock";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+// ยอดขายที่นับ = ชำระแล้วและไม่ถูกยกเลิก — ออเดอร์ที่ยกเลิกหลังชำระยังคง payment_status "paid" จนกว่าจะยืนยันโอนคืน
+// (ดู userService awaitingRefund) ถ้ากรองแค่ paid ยอดที่รอคืนเงินจะถูกนับเป็นรายรับ/ยอดขาย
+const SOLD = { payment_status: "paid", order_status: { $ne: "cancelled" } };
 
 function rangeMatch(dateFrom?: string, dateTo?: string): Record<string, any> {
   const m: Record<string, any> = { deleted_at: null };
@@ -56,7 +62,7 @@ function joinedItems(key: SourceKey, parentMatch: Record<string, any>): any[] {
 export async function overview(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();
   const match = rangeMatch(opts.date_from, opts.date_to);
-  const paidMatch = { ...match, payment_status: "paid" };
+  const paidMatch = { ...match, ...SOLD };
 
   const perSource = await Promise.all(
     SOURCE_KEYS.map(async (key) => {
@@ -90,7 +96,7 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
     })
   );
 
-  const [lowProducts, lowIngredients, expenseTotal] = await Promise.all([
+  const [lowProducts, lowIngredients, expenseTotals] = await Promise.all([
     productModel.countDocuments({
       deleted_at: null,
       is_preorder: { $ne: true }, // สินค้าปกติ (มีสต็อก)
@@ -101,23 +107,23 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       deleted_at: null,
       $expr: { $lte: ["$current_stock", "$reorder_point"] },
     }),
-    expenseService.totalInRange(
+    expenseService.totalsInRange(
       opts.date_from ? new Date(opts.date_from) : undefined,
       opts.date_to ? new Date(opts.date_to) : undefined
     ),
   ]);
 
-  // total_amount/discount_amount/cost_per_unit/expenseTotal เป็นบาททั้งหมด — รวมค่าดิบก่อนแล้วปัด 2 ตำแหน่งครั้งเดียว
+  // total_amount/discount_amount/cost_per_unit/expenseTotals เป็นบาททั้งหมด — รวมค่าดิบก่อนแล้วปัด 2 ตำแหน่งครั้งเดียว
   // (กัน float สะสมในสูตร profit_estimate · docs/money-units.md)
   const sum = (f: "revenue" | "discount" | "paid" | "cogs") => perSource.reduce((s, p) => s + p[f], 0);
   const revenue = toBaht(sum("revenue"));
   const discount = toBaht(sum("discount"));
-  const cogs = toBaht(sum("cogs"));
+  const recipeCogs = toBaht(sum("cogs"));
   const paidOrders = sum("paid");
 
   const byStatus: Record<string, number> = {};
   let totalOrders = 0;
-  const bySource: Record<string, { total: number; paid: number; revenue: number; cogs: number }> = {};
+  const bySource: Record<string, { total: number; paid: number; revenue: number; recipe_cogs: number }> = {};
   for (const p of perSource) {
     let total = 0;
     for (const r of p.statusRows) {
@@ -125,7 +131,7 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       total += r.count;
     }
     totalOrders += total;
-    bySource[p.key] = { total, paid: p.paid, revenue: round2(toBaht(p.revenue)), cogs: round2(toBaht(p.cogs)) };
+    bySource[p.key] = { total, paid: p.paid, revenue: round2(toBaht(p.revenue)), recipe_cogs: round2(toBaht(p.cogs)) };
   }
 
   return {
@@ -135,9 +141,10 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
     revenue: round2(revenue),
     discount_given: round2(discount),
     avg_order_value: paidOrders ? round2(revenue / paidOrders) : 0,
-    expenses: round2(expenseTotal),
-    cogs: round2(cogs),
-    profit_estimate: round2(revenue - expenseTotal - cogs),
+    expenses: round2(expenseTotals.total),
+    cogs: round2(expenseTotals.cogs),
+    recipe_cogs: round2(recipeCogs),
+    profit_estimate: round2(revenue - expenseTotals.total),
     by_source: bySource,
     low_stock: { products: lowProducts, ingredients: lowIngredients },
   };
@@ -152,7 +159,7 @@ export async function salesByDay(opts: { days?: number } = {}) {
   const perSource = await Promise.all(
     SOURCE_KEYS.map((key) =>
       SOURCES[key].model.aggregate([
-        { $match: { deleted_at: null, payment_status: "paid", created_at: { $gte: since } } },
+        { $match: { deleted_at: null, ...SOLD, created_at: { $gte: since } } },
         {
           $group: {
             _id: { $dateToString: { format: "%Y-%m-%d", date: "$created_at", timezone: "Asia/Bangkok" } },
@@ -196,7 +203,7 @@ export async function topProducts(opts: {
   await dbConnect();
   const limit = Math.min(50, Math.max(1, Number(opts.limit) || 10));
 
-  const parentMatch: Record<string, any> = { deleted_at: null, payment_status: "paid" };
+  const parentMatch: Record<string, any> = { deleted_at: null, ...SOLD };
   if (opts.date_from || opts.date_to) {
     parentMatch.created_at = {};
     if (opts.date_from) parentMatch.created_at.$gte = new Date(opts.date_from);
@@ -258,7 +265,7 @@ export function orderChannelOf(orderNo: unknown): RevenueChannel {
 }
 
 /**
- * รายรับ (ชำระแล้ว ไม่ถูกลบ ในช่วงวันที่ตาม created_at) แยกตามช่องทาง — docs/BACKLOG2.md §14 (2026-09-30):
+ * รายรับ (ชำระแล้ว ไม่ถูกยกเลิก ไม่ถูกลบ ในช่วงวันที่ตาม created_at) แยกตามช่องทาง — docs/BACKLOG2.md §14 (2026-09-30):
  * เลิกแยกประเภทสินค้าตามช่องทางขายแล้ว ช่องทางดูจาก "ออเดอร์" แทน
  *   web      = ออเดอร์เว็บไซต์ (ORD-)          ← orders
  *   pos      = ออเดอร์หน้าร้าน (POS-)          ← orders
@@ -266,14 +273,26 @@ export function orderChannelOf(orderNo: unknown): RevenueChannel {
  *   other    = ออเดอร์เลขรุ่นเก่าก่อนแยก prefix (OP-, WEB- ฯลฯ) — ระบุช่องทางย้อนหลังไม่ได้
  * ใช้ total_amount ของออเดอร์ทั้งก้อน (รวมค่าส่ง − ส่วนลด) — ออเดอร์หนึ่งอยู่ช่องทางเดียว ไม่ต้องกระจายสัดส่วน
  * คืนเป็นบาท (ปัด 2 ตำแหน่งตอนท้ายสุด) + จำนวนออเดอร์ต่อช่องทาง
+ * + recipe_cogs = ต้นทุนตามสูตร (Σ cost_per_unit × จำนวน ของรายการที่ชำระแล้ว — ออเดอร์ + พรีออเดอร์)
  */
 export async function revenueByChannel(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();
-  const match = { ...rangeMatch(opts.date_from, opts.date_to), payment_status: "paid" };
-  const [orders, preorders] = await Promise.all([
+  const match = { ...rangeMatch(opts.date_from, opts.date_to), ...SOLD };
+  const [orders, preorders, recipeCogsRows] = await Promise.all([
     orderModel.find(match).select("order_no total_amount").lean<Array<{ order_no?: string; total_amount: number }>>(),
     preorderModel.find(match).select("total_amount").lean<Array<{ total_amount: number }>>(),
+    // ต้นทุนตามสูตรของสินค้าที่ขายได้ (ชุดเดียวกับ overview.recipe_cogs) — หน้าสรุปการเงินแสดงกำไรแบบนี้คู่กับแบบหมวดค่าใช้จ่าย
+    // อยู่ใต้ reports.view เหมือน endpoint นี้ (overview ต้องมี dashboard.view)
+    Promise.all(
+      SOURCE_KEYS.map((key) =>
+        SOURCES[key].itemModel.aggregate([
+          ...joinedItems(key, match),
+          { $group: { _id: null, cogs: { $sum: { $multiply: [{ $ifNull: ["$cost_per_unit", 0] }, "$quantity"] } } } },
+        ])
+      )
+    ),
   ]);
+  const recipeCogs = (recipeCogsRows as Array<Array<{ cogs: number }>>).reduce((s, rows) => s + (rows[0]?.cogs ?? 0), 0);
 
   const sums: Record<RevenueChannel, number> = { web: 0, pos: 0, preorder: 0, other: 0 };
   const counts: Record<RevenueChannel, number> = { web: 0, pos: 0, preorder: 0, other: 0 };
@@ -296,5 +315,6 @@ export async function revenueByChannel(opts: { date_from?: string; date_to?: str
     total: toBaht(total),
     counts,
     orders: orders.length + preorders.length,
+    recipe_cogs: round2(toBaht(recipeCogs)),
   };
 }
