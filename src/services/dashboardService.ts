@@ -2,7 +2,7 @@
  * dashboardService — สรุปตัวเลขสำหรับหน้า dashboard (aggregate จากหลายคอลเลกชัน)
  *
  * ข้อสังเกต:
- *  - "รายได้" นับจากออเดอร์ปกติ + พรีออเดอร์ ที่ payment_status = "paid" และไม่ถูกลบ (พรีออเดอร์รวมตั้งแต่ BACKLOG4 R5)
+ *  - "รายได้" นับจากออเดอร์ปกติ + พรีออเดอร์ ที่ payment_status = "paid" ไม่ถูกยกเลิก และไม่ถูกลบ (พรีออเดอร์รวมตั้งแต่ BACKLOG4 R5)
  *  - "กำไรโดยประมาณ" = รายได้ − ค่าใช้จ่ายในช่วง (ทุกหมวด) · cogs = ค่าใช้จ่ายหมวดวัตถุดิบ/บรรจุภัณฑ์ (อยู่ใน expenses แล้ว)
  *    recipe_cogs = ต้นทุนตามสูตร (cost_per_unit × จำนวน) ไว้ดูอ้างอิงเท่านั้น ไม่หักจากกำไร — เดิมหักทั้งสองอย่าง
  *    ค่าวัตถุดิบจึงถูกนับซ้ำ (Final-Backlog Q1 · เลือกแบบ ข. ให้ตรงกับหน้าสรุปการเงินฝั่ง frontend)
@@ -21,6 +21,10 @@ import { toBaht, round2 } from "../lib/money";
 import { LOW_STOCK_EXPR } from "../lib/lowStock";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+// ยอดขายที่นับ = ชำระแล้วและไม่ถูกยกเลิก — ออเดอร์ที่ยกเลิกหลังชำระยังคง payment_status "paid" จนกว่าจะยืนยันโอนคืน
+// (ดู userService awaitingRefund) ถ้ากรองแค่ paid ยอดที่รอคืนเงินจะถูกนับเป็นรายรับ/ยอดขาย
+const SOLD = { payment_status: "paid", order_status: { $ne: "cancelled" } };
 
 function rangeMatch(dateFrom?: string, dateTo?: string): Record<string, any> {
   const m: Record<string, any> = { deleted_at: null };
@@ -58,7 +62,7 @@ function joinedItems(key: SourceKey, parentMatch: Record<string, any>): any[] {
 export async function overview(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();
   const match = rangeMatch(opts.date_from, opts.date_to);
-  const paidMatch = { ...match, payment_status: "paid" };
+  const paidMatch = { ...match, ...SOLD };
 
   const perSource = await Promise.all(
     SOURCE_KEYS.map(async (key) => {
@@ -155,7 +159,7 @@ export async function salesByDay(opts: { days?: number } = {}) {
   const perSource = await Promise.all(
     SOURCE_KEYS.map((key) =>
       SOURCES[key].model.aggregate([
-        { $match: { deleted_at: null, payment_status: "paid", created_at: { $gte: since } } },
+        { $match: { deleted_at: null, ...SOLD, created_at: { $gte: since } } },
         {
           $group: {
             _id: { $dateToString: { format: "%Y-%m-%d", date: "$created_at", timezone: "Asia/Bangkok" } },
@@ -199,7 +203,7 @@ export async function topProducts(opts: {
   await dbConnect();
   const limit = Math.min(50, Math.max(1, Number(opts.limit) || 10));
 
-  const parentMatch: Record<string, any> = { deleted_at: null, payment_status: "paid" };
+  const parentMatch: Record<string, any> = { deleted_at: null, ...SOLD };
   if (opts.date_from || opts.date_to) {
     parentMatch.created_at = {};
     if (opts.date_from) parentMatch.created_at.$gte = new Date(opts.date_from);
@@ -261,7 +265,7 @@ export function orderChannelOf(orderNo: unknown): RevenueChannel {
 }
 
 /**
- * รายรับ (ชำระแล้ว ไม่ถูกลบ ในช่วงวันที่ตาม created_at) แยกตามช่องทาง — docs/BACKLOG2.md §14 (2026-09-30):
+ * รายรับ (ชำระแล้ว ไม่ถูกยกเลิก ไม่ถูกลบ ในช่วงวันที่ตาม created_at) แยกตามช่องทาง — docs/BACKLOG2.md §14 (2026-09-30):
  * เลิกแยกประเภทสินค้าตามช่องทางขายแล้ว ช่องทางดูจาก "ออเดอร์" แทน
  *   web      = ออเดอร์เว็บไซต์ (ORD-)          ← orders
  *   pos      = ออเดอร์หน้าร้าน (POS-)          ← orders
@@ -273,7 +277,7 @@ export function orderChannelOf(orderNo: unknown): RevenueChannel {
  */
 export async function revenueByChannel(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();
-  const match = { ...rangeMatch(opts.date_from, opts.date_to), payment_status: "paid" };
+  const match = { ...rangeMatch(opts.date_from, opts.date_to), ...SOLD };
   const [orders, preorders, recipeCogsRows] = await Promise.all([
     orderModel.find(match).select("order_no total_amount").lean<Array<{ order_no?: string; total_amount: number }>>(),
     preorderModel.find(match).select("total_amount").lean<Array<{ total_amount: number }>>(),

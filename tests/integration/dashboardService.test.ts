@@ -96,6 +96,15 @@ describe("dashboardService — รวมพรีออเดอร์ (BACKLOG4
       product_snapshot: { product_name_th: bread.product_name_th, product_name_eng: "b" },
       quantity: 3, unit_price: 100, total_price: 300, cost_per_unit: 40,
     });
+    // ยกเลิกหลังชำระ รอโอนคืน (payment_status ยัง paid) — ต้องไม่นับ
+    const c = await orderModel.create({
+      order_no: `ORD-R5-C-${Date.now()}`, user_id: user._id, order_type: "takeaway", payment_status: "paid",
+      order_status: "cancelled", subtotal: 59, discount_amount: 0, total_amount: 59, created_at: at,
+    });
+    await orderItemModel.create({
+      order_id: c._id, product_id: cake._id, product_snapshot: { product_name_th: cake.product_name_th, product_name_eng: "c" },
+      quantity: 1, unit_price: 59, total_price: 59, cost_per_unit: 10,
+    });
     // ยังไม่จ่าย — ต้องไม่นับ
     await preorderModel.create({
       preorder_no: `PRE-R5-U-${Date.now()}`, user_id: user._id, round_id: oid(), order_type: "takeaway", payment_status: "pending",
@@ -111,9 +120,9 @@ describe("dashboardService — รวมพรีออเดอร์ (BACKLOG4
     expect(r.discount_given).toBe(10);
     expect(r.recipe_cogs).toBe(20 + 120); // 2×10 + 3×40
     expect(r.orders.paid).toBe(2);
-    expect(r.orders.total).toBe(3); // รวมพรีออเดอร์ที่ยังไม่จ่าย (นับจำนวนตามสถานะ)
+    expect(r.orders.total).toBe(4); // รวมพรีออเดอร์ที่ยังไม่จ่าย + ออเดอร์ที่ยกเลิก (นับจำนวนตามสถานะ)
     expect(r.avg_order_value).toBe(195);
-    expect(r.by_source.orders).toMatchObject({ total: 1, paid: 1, revenue: 90, recipe_cogs: 20 });
+    expect(r.by_source.orders).toMatchObject({ total: 2, paid: 1, revenue: 90, recipe_cogs: 20 });
     expect(r.by_source.preorders).toMatchObject({ total: 2, paid: 1, revenue: 300, recipe_cogs: 120 });
   });
 
@@ -123,5 +132,14 @@ describe("dashboardService — รวมพรีออเดอร์ (BACKLOG4
     const ids = r.items.map((i) => i.product_id);
     expect(ids.indexOf(String(bread._id))).toBeLessThan(ids.indexOf(String(cake._id))); // 3 ชิ้น > 2 ชิ้น
     expect(r.items.find((i) => i.product_id === String(bread._id))).toMatchObject({ quantity_sold: 3, revenue: 300 });
+    expect(r.items.find((i) => i.product_id === String(cake._id))).toMatchObject({ quantity_sold: 2, revenue: 100 }); // ไม่รวมออเดอร์ที่ยกเลิก
+  });
+
+  it("revenueByChannel: ไม่นับออเดอร์ที่ยกเลิกแล้วแต่ยังรอโอนคืน", async () => {
+    await seed();
+    const r = await dashboardService.revenueByChannel(range);
+    expect(r.web).toBe(90);
+    expect(r.preorder).toBe(300);
+    expect(r.recipe_cogs).toBe(20 + 120);
   });
 });
