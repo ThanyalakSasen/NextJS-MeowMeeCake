@@ -27,6 +27,15 @@ const promotionSchema = new mongoose.Schema({
         enum: ["online", "instore"],
         default: ["online", "instore"],
     },
+    audience: { //กลุ่มลูกค้าที่ใช้ได้ — all = ทุกคน (รวมบัญชีลูกค้าทั่วไปของ POS) · members = เฉพาะสมาชิก (ไม่ใช่ลูกค้าทั่วไป)
+        type: String,
+        enum: ["all", "members"],
+        default: "all",
+    },
+    stackable: { //ใช้ร่วมกับโปรอื่นในบิลเดียวได้ (POS ส่ง promotion_ids) — ทุกตัวในบิลต้องเป็น true ถึงจะซ้อนได้
+        type: Boolean,
+        default: false,
+    },
     // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md) เฉพาะตอน discount_type === "Amount"
     // ตอน "Percentage" เป็นตัวเลข % (0-100) ไม่ใช่เงิน · "FreeShipping" ไม่ใช้ (ปล่อย 0) — ดู promotionService
     discount_value: { //ค่าของส่วนลด
