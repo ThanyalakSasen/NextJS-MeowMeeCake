@@ -3,7 +3,9 @@
  *
  * ข้อสังเกต:
  *  - "รายได้" นับจากออเดอร์ปกติ + พรีออเดอร์ ที่ payment_status = "paid" และไม่ถูกลบ (พรีออเดอร์รวมตั้งแต่ BACKLOG4 R5)
- *  - "กำไรโดยประมาณ" = รายได้ − ค่าใช้จ่ายในช่วง − ต้นทุนสินค้าขาย (COGS จาก cost_per_unit ของ orderItems + preorderItems)
+ *  - "กำไรโดยประมาณ" = รายได้ − ค่าใช้จ่ายในช่วง (ทุกหมวด) · cogs = ค่าใช้จ่ายหมวดวัตถุดิบ/บรรจุภัณฑ์ (อยู่ใน expenses แล้ว)
+ *    recipe_cogs = ต้นทุนตามสูตร (cost_per_unit × จำนวน) ไว้ดูอ้างอิงเท่านั้น ไม่หักจากกำไร — เดิมหักทั้งสองอย่าง
+ *    ค่าวัตถุดิบจึงถูกนับซ้ำ (Final-Backlog Q1 · เลือกแบบ ข. ให้ตรงกับหน้าสรุปการเงินฝั่ง frontend)
  *  - ช่วงวันที่อ้างอิง created_at ของออเดอร์
  */
 import dbConnect from "../lib/dbConnect";
@@ -90,7 +92,7 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
     })
   );
 
-  const [lowProducts, lowIngredients, expenseTotal] = await Promise.all([
+  const [lowProducts, lowIngredients, expenseTotals] = await Promise.all([
     productModel.countDocuments({
       deleted_at: null,
       is_preorder: { $ne: true }, // สินค้าปกติ (มีสต็อก)
@@ -101,23 +103,23 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       deleted_at: null,
       $expr: { $lte: ["$current_stock", "$reorder_point"] },
     }),
-    expenseService.totalInRange(
+    expenseService.totalsInRange(
       opts.date_from ? new Date(opts.date_from) : undefined,
       opts.date_to ? new Date(opts.date_to) : undefined
     ),
   ]);
 
-  // total_amount/discount_amount/cost_per_unit/expenseTotal เป็นบาททั้งหมด — รวมค่าดิบก่อนแล้วปัด 2 ตำแหน่งครั้งเดียว
+  // total_amount/discount_amount/cost_per_unit/expenseTotals เป็นบาททั้งหมด — รวมค่าดิบก่อนแล้วปัด 2 ตำแหน่งครั้งเดียว
   // (กัน float สะสมในสูตร profit_estimate · docs/money-units.md)
   const sum = (f: "revenue" | "discount" | "paid" | "cogs") => perSource.reduce((s, p) => s + p[f], 0);
   const revenue = toBaht(sum("revenue"));
   const discount = toBaht(sum("discount"));
-  const cogs = toBaht(sum("cogs"));
+  const recipeCogs = toBaht(sum("cogs"));
   const paidOrders = sum("paid");
 
   const byStatus: Record<string, number> = {};
   let totalOrders = 0;
-  const bySource: Record<string, { total: number; paid: number; revenue: number; cogs: number }> = {};
+  const bySource: Record<string, { total: number; paid: number; revenue: number; recipe_cogs: number }> = {};
   for (const p of perSource) {
     let total = 0;
     for (const r of p.statusRows) {
@@ -125,7 +127,7 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       total += r.count;
     }
     totalOrders += total;
-    bySource[p.key] = { total, paid: p.paid, revenue: round2(toBaht(p.revenue)), cogs: round2(toBaht(p.cogs)) };
+    bySource[p.key] = { total, paid: p.paid, revenue: round2(toBaht(p.revenue)), recipe_cogs: round2(toBaht(p.cogs)) };
   }
 
   return {
@@ -135,9 +137,10 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
     revenue: round2(revenue),
     discount_given: round2(discount),
     avg_order_value: paidOrders ? round2(revenue / paidOrders) : 0,
-    expenses: round2(expenseTotal),
-    cogs: round2(cogs),
-    profit_estimate: round2(revenue - expenseTotal - cogs),
+    expenses: round2(expenseTotals.total),
+    cogs: round2(expenseTotals.cogs),
+    recipe_cogs: round2(recipeCogs),
+    profit_estimate: round2(revenue - expenseTotals.total),
     by_source: bySource,
     low_stock: { products: lowProducts, ingredients: lowIngredients },
   };

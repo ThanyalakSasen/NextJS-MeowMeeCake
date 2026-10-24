@@ -223,39 +223,45 @@ discount_given   = Σ order.discount_amount   (ออเดอร์ paid)
 avg_order_value  = paidOrders > 0 ? round2(revenue / paidOrders) : 0
 ```
 
-### 5.3 ต้นทุนสินค้าขาย (COGS)
+### 5.3 ต้นทุนสินค้าขาย (COGS) และต้นทุนตามสูตร (recipe_cogs)
+
+ตั้งแต่ Final-Backlog Q1 (2026-10-24 เลือกแบบ ข.) — ตรงกับหน้าสรุปการเงินฝั่ง frontend:
 
 ```
-COGS = Σ ( (orderItem.cost_per_unit ?? 0) × orderItem.quantity )
-       เฉพาะ orderItem ของออเดอร์ที่ payment_status = "paid" และอยู่ในช่วงวันที่
+COGS        = Σ expense.amount   เฉพาะหมวด "วัตถุดิบ" / "บรรจุภัณฑ์" (COGS_EXPENSE_CATEGORIES) ในช่วง
+              — เป็นส่วนหนึ่งของ expenses อยู่แล้ว ไม่หักซ้ำ
+recipe_cogs = Σ ( (orderItem.cost_per_unit ?? 0) × orderItem.quantity )
+              เฉพาะ orderItem ของออเดอร์ที่ payment_status = "paid" และอยู่ในช่วงวันที่ — ไว้ดูอ้างอิง ไม่หักจากกำไร
 ```
 
-> `orderItem.cost_per_unit` มาจาก §4 · ถ้าเป็น `null` (สินค้าไม่มีสูตร) จะถูกนับเป็น **0** → COGS จะต่ำกว่าจริง
+> `orderItem.cost_per_unit` มาจาก §4 · ถ้าเป็น `null` (สินค้าไม่มีสูตร) จะถูกนับเป็น **0** → recipe_cogs จะต่ำกว่าจริง
+> เดิมกำไรหักทั้ง expenses (มีค่าวัตถุดิบที่ซื้อเข้า) และต้นทุนตามสูตร → ค่าวัตถุดิบถูกนับซ้ำสองรอบ
 
 ### 5.4 ค่าใช้จ่าย (expenses)
 
-**ไฟล์:** `src/services/expenseService.ts` (`totalInRange`)
+**ไฟล์:** `src/services/expenseService.ts` (`totalsInRange` — คืน `{ total, cogs }`)
 
 ```
-expenses = Σ expense.amount   ของ expense ที่ deleted_at: null และ date อยู่ในช่วง
+expenses = Σ expense.amount   ของ expense ที่ deleted_at: null และ date อยู่ในช่วง (ทุกหมวด)
 ```
 
 ### 5.5 กำไรโดยประมาณ (profit_estimate)
 
 ```
-profit_estimate = round2( revenue − expenses − COGS )
+profit_estimate = round2( revenue − expenses )
 ```
 
 **ตัวอย่าง (ช่วง 1 เดือน):**
 ```
-revenue   = 120,000     (ออเดอร์ paid รวมค่าส่ง หักส่วนลดแล้ว)
-COGS      =  38,000      (Σ cost_per_unit × quantity ของทุก orderItem ที่ paid)
-expenses  =  55,000      (ค่าเช่า + ค่าแรง + ค่าไฟ + วัตถุดิบซื้อเข้า ฯลฯ)
+revenue     = 120,000     (ออเดอร์ paid รวมค่าส่ง หักส่วนลดแล้ว)
+expenses    =  55,000     (ค่าเช่า + ค่าแรง + ค่าไฟ + วัตถุดิบซื้อเข้า ฯลฯ)
+COGS        =  30,000     (ส่วนของ expenses ที่เป็นหมวดวัตถุดิบ/บรรจุภัณฑ์)
+recipe_cogs =  38,000     (อ้างอิง — Σ cost_per_unit × quantity)
 
-profit_estimate = 120,000 − 55,000 − 38,000 = 27,000
+profit_estimate = 120,000 − 55,000 = 65,000
 ```
 
-> เรียก "โดยประมาณ" เพราะ: COGS ขาดสินค้าที่ไม่มีสูตร · ค่าส่งที่จ่ายจริงให้ขนส่งนับรวมใน `expenses` (ไม่ได้แยก) · ไม่มีการแปลงหน่วยในต้นทุนวัตถุดิบ · เงินเก็บเป็น float
+> เรียก "โดยประมาณ" เพราะ: เป็นเกณฑ์เงินสด (วัตถุดิบที่ซื้อแล้วยังไม่ใช้ก็นับเป็นต้นทุนเดือนที่ซื้อ) · ค่าส่งที่จ่ายจริงให้ขนส่งนับรวมใน `expenses` (ไม่ได้แยก) · เงินเก็บเป็น float
 
 ### 5.6 ยอดขายรายวัน / สินค้าขายดี
 
@@ -375,6 +381,6 @@ total_amount = round2(subtotal − discount_amount + delivery_fee)              
         │
         ▼  (เมื่อ payment_status = "paid" แล้ว dashboard จึงนับ)
 revenue  += total_amount
-COGS     += Σ (cost_per_unit × quantity)
-profit_estimate = revenue − expenses − COGS                                     [§5.5]
+recipe_cogs += Σ (cost_per_unit × quantity)                                 (อ้างอิง)
+profit_estimate = revenue − expenses   (COGS = หมวดวัตถุดิบ/บรรจุภัณฑ์ใน expenses)  [§5.5]
 ```
