@@ -269,14 +269,26 @@ export function orderChannelOf(orderNo: unknown): RevenueChannel {
  *   other    = ออเดอร์เลขรุ่นเก่าก่อนแยก prefix (OP-, WEB- ฯลฯ) — ระบุช่องทางย้อนหลังไม่ได้
  * ใช้ total_amount ของออเดอร์ทั้งก้อน (รวมค่าส่ง − ส่วนลด) — ออเดอร์หนึ่งอยู่ช่องทางเดียว ไม่ต้องกระจายสัดส่วน
  * คืนเป็นบาท (ปัด 2 ตำแหน่งตอนท้ายสุด) + จำนวนออเดอร์ต่อช่องทาง
+ * + recipe_cogs = ต้นทุนตามสูตร (Σ cost_per_unit × จำนวน ของรายการที่ชำระแล้ว — ออเดอร์ + พรีออเดอร์)
  */
 export async function revenueByChannel(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();
   const match = { ...rangeMatch(opts.date_from, opts.date_to), payment_status: "paid" };
-  const [orders, preorders] = await Promise.all([
+  const [orders, preorders, recipeCogsRows] = await Promise.all([
     orderModel.find(match).select("order_no total_amount").lean<Array<{ order_no?: string; total_amount: number }>>(),
     preorderModel.find(match).select("total_amount").lean<Array<{ total_amount: number }>>(),
+    // ต้นทุนตามสูตรของสินค้าที่ขายได้ (ชุดเดียวกับ overview.recipe_cogs) — หน้าสรุปการเงินแสดงกำไรแบบนี้คู่กับแบบหมวดค่าใช้จ่าย
+    // อยู่ใต้ reports.view เหมือน endpoint นี้ (overview ต้องมี dashboard.view)
+    Promise.all(
+      SOURCE_KEYS.map((key) =>
+        SOURCES[key].itemModel.aggregate([
+          ...joinedItems(key, match),
+          { $group: { _id: null, cogs: { $sum: { $multiply: [{ $ifNull: ["$cost_per_unit", 0] }, "$quantity"] } } } },
+        ])
+      )
+    ),
   ]);
+  const recipeCogs = (recipeCogsRows as Array<Array<{ cogs: number }>>).reduce((s, rows) => s + (rows[0]?.cogs ?? 0), 0);
 
   const sums: Record<RevenueChannel, number> = { web: 0, pos: 0, preorder: 0, other: 0 };
   const counts: Record<RevenueChannel, number> = { web: 0, pos: 0, preorder: 0, other: 0 };
@@ -299,5 +311,6 @@ export async function revenueByChannel(opts: { date_from?: string; date_to?: str
     total: toBaht(total),
     counts,
     orders: orders.length + preorders.length,
+    recipe_cogs: round2(toBaht(recipeCogs)),
   };
 }
