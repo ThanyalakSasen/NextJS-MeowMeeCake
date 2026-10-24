@@ -75,11 +75,13 @@ describe("monthlySummaryService (LINE.md §9.13)", () => {
     expect(s.previous_revenue).toBe(700);
     expect(s.change_pct).toBe(51.43); // (1060 − 700) / 700
     expect(s.expenses).toBe(200);
-    expect(s.cogs).toBe(120); // (10 + 2) ชิ้น × 10 บาท
-    expect(s.profit_estimate).toBe(1060 - 200 - 120);
+    expect(s.cogs).toBe(200); // ค่าใช้จ่ายหมวดวัตถุดิบ (ไม่ใช่ต้นทุนตามสูตร 120)
+    expect(s.profit_estimate).toBe(1060 - 200); // ไม่หักวัตถุดิบซ้ำ (Final-Backlog Q1)
     expect(s.top_products[0]).toMatchObject({ name: "คัพเค้กสรุปเดือน", quantity: 12 });
     expect(res.message).toContain("ยอดขาย 1,060 บาท (เดือนก่อน 700 · +51.43%)");
     expect(res.message).toContain("เว็บ 350 · หน้าร้าน 70 · พรีออเดอร์ 640");
+    expect(res.message).toContain("ค่าใช้จ่าย 200 บาท (วัตถุดิบ/บรรจุภัณฑ์ 200)");
+    expect(res.message).toContain("กำไรโดยประมาณ 860 บาท");
     expect(await notificationModel.countDocuments({ title: res.title })).toBe(0); // dry-run ไม่บันทึก
     expect(pushLineMessage).not.toHaveBeenCalled();
   });

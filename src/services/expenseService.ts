@@ -23,6 +23,9 @@ export const EXPENSE_CATEGORIES = [
   "อื่นๆ",
 ] as const;
 
+/** หมวดที่นับเป็นต้นทุนขาย (COGS) ใน dashboard — ตรงกับหน้าสรุปการเงินฝั่ง frontend (Final-Backlog Q1 แบบ ข.) */
+export const COGS_EXPENSE_CATEGORIES: readonly string[] = ["วัตถุดิบ", "บรรจุภัณฑ์"];
+
 // amount — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentExpense<T extends Record<string, unknown>>(doc: T): T {
   return toBahtFields(doc, ["amount"] as const);
@@ -111,8 +114,11 @@ export async function summary(opts: { date_from?: string; date_to?: string } = {
   };
 }
 
-/** ยอดรวมค่าใช้จ่ายในช่วง เป็น**บาท** (ใช้จาก dashboardService — คืนบาทตรงนี้เลยกันต้องแปลงซ้ำที่ผู้เรียก) */
-export async function totalInRange(dateFrom?: Date, dateTo?: Date): Promise<number> {
+/**
+ * ยอดรวมค่าใช้จ่ายในช่วง เป็น**บาท** (ใช้จาก dashboardService — คืนบาทตรงนี้เลยกันต้องแปลงซ้ำที่ผู้เรียก)
+ * total = ทุกหมวด · cogs = เฉพาะ COGS_EXPENSE_CATEGORIES (รวมอยู่ใน total แล้ว)
+ */
+export async function totalsInRange(dateFrom?: Date, dateTo?: Date): Promise<{ total: number; cogs: number }> {
   await dbConnect();
   const match: Record<string, any> = { deleted_at: null };
   if (dateFrom || dateTo) {
@@ -122,9 +128,15 @@ export async function totalInRange(dateFrom?: Date, dateTo?: Date): Promise<numb
   }
   const rows = await expenseModel.aggregate([
     { $match: match },
-    { $group: { _id: null, total: { $sum: "$amount" } } },
+    {
+      $group: {
+        _id: null,
+        total: { $sum: "$amount" },
+        cogs: { $sum: { $cond: [{ $in: ["$category", COGS_EXPENSE_CATEGORIES] }, "$amount", 0] } },
+      },
+    },
   ]);
-  return toBaht(rows[0]?.total ?? 0);
+  return { total: toBaht(rows[0]?.total ?? 0), cogs: toBaht(rows[0]?.cogs ?? 0) };
 }
 
 export function assertCategory(cat: unknown): void {
