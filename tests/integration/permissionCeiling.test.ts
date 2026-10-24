@@ -175,3 +175,76 @@ describe("ผู้ใช้ (users) — staff ที่มี employees คร�
     expect(await call(h(userPasswordPUT), session, "PUT", peer._id, { new_password: "ownerpass123" })).toBe(200);
   });
 });
+
+// ── วันหมดอายุ (Final-Backlog P5) ──
+const DAY = 24 * 60 * 60 * 1000;
+const inDays = (n: number) => new Date(Date.now() + n * DAY);
+
+/** HR ชั่วคราว: employees + permissions ครบแบบถาวร · products ดู+แก้ หมดอายุใน 7 วัน */
+async function tempHrActor() {
+  const role = await roleModel.create({ role_name: name("temp-hr"), role_type: "staff" });
+  const user = await makeUser({ role_id: role._id });
+  const limit = inDays(7);
+  await createPermission({ role_id: String(role._id), menu_key: "employees", granted_by: String(user._id), ...FULL });
+  await createPermission({ role_id: String(role._id), menu_key: "permissions", granted_by: String(user._id), ...FULL });
+  await createPermission({ role_id: String(role._id), menu_key: "products", granted_by: String(user._id), can_view: true, can_update: true, expires_at: limit });
+  return { session: sessionOf(user, role, "staff"), role, user, limit };
+}
+
+describe("วันหมดอายุ — ผู้ที่มีสิทธิ์ชั่วคราว (P5)", () => {
+  it("ให้สิทธิ์แบบถาวร / หมดอายุช้ากว่าของตัวเองไม่ได้ (403) · ไม่ช้ากว่าได้", async () => {
+    const { session, limit } = await tempHrActor();
+    const target = await staffRole({});
+    const body = { role_id: String(target._id), menu_key: "products", can_view: true };
+    expect(await call(h(permissionsPOST), session, "POST", null, body)).toBe(403);
+    expect(await call(h(permissionsPOST), session, "POST", null, { ...body, expires_at: inDays(30).toISOString() })).toBe(403);
+    expect(await permissionModel.countDocuments({ role_id: target._id, menu_key: "products" })).toBe(0);
+    expect(await call(h(permissionsPOST), session, "POST", null, { ...body, expires_at: limit.toISOString() })).toBe(201);
+    // เมนูที่ตัวเองมีแบบถาวรให้แบบถาวรได้ตามเดิม
+    expect(await call(h(permissionsPOST), session, "POST", null, { role_id: String(target._id), menu_key: "employees", can_view: true })).toBe(201);
+  });
+
+  it("PATCH: เปิด flag ในแถวถาวร / ยืดวันหมดอายุเกินของตัวเองไม่ได้ (403) · ถอนสิทธิ์ / ตัดให้สั้นลงได้", async () => {
+    const { session, limit } = await tempHrActor();
+    const owner = await ownerActor();
+    const target = await staffRole({ products: { can_view: true } }, owner.user._id); // แถวถาวร
+    const row = await permissionModel.findOne({ role_id: target._id, menu_key: "products" }).lean<{ _id: unknown }>();
+    expect(await call(h(permissionPATCH), session, "PATCH", row?._id, { can_update: true })).toBe(403);
+    expect(await call(h(permissionPATCH), session, "PATCH", row?._id, { expires_at: inDays(30).toISOString() })).toBe(403);
+    expect(await call(h(permissionPATCH), session, "PATCH", row?._id, { expires_at: null })).toBe(403);
+    expect(await call(h(permissionPATCH), session, "PATCH", row?._id, { expires_at: limit.toISOString() })).toBe(200);
+    expect(await call(h(permissionPATCH), session, "PATCH", row?._id, { can_update: true })).toBe(200); // ตอนนี้แถวหมดอายุไม่ช้ากว่าแล้ว
+    expect(await call(h(permissionPATCH), session, "PATCH", row?._id, { can_view: false, can_update: false })).toBe(200);
+  });
+
+  it("กู้คืนแถวถาวรในเมนูที่ตัวเองมีแบบชั่วคราวไม่ได้ (403)", async () => {
+    const { session, limit } = await tempHrActor();
+    const owner = await ownerActor();
+    const target = await staffRole({});
+    const forever = await permissionModel.create({ role_id: target._id, menu_key: "products", granted_by: owner.user._id, can_view: true, deleted_at: new Date() });
+    expect(await call(h(permissionRestorePOST), session, "POST", forever._id)).toBe(403);
+    const other = await staffRole({});
+    const shortRow = await permissionModel.create({ role_id: other._id, menu_key: "products", granted_by: owner.user._id, can_view: true, expires_at: limit, deleted_at: new Date() });
+    expect(await call(h(permissionRestorePOST), session, "POST", shortRow._id)).toBe(200);
+  });
+
+  it("สร้างผู้ใช้ / ย้ายตัวเองเข้าบทบาทที่มีสิทธิ์เมนูนั้นแบบถาวรไม่ได้ (403)", async () => {
+    const { session, user: me, role, limit } = await tempHrActor();
+    const owner = await ownerActor();
+    const forever = await staffRole({ products: { can_view: true } }, owner.user._id);
+    const short = await roleModel.create({ role_name: name("short"), role_type: "staff" });
+    await createPermission({ role_id: String(short._id), menu_key: "products", granted_by: String(owner.user._id), can_view: true, expires_at: limit });
+
+    const base = { user_fullname: "ใหม่", auth_provider: "local", password: "password123" };
+    expect(await call(h(usersPOST), session, "POST", null, { ...base, email: `forever-${seq}@test.local`, role_id: String(forever._id) })).toBe(403);
+    expect(await call(h(usersPOST), session, "POST", null, { ...base, email: `short-${seq}@test.local`, role_id: String(short._id) })).toBe(201);
+    expect(await call(h(userPATCH), session, "PATCH", me._id, { role_id: String(forever._id) })).toBe(403);
+    expect(String((await userModel.findById(me._id).lean<{ role_id: unknown }>())?.role_id)).toBe(String(role._id));
+  });
+
+  it("owner ไม่ติดวันหมดอายุ", async () => {
+    const { session } = await ownerActor();
+    const target = await staffRole({});
+    expect(await call(h(permissionsPOST), session, "POST", null, { role_id: String(target._id), menu_key: "products", ...FULL })).toBe(201);
+  });
+});
