@@ -21,7 +21,7 @@ import { ORDER_PAYMENT_WINDOW_MS, PAYMENT_EXPIRED_REASON } from "../lib/paymentD
 import dbConnect from "../lib/dbConnect";
 import { log } from "../lib/logger";
 import { Saga } from "../lib/compensation";
-import { badRequest, conflict, notFound, isHttpError } from "../lib/httpError";
+import { badRequest, conflict, notFound, unprocessable, isHttpError } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
@@ -118,6 +118,8 @@ export interface CreateOrderCommon {
   /** ใช้โปรโมชัน: ส่ง promotion_code หรือ promotion_id อย่างใดอย่างหนึ่ง — ระบบคิดส่วนลดเอง */
   promotion_code?: string | null;
   promotion_id?: string | null;
+  /** ซ้อนโปร (POS) — ทุกตัวต้องตั้ง stackable · ใช้แทน promotion_code/promotion_id */
+  promotion_ids?: string[] | null;
   /** ส่วนลดที่กรอกมือ (เฉพาะเมื่อไม่ได้ใช้โปรโมชัน — เช่น แอดมินลดให้หน้าร้าน) */
   discount_amount?: number;
   /** ค่าส่ง: ปกติระบบคิดเองจากที่อยู่ + ยอดสั่งซื้อ — ใส่ค่านี้ได้เฉพาะเมื่อ delivery_fee_override = true (แอดมิน) */
@@ -333,13 +335,19 @@ async function persistOrder(
   let discount_amount = 0;
   // ส่วนของ discount_amount ที่เป็นส่วนลดค่าส่ง (โปร/คูปองส่งฟรี) — ไม่ลดฐานคิดเพดานแต้ม (Q-BE14)
   let shippingDiscount = 0;
-  let appliedPromotion: { promotion_id: string; discount_amount: number } | null = null;
-  if (opts.user_coupon_id && (opts.promotion_code || opts.promotion_id)) {
+  let appliedPromotions: Array<{ promotion_id: string; discount_amount: number }> = [];
+  // โปรที่ขอใช้ — promotion_ids (POS ซ้อนโปร) หรือ promotion_code/promotion_id ตัวเดียวแบบเดิม
+  const promoRefs: Array<{ code?: string; promotion_id?: string }> = opts.promotion_ids?.length
+    ? [...new Set(opts.promotion_ids)].map((id) => ({ promotion_id: id }))
+    : opts.promotion_code || opts.promotion_id
+      ? [{ code: opts.promotion_code ?? undefined, promotion_id: opts.promotion_id ?? undefined }]
+      : [];
+  if (opts.user_coupon_id && promoRefs.length) {
     throw badRequest("ใช้คูปองของฉันกับโค้ดส่วนลดพร้อมกันไม่ได้ — เลือกอย่างใดอย่างหนึ่ง");
   }
   let discountLines: Array<{ product_id: string; category_id: string | null; quantity: number; line_total: number }> = [];
 
-  if (opts.promotion_code || opts.promotion_id || opts.user_coupon_id) {
+  if (promoRefs.length || opts.user_coupon_id) {
     const prodIds = [...new Set(lines.map((l) => String(l.product_id)))];
     const prods = await productModel
       .find({ _id: { $in: prodIds } })
@@ -356,19 +364,36 @@ async function persistOrder(
     }));
   }
 
-  if (opts.promotion_code || opts.promotion_id) {
-    const result = await promotionService.validateForOrder({
-      code: opts.promotion_code ?? undefined,
-      promotion_id: opts.promotion_id ?? undefined,
-      user_id: userId,
-      lines: discountLines,
-      subtotal: toBaht(subtotal),
-      delivery_fee: toBaht(delivery_fee),
-      channel: opts.channel ?? "online",
-    });
-    discount_amount = toSatang(result.discount_amount);
-    if (result.free_shipping) shippingDiscount = discount_amount;
-    appliedPromotion = { promotion_id: result.promotion_id, discount_amount };
+  if (promoRefs.length) {
+    // ซ้อนโปร: ทุกตัวคิดจากรายการเดียวกัน (ไม่คิดทบจากยอดหลังหัก) แล้วรวมกัน — ตรวจเพดานยอดด้านล่าง
+    const results = [];
+    for (const ref of promoRefs) {
+      results.push(
+        await promotionService.validateForOrder({
+          ...ref,
+          user_id: userId,
+          lines: discountLines,
+          subtotal: toBaht(subtotal),
+          delivery_fee: toBaht(delivery_fee),
+          channel: opts.channel ?? "online",
+        })
+      );
+    }
+    if (results.length > 1) {
+      const single = results.find((r) => !r.stackable);
+      if (single) {
+        throw unprocessable(`โปรโมชัน ${single.promotion_code} ใช้ร่วมกับโปรอื่นไม่ได้`);
+      }
+      if (results.filter((r) => r.free_shipping).length > 1) {
+        throw unprocessable("ใช้โปรส่งฟรีได้บิลละ 1 โปร");
+      }
+    }
+    for (const r of results) {
+      const amount = toSatang(r.discount_amount);
+      discount_amount = toSatang(discount_amount + amount);
+      if (r.free_shipping) shippingDiscount = amount;
+      appliedPromotions.push({ promotion_id: r.promotion_id, discount_amount: amount });
+    }
   } else if (!opts.user_coupon_id) {
     discount_amount = toSatang(Math.max(0, Number(opts.discount_amount) || 0));
   }
@@ -411,7 +436,7 @@ async function persistOrder(
       shippingDiscount = coupon.free_shipping ? discount_amount : 0;
       couponFields = { user_coupon_id: coupon.user_coupon_id, coupon_discount: discount_amount };
       couponPromotionId = coupon.promotion_id;
-      appliedPromotion = null;
+      appliedPromotions = [];
     }
     if (pointsToRedeem > 0) {
       const goodsDiscount = Math.min(discount_amount - shippingDiscount, subtotal); // ส่วนลดส่งฟรีไม่ลดฐานคิดแต้ม (Q-BE14)
@@ -451,7 +476,8 @@ async function persistOrder(
           discount_amount,
           delivery_fee,
           total_amount,
-          promotion_id: appliedPromotion?.promotion_id ?? couponPromotionId ?? opts.promotion_id ?? null,
+          promotion_id: appliedPromotions[0]?.promotion_id ?? couponPromotionId ?? opts.promotion_id ?? null,
+          promotion_ids: appliedPromotions.map((p) => p.promotion_id),
           ...couponFields,
           ...pointsFields,
         });
@@ -469,17 +495,20 @@ async function persistOrder(
     saga.onRollback("delete-order-items", () => orderItemModel.deleteMany({ order_id: order._id }));
 
     // 4) บันทึกการใช้โปรโมชัน — จองสิทธิ์แบบ atomic (กันใช้เกิน usage_limit / per-user)
-    //    computeDiscount reject ส่วนลด 0 ไปแล้ว → มี appliedPromotion = discount > 0 เสมอ
+    //    computeDiscount reject ส่วนลด 0 ไปแล้ว → ทุกตัวใน appliedPromotions มี discount > 0 เสมอ
     //    limit เต็ม (HttpError 422) = reject จริง → โยนต่อให้ saga.rollback ล้มออเดอร์
     //    error อื่น (transient) = best-effort ไม่ล้มออเดอร์ที่สร้างสำเร็จแล้ว
-    //    (recordUsage rollback used_count ของตัวเองแล้ว จึงไม่ต้อง onRollback ที่นี่)
-    if (appliedPromotion) {
+    //    recordUsage rollback used_count ของตัวเองแล้ว — ซ้อนโปรแล้วตัวหลังเต็ม ต้องคืนสิทธิ์ตัวก่อนหน้าด้วย (revoke ทั้งออเดอร์)
+    if (appliedPromotions.length) {
+      saga.onRollback("revoke-promo-usage", () => promotionUsageService.revokeUsage({ order_id: String(order._id) }));
+    }
+    for (const applied of appliedPromotions) {
       try {
         await promotionUsageService.recordUsage({
-          promotion_id: appliedPromotion.promotion_id,
+          promotion_id: applied.promotion_id,
           user_id: userId,
           order_id: String(order._id),
-          discount_applied: appliedPromotion.discount_amount,
+          discount_applied: applied.discount_amount,
         });
       } catch (e) {
         if (isHttpError(e) && e.status === 422) throw e;

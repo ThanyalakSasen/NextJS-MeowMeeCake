@@ -44,6 +44,8 @@ const orderSchema = new mongoose.Schema(
     delivery_fee: { type: Number, default: 0 },
     total_amount: { type: Number, required: true, min: 0 },
     promotion_id: { type: mongoose.Schema.Types.ObjectId, ref: "Promotions", default: null },
+    // โปรทุกตัวที่ใช้ในบิล (POS ซ้อนโปรได้) — promotion_id = ตัวแรก (ของเดิมที่หน้าอื่นอ่านอยู่)
+    promotion_ids: { type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Promotions" }], default: [] },
     payment_id: { type: mongoose.Schema.Types.ObjectId, ref: "Payments", default: null },
     // แต้มสะสม + คูปองส่วนตัว (customer-backend-merge.md §8.11) — ส่วนลดรวมอยู่ใน discount_amount แล้ว
     points_redeemed: { type: Number, default: 0, min: 0 },
