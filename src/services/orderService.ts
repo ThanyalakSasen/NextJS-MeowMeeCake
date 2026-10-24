@@ -6,7 +6,7 @@
  *
  * ครอบคลุม:
  *  - สร้างออเดอร์จากตะกร้า (createOrderFromCart) หรือระบุรายการเอง (createOrder เช่น หน้าร้าน/POS)
- *  - ออกเลขออเดอร์ ORD-YYYYMMDD-XXXXXX (เว็บไซต์) / POS-YYYYMMDD-XXXXXX (หน้าร้าน) กันซ้ำด้วย unique index + retry
+ *  - ออกเลขออเดอร์ ORD-YYYYMMDD-MMC001 (เว็บไซต์) / POS-YYYYMMDD-MMC001 (หน้าร้าน) — ลำดับรายวันจาก docNoService + unique index
  *  - ตัดสต็อกตอนสร้าง และคืนสต็อกตอนยกเลิก (ผ่าน productService)
  *  - state machine ของ order_status + จัดการสถานะจัดส่ง/ชำระเงิน
  *  - ปฏิเสธสินค้าพรีออเดอร์ (is_preorder: true) ทั้งใน createOrder และ createOrderFromCart
@@ -55,7 +55,8 @@ import {
 import { notificationService } from "./notificationService";
 import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
-import { generateDocNo, isPreorderProduct } from "../lib/productCode";
+import { isPreorderProduct } from "../lib/productCode";
+import { nextDailyDocNo } from "./docNoService";
 import type { z } from "zod";
 import type { updateDeliveryBody } from "../schemas/order";
 import { adminLinks } from "../lib/adminLinks";
@@ -390,7 +391,7 @@ async function persistOrder(
   let insertedItems: any[] = [];
   // คูปอง/แต้มผูกกับ _id ของออเดอร์ → จองเลขไว้ก่อน (สร้างไม่สำเร็จ = saga คืนคูปอง/แต้ม)
   const orderId = new mongoose.Types.ObjectId();
-  let orderNo = generateDocNo(orderNoPrefix(opts.channel));
+  let orderNo = await nextDailyDocNo(orderNoPrefix(opts.channel));
   let couponFields: { user_coupon_id: unknown; coupon_discount: number } = { user_coupon_id: null, coupon_discount: 0 };
   let pointsFields = { points_redeemed: 0, points_discount: 0 };
   let couponPromotionId: unknown = null;
@@ -437,7 +438,7 @@ async function persistOrder(
     // 2) สร้างออเดอร์ (retry เมื่อเลขออเดอร์ชนกัน)
     for (let attempt = 0; attempt < 5 && !order; attempt++) {
       try {
-        if (attempt > 0) orderNo = generateDocNo(orderNoPrefix(opts.channel));
+        if (attempt > 0) orderNo = await nextDailyDocNo(orderNoPrefix(opts.channel));
         order = await orderModel.create({
           _id: orderId,
           order_no: orderNo,

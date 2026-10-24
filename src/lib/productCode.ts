@@ -9,7 +9,7 @@
  *   zzz = เลขสุ่ม 3 หลัก (000-999) กันซ้ำ
  *
  * docs/BACKLOG2.md §14 (แก้ 2026-09-30) — เลิกแยกประเภทสินค้าตามช่องทางขาย (inStore/online) แล้ว
- * ช่องทางดูจาก "ออเดอร์" แทน (ORD- เว็บไซต์ / POS- หน้าร้าน / PRE- พรีออเดอร์ — generateDocNo ด้านล่าง)
+ * ช่องทางดูจาก "ออเดอร์" แทน (ORD- เว็บไซต์ / POS- หน้าร้าน / PRE- พรีออเดอร์ — formatDailyDocNo ด้านล่าง)
  * สินค้าเหลือแค่ 2 แบบ ตัดสินด้วยฟิลด์ boolean `is_preorder` ตัวเดียว
  */
 
@@ -57,9 +57,9 @@ export function isProductCode(value: unknown): value is string {
 }
 
 /**
- * generateDocNo — เลขที่เอกสารรูปแบบ `<prefix>-YYYYMMDD-<random>` (ตัวพิมพ์ใหญ่, base36) ใช้ร่วมกันโดย
- * ออเดอร์เว็บไซต์ (`ORD-`), ออเดอร์หน้าร้าน (`POS-`), พรีออเดอร์ (`PRE-`), ใบสั่งผลิต (`PRD-`) — ชนกันได้ (เลขสุ่ม ไม่การันตี unique) ผู้เรียก
- * ต้องมี retry-on-duplicate-key ของตัวเองเสมอ (ดู `orderService`/`preorderService`/`productionOrderService`)
+ * generateDocNo — เลขที่เอกสารรูปแบบ `<prefix>-YYYYMMDD-<random>` (ตัวพิมพ์ใหญ่, base36) — ตอนนี้ใช้เฉพาะใบสั่งผลิต (`PRD-`)
+ * (ออเดอร์ ORD-/POS- และพรีออเดอร์ PRE- ย้ายไปใช้ formatDailyDocNo + docNoService แล้ว) — ชนกันได้ (เลขสุ่ม ไม่การันตี unique)
+ * ผู้เรียกต้องมี retry-on-duplicate-key ของตัวเองเสมอ (ดู `productionOrderService`)
  */
 export function generateDocNo(prefix: string, randomLength = 6, now: Date = new Date()): string {
   const ymd =
@@ -71,6 +71,17 @@ export function generateDocNo(prefix: string, randomLength = 6, now: Date = new 
     .slice(2, 2 + randomLength)
     .toUpperCase();
   return `${prefix}-${ymd}-${rand}`;
+}
+
+/** ป้ายร้านในเลขออเดอร์/พรีออเดอร์ (ORD-20261024-MMC001) */
+export const DAILY_DOC_NO_TAG = "MMC";
+
+/**
+ * formatDailyDocNo — `<prefix>-YYYYMMDD-MMC<ลำดับ 3 หลัก>` · เกิน 999 ในวันเดียว = MMC1000 (ไม่ตัดหลัก)
+ * ออกลำดับจริงผ่าน docNoService.nextDailyDocNo (ตัวนับรายวันใน DB)
+ */
+export function formatDailyDocNo(prefix: string, ymd: string, seq: number): string {
+  return `${prefix}-${ymd}-${DAILY_DOC_NO_TAG}${String(seq).padStart(3, "0")}`;
 }
 
 /**

@@ -36,7 +36,7 @@ import { notificationService } from "./notificationService";
 import { computePaymentDueAt, onPreorderCancelled, onPreorderPaid } from "./preorderRoundLifecycleService";
 import { log } from "../lib/logger";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
-import { generateDocNo } from "../lib/productCode";
+import { nextDailyDocNo } from "./docNoService";
 import type { z } from "zod";
 // BACKLOG2 §4 — schema เดียวกับ orderService.updateDelivery() ทุกฟิลด์ (generic ไม่มีอะไรเฉพาะ order)
 // ใช้ร่วมกันได้เลย ไม่ต้องสร้างซ้ำ
@@ -325,7 +325,7 @@ export async function createPreorder(
   const saga = new Saga();
   // คูปอง/แต้มผูกกับ _id ของพรีออเดอร์ → จองเลขไว้ก่อน (สร้างไม่สำเร็จ = saga คืนคูปอง/แต้ม)
   const preorderId = new mongoose.Types.ObjectId();
-  let preorderNo = generateDocNo("PRE");
+  let preorderNo = await nextDailyDocNo("PRE");
   let loyaltyFields = { user_coupon_id: null as unknown, coupon_discount: 0, points_redeemed: 0, points_discount: 0, promotion_id: null as unknown };
   // ส่วนลดค่าส่ง (คูปองส่งฟรี) — ไม่ลดฐานคิดเพดานแต้ม (Q-BE14)
   let shippingDiscount = 0;
@@ -387,7 +387,7 @@ export async function createPreorder(
     let preorder: any = null;
     for (let attempt = 0; attempt < 5 && !preorder; attempt++) {
       try {
-        if (attempt > 0) preorderNo = generateDocNo("PRE");
+        if (attempt > 0) preorderNo = await nextDailyDocNo("PRE");
         preorder = await preorderModel.create({
           _id: preorderId,
           preorder_no: preorderNo,
