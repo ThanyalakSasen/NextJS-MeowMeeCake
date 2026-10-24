@@ -820,7 +820,7 @@ frontend PR #16 (merge `49cae44`) ทำหน้าออเดอร์ / พ�
 | พรีออเดอร์ใหม่ / สลิปของพรีออเดอร์ | `link: null` | หน้าพรีออเดอร์ `?tab=orders&id=` |
 | แจ้งเตือนใบผลิต (ปิดรอบ · จ่ายช้า · เพิ่ม/หักยอด · ยกเลิกหลังเริ่มผลิต · ผลิตเสร็จสินค้ามีตัวเลือก) | `null` / `/owner/products` | หน้าใบผลิต `?id=` (`autoCreateProduction` คืน `production_id` เพิ่ม) |
 | สินค้าใกล้จะหมด | `/owner/products` (หน้ารวม) | `/owner/products/<id>/edit` (สินค้าตัวนั้น) |
-| สรุปวันรับพรีออเดอร์ | `null` | `/owner/orders/preOrderRound` |
+| สรุปวันรับพรีออเดอร์ | `null` | `/owner/orders/preOrderRound?tab=rounds` |
 | สรุปยอดรายเดือน | `/owner/dashboard` (เดา) | `/owner/dashboard` (ยืนยันแล้ว) |
 | path กระจายในหลายไฟล์ | เขียน string เองแต่ละ service | `adminLinks.*` ที่เดียว |
 
@@ -829,7 +829,7 @@ frontend PR #16 (merge `49cae44`) ทำหน้าออเดอร์ / พ�
 | ออเดอร์ใหม่ · สลิปรอตรวจของออเดอร์ | `/owner/orders/manageOrders?id=<orderId>` |
 | พรีออเดอร์ใหม่ · สลิปรอตรวจของพรีออเดอร์ · จ่ายช้าแต่สร้างใบผลิตไม่ได้ | `/owner/orders/preOrderRound?tab=orders&id=<preorderId>` |
 | ปิดรอบ (สร้างใบผลิตแล้ว) · จ่ายช้าแต่เริ่มผลิตแล้ว/สินค้าไม่มีสูตร · เพิ่ม/หักยอดใบผลิต · ยกเลิกหลังเริ่มผลิต · ผลิตเสร็จสินค้ามีตัวเลือก | `/owner/production?id=<productionOrderId>` |
-| ปิดรอบ (สร้างใบผลิตไม่ได้) · สรุปวันรับพรีออเดอร์ (เว็บอย่างเดียว) | `/owner/orders/preOrderRound` |
+| ปิดรอบ (สร้างใบผลิตไม่ได้) · สรุปวันรับพรีออเดอร์ (เว็บอย่างเดียว) | `/owner/orders/preOrderRound?tab=rounds` |
 | สินค้าใกล้จะหมด | `/owner/products/<productId>/edit` |
 | ข้อมูลสินค้าผิดปกติ | `/owner/products` |
 | วัตถุดิบใกล้จะหมด | `/owner/ingredients` (ไม่มีหน้ารายตัว) |
