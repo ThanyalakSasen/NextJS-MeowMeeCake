@@ -73,10 +73,16 @@ export const adminCreateOrderBody = orderBodyBase
     delivery_fee: z.coerce.number().min(0).nullish(),
     discount_amount: z.coerce.number().min(0).nullish(),
     channel: z.enum(["online", "instore"]).default("instore"),
+    // ซ้อนโปร (POS) — ใช้แทน promotion_code/promotion_id · ทุกตัวต้องตั้ง stackable (orderService ตรวจ)
+    promotion_ids: z.array(objectId).max(5).nullish(),
   })
   .refine((d) => !(d.promotion_code && d.promotion_id), {
     message: "ส่ง promotion_code หรือ promotion_id อย่างใดอย่างหนึ่ง",
     path: ["promotion_code"],
+  })
+  .refine((d) => !(d.promotion_ids?.length && (d.promotion_code || d.promotion_id)), {
+    message: "ส่ง promotion_ids หรือ promotion_code/promotion_id อย่างใดอย่างหนึ่ง",
+    path: ["promotion_ids"],
   })
   .refine((d) => d.source !== "items" || (d.items?.length ?? 0) > 0, {
     message: "source=items ต้องมี items อย่างน้อย 1 รายการ",
