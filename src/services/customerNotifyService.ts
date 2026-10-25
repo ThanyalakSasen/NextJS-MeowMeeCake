@@ -29,6 +29,7 @@ import {
   recordPushed,
 } from "../lib/lineQuota";
 import userModel from "../models/userModel";
+import roleModel from "../models/roleModel";
 import customerNotificationModel from "../models/customerNotificationModel";
 import { PAYMENT_EXPIRED_REASON } from "../lib/paymentDeadline";
 import { isObjectId } from "../lib/objectId";
@@ -134,8 +135,10 @@ export interface WebNotice {
   type: WebNoticeType;
   /** path ในหน้าเว็บลูกค้า เช่น /customer/account/purchases/<id> */
   link: string | null;
-  ref_type: "order" | "preorder" | "review" | "chat" | null;
+  ref_type: "order" | "preorder" | "review" | "chat" | "coupon" | null;
   ref_id: unknown;
+  /** รหัสคูปอง (ref_type = coupon) — หน้าเว็บแสดงเป็นป้ายรหัส + ปุ่มคัดลอก */
+  coupon_code?: string | null;
   /** เลขเอกสาร — ใช้ข้ามบิลหน้าร้าน (POS-) */
   doc_no?: string | null;
 }
@@ -177,6 +180,150 @@ export function reviewReplyNotice(reviewId: unknown, productName: string, replyT
     },
   };
 }
+/** หน้า "สมาชิก" ของลูกค้า — มีรายการ "คูปองของฉัน" */
+export const MY_COUPONS_PATH = "/customer/account/member?tab=coupons";
+
+/** กระดิ่ง (ไม่ส่ง LINE) เมื่อลูกค้าแลกแต้มเป็นคูปองสำเร็จ — แนบรหัสไว้ให้คัดลอกจากหน้าแจ้งเตือน */
+export function couponRedeemedNotice(coupon: {
+  _id: unknown;
+  promotion_code: string;
+  promotion_name: string;
+  expires_at: Date | string;
+}): WebNotice {
+  const until = new Date(coupon.expires_at).toLocaleDateString("th-TH", {
+    timeZone: "Asia/Bangkok",
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+  return {
+    title: `ได้รับคูปอง ${coupon.promotion_name}`,
+    message: `🎟️ แลกแต้มเป็นคูปองสำเร็จ ใช้ได้ถึง ${until}
+เลือกใช้ได้ที่หน้าชำระเงิน หรือคัดลอกรหัสด้านล่าง`,
+    type: "success",
+    link: MY_COUPONS_PATH,
+    ref_type: "coupon",
+    ref_id: coupon._id ?? null,
+    coupon_code: coupon.promotion_code,
+  };
+}
+
+/** ข้อความส่วนลดสั้น ๆ ของโปร (เงินเป็นบาท — รับโปรที่ผ่าน presentPromotion แล้ว) */
+function promoDiscountText(p: { discount_type: string; discount_value: number; max_discount_amount?: number | null }): string {
+  const thb = (n: number) => `${Number(n).toLocaleString("th-TH", { maximumFractionDigits: 2 })} บาท`;
+  if (p.discount_type === "Percentage") {
+    return `ลด ${p.discount_value}%${p.max_discount_amount ? ` (สูงสุด ${thb(p.max_discount_amount)})` : ""}`;
+  }
+  if (p.discount_type === "Amount") return `ลด ${thb(p.discount_value)}`;
+  return "ส่งฟรี";
+}
+
+export interface NewPromotionCode {
+  _id: unknown;
+  promotion_code: string;
+  promotion_name: string;
+  discount_type: string;
+  discount_value: number;
+  min_order_amount?: number | null;
+  max_discount_amount?: number | null;
+  start_date?: Date | string | null;
+  end_date?: Date | string | null;
+  is_active?: boolean;
+  points_cost?: number | null;
+  applicable_channels?: string[] | null;
+}
+
+/** โค้ดนี้ควรแจ้งลูกค้าไหม — โค้ดที่กรอกเองได้ที่เว็บ (ไม่ใช่โปรแลกแต้ม) · เปิดอยู่ · ยังไม่หมดอายุ */
+export function shouldAnnouncePromotion(p: NewPromotionCode, now = new Date()): boolean {
+  if (!p.promotion_code || (p.points_cost ?? 0) > 0 || p.is_active === false) return false;
+  const channels = p.applicable_channels?.length ? p.applicable_channels : ["online", "instore"];
+  if (!channels.includes("online")) return false;
+  return !(p.end_date && new Date(p.end_date) < now);
+}
+
+/** กระดิ่งของโค้ดส่วนลดใหม่ (ไม่ส่ง LINE) — แสดงตั้งแต่วันเริ่มใช้ (ถ้ายังไม่ถึง) · แนบรหัสไว้ให้คัดลอก */
+export function newPromotionNotice(p: NewPromotionCode): WebNotice {
+  const fmt = (d: Date | string) =>
+    new Date(d).toLocaleDateString("th-TH", { timeZone: "Asia/Bangkok", day: "numeric", month: "short", year: "numeric" });
+  const parts = [promoDiscountText(p)];
+  if (p.min_order_amount) parts.push(`ขั้นต่ำ ${Number(p.min_order_amount).toLocaleString("th-TH")} บาท`);
+  if (p.end_date) parts.push(`ใช้ได้ถึง ${fmt(p.end_date)}`);
+  return {
+    title: `โค้ดส่วนลดใหม่ ${p.promotion_name}`,
+    message: `🎟️ ${parts.join(" · ")}
+กรอกโค้ดที่หน้าชำระเงินได้เลย`,
+    type: "success",
+    link: "/customer/product",
+    ref_type: "coupon",
+    ref_id: p._id ?? null,
+    coupon_code: p.promotion_code,
+  };
+}
+
+const BROADCAST_BATCH = 500;
+
+/**
+ * แจ้งโค้ดส่วนลดใหม่ถึงลูกค้าทุกคน (กระดิ่งในเว็บอย่างเดียว — ไม่ใช้โควตา LINE) · คืนจำนวนที่บันทึก · ไม่ throw
+ * ยังไม่ถึงวันเริ่มใช้ = บันทึกล่วงหน้า (visible_at = start_date) แล้วโผล่เองเมื่อถึงเวลา
+ */
+export async function announceNewPromotion(p: NewPromotionCode): Promise<number> {
+  if (!shouldAnnouncePromotion(p)) return 0;
+  try {
+    await dbConnect();
+    const roleIds = await roleModel.find({ role_type: "customer", deleted_at: null }).distinct("_id");
+    if (roleIds.length === 0) return 0;
+    const notice = newPromotionNotice(p);
+    const now = new Date();
+    const visible_at = p.start_date && new Date(p.start_date) > now ? new Date(p.start_date) : now;
+    const base = {
+      title: notice.title,
+      message: notice.message,
+      type: notice.type,
+      link: notice.link,
+      ref_type: notice.ref_type,
+      ref_id: notice.ref_id,
+      coupon_code: notice.coupon_code,
+      visible_at,
+    };
+    let sent = 0;
+    let batch: Array<typeof base & { user_id: unknown }> = [];
+    const cursor = userModel
+      .find({ role_id: { $in: roleIds }, deleted_at: null, is_active: { $ne: false } })
+      .select("_id")
+      .lean()
+      .cursor();
+    for await (const u of cursor) {
+      batch.push({ ...base, user_id: (u as { _id: unknown })._id });
+      if (batch.length >= BROADCAST_BATCH) {
+        await customerNotificationModel.insertMany(batch, { ordered: false });
+        sent += batch.length;
+        batch = [];
+      }
+    }
+    if (batch.length) {
+      await customerNotificationModel.insertMany(batch, { ordered: false });
+      sent += batch.length;
+    }
+    return sent;
+  } catch (err) {
+    log.warn("customer_notify.promotion_broadcast_failed", { promotion_id: String(p._id), err });
+    return 0;
+  }
+}
+
+/** ลบโค้ดแล้ว → ซ่อนกระดิ่งของโค้ดนั้นจากลูกค้าทุกคน (ไม่ throw) */
+export async function retractPromotionNotices(promotionId: unknown): Promise<void> {
+  try {
+    await dbConnect();
+    await customerNotificationModel.updateMany(
+      { ref_type: "coupon", ref_id: promotionId, deleted_at: null },
+      { $set: { deleted_at: new Date() } }
+    );
+  } catch (err) {
+    log.warn("customer_notify.promotion_retract_failed", { promotion_id: String(promotionId), err });
+  }
+}
+
 function docTitle(kind: CustomerDocKind, docNo: string): string {
   return kind === "order" ? `คำสั่งซื้อ #${docNo}` : `พรีออเดอร์ #${docNo}`;
 }
@@ -253,6 +400,7 @@ async function recordWebNotice(userId: string, notice: WebNotice): Promise<void>
       link: notice.link,
       ref_type: notice.ref_type,
       ref_id: notice.ref_id ?? null,
+      coupon_code: notice.coupon_code ?? null,
     });
   } catch (err) {
     log.warn("customer_notify.web_failed", { user_id: userId, err });
@@ -339,7 +487,7 @@ export async function listMyNotifications(userId: string, rawLimit?: unknown) {
       .find(filter)
       .sort({ visible_at: -1, created_at: -1, _id: -1 })
       .limit(limit)
-      .select("title message type link ref_type ref_id read_at created_at visible_at")
+      .select("title message type link ref_type ref_id coupon_code read_at created_at visible_at")
       .lean(),
     customerNotificationModel.countDocuments({ ...filter, read_at: null }),
   ]);

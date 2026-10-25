@@ -12,7 +12,7 @@
  */
 import mongoose from "mongoose";
 import dbConnect from "../lib/dbConnect";
-import { badRequest, conflict, isHttpError, notFound } from "../lib/httpError";
+import { badRequest, conflict, notFound } from "../lib/httpError";
 import { Saga } from "../lib/compensation";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
@@ -507,19 +507,15 @@ async function createPreorderImpl(
     }
 
     // บันทึกการใช้โค้ดส่วนลด — จองสิทธิ์แบบ atomic (กันใช้เกิน usage_limit / ต่อคน) แบบ orderService
-    // เต็มแล้ว (422) = ล้มพรีออเดอร์ใบนี้ · error อื่น = best-effort ไม่ล้มเอกสารที่สร้างสำเร็จแล้ว
+    // ล้มด้วยเหตุใดก็ตาม (เต็ม 422 · โปรถูกลบ 404 · DB สะดุด) = ล้มพรีออเดอร์ใบนี้ทั้งใบ (saga.rollback) —
+    // ห้ามเก็บส่วนลดไว้โดยไม่นับการใช้ ไม่งั้นข้าม usage_limit / ต่อคนได้ · ลูกค้าสั่งใหม่ได้
     if (appliedPromotion) {
-      try {
-        await promotionUsageService.recordUsage({
-          promotion_id: appliedPromotion.promotion_id,
-          user_id: userId,
-          preorder_id: String(preorder._id),
-          discount_applied: appliedPromotion.discount_amount,
-        });
-      } catch (e) {
-        if (isHttpError(e) && e.status === 422) throw e;
-        log.error("preorder.record_usage_failed", { preorder_id: String(preorder._id), err: e });
-      }
+      await promotionUsageService.recordUsage({
+        promotion_id: appliedPromotion.promotion_id,
+        user_id: userId,
+        preorder_id: String(preorder._id),
+        discount_applied: appliedPromotion.discount_amount,
+      });
     }
 
     // ทุกขั้นสำเร็จ → ทิ้ง undo ก่อนอ่านผลลัพธ์ (getPreorderById อาจ throw โดยไม่ต้อง rollback)

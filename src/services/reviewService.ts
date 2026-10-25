@@ -130,8 +130,10 @@ async function assertReviewable(userId: string, kind: ReviewTargetKind, itemId: 
       : await preorderModel.findOne({ _id: item.preorder_id, deleted_at: null }).select("user_id order_status payment_status").lean<any>();
   if (!parent) throw notFound(`ไม่พบ${label}ของรายการนี้`);
   if (String(parent.user_id) !== String(userId)) throw forbidden("รีวิวได้เฉพาะสินค้าที่คุณสั่งซื้อเอง");
-  if (parent.order_status !== "completed") throw badRequest(`รีวิวได้เฉพาะเมื่อ${label}เสร็จสิ้น (completed) แล้ว`);
-  if (parent.payment_status !== "paid") throw badRequest(`รีวิวได้เมื่อ${label}ชำระเงินแล้ว`);
+  // ข้อความเดียวกับหน้าเว็บ (shop.orders.reviewOnlyCompleted)
+  if (parent.order_status !== "completed" || parent.payment_status !== "paid") {
+    throw badRequest(`รีวิวได้เมื่อ${kind === "order" ? "คำสั่งซื้อ" : "พรีออเดอร์"}เสร็จสิ้นและชำระเงินแล้ว`);
+  }
 
   const dup = await reviewModel.exists({
     [kind === "order" ? "order_item_id" : "preorder_order_item_id"]: itemId,

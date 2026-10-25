@@ -468,21 +468,16 @@ async function persistOrder(
 
     // 4) บันทึกการใช้โปรโมชัน — จองสิทธิ์แบบ atomic (กันใช้เกิน usage_limit / per-user)
     //    computeDiscount reject ส่วนลด 0 ไปแล้ว → มี appliedPromotion = discount > 0 เสมอ
-    //    limit เต็ม (HttpError 422) = reject จริง → โยนต่อให้ saga.rollback ล้มออเดอร์
-    //    error อื่น (transient) = best-effort ไม่ล้มออเดอร์ที่สร้างสำเร็จแล้ว
+    //    ล้มด้วยเหตุใดก็ตาม (เต็ม 422 · โปรถูกลบ 404 · DB สะดุด) → โยนต่อให้ saga.rollback ล้มออเดอร์
+    //    ห้ามเก็บส่วนลดไว้โดยไม่นับการใช้ ไม่งั้นข้าม usage_limit / ต่อคนได้
     //    (recordUsage rollback used_count ของตัวเองแล้ว จึงไม่ต้อง onRollback ที่นี่)
     if (appliedPromotion) {
-      try {
-        await promotionUsageService.recordUsage({
-          promotion_id: appliedPromotion.promotion_id,
-          user_id: userId,
-          order_id: String(order._id),
-          discount_applied: appliedPromotion.discount_amount,
-        });
-      } catch (e) {
-        if (isHttpError(e) && e.status === 422) throw e;
-        log.error("order.record_usage_failed", { order_id: String(order._id), err: e });
-      }
+      await promotionUsageService.recordUsage({
+        promotion_id: appliedPromotion.promotion_id,
+        user_id: userId,
+        order_id: String(order._id),
+        discount_applied: appliedPromotion.discount_amount,
+      });
     }
 
     saga.commit();

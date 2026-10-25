@@ -61,9 +61,13 @@ export function computeDiscount(promo: PromotionLike, ctx: DiscountContext): Dis
   const type = promo.discount_type as DiscountType;
 
   // ── ช่องทาง ──
-  const channels: string[] = promo.applicable_channels ?? ["online", "instore"];
+  // ไม่ระบุ / ว่าง = ใช้ได้ทุกช่องทาง (แบบเดียวกับ couponService.channelsOf)
+  const channels: string[] = promo.applicable_channels?.length ? promo.applicable_channels : ["online", "instore"];
   if (!channels.includes(ctx.channel)) {
-    throw unprocessable(`โปรโมชันนี้ใช้ได้เฉพาะช่องทาง: ${channels.join(", ")}`);
+    // ข้อความที่ลูกค้า/พนักงานอ่านรู้เรื่อง — ไม่โชว์ชื่อช่องทางดิบ ("instore")
+    throw unprocessable(
+      ctx.channel === "online" ? "โค้ดนี้ใช้ได้เฉพาะที่หน้าร้านเท่านั้น" : "โค้ดนี้ใช้ได้เฉพาะการสั่งซื้อออนไลน์เท่านั้น"
+    );
   }
 
   // ── หาว่ารายการไหน "ร่วมรายการ" ──

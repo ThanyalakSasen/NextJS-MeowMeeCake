@@ -16,6 +16,8 @@ const customerNotificationSchema = new mongoose.Schema(
     // อ้างอิงคำสั่งซื้อที่เกี่ยวข้อง (ไว้ตรวจสอบย้อนหลัง)
     ref_type: { type: String, enum: ["order", "preorder", "coupon", "bundle", "preorder_round", "review", "chat", null], default: null },
     ref_id: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // รหัสคูปอง (ref_type = coupon) — หน้าเว็บแสดงเป็นป้ายรหัส + ปุ่มคัดลอก
+    coupon_code: { type: String, default: null, trim: true, maxlength: 50 },
     // เวลาที่เริ่มแสดงให้ลูกค้าเห็น — ปกติ = ตอนสร้าง · รอบพรีออเดอร์ที่ยังไม่เปิดรับ = วันเวลาเปิดรับ (บันทึกล่วงหน้า)
     // เอกสารเก่าที่ไม่มี field นี้ถือว่าแสดงตั้งแต่ created_at
     visible_at: { type: Date, default: () => new Date() },
