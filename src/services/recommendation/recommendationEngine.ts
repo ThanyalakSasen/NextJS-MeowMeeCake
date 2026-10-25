@@ -6,7 +6,7 @@
 // กลยุทธ์ A: Collaborative Filtering  (35%)  Item-based, Cosine Similarity
 // กลยุทธ์ B: Content-Based Filtering  (30%)  User Profile Vector + Taste Matching
 // กลยุทธ์ C: Popularity-Based        (15%)   Sales + Rating + Recent Trend
-// กลยุทธ์ D: Allergen-Aware Filter   (20%)   Bonus/penalty ตาม allergen (service แยก)
+// กลยุทธ์ D: Allergen-Aware Filter   (20%)   สินค้าที่มีวัตถุดิบที่แพ้ = ไม่แนะนำ · ที่เหลือได้ bonus (service แยก)
 // กลยุทธ์ E: Age-Based Preference    (boost) Boost สินค้าที่ taste ตรงกับช่วงวัยผู้ใช้ (จาก user_birthdate)
 //
 // finalScore = (0.35×collab + 0.30×content + 0.15×popular + 0.20×allergen) / Σน้ำหนัก
@@ -72,7 +72,6 @@ export interface RecommendationQuery {
   userId: string;
   limit: number;
   strategy: RecommendationStrategy;
-  excludeAllergens: boolean;
 }
 
 export interface RecommendationsResult {
@@ -1010,7 +1009,6 @@ interface ReasonOptions {
   content: number;
   pop: PopularityScore;
   boosts: string[];
-  warning: AllergenWarning;
   isColdStart: boolean;
 }
 
@@ -1042,9 +1040,6 @@ function buildReasons(opts: ReasonOptions): string[] {
   for (const b of opts.boosts) {
     if (!reasons.includes(b)) reasons.push(b);
   }
-  if (opts.warning.level !== "none" && opts.warning.message) {
-    reasons.push(opts.warning.message);
-  }
   return reasons.slice(0, 4);
 }
 /**
@@ -1055,7 +1050,7 @@ function buildReasons(opts: ReasonOptions): string[] {
  * 3. ถ้าไม่ใช่ → Hybrid 4 กลยุทธ์:
  *    finalScore = (0.35×collab + 0.30×content + 0.15×popular + 0.20×allergen) / 0.80
  * 4. ใช้ boost: isFeatured ×1.1, discountPrice ×1.05, favoriteCategory ×1.15
- * 5. สินค้าที่มี allergen ยังแสดงอยู่ (ติด warning) — ยกเว้น excludeAllergens=true
+ * 5. สินค้าที่มีวัตถุดิบที่ผู้ใช้แพ้ (user_allergies) ไม่ถูกแนะนำเลย
  */
 export async function getRecommendations(
   query: RecommendationQuery
@@ -1063,14 +1058,11 @@ export async function getRecommendations(
   await connectMongoDB();
   const limit = Math.max(1, Math.min(50, Number(query.limit) || 10));
   const strategy: RecommendationStrategy = query.strategy || "hybrid";
-  const { userId, excludeAllergens } = query;
+  const { userId } = query;
 
   // ข้อมูลผู้ใช้: allergen profile + favorite categories
   const userDoc = await User.findById(userId).lean().catch(() => null);
-  const allergenProfile: AllergenProfile = parseAllergenProfile(
-    (userDoc as any)?.user_allergies,
-    (userDoc as any)?.allergenProfile
-  );
+  const allergenProfile: AllergenProfile = parseAllergenProfile((userDoc as any)?.user_allergies);
 
   const { items } = await loadCatalog();
   const { signals, eventCount } = await collectUserSignals(userId);
@@ -1116,7 +1108,7 @@ export async function getRecommendations(
     if (signals.has(pid)) continue;
 
     const warning = checkAllergenForProduct(item.allergenInfo, allergenProfile);
-    if (excludeAllergens && warning.level !== "none") continue;
+    if (warning.level !== "none") continue; // มีวัตถุดิบที่แพ้ → ไม่แนะนำ
 
     const pop = popScores.get(pid) ?? DEFAULT_POPULARITY;
     const collab = collabScores.get(pid) ?? 0;
@@ -1131,8 +1123,8 @@ export async function getRecommendations(
       rawScore = pop.score;
     } else if (isColdStart) {
       // Cold Start: Popularity-Based + Allergen Filter (+ หมวดที่ชอบ via boost)
-      // map adjustment [-0.5, +0.2] → [0, 1] แล้วถ่วง 30%
-      const adjNorm = clamp01((warning.scoreAdjustment + 0.5) / 0.7);
+      // map adjustment [-0.3, +0.2] → [0, 1] แล้วถ่วง 30%
+      const adjNorm = clamp01((warning.scoreAdjustment + 0.3) / 0.5);
       rawScore = 0.7 * pop.score + 0.3 * adjNorm;
     } else {
       // Hybrid เต็มรูปแบบ (หารด้วย 0.80 = ผลรวมน้ำหนักกลยุทธ์หลัก)
@@ -1151,7 +1143,6 @@ export async function getRecommendations(
       content,
       pop,
       boosts: boosted.boosts,
-      warning,
       isColdStart,
     });
 
@@ -1163,7 +1154,7 @@ export async function getRecommendations(
       },
       score: Number(boosted.score.toFixed(6)),
       reasons,
-      allergenWarning: warning.level === "none" ? null : warning,
+      allergenWarning: null, // สินค้าที่มีวัตถุดิบที่แพ้ถูกตัดออกไปแล้ว
     });
   }
 
@@ -1305,8 +1296,8 @@ async function getCoOccurrenceScores(
  */
 export async function getAllergenWarnings(userId: string): Promise<Record<string, AllergenWarning>> {
   await connectMongoDB();
-  const userDoc = await User.findById(userId).select("user_allergies allergenProfile").lean().catch(() => null);
-  const profile = parseAllergenProfile((userDoc as any)?.user_allergies, (userDoc as any)?.allergenProfile);
+  const userDoc = await User.findById(userId).select("user_allergies").lean().catch(() => null);
+  const profile = parseAllergenProfile((userDoc as any)?.user_allergies);
   if (profile.items.length === 0) return {};
 
   const { items } = await loadCatalog();
@@ -1336,18 +1327,14 @@ export async function getSimilarProducts(
     throw new RecommendationError(404, "ไม่พบสินค้าที่ระบุ");
   }
 
-  // ถ้าล็อกอิน → โหลดโปรไฟล์สารที่แพ้ (user_allergies) เพื่อแนบคำเตือน allergen
-  // ในสินค้าที่แนะนำคล้ายกัน (ProductCard จะแสดง badge เดือนเมื่อมี user_allergies)
+  // ถ้าล็อกอิน → โหลดวัตถุดิบที่แพ้ (user_allergies) เพื่อตัดสินค้าที่มีวัตถุดิบนั้นออกจากสินค้าคล้ายกัน
   let allergenProfile: AllergenProfile | null = null;
   if (query.userId) {
-    const userDoc = await User.findById(query.userId).lean().catch(() => null);
-    if (userDoc) {
-      allergenProfile = parseAllergenProfile(
-        (userDoc as any)?.user_allergies,
-        (userDoc as any)?.allergenProfile
-      );
-    }
+    const userDoc = await User.findById(query.userId).select("user_allergies").lean().catch(() => null);
+    if (userDoc) allergenProfile = parseAllergenProfile((userDoc as any)?.user_allergies);
   }
+  const hasAllergen = (item: CatalogProduct) =>
+    !!allergenProfile && checkAllergenForProduct(item.allergenInfo, allergenProfile).level !== "none";
 
     // ดึงหมวดหมู่ของสินค้าที่เลือกเพื่อกรองสินค้าที่คล้ายกันตามหมวดเดียวกัน
   // category_id ตอน lean จะเป็น ObjectId (ไม่ได้ populate) → ใช้ String() เปรียบเทียบเสมอ
@@ -1367,8 +1354,8 @@ export async function getSimilarProducts(
   for (const item of items) {
     const pid = String(item.doc._id);
     if (pid === productId) continue;
-    // ข้ามสินค้าที่แสดงจริงไม่ได้ (preorder / ถูกซ่อน / หมดสต็อก)
-    if (!isDisplayableProduct(item.doc)) continue;
+    // ข้ามสินค้าที่แสดงจริงไม่ได้ (preorder / ถูกซ่อน / หมดสต็อก) และสินค้าที่มีวัตถุดิบที่แพ้
+    if (!isDisplayableProduct(item.doc) || hasAllergen(item)) continue;
 
     // กรอง: เฉพาะสินค้าที่อยู่ในหมวดหมู่เดียวกันกับสินค้าที่เลือก
     const itemCategoryId = item.doc?.category_id
@@ -1392,11 +1379,6 @@ export async function getSimilarProducts(
     if (coNorm > 0.35) reasons.push("ลูกค้าที่เลือกสินค้านี้ มักสั่งรายการนี้ด้วย");
     if (reasons.length === 0) reasons.push("สินค้าที่ลูกค้าอาจสนใจ");
 
-    // แนบคำเตือน allergen (ถ้าล็อกอินและมี user_allergies) — badge เดือนบนการ์ด
-    const warning = allergenProfile
-      ? checkAllergenForProduct(item.allergenInfo, allergenProfile)
-      : null;
-
     scored.push({
       product: {
         ...item.doc,
@@ -1405,8 +1387,7 @@ export async function getSimilarProducts(
       },
       score: Number(score.toFixed(6)),
       reasons: reasons.slice(0, 3),
-      allergenWarning:
-        warning && warning.level !== "none" ? warning : null,
+      allergenWarning: null, // สินค้าที่มีวัตถุดิบที่แพ้ถูกตัดออกไปแล้ว
     });
   }
 
@@ -1419,8 +1400,8 @@ export async function getSimilarProducts(
       if (scored.length >= limit) break;
       const pid = String(item.doc._id);
       if (pid === productId || existingIds.has(pid)) continue;
-      // ข้ามสินค้าที่แสดงจริงไม่ได้ (preorder / ถูกซ่อน / หมดสต็อก)
-      if (!isDisplayableProduct(item.doc)) continue;
+      // ข้ามสินค้าที่แสดงจริงไม่ได้ (preorder / ถูกซ่อน / หมดสต็อก) และสินค้าที่มีวัตถุดิบที่แพ้
+      if (!isDisplayableProduct(item.doc) || hasAllergen(item)) continue;
 
       // ข้ามสินค้าในหมวดเดียวกับเป้าหมาย (ให้ลงก่อนหมดแล้ว)
       const fallbackCategory = item.doc?.category_id ? String(item.doc.category_id) : "";
@@ -1431,11 +1412,7 @@ export async function getSimilarProducts(
         euclidean(targetTaste, normalizeVec(item.features.taste)) / maxTasteDist;
       const tasteScore = clamp01(1 - dist);
       const contentSim = 0.6 * clamp01(sim) + 0.4 * tasteScore;
-      
-      // ✅ คำนวณ warning ใหม่สำหรับสินค้าตัวนี้โดยเฉพาะ
-      const fallbackWarning = allergenProfile
-        ? checkAllergenForProduct(item.allergenInfo, allergenProfile)
-        : null;
+
 
       scored.push({
         product: {
@@ -1445,8 +1422,7 @@ export async function getSimilarProducts(
         },
         score: Number((contentSim * 0.4).toFixed(6)), // ถ่วงให้คะแนนน้อยกว่าหมวดเดียวกัน
         reasons: ["สินค้าแนะนำ"],
-        allergenWarning:
-          fallbackWarning && fallbackWarning.level !== "none" ? fallbackWarning : null,
+        allergenWarning: null,
       });
       existingIds.add(pid);
     }

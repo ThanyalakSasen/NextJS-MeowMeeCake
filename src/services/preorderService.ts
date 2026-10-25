@@ -46,6 +46,8 @@ import * as shippingService from "./shippingService";
 import * as couponService from "./couponService";
 import * as pointsService from "./pointsService";
 import * as promotionUsageService from "./promotionUsageService";
+import * as promotionService from "./promotionService";
+import type { DiscountResult } from "../lib/discountEngine";
 import { trackBackground } from "../lib/backgroundTasks";
 import {
   assertCustomizationIds,
@@ -109,7 +111,12 @@ export interface CreatePreorderInput {
   /** คูปองของฉัน (แลกด้วยแต้ม) + ใช้แต้มเป็นส่วนลด — หน้าเว็บลูกค้า (customer-backend-merge.md §8.11) */
   user_coupon_id?: string | null;
   points_to_redeem?: number | null;
+  /** โค้ดส่วนลด (โปรโมชันทั่วไป — ใช้ร่วมกับคูปองของฉันไม่ได้) · ระบบคิดส่วนลดเองแบบเดียวกับออเดอร์ปกติ */
+  promotion_code?: string | null;
 }
+
+/** ผลพรีวิวโค้ดส่วนลดของพรีออเดอร์ (ยังไม่สร้างเอกสาร) */
+export type PreorderPromotionPreview = DiscountResult & { subtotal: number; delivery_fee: number };
 
 export interface ListPreorderQuery {
   pagination: Pagination;
@@ -140,12 +147,27 @@ async function quantityAlreadyOrdered(userId: string, roundId: unknown): Promise
 }
 
 // ── CREATE ───────────────────────────────────────────────────
+/** สั่งพรีออเดอร์ — จองโควตา + สร้างเอกสาร (โค้ดส่วนลด/คูปอง/แต้ม ใน input) */
 export async function createPreorder(
   userId: string,
   input: CreatePreorderInput,
-  /** storefront = สั่งจากหน้าเว็บลูกค้า → ค่าส่งจาก ShippingZones + ขอบเขตจัดส่ง (docs/customer-backend-merge.md §8.7) */
   opts: { allowManualDiscount?: boolean; storefront?: boolean } = {}
-) {
+): Promise<Awaited<ReturnType<typeof getPreorderById>>> {
+  return createPreorderImpl(userId, input, { ...opts, previewPromotion: false });
+}
+
+/** พรีวิวโค้ดส่วนลดของพรีออเดอร์ที่กำลังจะสั่ง (หน้าเว็บลูกค้า) — คิดราคา/ค่าส่งชุดเดียวกับ createPreorder แต่ไม่สร้างเอกสาร */
+export async function previewPreorderPromotion(userId: string, input: CreatePreorderInput): Promise<PreorderPromotionPreview> {
+  return createPreorderImpl(userId, input, { storefront: true, previewPromotion: true });
+}
+
+async function createPreorderImpl(
+  userId: string,
+  input: CreatePreorderInput,
+  /** storefront = สั่งจากหน้าเว็บลูกค้า → ค่าส่งจาก ShippingZones + ขอบเขตจัดส่ง (docs/customer-backend-merge.md §8.7)
+   *  previewPromotion = แค่คิดส่วนลดของ promotion_code แล้วคืนผล (ไม่จองโควตา/ไม่สร้างเอกสาร) — ใช้ราคา/ค่าส่งชุดเดียวกับตอนสั่งจริง */
+  opts: { allowManualDiscount?: boolean; storefront?: boolean; previewPromotion?: boolean } = {}
+): Promise<any> {
   await dbConnect();
   await assertRefExists(userModel, userId, "ผู้ใช้", "user_id");
 
@@ -316,6 +338,40 @@ export async function createPreorder(
   let total_amount = toSatang(subtotal - discount_amount + delivery_fee);
   const pointsToRedeem = Math.max(0, Number(input.points_to_redeem) || 0);
 
+  // ── โค้ดส่วนลด (โปรโมชันทั่วไป) — คิดแบบเดียวกับออเดอร์ปกติ (promotionService.validateForOrder) ──
+  const promotionCode = input.promotion_code?.trim() || null;
+  if (promotionCode && input.user_coupon_id) {
+    throw badRequest("ใช้คูปองของฉันกับโค้ดส่วนลดพร้อมกันไม่ได้ — เลือกอย่างใดอย่างหนึ่ง");
+  }
+  let appliedPromotion: DiscountResult | null = null;
+  if (promotionCode) {
+    const catByProduct = new Map(
+      (
+        await productModel
+          .find({ _id: { $in: lines.map((l) => l.product_id) } })
+          .select("category_id")
+          .lean<Array<{ _id: unknown; category_id?: unknown }>>()
+      ).map((p) => [String(p._id), p.category_id ? String(p.category_id) : null])
+    );
+    appliedPromotion = await promotionService.validateForOrder({
+      code: promotionCode,
+      user_id: userId,
+      lines: lines.map((l) => ({
+        product_id: String(l.product_id),
+        category_id: catByProduct.get(String(l.product_id)) ?? null,
+        quantity: l.quantity,
+        line_total: toBaht(l.total_price),
+      })),
+      subtotal: toBaht(subtotal),
+      delivery_fee: toBaht(delivery_fee),
+      channel: "online",
+    });
+  }
+  if (opts.previewPromotion) {
+    if (!appliedPromotion) throw badRequest("กรุณาระบุโค้ดส่วนลด");
+    return { ...appliedPromotion, subtotal: toBaht(subtotal), delivery_fee: toBaht(delivery_fee) } satisfies PreorderPromotionPreview;
+  }
+
   // ── ต้นทุนต่อหน่วย (สแนปช็อตจากสูตรล่าสุด) ──
   const costByProduct = await recipeService.getUnitCostByProduct(
     lines.map((l) => String(l.product_id))
@@ -330,6 +386,12 @@ export async function createPreorder(
   // ส่วนลดค่าส่ง (คูปองส่งฟรี) — ไม่ลดฐานคิดเพดานแต้ม (Q-BE14)
   let shippingDiscount = 0;
   try {
+    // โค้ดส่วนลด — ตรวจแล้วข้างบน · บันทึกการใช้ (จองสิทธิ์) หลังสร้างเอกสาร
+    if (appliedPromotion) {
+      discount_amount = toSatang(discount_amount + appliedPromotion.discount_amount);
+      if (appliedPromotion.free_shipping) shippingDiscount = toSatang(appliedPromotion.discount_amount);
+      loyaltyFields = { ...loyaltyFields, promotion_id: appliedPromotion.promotion_id };
+    }
     // คูปองของฉัน + แต้ม (customer-backend-merge.md §8.11) — หักคูปองก่อน แล้วคิดเพดานแต้มจากยอดสินค้าที่เหลือ
     if (input.user_coupon_id) {
       const categoryById = new Map(
@@ -442,6 +504,18 @@ export async function createPreorder(
           throw badRequest(`"${name}" สั่งได้สูงสุด ${max} ชิ้นต่อคนต่อรอบ`);
         }
       }
+    }
+
+    // บันทึกการใช้โค้ดส่วนลด — จองสิทธิ์แบบ atomic (กันใช้เกิน usage_limit / ต่อคน) แบบ orderService
+    // ล้มด้วยเหตุใดก็ตาม (เต็ม 422 · โปรถูกลบ 404 · DB สะดุด) = ล้มพรีออเดอร์ใบนี้ทั้งใบ (saga.rollback) —
+    // ห้ามเก็บส่วนลดไว้โดยไม่นับการใช้ ไม่งั้นข้าม usage_limit / ต่อคนได้ · ลูกค้าสั่งใหม่ได้
+    if (appliedPromotion) {
+      await promotionUsageService.recordUsage({
+        promotion_id: appliedPromotion.promotion_id,
+        user_id: userId,
+        preorder_id: String(preorder._id),
+        discount_applied: appliedPromotion.discount_amount,
+      });
     }
 
     // ทุกขั้นสำเร็จ → ทิ้ง undo ก่อนอ่านผลลัพธ์ (getPreorderById อาจ throw โดยไม่ต้อง rollback)

@@ -31,6 +31,8 @@ const weeklyMarketSchema = new mongoose.Schema(
     close_time: { type: String, default: "22:00", match: /^([01]\d|2[0-3]):[0-5]\d$/ },
     map_url: { type: String, default: "", trim: true }, // ลิงก์ Google Maps (ไม่บังคับ)
     is_active: { type: Boolean, default: true }, // ปิดไว้ = ไม่แสดงให้ลูกค้าเห็น (เช่น งดออกร้านชั่วคราว)
+    // หน้าร้านหลัก (ที่อยู่ร้าน) — มีได้รายการเดียว · location/map_url ระบบเติมจากที่อยู่ร้าน (StoreSettings) ทุกครั้งที่บันทึก
+    is_main: { type: Boolean, default: false },
   }
 );
 
@@ -75,6 +77,10 @@ const storeProfileSchema = new mongoose.Schema(
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }
 );
+
+// dev (hot reload): โมเดลที่ cache ไว้ยังไม่มี weekly_markets.is_main → สร้างใหม่ (ไม่งั้นค่า is_main ถูกตัดทิ้งเงียบ ๆ)
+const cachedMarkets = mongoose.models.StoreProfile?.schema.path("weekly_markets") as { schema?: mongoose.Schema } | undefined;
+if (cachedMarkets?.schema && !cachedMarkets.schema.path("is_main")) mongoose.deleteModel("StoreProfile");
 
 const StoreProfileModel = mongoose.models.StoreProfile || mongoose.model("StoreProfile", storeProfileSchema);
 

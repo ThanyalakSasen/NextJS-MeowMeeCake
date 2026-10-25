@@ -1,5 +1,6 @@
 /**
- * PATCH /api/admin/shipping-zones/:zone_code (A|B|C|D) — แก้โซนค่าส่งเว็บ (store_info.update · frontend Q-BE2)
+ * PATCH  /api/admin/shipping-zones/:zone_code — แก้โซนค่าส่งเว็บ (store_info.update · frontend Q-BE2)
+ * DELETE /api/admin/shipping-zones/:zone_code — ลบโซน (store_info.delete) · โซน D (จังหวัดที่เหลือ) ลบไม่ได้
  *   body { zone_label?, fee?, provinces? } อย่างน้อย 1 ฟิลด์
  *   - provinces ต้องเป็นชื่อทางการใน 77 จังหวัด · ซ้ำกับโซนอื่น = 409 · โซน D ใส่จังหวัดไม่ได้ (เป็นโซนที่เหลือทั้งหมด)
  *   - fee เป็นบาท ≥ 0
@@ -29,4 +30,20 @@ export const PATCH = withPermission("shipping", "update", async (_s, req, ctx: C
     keys: Object.keys(body),
   });
   return ok(after);
+});
+
+export const DELETE = withPermission("shipping", "delete", async (_s, req, ctx: Ctx) => {
+  const { zone_code } = await ctx.params;
+  const removed = await shippingService.deleteShippingZone(zone_code.toUpperCase());
+  auditChange(req, {
+    op: "delete",
+    noun: "ค่าส่งเว็บ โซน",
+    label: removed.zone_code,
+    entity: "ShippingZone",
+    entity_id: null,
+    before: removed,
+    after: null,
+    keys: ["zone_label", "fee", "provinces"],
+  });
+  return ok({ deleted: removed.zone_code });
 });

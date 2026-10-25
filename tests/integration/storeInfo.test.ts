@@ -201,3 +201,24 @@ describe("แปลงลิงก์ Google Maps แบบย่อ", () => {
     await expect(storeService.resolveMapLink("https://maps.app.goo.gl/abc")).rejects.toMatchObject({ status: 502 });
   });
 });
+
+describe("หน้าร้านหลัก (ที่อยู่ร้าน) ในรายการหน้าร้านประจำสัปดาห์", () => {
+  it("สถานที่/แผนที่ของหน้าร้านหลักมาจากที่อยู่ร้าน · เปลี่ยนที่อยู่แล้วตามไปด้วย · มีได้รายการเดียว", async () => {
+    await storeService.updateSettings({ house_no: "12/3", district: "เมือง", province: "หนองคาย", zip_code: "43000", latitude: 17.88, longitude: 102.74 });
+    const owner = { user_id: "x", role_id: "x", role_type: "owner", email: "o@test.local", source: "jwt" } as SessionUser;
+    const res = await storeService.updateWeeklyMarkets(owner, {
+      weekly_markets: [
+        { name: "หน้าร้านหลัก", location: "ค่าที่ส่งมาไม่ใช้", days: ["mon"], open_time: "09:00", close_time: "18:00", is_main: true },
+        { name: "ตลาดนัด", location: "ถนนคนเดิน", days: ["sat"], open_time: "16:00", close_time: "21:00", is_main: true },
+      ],
+    });
+    const [main, other] = res.weekly_markets as Array<Record<string, unknown>>;
+    expect(main).toMatchObject({ is_main: true, location: "12/3 อ.เมือง จ.หนองคาย 43000", map_url: "https://www.google.com/maps?q=17.88,102.74" });
+    expect(other).toMatchObject({ is_main: false, location: "ถนนคนเดิน" });
+
+    await storeService.updateSettings({ province: "อุดรธานี", zip_code: "41000" });
+    const [after] = (await storeService.getWeeklyMarkets()).weekly_markets as Array<Record<string, unknown>>;
+    expect(after.location).toBe("12/3 อ.เมือง จ.อุดรธานี 41000");
+  });
+});
+

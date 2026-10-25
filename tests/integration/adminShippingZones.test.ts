@@ -4,8 +4,9 @@ import roleModel from "@/models/roleModel";
 import { USER_HEADER, type SessionUser } from "@/lib/session";
 import { createPermission } from "@/services/permissionService";
 import * as shippingService from "@/services/shippingService";
-import { GET as listGET } from "@/app/api/admin/shipping-zones/route";
-import { PATCH as zonePATCH } from "@/app/api/admin/shipping-zones/[zone_code]/route";
+import { GET as listGET, POST as zonePOST } from "@/app/api/admin/shipping-zones/route";
+import { PATCH as zonePATCH, DELETE as zoneDELETE } from "@/app/api/admin/shipping-zones/[zone_code]/route";
+import { computeShippingFee } from "@/lib/shipping";
 import { makeUser } from "./helpers";
 
 /**
@@ -13,10 +14,10 @@ import { makeUser } from "./helpers";
  * เดิมมีแค่ GET /catalog/shipping-zones (อ่านอย่างเดียว) — แก้ได้ทาง DB เท่านั้น
  */
 
-async function sessionFor(roleType: "owner" | "staff", perms: { can_view?: boolean; can_update?: boolean } = {}) {
+async function sessionFor(roleType: "owner" | "staff", perms: { can_view?: boolean; can_update?: boolean; can_create?: boolean; can_delete?: boolean } = {}) {
   const role = await roleModel.create({ role_name: `${roleType}-${Math.random()}`, role_type: roleType });
   const user = await makeUser({ role_id: role._id });
-  if (roleType === "staff" && (perms.can_view || perms.can_update)) {
+  if (roleType === "staff" && Object.values(perms).some(Boolean)) {
     await createPermission({ role_id: String(role._id), menu_key: "shipping", granted_by: String(user._id), ...perms });
   }
   const session: SessionUser = {
@@ -111,5 +112,43 @@ describe("PATCH /api/admin/shipping-zones/:zone_code", () => {
   it("พนักงาน: มีแค่ store_info.view → 403 · มี update → 200", async () => {
     expect((await patch(await sessionFor("staff", { can_view: true }), "A", { fee: 50 })).status).toBe(403);
     expect((await patch(await sessionFor("staff", { can_view: true, can_update: true }), "A", { fee: 50 })).status).toBe(200);
+  });
+});
+
+describe("เพิ่ม/ลบโซนค่าส่ง", () => {
+  async function create(session: SessionUser, body: unknown) {
+    const res = await zonePOST(
+      new NextRequest("http://localhost:3000/api/admin/shipping-zones", { method: "POST", headers: headers(session), body: JSON.stringify(body) })
+    );
+    return { status: res.status, body: await res.json() };
+  }
+  async function remove(session: SessionUser, code: string) {
+    const res = await zoneDELETE(
+      new NextRequest(`http://localhost:3000/api/admin/shipping-zones/${code}`, { method: "DELETE", headers: headers(session) }),
+      { params: Promise.resolve({ zone_code: code }) }
+    );
+    return { status: res.status, body: await res.json() };
+  }
+
+  it("เพิ่มโซนได้รหัสถัดไป (E) · โซน D อยู่ท้ายรายการ · ค่าส่งใช้โซนใหม่ · จังหวัดซ้ำ = 409", async () => {
+    const owner = await sessionFor("owner");
+    const res = await create(owner, { zone_label: "ภาคกลาง", fee: 120, provinces: ["กรุงเทพมหานคร"] });
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({ zone_code: "E", fee: 120, provinces: ["กรุงเทพมหานคร"] });
+    const zones = await shippingService.getShippingZones();
+    expect(zones.map((z) => z.zone_code)).toEqual(["A", "B", "C", "E", "D"]);
+    expect(computeShippingFee("กรุงเทพมหานคร", zones)).toBe(120);
+    expect((await create(owner, { zone_label: "ซ้ำ", fee: 10, provinces: ["หนองคาย"] })).status).toBe(409);
+  });
+
+  it("ลบโซนได้ (จังหวัดกลับไปใช้โซน D) · ลบโซน D ไม่ได้ · ไม่มีสิทธิ์ = 403", async () => {
+    const owner = await sessionFor("owner");
+    await create(owner, { zone_label: "ใต้", fee: 150, provinces: ["ภูเก็ต"] });
+    expect((await remove(await sessionFor("staff", { can_view: true, can_update: true }), "E")).status).toBe(403);
+    expect((await remove(owner, "E")).status).toBe(200);
+    const zones = await shippingService.getShippingZones();
+    expect(computeShippingFee("ภูเก็ต", zones)).toBe(zones.find((z) => z.zone_code === "D")!.fee);
+    expect((await remove(owner, "D")).status).toBe(400);
+    expect((await remove(owner, "E")).status).toBe(404);
   });
 });

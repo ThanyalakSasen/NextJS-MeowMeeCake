@@ -5,6 +5,8 @@ import promotionModel from "@/models/promotionModel";
 import promotionUsagesModel from "@/models/promotionUsagesModel";
 import pointTransactionModel from "@/models/pointTransactionModel";
 import userCouponModel from "@/models/userCouponModel";
+import customerNotificationModel from "@/models/customerNotificationModel";
+import { flushBackground } from "@/lib/backgroundTasks";
 import orderModel from "@/models/orderModel";
 import productCategoryModel from "@/models/productCategoryModel";
 import * as orderService from "@/services/orderService";
@@ -113,6 +115,12 @@ describe("คูปองส่วนตัว (แลกด้วยแต้�
     expect(await pointsService.getBalance(uid)).toBe(400);
     const overview = await couponService.getCouponOverview(uid);
     expect(overview.coupons[0].state).toBe("available");
+
+    // แลกสำเร็จ → กระดิ่งในเว็บพร้อมรหัสคูปอง (ไว้คัดลอกจากหน้าแจ้งเตือน) · ลิงก์ไปหน้าสมาชิก
+    await flushBackground();
+    const notice = await customerNotificationModel.findOne({ user_id: user._id, ref_type: "coupon" }).lean<any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+    expect(notice).toMatchObject({ coupon_code: promo.promotion_code, link: "/customer/account/member?tab=coupons", type: "success" });
+    expect(String(notice.ref_id)).toBe(String(coupon._id));
 
     const p = await makeProduct({ product_price: 250, product_stock_quantity: 10 });
     // โค้ดของโปรแลกแต้มกรอกตรง ๆ ไม่ได้ · ใช้คู่กับโค้ดไม่ได้

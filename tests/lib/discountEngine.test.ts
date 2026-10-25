@@ -72,10 +72,20 @@ describe("computeDiscount — FreeShipping (BACKLOG 2.6)", () => {
 });
 
 describe("computeDiscount — เงื่อนไข", () => {
-  it("ช่องทางไม่ตรง → reject", () => {
+  it("โค้ดหน้าร้านกรอกที่เว็บ → reject พร้อมข้อความที่ลูกค้าอ่านรู้เรื่อง", () => {
     expect(() =>
       computeDiscount(promo({ applicable_channels: ["instore"] }), ctx({ channel: "online" }))
-    ).toThrowError(/ช่องทาง/);
+    ).toThrowError("โค้ดนี้ใช้ได้เฉพาะที่หน้าร้านเท่านั้น");
+  });
+
+  it("โค้ดออนไลน์ใช้ที่ POS → reject", () => {
+    expect(() =>
+      computeDiscount(promo({ applicable_channels: ["online"] }), ctx({ channel: "instore" }))
+    ).toThrowError("โค้ดนี้ใช้ได้เฉพาะการสั่งซื้อออนไลน์เท่านั้น");
+  });
+
+  it("applicable_channels ว่าง = ใช้ได้ทุกช่องทาง", () => {
+    expect(() => computeDiscount(promo({ applicable_channels: [] }), ctx({ channel: "online" }))).not.toThrow();
   });
 
   it("ยอดไม่ถึง min_order_amount → reject", () => {

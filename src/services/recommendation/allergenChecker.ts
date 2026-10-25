@@ -5,29 +5,26 @@
 //
 // กลยุทธ์ D: Allergen-Aware Filter (น้ำหนัก 20%)
 //   - สินค้าไม่มี allergen ของ user  → bonus +0.2
-//   - สินค้ามี allergen ของ user     → penalty -0.3 (ไม่ลบออกจากรายการ ยังแสดงอยู่!)
-//   - severity = "severe"           → penalty -0.5
+//   - สินค้ามี allergen ของ user     → penalty -0.3
 //
-// สินค้าที่มี allergen ยังคงแสดงบนเว็บ แต่:
-//   1. ถูกจัดอันดับต่ำลงใน recommendation
-//   2. มี allergenWarning object แนบมาใน API response
-//   3. ฝั่ง UI นำไปแสดง warning badge/banner
+// ลูกค้าบันทึกแค่ชื่อวัตถุดิบที่แพ้ (ไม่มีระดับความรุนแรง)
+// สินค้าที่มี allergen:
+//   1. ไม่ถูกแนะนำ (recommendationEngine ตัดออกจากสินค้าแนะนำ/สินค้าคล้ายกัน)
+//   2. หน้าอื่นยังแสดงอยู่ พร้อมป้ายเตือน (GET /api/shop/allergen-warnings)
 // ───────────────────────────────────────────────────────────────────────────────
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 // type ที่ frontend ใช้ด้วยอยู่ที่ src/types/recommendation.ts (frontend มีสำเนาไฟล์เดียวกัน)
 import type {
-  AllergenSeverity,
   AllergenWarningLevel,
   AllergenMatchedItem,
   AllergenWarning,
 } from "@/types/recommendation";
 
-export type { AllergenSeverity, AllergenWarningLevel, AllergenMatchedItem, AllergenWarning };
+export type { AllergenWarningLevel, AllergenMatchedItem, AllergenWarning };
 
 export interface AllergenProfileItem {
   name: string;
-  severity?: AllergenSeverity | string; // "severe" | "moderate" (ไม่เจาะจง = moderate)
 }
 
 export interface AllergenProfile {
@@ -44,7 +41,6 @@ export interface ProductAllergenInfo {
 // ─── ค่าคงที่ bonus/penalty ตาม spec ───────────────────────────────────────────
 export const ALLERGEN_BONUS_NONE = 0.2;
 export const ALLERGEN_PENALTY_MATCH = -0.3;
-export const ALLERGEN_PENALTY_SEVERE = -0.5;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,40 +89,10 @@ export function isMainIngredient(
   );
 }
 
-/**
- * สร้าง AllergenProfile จากข้อมูลผู้ใช้จริง
- *
- * ปรับให้เข้ากับ schema เดิมของโปรเจกต์ (users.user_allergies: string[]):
- *  - สนับสนุนรูปแบบ "ชื่อวัตถุดิบ" หรือ "ชื่อวัตถุดิบ:severe"
- *  - ถ้าในอนาคต schema มี field allergenProfile (array ของ {name, severity})
- *    ก็จะอ่านใช้ได้ทันทีผ่านอาร์กิวเมนต์ advancedProfile
- */
-export function parseAllergenProfile(
-  userAllergies?: string[] | null,
-  advancedProfile?: any
-): AllergenProfile {
-  if (Array.isArray(advancedProfile?.items)) {
-    return {
-      items: advancedProfile.items
-        .filter((it: any) => it && it.name)
-        .map((it: any) => ({
-          name: String(it.name),
-          severity: String(it.severity ?? "moderate"),
-        })),
-    };
-  }
-  const items: AllergenProfileItem[] = [];
-  for (const raw of userAllergies ?? []) {
-    if (raw == null || String(raw).trim() === "") continue;
-    const [name, severity] = String(raw).split(/[:|]/).map((x) => x.trim());
-    if (!name) continue;
-    items.push({
-      name,
-      severity:
-        String(severity ?? "").toLowerCase() === "severe" ? "severe" : "moderate",
-    });
-  }
-  return { items };
+/** สร้าง AllergenProfile จาก users.user_allergies (รายชื่อวัตถุดิบที่แพ้ · ตัดค่าว่าง/ซ้ำ) */
+export function parseAllergenProfile(userAllergies?: string[] | null): AllergenProfile {
+  const names = (userAllergies ?? []).map((raw) => String(raw ?? "").trim()).filter(Boolean);
+  return { items: [...new Set(names)].map((name) => ({ name })) };
 }
 
 /**
@@ -165,13 +131,10 @@ export function buildAllergenInfoFromRecipe(recipe: any): ProductAllergenInfo {
 /**
  * หัวใจของ Allergen Warning System — ตรวจสอบสินค้าหนึ่งตัวกับ profile ผู้ใช้
  *
- * ระดับ warning (4 level ตาม spec):
+ * ระดับ warning:
  *  | none    | ไม่มี allergen ตรงกัน              → ไม่แสดงข้อความ, bonus +0.2
  *  | caution | มี allergen แต่ไม่ใช่ส่วนผสมหลัก     → "สินค้านี้มีวัตถุดิบที่คุณอาจแพ้", penalty -0.3
  *  | warning | มี allergen เป็นส่วนผสมหลัก         → "สินค้านี้มีวัตถุดิบหลักที่คุณแพ้: [ชื่อ]", penalty -0.3
- *  | danger  | user severity = "severe"           → "คำเตือน! สินค้านี้มี [ชื่อ] ที่คุณแพ้รุนแรง", penalty -0.5
- *
- * หมายเหตุ: สินค้าที่มี allergen จะไม่ถูกตัดออกจากรายการ (ยกเว้นฝั่ง route ขอ excludeAllergens=true)
  */
 export function checkAllergenForProduct(
   info: ProductAllergenInfo,
@@ -191,13 +154,7 @@ export function checkAllergenForProduct(
       info.allIngredientNames.some((n) => allergenMatchesIngredient(alias, n));
     if (!present) continue;
 
-    const severe =
-      String(item?.severity ?? "moderate").toLowerCase() === "severe";
-    matched.push({
-      name: alias,
-      severity: severe ? "severe" : "moderate",
-      isMainIngredient: isMain,
-    });
+    matched.push({ name: alias, isMainIngredient: isMain });
   }
 
   // ไม่มี allergen ตรงกันเลย
@@ -213,22 +170,10 @@ export function checkAllergenForProduct(
     };
   }
 
-  const severeAllergens = matched
-    .filter((m) => m.severity === "severe")
-    .map((m) => m.name);
   const mainAllergens = matched
     .filter((m) => m.isMainIngredient)
     .map((m) => m.name);
 
-  // danger: user ระบุ severity = "severe"
-  if (severeAllergens.length > 0) {
-    return {
-      level: "danger",
-      message: `คำเตือน! สินค้านี้มี ${severeAllergens.join(", ")} ที่คุณแพ้รุนแรง`,
-      scoreAdjustment: ALLERGEN_PENALTY_SEVERE,
-      matchedAllergens: matched,
-    };
-  }
   // warning: allergen เป็นส่วนผสมหลัก
   if (mainAllergens.length > 0) {
     return {

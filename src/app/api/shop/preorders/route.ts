@@ -7,6 +7,7 @@
  *                  items: [{ round_item_id, quantity, special_request? }] }
  *          - ที่อยู่จัดส่ง: ระบุ address_id หรือ delivery_address อย่างใดอย่างหนึ่งเท่านั้น (BACKLOG §3.8)
  *          - ค่าส่งคิดฝั่ง server จากจังหวัด + ยอดสั่งซื้อ ; ส่วนลดกรอกเองไม่ได้
+ *          - promotion_code? = โค้ดส่วนลด (ระบบคิดเอง · ใช้ร่วมกับ user_coupon_id ไม่ได้) — พรีวิวก่อนที่ /promotion-preview
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withAuth } from "@/lib/authGuard";
@@ -43,6 +44,7 @@ export const POST = withAuth(async (session, req) => {
     pickup_location_id: body.pickup_location_id ?? null,
     pickup_date: body.pickup_date ?? null,
     user_coupon_id: body.user_coupon_id ?? null,
+    promotion_code: body.promotion_code ?? null,
     points_to_redeem: body.points_to_redeem ?? 0,
   }, { storefront: true });
   audit(req, {

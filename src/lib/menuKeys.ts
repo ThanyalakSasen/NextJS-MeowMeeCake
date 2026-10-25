@@ -43,6 +43,8 @@ export const MENU_KEYS = [
   "store_design",
   "store_info",
   "shipping",
+  // แชทกับลูกค้า (view = ดู/อ่าน · create = ตอบ) — key ใหม่ ไม่มี key เดิมให้คัดลอกสิทธิ์ (เจ้าของร้านให้สิทธิ์เอง)
+  "chat",
   // เลิกใช้ — แตกเป็น reports_sales / reports_reviews / finance_expenses / finance_summary
   "reports",
 ] as const;

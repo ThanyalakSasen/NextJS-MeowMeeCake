@@ -22,6 +22,8 @@ import productModel from "../models/productModel";
 import userModel from "../models/userModel";
 import * as promotionUsageService from "./promotionUsageService";
 import * as cartService from "./cartService";
+import { announceNewPromotion, retractPromotionNotices } from "./customerNotifyService";
+import { trackBackground } from "../lib/backgroundTasks";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { GUEST_CUSTOMER_EMAIL } from "../lib/posGuest";
 import type { z } from "zod";
@@ -73,7 +75,10 @@ export async function createPromotion(input: CreatePromotionInput, createdBy: st
 
   try {
     const doc = await promotionModel.create(payload);
-    return presentPromotion(doc.toObject());
+    const created = presentPromotion(doc.toObject());
+    // โค้ดที่ลูกค้ากรอกเองได้ที่เว็บ (ไม่ใช่โปรแลกแต้ม) → แจ้งในกระดิ่งของลูกค้าทุกคน · เบื้องหลัง ไม่ทำให้การสร้างล้ม
+    void trackBackground(announceNewPromotion(created as any));
+    return created;
   } catch (err: any) {
     if (err?.code === 11000) throw conflict("รหัสโปรโมชันนี้ถูกใช้แล้ว");
     throw err;
@@ -180,6 +185,7 @@ export async function deletePromotion(id: string) {
   const doc = await softDeleteDoc(promotionModel, id, {
     notFoundMsg: "ไม่พบโปรโมชันที่ระบุ หรือถูกลบไปแล้ว",
   });
+  await retractPromotionNotices(doc._id); // โค้ดใช้ไม่ได้แล้ว — ไม่ให้ลูกค้าเห็นในกระดิ่งอีก
   return presentPromotion(doc);
 }
 

@@ -18,6 +18,7 @@ import promotionUsagesModel from "../models/promotionUsagesModel";
 import userCouponModel from "../models/userCouponModel";
 import * as pointsService from "./pointsService";
 import type { LoyaltyKind } from "./pointsService";
+import { couponRedeemedNotice, notifyCustomerLater } from "./customerNotifyService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -112,7 +113,9 @@ export async function redeemCoupon(userId: string, promotionId: unknown) {
       await userCouponModel.deleteOne({ _id: doc._id });
       throw badRequest(`แลกคูปองนี้ได้สูงสุด ${perUser} ครั้งต่อคน`);
     }
-    return doc.toObject();
+    const coupon = doc.toObject();
+    notifyCustomerLater(userId, null, couponRedeemedNotice(coupon)); // กระดิ่งในเว็บเท่านั้น (ไม่ใช้โควตา LINE) · ไม่ทำให้การแลกล้ม
+    return coupon;
   } catch (err) {
     await pointsService.refundRedemption("coupon", String(couponId)).catch((e) =>
       log.error("coupon.redeem_refund_failed", { coupon_id: String(couponId), err: e })

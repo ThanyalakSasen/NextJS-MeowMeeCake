@@ -263,4 +263,20 @@ describe("migrate-reviews", () => {
     expect((await reviewModel.findById(b._id).lean<any>()).status).toBe("hidden");
     expect((await runReviewMigration({ apply: true, backupDir: "scripts/backups/test" })).statusFilled).toBe(0);
   });
+
+  it("รีวิวของฉัน: มีรายละเอียดรายการที่รีวิว (เลขออเดอร์/พรีออเดอร์ · จำนวน · ราคา) แต่ไม่มีต้นทุน", async () => {
+    const c = await customer();
+    const o = await paidOrder(c.uid);
+    const pre = await preorderItems(c.uid, 1);
+    await reviewService.createReview({ user_id: c.uid, order_item_id: o.itemIds[0], rating: 5 });
+    await reviewService.createReview({ user_id: c.uid, preorder_item_id: pre.ids[0], rating: 4 });
+    const { items } = await reviewService.listReviews({ pagination: { page: 1, limit: 50, skip: 0 }, user_id: c.uid, ownOnly: true });
+    const ord = (items as any[]).find((r) => r.order_item_id);
+    expect(ord.order_item_id).toMatchObject({ quantity: 1, total_price: 100 });
+    expect(ord.order_item_id.order_id.order_no).toBeTruthy();
+    expect(ord.order_item_id.cost_per_unit).toBeUndefined();
+    const preR = (items as any[]).find((r) => r.preorder_order_item_id);
+    expect(preR.preorder_order_item_id.preorder_id.preorder_no).toMatch(/^PRE-TEST/);
+    expect(preR.preorder_order_item_id.pickup_date).toBeTruthy();
+  });
 });
