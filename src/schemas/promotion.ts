@@ -7,6 +7,7 @@ import { objectId } from "./common";
 
 const DISCOUNT_TYPES = ["Percentage", "Amount", "FreeShipping"] as const;
 const CHANNELS = ["online", "instore"] as const;
+const AUDIENCES = ["all", "members"] as const;
 
 const base = z.object({
   promotion_code: z.string().trim().min(1).max(50),
@@ -16,6 +17,8 @@ const base = z.object({
   discount_value: z.number().nonnegative(),
   is_active: z.boolean().optional(),
   applicable_channels: z.array(z.enum(CHANNELS)).min(1).optional(),
+  audience: z.enum(AUDIENCES).optional(),
+  stackable: z.boolean().optional(),
   min_order_amount: z.number().nonnegative().nullish(),
   min_quantity: z.number().int().nonnegative().nullish(),
   applicable_products: z.array(objectId).optional(),

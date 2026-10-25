@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import expenseModel from "@/models/expenseModel";
-import { expenseService, summary, totalInRange } from "@/services/expenseService";
+import { expenseService, summary, totalsInRange } from "@/services/expenseService";
 
 /**
  * BACKLOG §3.11 เฟส 2 — expenseModel.amount เก็บเป็นสตางค์ แต่ API ยังรับ-ส่งบาทเหมือนเดิม
@@ -63,7 +63,7 @@ describe("expenseService — create/update/list/getById คืนบาท เ�
   });
 });
 
-describe("expenseService.summary / totalInRange — คืนบาท (BACKLOG §3.11 เฟส 2)", () => {
+describe("expenseService.summary / totalsInRange — คืนบาท (BACKLOG §3.11 เฟส 2)", () => {
   it("summary(): รวมยอดตามหมวดเป็นบาทถูกต้อง ไม่ใช่สตางค์ดิบ", async () => {
     await expenseService.create({
       date: new Date("2026-02-01"),
@@ -95,7 +95,7 @@ describe("expenseService.summary / totalInRange — คืนบาท (BACKLOG 
     expect(rawMat?.total).toBe(150.5);
   });
 
-  it("totalInRange(): คืนบาทตรง ๆ ให้ dashboardService ใช้ผสมกับค่าอื่นได้เลยไม่ต้องแปลงซ้ำ", async () => {
+  it("totalsInRange(): คืนบาทตรง ๆ ให้ dashboardService ใช้ผสมกับค่าอื่นได้เลยไม่ต้องแปลงซ้ำ · cogs = หมวดวัตถุดิบ/บรรจุภัณฑ์", async () => {
     await expenseService.create({
       date: new Date("2026-03-01"),
       description: "ค่าจ้าง",
@@ -103,8 +103,15 @@ describe("expenseService.summary / totalInRange — คืนบาท (BACKLOG 
       amount: 15000,
       payment_method: "โอนเงิน",
     });
+    await expenseService.create({
+      date: new Date("2026-03-02"),
+      description: "กล่องเค้ก",
+      category: "บรรจุภัณฑ์",
+      amount: 250.5,
+      payment_method: "เงินสด",
+    });
 
-    const total = await totalInRange(new Date("2026-03-01"), new Date("2026-03-31"));
-    expect(total).toBe(15000);
+    const totals = await totalsInRange(new Date("2026-03-01"), new Date("2026-03-31"));
+    expect(totals).toEqual({ total: 15250.5, cogs: 250.5 });
   });
 });

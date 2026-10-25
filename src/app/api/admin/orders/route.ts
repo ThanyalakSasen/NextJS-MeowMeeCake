@@ -5,7 +5,8 @@
  *   POST — สร้างออเดอร์แทนลูกค้า (orders.create) — validate ด้วย schemas/order.adminCreateOrderBody
  *          body: { user_id, source?: "cart"|"items", order_type,
  *                  address_id? (จากสมุดที่อยู่ของ user_id + recipient_name/recipient_phone) | delivery_address?,
- *                  promotion_code?, promotion_id?, discount_amount?, delivery_fee?, channel?, items?, item_notes? }
+ *                  promotion_code?, promotion_id?, promotion_ids? (ซ้อนโปร — ทุกตัว stackable),
+ *                  discount_amount?, delivery_fee?, channel?, items?, item_notes? }
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
@@ -43,6 +44,7 @@ export const POST = withPermission(["orders", "pos"], "create", async (_s, req) 
     delivery_address,
     promotion_code: body.promotion_code ?? null,
     promotion_id: body.promotion_id ?? null,
+    promotion_ids: body.promotion_ids ?? null,
     discount_amount: body.discount_amount ?? undefined, // ส่วนลดกรอกมือ (ใช้เมื่อไม่ได้ระบุโปรโมชัน)
     // ปกติระบบคิดค่าส่งเอง — ถ้าแอดมินส่ง delivery_fee มา ถือเป็นการ override
     delivery_fee: body.delivery_fee ?? undefined,

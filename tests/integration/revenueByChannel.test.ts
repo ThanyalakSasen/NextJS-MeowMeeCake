@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import orderModel from "@/models/orderModel";
 import preorderModel from "@/models/preorderModel";
+import orderItemModel from "@/models/orderItemModel";
+import preorderItemModel from "@/models/preorderItemModel";
 import { orderChannelOf, revenueByChannel } from "@/services/dashboardService";
 import { makeUser, oid } from "./helpers";
 
@@ -66,6 +68,22 @@ describe("revenueByChannel", () => {
 
     const r = await revenueByChannel(range(2));
     expect(r).toMatchObject({ web: 50, pos: 0, preorder: 0, other: 0, total: 50, orders: 1 });
+  });
+
+  it("recipe_cogs = Σ cost_per_unit × จำนวน ของออเดอร์ + พรีออเดอร์ที่ชำระแล้ว", async () => {
+    const paid = await order(4, "POS", 200);
+    const unpaid = await order(4, "ORD", 200, { payment_status: "pending" });
+    const pre = await preorder(4, 300);
+    await orderItemModel.create([
+      { order_id: paid._id, product_id: oid(), product_snapshot: { product_name_th: "a", product_name_eng: "a" }, quantity: 2, unit_price: 100, total_price: 200, cost_per_unit: 30 },
+      { order_id: unpaid._id, product_id: oid(), product_snapshot: { product_name_th: "b", product_name_eng: "b" }, quantity: 1, unit_price: 200, total_price: 200, cost_per_unit: 99 },
+    ]);
+    await preorderItemModel.create({
+      preorder_id: pre._id, round_item_id: oid(), pickup_date: day(5), product_id: oid(), product_snapshot: { product_name_th: "c", product_name_eng: "c" }, quantity: 3, unit_price: 100, total_price: 300, cost_per_unit: 25.5,
+    });
+
+    const r = await revenueByChannel(range(4));
+    expect(r.recipe_cogs).toBe(2 * 30 + 3 * 25.5); // 136.5 — ไม่นับออเดอร์ที่ยังไม่จ่าย
   });
 
   it("orderChannelOf", () => {

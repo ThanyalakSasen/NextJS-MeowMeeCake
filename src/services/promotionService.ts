@@ -23,6 +23,7 @@ import userModel from "../models/userModel";
 import * as promotionUsageService from "./promotionUsageService";
 import * as cartService from "./cartService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
+import { GUEST_CUSTOMER_EMAIL } from "../lib/posGuest";
 import type { z } from "zod";
 import type { promotionCreate, promotionUpdate } from "../schemas/promotion";
 
@@ -198,6 +199,11 @@ export interface ValidateForOrderInput {
   channel?: PromotionChannel;
 }
 
+async function isPosGuest(userId: string): Promise<boolean> {
+  const user = await userModel.findById(userId).select("email").lean<{ email?: string } | null>();
+  return user?.email?.toLowerCase() === GUEST_CUSTOMER_EMAIL.toLowerCase();
+}
+
 export async function validateForOrder(input: ValidateForOrderInput): Promise<DiscountResult> {
   await dbConnect();
 
@@ -232,6 +238,10 @@ export async function validateForOrder(input: ValidateForOrderInput): Promise<Di
 
   if (promo.usage_limit != null && (promo.used_count ?? 0) >= promo.usage_limit) {
     throw unprocessable("โปรโมชันนี้ถูกใช้ครบจำนวนแล้ว");
+  }
+  // โปรเฉพาะสมาชิก — บัญชี "ลูกค้าทั่วไป" ของ POS ใช้ไม่ได้ (ลูกค้าหน้าเว็บมีบัญชีเสมอ = สมาชิก)
+  if (promo.audience === "members" && (await isPosGuest(input.user_id))) {
+    throw unprocessable("โปรโมชันนี้สำหรับสมาชิกเท่านั้น — ผูกบิลกับสมาชิกก่อนใช้");
   }
   if (promo.max_user_per_user != null) {
     const used = await promotionUsageService.getUserUsageCount(

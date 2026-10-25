@@ -446,7 +446,7 @@ Next 16 + antd + i18n ที่ทำถึง D0.5 · ตามหลัง mai
   | ออเดอร์ใหม่ · สลิปรอตรวจของออเดอร์ | `/owner/orders/manageOrders?id=<orderId>` |
   | พรีออเดอร์ใหม่ · สลิปรอตรวจของพรีออเดอร์ · จ่ายช้าแต่สร้างใบผลิตไม่ได้ | `/owner/orders/preOrderRound?tab=orders&id=<preorderId>` |
   | ปิดรอบ (สร้างใบผลิตแล้ว) · จ่ายช้าแต่เริ่มผลิตแล้ว/สินค้าไม่มีสูตร · เพิ่ม/หักยอดใบผลิต · ยกเลิกหลังเริ่มผลิต · ผลิตเสร็จสินค้ามีตัวเลือก | `/owner/production?id=<productionOrderId>` |
-  | ปิดรอบ (สร้างใบผลิตไม่ได้) · สรุปวันรับพรีออเดอร์ (เว็บอย่างเดียว) | `/owner/orders/preOrderRound` |
+  | ปิดรอบ (สร้างใบผลิตไม่ได้) · สรุปวันรับพรีออเดอร์ (เว็บอย่างเดียว) | `/owner/orders/preOrderRound?tab=rounds` |
   | สินค้าใกล้จะหมด | `/owner/products/<productId>/edit` |
   | ข้อมูลสินค้าผิดปกติ | `/owner/products` |
   | วัตถุดิบใกล้จะหมด | `/owner/ingredients` (ไม่มีหน้ารายตัว) |
