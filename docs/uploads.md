@@ -47,6 +47,15 @@ file (หรือ slip) = <รูปสลิป>        promptpay_ref = <ไ�
 อัปโหลด + ผูกกับรายการในคำขอเดียว · ผูกไม่สำเร็จ (เช่น รายการ `paid` ไปแล้ว) → ลบไฟล์ที่เพิ่งเขียนทิ้ง ไม่ค้าง
 `PATCH` (JSON) แบบเดิมยังใช้ได้ แต่ `slip_image_url` ต้องเป็นไฟล์ในระบบ
 
+**`POST /api/shop/payments`** (ลูกค้า — สร้างรายการชำระเงินพร้อมสลิป · ยังไม่มีรายการชำระเงินมาก่อน)
+```
+Content-Type: multipart/form-data
+file (หรือ slip) = <รูปสลิป>   order_id | preorder_id   amount   promptpay_ref = <ไม่บังคับ>
+→ 201 { ...payment, slip_image_url: "/api/files/slips/…", status: "pending" }
+```
+ใช้แนบสลิปย้อนหลังเพื่อเปิดออเดอร์ที่หมดเวลาชำระกลับ (customer-backend-merge §8.8 · TC-CUS-85) · สร้างไม่สำเร็จ
+(ไม่ใช่ของตัวเอง · ยอดไม่ตรง · ของหมด = 409) → ลบไฟล์ที่เพิ่งเขียนทิ้ง · ส่งเป็น JSON แบบเดิมยังใช้ได้
+
 **`POST /api/admin/payments/slips`** (`payments.create`) · **`POST /api/admin/expenses/receipts`** (`reports.create`)
 ```
 Content-Type: multipart/form-data
