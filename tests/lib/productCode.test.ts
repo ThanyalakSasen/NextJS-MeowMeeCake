@@ -7,6 +7,7 @@ import {
   isPreorderFilterFrom,
   productCodePrefix,
   generateDocNo,
+  formatDailyDocNo,
 } from "@/lib/productCode";
 
 describe("generateProductCode", () => {
@@ -109,3 +110,15 @@ describe("generateDocNo (BACKLOG3 — ตัวสร้างเลขที่
   });
 });
 
+
+describe("formatDailyDocNo (เลขออเดอร์/พรีออเดอร์รายวัน)", () => {
+  it("<prefix>-YYYYMMDD-MMC<ลำดับ 3 หลัก>", () => {
+    expect(formatDailyDocNo("ORD", "20261024", 1)).toBe("ORD-20261024-MMC001");
+    expect(formatDailyDocNo("POS", "20261024", 42)).toBe("POS-20261024-MMC042");
+    expect(formatDailyDocNo("PRE", "20261024", 999)).toBe("PRE-20261024-MMC999");
+  });
+
+  it("เกิน 999 ไม่ตัดหลัก (ยังไม่ซ้ำกับลำดับก่อนหน้า)", () => {
+    expect(formatDailyDocNo("ORD", "20261024", 1000)).toBe("ORD-20261024-MMC1000");
+  });
+});
