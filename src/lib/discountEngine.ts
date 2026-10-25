@@ -60,13 +60,20 @@ function idIn(list: unknown[] | undefined, id: string | null | undefined): boole
   return list.some((x) => String(x) === String(id));
 }
 
+/** ข้อความเมื่อใช้โค้ดผิดช่องทาง — ลูกค้า/พนักงานเห็นตรงๆ จึงห้ามแสดงค่าภายใน (online/instore) — TC-CUS-67 */
+function channelMismatchMessage(channels: string[]): string {
+  if (channels.length === 1 && channels[0] === "instore") return "โค้ดนี้ใช้ได้เฉพาะที่หน้าร้านเท่านั้น";
+  if (channels.length === 1 && channels[0] === "online") return "โค้ดนี้ใช้ได้เฉพาะการสั่งซื้อออนไลน์เท่านั้น";
+  return "โค้ดนี้ใช้กับช่องทางการสั่งซื้อนี้ไม่ได้";
+}
+
 export function computeDiscount(promo: PromotionLike, ctx: DiscountContext): DiscountResult {
   const type = promo.discount_type as DiscountType;
 
   // ── ช่องทาง ──
   const channels: string[] = promo.applicable_channels ?? ["online", "instore"];
   if (!channels.includes(ctx.channel)) {
-    throw unprocessable(`โปรโมชันนี้ใช้ได้เฉพาะช่องทาง: ${channels.join(", ")}`);
+    throw unprocessable(channelMismatchMessage(channels));
   }
 
   // ── หาว่ารายการไหน "ร่วมรายการ" ──
