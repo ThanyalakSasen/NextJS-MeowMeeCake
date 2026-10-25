@@ -246,10 +246,8 @@ describe("เจ้าของร้าน", () => {
 
     await paymentService.submitSlip(String(payment._id), { slip_image_url: "/api/files/slips/line-test.jpg" });
 
-    // submitSlip หาเลขเอกสารก่อนแล้วค่อย notify ใน .then — ยังไม่ได้ลงทะเบียนตอน flushBackground → รอด้วย waitFor
-    const findSlip = () => pushedTo(OWNER).find((t) => t.includes("รอตรวจสอบสลิป"));
-    await vi.waitFor(() => expect(findSlip()).toBeTruthy());
-    const slipMsg = findSlip();
+    const slipMsg = (await settled(OWNER)).find((t) => t.includes("รอตรวจสอบสลิป"));
+    expect(slipMsg).toBeTruthy();
     expect(slipMsg).toContain(order.order_no);
   });
 
