@@ -259,8 +259,7 @@ export async function markReadByCustomer(customerId: string) {
   await dbConnect();
   const conv = await chatConversationModel.findOne({ customer_id: customerId }).select("_id").lean<any>();
   if (!conv) return { unread: 0 };
-  await markRead(conv._id, "staff");
-  return { unread: 0 };
+  return { unread: await markRead(conv._id, "staff") };
 }
 
 // ── ฝั่งร้าน (/api/admin/chats) ───────────────────────────────
@@ -345,20 +344,22 @@ export async function sendStaffMessage(staffId: string, conversationId: string, 
 export async function markReadByStaff(conversationId: string) {
   await dbConnect();
   const conv = await findConversation(conversationId);
-  await markRead(conv._id, "customer");
-  return { staff_unread: 0 };
+  const staff_unread = await markRead(conv._id, "customer");
+  return { staff_unread };
 }
 
-/** ข้อความของ sender ฝั่งนี้ = อ่านแล้ว + รีเซ็ตตัวนับของอีกฝั่ง */
-async function markRead(conversationId: unknown, senderOfMessages: SenderType) {
-  const now = new Date();
-  await chatMessageModel.updateMany(
-    { conversation_id: conversationId, sender_type: senderOfMessages, read_at: null },
-    { $set: { read_at: now } }
-  );
+/**
+ * ข้อความของ sender ฝั่งนี้ = อ่านแล้ว + ตั้งตัวนับของอีกฝั่งใหม่ → คืนจำนวนที่ยังไม่อ่าน
+ * นับจากข้อความจริงแทนการตั้ง 0 — ข้อความที่เข้ามาระหว่าง updateMany กับ updateOne จะไม่หายจากตัวนับ
+ */
+async function markRead(conversationId: unknown, senderOfMessages: SenderType): Promise<number> {
+  const unreadFilter = { conversation_id: conversationId, sender_type: senderOfMessages, read_at: null };
+  await chatMessageModel.updateMany(unreadFilter, { $set: { read_at: new Date() } });
+  const remaining = await chatMessageModel.countDocuments(unreadFilter);
   await chatConversationModel.updateOne(
     { _id: conversationId },
-    { $set: { [senderOfMessages === "customer" ? "staff_unread" : "customer_unread"]: 0 } }
+    { $set: { [senderOfMessages === "customer" ? "staff_unread" : "customer_unread"]: remaining } }
   );
+  return remaining;
 }
 

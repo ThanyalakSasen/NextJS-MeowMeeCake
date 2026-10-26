@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import notificationModel from "@/models/notificationModel";
 import customerNotificationModel from "@/models/customerNotificationModel";
 import chatConversationModel from "@/models/chatConversationModel";
@@ -90,5 +90,29 @@ describe("แชทลูกค้า", () => {
     await chatService.markReadByStaff(conv);
     const unread = await chatService.listConversations({ pagination: pg, unreadOnly: true });
     expect(unread.items.map((c) => c.customer?.user_fullname)).toEqual(["สมชาย"]);
+  });
+
+  it("ข้อความที่เข้ามาระหว่างกด 'อ่านแล้ว' ยังนับเป็นยังไม่อ่าน (เดิมตัวนับถูกตั้งเป็น 0)", async () => {
+    const user = await makeUser();
+    const uid = String(user._id);
+    await chatService.sendCustomerMessage(uid, { body: "ข้อความแรก" });
+    const conv = await chatConversationModel.findOne({ customer_id: user._id }).lean<{ _id: unknown }>();
+
+    // ลูกค้าส่งข้อความใหม่หลัง updateMany ทำเสร็จ แต่ก่อนตั้งตัวนับ
+    const original = chatMessageModel.updateMany.bind(chatMessageModel);
+    vi.spyOn(chatMessageModel, "updateMany").mockImplementationOnce((async (...args: Parameters<typeof original>) => {
+      const res = await original(...args);
+      await chatMessageModel.create({ conversation_id: conv!._id, sender_type: "customer", sender_id: user._id, body: "แทรกเข้ามา" });
+      return res;
+    }) as unknown as typeof chatMessageModel.updateMany);
+
+    try {
+      expect(await chatService.markReadByStaff(String(conv!._id))).toEqual({ staff_unread: 1 });
+    } finally {
+      vi.restoreAllMocks();
+    }
+    const after = await chatConversationModel.findById(conv!._id).lean<{ staff_unread: number }>();
+    expect(after?.staff_unread).toBe(1);
+    expect(await chatMessageModel.countDocuments({ conversation_id: conv!._id, read_at: null })).toBe(1);
   });
 });
