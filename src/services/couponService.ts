@@ -241,8 +241,9 @@ export async function applyUserCoupon(opts: {
   const coupon = await userCouponModel.findOne({ _id: opts.userCouponId, user_id: opts.userId }).lean<any>();
   if (!coupon || coupon.status !== "available") throw unprocessable("คูปองนี้ถูกใช้ไปแล้วหรือไม่มีอยู่");
   if (new Date(coupon.expires_at) <= new Date()) throw unprocessable("คูปองนี้หมดอายุแล้ว");
-  // คูปองลดเป็นบาทที่มูลค่ามากกว่ายอดสินค้า = ใช้ไม่ได้ (ไม่ให้ส่วนลดเกินยอดทิ้งไปเปล่า ๆ · 2026-10-26)
-  if (coupon.discount_type === "Amount" && Number(coupon.discount_value) > Number(opts.subtotal) + 1e-9) {
+  // คูปองแลกแต้ม (ลดเป็นบาท) ที่มูลค่ามากกว่ายอดสินค้า = ใช้ไม่ได้ (ไม่ให้แต้มที่แลกมาเสียเปล่า · 2026-10-26)
+  // คูปองจากโปร (รวมใบที่ลูกค้าแลกไว้ก่อนกติกานี้) ลดได้ไม่เกินยอดเหมือนเดิม — computeDiscount ตัดให้
+  if (coupon.source === "points" && coupon.discount_type === "Amount" && Number(coupon.discount_value) > Number(opts.subtotal) + 1e-9) {
     throw unprocessable(`คูปองมูลค่า ${Number(coupon.discount_value).toLocaleString("th-TH")} บาท มากกว่ายอดสินค้า — ใช้กับคำสั่งซื้อนี้ไม่ได้`);
   }
 

@@ -4,6 +4,7 @@ import promotionModel from "@/models/promotionModel";
 import promotionUsagesModel from "@/models/promotionUsagesModel";
 import pointTransactionModel from "@/models/pointTransactionModel";
 import customerNotificationModel from "@/models/customerNotificationModel";
+import userCouponModel from "@/models/userCouponModel";
 import * as couponService from "@/services/couponService";
 import * as promotionService from "@/services/promotionService";
 import * as preorderRoundService from "@/services/preorderRoundService";
@@ -119,6 +120,33 @@ describe("คูปองของฉัน", () => {
       refType: "order", refId: (await makeUser())._id,
     });
     expect(ok.discount_amount).toBe(50);
+  });
+
+  it("คูปองจากโปรที่มูลค่ามากกว่ายอด ยังใช้ได้ ลดไม่เกินยอด (กติกาห้ามเกินยอดใช้กับคูปองแลกแต้มเท่านั้น) · คูปองเก่าไม่มี source ก็เช่นกัน", async () => {
+    const user = await customer();
+    const uid = String(user._id);
+    await pointTransactionModel.create({
+      user_id: user._id, type: "earn", source: "welcome", points: 1000, remaining: 1000,
+      expires_at: new Date(Date.now() + 365 * DAY), description: "ทดสอบ", dedupe_key: `t-${Math.random()}`,
+    });
+    const product = await makeProduct();
+    const p = await promo({ points_cost: 100 });
+
+    const fresh = await couponService.redeemCoupon(uid, String(p._id));
+    const a = await couponService.applyUserCoupon({
+      userId: uid, userCouponId: String(fresh._id), lines: [line(String(product._id), 30)], subtotal: 30, delivery_fee: 0,
+      refType: "order", refId: (await makeUser())._id,
+    });
+    expect(a.discount_amount).toBe(30);
+
+    // คูปองที่แลกก่อนมี field source (ข้อมูลเก่าใน DB)
+    const legacy = await couponService.redeemCoupon(uid, String(p._id));
+    await userCouponModel.collection.updateOne({ _id: legacy._id }, { $unset: { source: "" } });
+    const b = await couponService.applyUserCoupon({
+      userId: uid, userCouponId: String(legacy._id), lines: [line(String(product._id), 30)], subtotal: 30, delivery_fee: 0,
+      refType: "order", refId: (await makeUser())._id,
+    });
+    expect(b.discount_amount).toBe(30);
   });
 });
 
