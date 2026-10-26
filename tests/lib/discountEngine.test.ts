@@ -75,7 +75,16 @@ describe("computeDiscount — เงื่อนไข", () => {
   it("ช่องทางไม่ตรง → reject", () => {
     expect(() =>
       computeDiscount(promo({ applicable_channels: ["instore"] }), ctx({ channel: "online" }))
-    ).toThrowError(/ช่องทาง/);
+    ).toThrowError("โค้ดนี้ใช้ได้เฉพาะที่หน้าร้านเท่านั้น");
+    expect(() =>
+      computeDiscount(promo({ applicable_channels: ["online"] }), ctx({ channel: "instore" }))
+    ).toThrowError("โค้ดนี้ใช้ได้เฉพาะการสั่งซื้อออนไลน์เท่านั้น");
+  });
+
+  it("ข้อความช่องทางไม่ตรงไม่แสดงค่าภายในของระบบ (TC-CUS-67)", () => {
+    expect(() =>
+      computeDiscount(promo({ applicable_channels: [] }), ctx({ channel: "online" }))
+    ).toThrowError(/^(?!.*(online|instore)).*$/);
   });
 
   it("ยอดไม่ถึง min_order_amount → reject", () => {
