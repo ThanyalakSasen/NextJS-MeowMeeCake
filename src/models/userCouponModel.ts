@@ -37,8 +37,5 @@ userCouponSchema.index({ user_id: 1, promotion_id: 1 });
 userCouponSchema.index({ used_ref_type: 1, used_ref_id: 1 });
 
 
-// dev: hot reload ไม่ล้าง mongoose.models — ลงทะเบียนใหม่ทุกครั้ง ให้ schema ที่แก้ (เช่น promotion_id ไม่บังคับ · source) มีผลทันที
-// (เดิมได้ schema เก่าค้าง → แลกแต้มเป็นคูปองล้มด้วย "ข้อมูลไม่ผ่านการตรวจสอบของ schema" จนกว่าจะรีสตาร์ท)
-if (process.env.NODE_ENV !== "production" && mongoose.models.UserCoupons) mongoose.deleteModel("UserCoupons");
 const UserCoupon = mongoose.models.UserCoupons || mongoose.model("UserCoupons", userCouponSchema);
 export default UserCoupon;
