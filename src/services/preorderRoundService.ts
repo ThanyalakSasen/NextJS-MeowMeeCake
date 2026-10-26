@@ -51,7 +51,7 @@ const NEXT_ROUND_STATUS: Record<RoundStatus, RoundStatus[]> = {
 };
 
 const PRODUCT_SELECT =
-  "product_name_th product_name_eng product_price sale_price product_img is_preorder preorder_config";
+  "product_name_th product_name_eng product_price sale_price product_img is_preorder preorder_config category_id";
 
 // price_override / current_price — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 // ปัด "ซ้อน" เข้าไปในผลลัพธ์ populate (product_id.product_price/sale_price) ด้วย เพราะ populate ไม่ผ่าน

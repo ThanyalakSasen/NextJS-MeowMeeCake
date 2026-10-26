@@ -66,9 +66,12 @@ export async function getPublicStoreInfo() {
     phones,
     contact_email: String(profile?.contact_email ?? "").trim(),
     social_links: Object.fromEntries(SOCIAL_KEYS.map((k) => [k, String(social[k] ?? "")])),
-    weekly_markets: ((profile?.weekly_markets ?? []) as AnyDoc[])
+    // หน้าร้านหลักก่อนเสมอ (ensureWeeklyMarketsReady จัดลำดับใน DB ให้แล้ว — เรียงซ้ำกันข้อมูลที่ระบบอื่นเขียนตรง)
+    weekly_markets: withMainFirst((profile?.weekly_markets ?? []) as AnyDoc[])
       .filter((m) => m.is_active !== false)
-      .map(({ name, location, days, open_time, close_time, map_url }) => ({ name, location, days, open_time, close_time, map_url })),
+      .map(({ name, location, days, open_time, close_time, map_url, is_main }) => ({
+        name, location, days, open_time, close_time, map_url, is_main: is_main === true,
+      })),
     address: {
       house_no: String(settings?.house_no ?? ""),
       sub_district: String(settings?.sub_district ?? ""),
@@ -92,7 +95,7 @@ export async function getStoreLogo(): Promise<{ url: string; updated_at: Date | 
  * ตรวจ + ทำความสะอาดทีละรายการ (ไม่ส่ง array จาก client เข้า DB ตรงๆ) · ผิด = 400 ข้อความของรายการแรกที่ผิด
  * คง _id เดิมของรายการไว้ (ออเดอร์อ้างอิงจุดรับด้วย _id) · ต้องมีรายการที่เปิดแสดงอย่างน้อย 1 แห่ง
  */
-export function normalizeWeeklyMarkets(raw: unknown): AnyDoc[] {
+export function normalizeWeeklyMarkets(raw: unknown, previous: AnyDoc[] = []): AnyDoc[] {
   if (!Array.isArray(raw)) throw badRequest("รูปแบบข้อมูลหน้าร้านประจำสัปดาห์ไม่ถูกต้อง");
   if (raw.length > MAX_WEEKLY_MARKETS) throw badRequest(`เพิ่มหน้าร้านประจำสัปดาห์ได้ไม่เกิน ${MAX_WEEKLY_MARKETS} แห่ง`);
   const seen = new Set<string>();
@@ -122,17 +125,32 @@ export function normalizeWeeklyMarkets(raw: unknown): AnyDoc[] {
       close_time: closeTime,
       map_url: mapUrl,
       is_active: m.is_active !== false,
+      // ไม่ส่งมา (client รุ่นเก่า) = ใช้ค่าเดิมของรายการนั้น — ไม่ให้หน้าร้านหลักหายเพราะบันทึกจากหน้าที่ไม่รู้จัก field นี้
+      is_main: typeof m.is_main === "boolean" ? m.is_main : previous.some((p) => String(p._id) === String(id) && p.is_main === true),
     };
   });
   if (!value.some((m) => m.is_active)) {
     throw badRequest("ต้องมีหน้าร้านประจำสัปดาห์ที่เปิดแสดงอย่างน้อย 1 แห่ง (ใช้เป็นเวลาเปิดร้านและจุดรับสินค้า)");
   }
-  return value;
+  return withMainFirst(value);
 }
 
-const MARKET_COMPARE_FIELDS = ["name", "location", "days", "open_time", "close_time", "map_url", "is_active"] as const;
+/**
+ * หน้าร้านหลักมีได้ 1 แห่งและอยู่ลำดับแรกเสมอ — ติดธงหลายแห่ง = ใช้แห่งแรก · ไม่มีเลย = รายการแรกที่เปิดแสดง
+ * (ระบบเดิมและหน้า "ติดต่อเรา" ใช้รายการแรกเป็นหน้าร้านหลัก)
+ */
+export function withMainFirst<T extends AnyDoc>(markets: T[]): T[] {
+  if (markets.length === 0) return markets;
+  let mainIdx = markets.findIndex((m) => m.is_main === true);
+  if (mainIdx < 0) mainIdx = Math.max(0, markets.findIndex((m) => m.is_active !== false));
+  const main = { ...markets[mainIdx], is_main: true };
+  const rest = markets.filter((_, i) => i !== mainIdx).map((m) => ({ ...m, is_main: false }));
+  return [main, ...rest];
+}
+
+const MARKET_COMPARE_FIELDS = ["name", "location", "days", "open_time", "close_time", "map_url", "is_active", "is_main"] as const;
 // เอกสารเก่าบางรายการไม่มี field เหล่านี้ (ไม่งั้นจะนับว่า "ถูกแก้" ทั้งที่ไม่ได้แตะ)
-const MARKET_DEFAULTS: AnyDoc = { location: "", days: [], map_url: "", is_active: true };
+const MARKET_DEFAULTS: AnyDoc = { location: "", days: [], map_url: "", is_active: true, is_main: false };
 const marketChanged = (before: AnyDoc, after: AnyDoc) =>
   MARKET_COMPARE_FIELDS.some(
     (f) => JSON.stringify(before[f] ?? MARKET_DEFAULTS[f] ?? null) !== JSON.stringify(after[f] ?? MARKET_DEFAULTS[f] ?? null)
@@ -149,10 +167,10 @@ export async function getWeeklyMarkets() {
 /** แทนที่ทั้งรายการ · สิทธิ์ store_info ตรวจตามสิ่งที่เปลี่ยนเทียบกับที่บันทึกไว้ (owner ผ่านเสมอ) */
 export async function updateWeeklyMarkets(session: SessionUser, body: unknown) {
   if (!isPlainObject(body)) throw badRequest("รูปแบบข้อมูลไม่ถูกต้อง");
-  const markets = normalizeWeeklyMarkets(body.weekly_markets);
   await dbConnect();
   // ย้ายเวลาทำการเดิมก่อน — ไม่งั้นการย้ายครั้งแรกจะเติมหน้าร้านหลักซ้อนเข้ามาหลังบันทึก
   const profile = await ensureWeeklyMarketsReady();
+  const markets = normalizeWeeklyMarkets(body.weekly_markets, (profile.weekly_markets ?? []) as AnyDoc[]);
 
   const existing = new Map(((profile.weekly_markets ?? []) as AnyDoc[]).map((m) => [String(m._id), m]));
   const incomingIds = new Set(markets.map((m) => String(m._id)));
@@ -218,7 +236,7 @@ async function phoneUserId(raw: unknown, label: string): Promise<mongoose.Types.
 }
 
 /** ตรวจ + เลือกเฉพาะ field ที่แก้ได้ (โลโก้แยก · business_hours/cover_url เลิกใช้แล้ว) */
-async function buildProfileUpdate(body: Record<string, unknown>): Promise<AnyDoc> {
+async function buildProfileUpdate(body: Record<string, unknown>, previousMarkets: AnyDoc[] = []): Promise<AnyDoc> {
   const update: AnyDoc = {};
   if ("store_name" in body) {
     const name = String(body.store_name ?? "").trim();
@@ -255,7 +273,7 @@ async function buildProfileUpdate(body: Record<string, unknown>): Promise<AnyDoc
   if ("phone_secondary_user_id" in body) {
     update.phone_secondary_user_id = await phoneUserId(body.phone_secondary_user_id, "เบอร์โทรสำรอง");
   }
-  if ("weekly_markets" in body) update.weekly_markets = normalizeWeeklyMarkets(body.weekly_markets);
+  if ("weekly_markets" in body) update.weekly_markets = normalizeWeeklyMarkets(body.weekly_markets, previousMarkets);
   return update;
 }
 
@@ -266,8 +284,8 @@ async function buildProfileUpdate(body: Record<string, unknown>): Promise<AnyDoc
 export async function updateProfile(body: unknown, logo: File | null = null) {
   if (!isPlainObject(body)) throw badRequest("รูปแบบข้อมูลไม่ถูกต้อง");
   await dbConnect();
-  await ensureWeeklyMarketsReady();
-  const update = await buildProfileUpdate(body);
+  const ready = await ensureWeeklyMarketsReady();
+  const update = await buildProfileUpdate(body, (ready.weekly_markets ?? []) as AnyDoc[]);
 
   let newLogo: string | null = null;
   if (logo) {

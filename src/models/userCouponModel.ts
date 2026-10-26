@@ -6,13 +6,21 @@ import mongoose from "mongoose";
 const userCouponSchema = new mongoose.Schema(
   {
     user_id: { type: mongoose.Schema.Types.ObjectId, ref: "Users", required: true },
-    promotion_id: { type: mongoose.Schema.Types.ObjectId, ref: "Promotions", required: true },
+    // null = คูปองที่ลูกค้าแลกจากแต้มโดยตรง (source "points" · ไม่มีโปรต้นทาง — 2026-10-26)
+    promotion_id: { type: mongoose.Schema.Types.ObjectId, ref: "Promotions", default: null },
+    // promotion = แลกจากโปรที่ร้านตั้ง points_cost · points = แลกแต้มเป็นส่วนลดบาท (100 แต้ม = ฿10 · ทีละ 10 แต้ม)
+    source: { type: String, enum: ["promotion", "points"], default: "promotion" },
     promotion_code: { type: String, required: true },
     promotion_name: { type: String, required: true },
     discount_type: { type: String, enum: ["Percentage", "Amount", "FreeShipping"], required: true },
     discount_value: { type: Number, required: true },
     min_order_amount: { type: Number, default: 0 },
     max_discount_amount: { type: Number, default: null },
+    // ขอบเขตสินค้า ณ ตอนแลก (snapshot เหมือนเงื่อนไขอื่น) — null = คูปองเก่าที่แลกก่อนเก็บ field นี้ → อ่านจากโปรต้นทางแทน
+    // (เดิมไม่เก็บ คูปองของโปร "เฉพาะหมวดเค้ก" จึงลดได้ทั้งตะกร้า — couponService.applyUserCoupon)
+    applicable_products: { type: [mongoose.Schema.Types.ObjectId], default: null },
+    applicable_categories: { type: [mongoose.Schema.Types.ObjectId], default: null },
+    min_quantity: { type: Number, default: null },
     points_spent: { type: Number, required: true, min: 0 },
     // available = ยังไม่ได้ใช้, used = ใช้กับออเดอร์แล้ว (ออเดอร์ถูกยกเลิก → กลับเป็น available)
     status: { type: String, enum: ["available", "used"], default: "available" },

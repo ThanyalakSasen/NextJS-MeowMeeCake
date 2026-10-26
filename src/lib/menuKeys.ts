@@ -39,6 +39,8 @@ export const MENU_KEYS = [
   "employees",
   "permissions",
   "user_log",
+  // แชทลูกค้า (แทนฟอร์ม "ส่งข้อความหาเรา" — 2026-10-26)
+  "chats",
   // หน้าร้านออนไลน์
   "store_design",
   "store_info",
@@ -50,6 +52,15 @@ export type MenuKey = (typeof MENU_KEYS)[number];
 
 /** key ที่ไม่ใช้ตรวจสิทธิ์แล้ว (เก็บไว้ให้แถวเก่ายัง validate ผ่าน) */
 export const LEGACY_MENU_KEYS: readonly MenuKey[] = ["reports"];
+
+/**
+ * key ที่เพิ่มทีหลัง → key เดิมที่จะคัดลอกสิทธิ์ให้ (ครั้งเดียวต่อ migration id · permissionService.ensureSubmenuPermissions)
+ * แยกจาก SUBMENU_PARENT เพราะ migration ชุดแรกบันทึกว่าทำแล้ว — เพิ่ม key ใน SUBMENU_PARENT จะไม่ถูกคัดลอกให้ DB ที่ย้ายไปแล้ว
+ *   chats ← orders : คนที่ดูแลคำสั่งซื้อได้ตอบแชทลูกค้าได้ทันทีหลัง deploy (เจ้าของร้านแก้แยกทีหลังได้)
+ */
+export const LATER_SUBMENU_MIGRATIONS: readonly { id: string; parents: Partial<Record<MenuKey, MenuKey>> }[] = [
+  { id: "chat-permissions-v1", parents: { chats: "orders" } },
+];
 
 /** key ใหม่ → key เดิมที่เคยคุมหน้านั้น (ใช้คัดลอกสิทธิ์ตอนย้ายระบบครั้งแรก) */
 export const SUBMENU_PARENT: Partial<Record<MenuKey, MenuKey>> = {

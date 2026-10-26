@@ -13,6 +13,7 @@ import { buildMeta, type Pagination } from "../lib/queryParams";
 import promotionUsagesModel from "../models/promotionUsagesModel";
 import promotionModel from "../models/promotionModel";
 import { toBahtFields } from "../lib/money";
+import { positiveLimit } from "../lib/promoCode";
 
 // discount_applied — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentUsage<T extends Record<string, unknown>>(usage: T): T {
@@ -44,8 +45,10 @@ export async function recordUsage(input: RecordUsageInput) {
       {
         _id: input.promotion_id,
         deleted_at: null,
+        // ไม่จำกัด = null / ไม่มี field / ≤ 0 (lib/promoCode.positiveLimit — ตรงกับ validateForOrder · couponService)
         $or: [
           { usage_limit: null },
+          { usage_limit: { $lte: 0 } },
           { $expr: { $lt: [{ $ifNull: ["$used_count", 0] }, "$usage_limit"] } },
         ],
       },
@@ -71,14 +74,15 @@ export async function recordUsage(input: RecordUsageInput) {
       discount_applied: input.discount_applied,
     });
 
-    if (claimed.max_user_per_user != null) {
+    const perUser = positiveLimit(claimed.max_user_per_user);
+    if (perUser != null) {
       // นับหลังสร้าง (optimistic — ผู้ยิงคำขอพร้อมกันคนหลังจะเป็นฝ่ายแพ้ แล้วถูก rollback)
       const userCount = await promotionUsagesModel.countDocuments({
         promotion_id: input.promotion_id,
         user_id: input.user_id,
         deleted_at: null,
       });
-      if (userCount > claimed.max_user_per_user) {
+      if (userCount > perUser) {
         await promotionUsagesModel.deleteOne({ _id: doc._id }).catch(() => undefined);
         throw unprocessable("คุณใช้สิทธิ์โปรโมชันนี้ครบจำนวนแล้ว");
       }

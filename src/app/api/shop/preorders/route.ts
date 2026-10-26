@@ -43,6 +43,7 @@ export const POST = withAuth(async (session, req) => {
     pickup_location_id: body.pickup_location_id ?? null,
     pickup_date: body.pickup_date ?? null,
     user_coupon_id: body.user_coupon_id ?? null,
+    promotion_code: body.promotion_code ?? null,
     points_to_redeem: body.points_to_redeem ?? 0,
   }, { storefront: true });
   audit(req, {

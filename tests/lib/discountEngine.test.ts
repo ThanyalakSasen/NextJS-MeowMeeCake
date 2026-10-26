@@ -83,8 +83,12 @@ describe("computeDiscount — เงื่อนไข", () => {
 
   it("ข้อความช่องทางไม่ตรงไม่แสดงค่าภายในของระบบ (TC-CUS-67)", () => {
     expect(() =>
-      computeDiscount(promo({ applicable_channels: [] }), ctx({ channel: "online" }))
+      computeDiscount(promo({ applicable_channels: ["instore"] }), ctx({ channel: "online" }))
     ).toThrowError(/^(?!.*(online|instore)).*$/);
+  });
+
+  it("applicable_channels ว่าง [] = ใช้ได้ทุกช่องทาง (ตรงกับ couponService — lib/promoCode.channelsOf)", () => {
+    expect(computeDiscount(promo({ applicable_channels: [] }), ctx({ channel: "online" })).discount_amount).toBeGreaterThan(0);
   });
 
   it("ยอดไม่ถึง min_order_amount → reject", () => {

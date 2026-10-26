@@ -114,10 +114,24 @@ async function buildContent(input: ReviewContentInput, userId: string) {
 
 type Content = Awaited<ReturnType<typeof buildContent>>;
 
+/** เหตุที่ยังรีวิวไม่ได้ (null = รีวิวได้) — ตรรกะเดียวกับหน้าเว็บ */
+export type ReviewBlockReason = "cancelled" | "unpaid" | "notCompleted";
+export function reviewBlockReason(doc: { order_status?: string; payment_status?: string }): ReviewBlockReason | null {
+  if (doc.order_status === "cancelled") return "cancelled";
+  if (doc.payment_status !== "paid") return "unpaid";
+  if (doc.order_status !== "completed") return "notCompleted";
+  return null;
+}
+export const REVIEW_BLOCK_MESSAGE: Record<ReviewBlockReason, (label: string) => string> = {
+  cancelled: (label) => `${label}นี้ถูกยกเลิกแล้ว จึงรีวิวไม่ได้`,
+  unpaid: (label) => `รีวิวได้หลังจาก${label}ชำระเงินแล้ว`,
+  notCompleted: (label) => `รีวิวได้เมื่อได้รับสินค้าแล้ว (${label}สำเร็จ)`,
+};
+
 /** ตรวจ: รายการมีจริง · คำสั่งซื้อเป็นของผู้รีวิว · completed · ชำระแล้ว · ยังไม่เคยรีวิว → { product_id } */
 async function assertReviewable(userId: string, kind: ReviewTargetKind, itemId: string): Promise<{ product_id: unknown }> {
   assertObjectId(itemId, kind === "order" ? "order_item_id" : "preorder_item_id");
-  const label = kind === "order" ? "ออเดอร์" : "พรีออเดอร์";
+  const label = kind === "order" ? "คำสั่งซื้อ" : "พรีออเดอร์";
   const item =
     kind === "order"
       ? await orderItemModel.findOne({ _id: itemId, deleted_at: null }).select("order_id product_id").lean<any>()
@@ -130,8 +144,10 @@ async function assertReviewable(userId: string, kind: ReviewTargetKind, itemId: 
       : await preorderModel.findOne({ _id: item.preorder_id, deleted_at: null }).select("user_id order_status payment_status").lean<any>();
   if (!parent) throw notFound(`ไม่พบ${label}ของรายการนี้`);
   if (String(parent.user_id) !== String(userId)) throw forbidden("รีวิวได้เฉพาะสินค้าที่คุณสั่งซื้อเอง");
-  if (parent.order_status !== "completed") throw badRequest(`รีวิวได้เฉพาะเมื่อ${label}เสร็จสิ้น (completed) แล้ว`);
-  if (parent.payment_status !== "paid") throw badRequest(`รีวิวได้เมื่อ${label}ชำระเงินแล้ว`);
+  // ข้อความต้องตรงกับที่หน้าเว็บแสดงแทนปุ่มรีวิว (frontend reviewBlockReason · shop.orders.reviewBlocked.*)
+  // ลำดับเดียวกัน: ยกเลิก → ยังไม่ชำระ → ยังไม่สำเร็จ · เดิมเช็คสถานะก่อนและมีคำว่า "(completed)" ภาษาอังกฤษ
+  const reason = reviewBlockReason(parent);
+  if (reason) throw badRequest(REVIEW_BLOCK_MESSAGE[reason](label));
 
   const dup = await reviewModel.exists({
     [kind === "order" ? "order_item_id" : "preorder_order_item_id"]: itemId,
@@ -269,6 +285,28 @@ export interface ListReviewQuery {
   ownOnly?: boolean;
 }
 
+/** ที่มาของรีวิว (รีวิวของฉัน) — เลขที่/วันที่สั่ง + รายการที่ซื้อ · รายการถูกลบไปแล้ว = null */
+function reviewSource(r: any) {
+  const kind = r.preorder_order_item_id && typeof r.preorder_order_item_id === "object" ? "preorder" : "order";
+  const item = kind === "preorder" ? r.preorder_order_item_id : r.order_item_id;
+  if (!item || typeof item !== "object") return null;
+  const doc = kind === "preorder" ? item.preorder_id : item.order_id;
+  const docObj = doc && typeof doc === "object" ? doc : null;
+  return {
+    kind,
+    doc_id: docObj ? String(docObj._id) : doc ? String(doc) : null,
+    doc_no: docObj ? String((kind === "preorder" ? docObj.preorder_no : docObj.order_no) ?? "") : "",
+    ordered_at: docObj?.created_at ?? null,
+    variant_name: item.product_snapshot?.variant_name ?? null,
+    options: Array.isArray(item.selected_options)
+      ? item.selected_options.map((o: any) => ({ option_name: String(o.option_name ?? ""), text_value: o.text_value ?? null }))
+      : [],
+    special_request: item.special_request ?? null,
+    quantity: Number(item.quantity ?? 0),
+    total_price: Number(item.total_price ?? 0),
+  };
+}
+
 /** รายการรีวิวแบบเรียบง่าย (รีวิวของฉัน) — หลังร้านใช้ reviewModerationService.listAdminReviews */
 export async function listReviews(query: ListReviewQuery) {
   await dbConnect();
@@ -293,13 +331,32 @@ export async function listReviews(query: ListReviewQuery) {
     .populate("user_id", "user_fullname user_img")
     // รูปสินค้า — หน้า "รีวิวของฉัน" ของลูกค้าแสดงรูปคู่กับรีวิว
     .populate("product_id", "product_name_th product_name_eng product_img");
-  if (query.ownOnly) q = q.select(INTERNAL_FIELDS);
+  if (query.ownOnly) {
+    // รีวิวของฉัน: รีวิวนี้มาจากคำสั่งซื้อ/พรีออเดอร์ไหน + รายการที่ซื้อ (ตัวเลือก · จำนวน · ราคา) — แสดงในหน้ารีวิวของฉัน
+    q = q
+      .select(INTERNAL_FIELDS)
+      .populate({
+        path: "order_item_id",
+        select: "order_id product_snapshot selected_options quantity total_price",
+        populate: { path: "order_id", select: "order_no created_at" },
+      })
+      .populate({
+        path: "preorder_order_item_id",
+        select: "preorder_id product_snapshot selected_options special_request quantity total_price",
+        populate: { path: "preorder_id", select: "preorder_no created_at" },
+      });
+  }
   const [rows, total] = await Promise.all([q.lean<any[]>(), reviewModel.countDocuments(filter)]);
   // ลูกค้าเห็นคำตอบของร้าน (ข้อความ + เวลา) แต่ไม่เห็นว่าพนักงานคนไหนตอบ (replied_by)
   const items = query.ownOnly
-    ? rows.map((r) =>
-        r.shop_reply ? { ...r, shop_reply: { text: r.shop_reply.text ?? "", replied_at: r.shop_reply.replied_at ?? null } } : r
-      )
+    ? rows.map((r) => ({
+        ...r,
+        // คง order_item_id / preorder_order_item_id เป็น id (หน้าเว็บใช้เทียบว่ารายการไหนรีวิวแล้ว) · รายละเอียดอยู่ใน source
+        order_item_id: r.order_item_id?._id ?? r.order_item_id ?? null,
+        preorder_order_item_id: r.preorder_order_item_id?._id ?? r.preorder_order_item_id ?? null,
+        source: reviewSource(r),
+        shop_reply: r.shop_reply ? { text: r.shop_reply.text ?? "", replied_at: r.shop_reply.replied_at ?? null } : null,
+      }))
     : rows;
   return { items, meta: buildMeta(total, query.pagination) };
 }

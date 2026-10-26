@@ -70,7 +70,7 @@ describe("ข้อมูลร้าน", () => {
       location: { latitude: 17.878, longitude: 102.742 },
     });
     expect(info.weekly_markets).toEqual([
-      { name: "ถนนคนเดิน", location: "หน้าศาลากลาง", days: ["fri", "sat"], open_time: "17:00", close_time: "22:00", map_url: "" },
+      { name: "ถนนคนเดิน", location: "หน้าศาลากลาง", days: ["fri", "sat"], open_time: "17:00", close_time: "22:00", map_url: "", is_main: true },
     ]);
     expect(JSON.stringify(info)).not.toContain("0812345678");
 

@@ -14,8 +14,11 @@ const customerNotificationSchema = new mongoose.Schema(
     // ลิงก์ภายในเว็บ (path) เช่น /customer/account/purchases/<id>
     link: { type: String, default: null },
     // อ้างอิงคำสั่งซื้อที่เกี่ยวข้อง (ไว้ตรวจสอบย้อนหลัง)
-    ref_type: { type: String, enum: ["order", "preorder", "coupon", "bundle", "preorder_round", "review", null], default: null },
+    // promotion = โค้ดส่วนลดใหม่ที่ประกาศให้ลูกค้าทุกคน (couponNoticeService — ลบโค้ดแล้วซ่อนตาม ref_id)
+    ref_type: { type: String, enum: ["order", "preorder", "coupon", "promotion", "bundle", "preorder_round", "review", null], default: null },
     ref_id: { type: mongoose.Schema.Types.ObjectId, default: null },
+    // รหัสโค้ด/คูปอง — หน้าเว็บแสดงพร้อมปุ่มคัดลอก (แจ้งเตือนคูปอง)
+    coupon_code: { type: String, default: null },
     // เวลาที่เริ่มแสดงให้ลูกค้าเห็น — ปกติ = ตอนสร้าง · รอบพรีออเดอร์ที่ยังไม่เปิดรับ = วันเวลาเปิดรับ (บันทึกล่วงหน้า)
     // เอกสารเก่าที่ไม่มี field นี้ถือว่าแสดงตั้งแต่ created_at
     visible_at: { type: Date, default: () => new Date() },

@@ -31,6 +31,9 @@ const weeklyMarketSchema = new mongoose.Schema(
     close_time: { type: String, default: "22:00", match: /^([01]\d|2[0-3]):[0-5]\d$/ },
     map_url: { type: String, default: "", trim: true }, // ลิงก์ Google Maps (ไม่บังคับ)
     is_active: { type: Boolean, default: true }, // ปิดไว้ = ไม่แสดงให้ลูกค้าเห็น (เช่น งดออกร้านชั่วคราว)
+    // หน้าร้านหลัก (มีได้ 1 แห่ง · อยู่ลำดับแรกเสมอ) — เดิม schema ไม่มี field นี้ บันทึกทีไรค่าที่ระบบเดิม (FrontOffice)
+    // เขียนไว้หาย หน้าร้านหลักจึงตกไปลำดับ 2 และระบบที่อ่านเวลาเปิดจากหน้าร้านหลักไปใช้เวลาเก่า (ตั้งวัน-เวลาไม่ติด)
+    is_main: { type: Boolean, default: false },
   }
 );
 

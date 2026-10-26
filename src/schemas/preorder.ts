@@ -30,6 +30,8 @@ export const createPreorderBody = z
     delivery_address: deliveryAddress.nullish(),
     // คูปองของฉัน (แลกด้วยแต้ม — ใช้ร่วมกับโค้ดส่วนลดไม่ได้) + ใช้แต้มเป็นส่วนลด (customer-backend-merge.md §8.11)
     user_coupon_id: objectId.nullish(),
+    // โค้ดส่วนลด (กรอกเอง) — ใช้แทนคูปองของฉัน ใช้พร้อมกันไม่ได้ · ตัดช่องว่าง/ตัวพิมพ์ใหญ่ที่ promotionService
+    promotion_code: z.string().trim().min(1).max(60).nullish(),
     points_to_redeem: z.number().int().min(0).max(1_000_000).nullish(),
     // takeaway: จุดรับ + วันรับ (ไม่บังคับ — ส่งมาแล้วตรวจกับหน้าร้านประจำสัปดาห์ · docs/customer-backend-merge.md §8.7)
     pickup_location_id: objectId.nullish(),
@@ -43,6 +45,10 @@ export const createPreorderBody = z
   .refine((d) => !d.address_id || Boolean(d.recipient_name && d.recipient_phone), {
     message: "ใช้ address_id ต้องระบุ recipient_name และ recipient_phone มาด้วย",
     path: ["recipient_name"],
+  })
+  .refine((d) => !(d.user_coupon_id && d.promotion_code), {
+    message: "ใช้คูปองของฉันกับโค้ดส่วนลดพร้อมกันไม่ได้ — เลือกอย่างใดอย่างหนึ่ง",
+    path: ["promotion_code"],
   });
 export type CreatePreorderBody = z.infer<typeof createPreorderBody>;
 
