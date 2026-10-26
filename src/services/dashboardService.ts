@@ -151,46 +151,71 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
 }
 
 // ── ยอดขายรายวัน ───────────────────────────────────────────
+// แต่ละวันมี channels แยกตามช่องทาง (กติกาเดียวกับ revenueByChannel — ออเดอร์ดูจาก prefix ของ order_no · พรีออเดอร์ = preorder)
+// ให้แดชบอร์ดวาดกราฟแท่งซ้อนสีได้ · revenue/orders เดิมยังเป็นยอดรวมทุกช่องทาง
+type ChannelTotals = Record<RevenueChannel, { revenue: number; orders: number }>;
+const emptyChannelTotals = (): ChannelTotals => ({
+  web: { revenue: 0, orders: 0 },
+  pos: { revenue: 0, orders: 0 },
+  preorder: { revenue: 0, orders: 0 },
+  other: { revenue: 0, orders: 0 },
+});
+
 export async function salesByDay(opts: { days?: number } = {}) {
   await dbConnect();
   const days = Math.min(180, Math.max(1, Number(opts.days) || 30));
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-  const perSource = await Promise.all(
+  type DayRow = { _id: { date: string; prefix: string | null }; revenue: number; orders: number; channel: RevenueChannel };
+  const perSource: DayRow[][] = await Promise.all(
     SOURCE_KEYS.map((key) =>
       SOURCES[key].model.aggregate([
         { $match: { deleted_at: null, ...SOLD, created_at: { $gte: since } } },
         {
           $group: {
-            _id: { $dateToString: { format: "%Y-%m-%d", date: "$created_at", timezone: "Asia/Bangkok" } },
+            _id: {
+              date: { $dateToString: { format: "%Y-%m-%d", date: "$created_at", timezone: "Asia/Bangkok" } },
+              // 4 ตัวแรกของเลขออเดอร์ (ORD- / POS- / …) — orderChannelOf แปลงเป็นช่องทาง · พรีออเดอร์ไม่ต้องใช้
+              prefix: key === "orders" ? { $substrCP: [{ $ifNull: ["$order_no", ""] }, 0, 4] } : null,
+            },
             revenue: { $sum: "$total_amount" },
             orders: { $sum: 1 },
           },
         },
-      ]) as Promise<Array<{ _id: string; revenue: number; orders: number }>>
+      ]).then((rows: Omit<DayRow, "channel">[]) =>
+        rows.map((r): DayRow => ({ ...r, channel: key === "preorders" ? "preorder" : orderChannelOf(r._id.prefix) }))
+      )
     )
   );
 
-  const byDate = new Map<string, { revenue: number; orders: number }>();
+  const byDate = new Map<string, ChannelTotals>();
   for (const rows of perSource) {
     for (const r of rows) {
-      const cur = byDate.get(r._id) ?? { revenue: 0, orders: 0 };
-      cur.revenue += r.revenue;
-      cur.orders += r.orders;
-      byDate.set(r._id, cur);
+      const totals = byDate.get(r._id.date) ?? emptyChannelTotals();
+      totals[r.channel].revenue += r.revenue;
+      totals[r.channel].orders += r.orders;
+      byDate.set(r._id.date, totals);
     }
   }
 
+  const CHANNELS = Object.keys(emptyChannelTotals()) as RevenueChannel[];
   return {
     from: bangkokDateString(since),
     to: bangkokDateString(new Date()),
     series: [...byDate.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, v]) => ({
-        date,
-        revenue: round2(toBaht(v.revenue)), // บาท ปัด 2 ตำแหน่ง
-        orders: v.orders, // รวมออเดอร์ปกติ + พรีออเดอร์
-      })),
+      .map(([date, totals]) => {
+        const revenue = CHANNELS.reduce((s, ch) => s + totals[ch].revenue, 0);
+        const orders = CHANNELS.reduce((s, ch) => s + totals[ch].orders, 0);
+        return {
+          date,
+          revenue: round2(toBaht(revenue)), // บาท ปัด 2 ตำแหน่ง
+          orders, // รวมออเดอร์ปกติ + พรีออเดอร์
+          channels: Object.fromEntries(
+            CHANNELS.map((ch) => [ch, { revenue: round2(toBaht(totals[ch].revenue)), orders: totals[ch].orders }])
+          ) as ChannelTotals,
+        };
+      }),
   };
 }
 
