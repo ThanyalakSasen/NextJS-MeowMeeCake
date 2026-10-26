@@ -79,6 +79,7 @@ GOOGLE_CLIENT_ID=556882585770-xxxxxxxx.apps.googleusercontent.com
 | `LINE_AUTH_CALLBACK_URL`, `LINE_AUTH_RETURN_URL` | ล็อกอินด้วย LINE จาก frontend แยก origin (`GET /api/auth/line` → `/api/auth/line/callback` → ตั้ง cookie `session` → กลับหน้า `/login/line` ของ frontend) · callback ต้องลงทะเบียนเพิ่มใน LINE Developers Console · ไม่ตั้ง = ปิด (400) — `src/lib/lineLogin.ts` |
 | `ADMIN_APP_URL` | ไม่บังคับ — URL เว็บหลังร้าน (เช่น `https://app.example.com`) · ตั้งแล้วข้อความ LINE ถึงเจ้าของร้านแนบลิงก์ `🔗` ไปหน้าออเดอร์/สินค้า/วัตถุดิบที่เกี่ยวข้อง · ไม่ตั้ง = ไม่แนบ (docs/LINE.md §9.12) |
 | `LINE_NOTIFY_POS_ORDERS` | `true` = ออเดอร์หน้าร้าน (POS) ส่ง LINE หาเจ้าของร้านด้วย · ไม่ตั้ง = บันทึกในหน้าแจ้งเตือนเว็บอย่างเดียว — ดู [`LINE.md`](LINE.md) §9.5 |
+| `LINE_NOTIFY_NEW_ORDERS` | `true` = "ออเดอร์ใหม่/พรีออเดอร์ใหม่" ส่ง LINE หาเจ้าของร้านด้วย (POS ต้องตั้ง `LINE_NOTIFY_POS_ORDERS` ด้วย) · ไม่ตั้ง = หน้าแจ้งเตือนเว็บอย่างเดียว — ดู [`LINE.md`](LINE.md) §9.15 |
 | `LINE_OWNER_QUOTA_RESERVE` | จำนวนข้อความ LINE ที่กันไว้ให้เจ้าของร้านต่อเดือน (ค่าเริ่มต้น 30) — โควตาเหลือเท่านี้แล้วหยุดส่งหาลูกค้า — ดู [`LINE.md`](LINE.md) §9.6 |
 | `CRON_SECRET` | secret ของ `/api/cron/*` (header `Authorization: Bearer …`) · ไม่ตั้ง = ปิด endpoint — ดู [`LINE.md`](LINE.md) §9.7 |
 | `PREORDER_REMINDER_DAYS_BEFORE` | เตือนลูกค้าก่อนวันรับพรีออเดอร์กี่วัน (ค่าเริ่มต้น 1 · 0 = วันรับ) — ดู [`LINE.md`](LINE.md) §9.7 |

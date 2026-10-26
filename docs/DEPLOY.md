@@ -145,6 +145,7 @@ CRON_SECRET=<สุ่มใหม่>
 # PREORDER_REMINDER_DAYS_BEFORE=       (1)
 # LINE_OWNER_QUOTA_RESERVE=            (30)
 # LINE_NOTIFY_POS_ORDERS=              (ไม่ส่ง LINE ออเดอร์หน้าร้าน)
+# LINE_NOTIFY_NEW_ORDERS=              (ไม่ส่ง LINE "ออเดอร์ใหม่" — ได้ LINE ตอนสลิปเข้าแทน)
 # GOOGLE_CLIENT_ID= · EMAIL_SERVICE= · EMAIL_USER= · EMAIL_PASS=
 ```
 

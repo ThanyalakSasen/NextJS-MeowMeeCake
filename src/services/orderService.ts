@@ -526,6 +526,7 @@ async function persistOrder(
   // แจ้งเตือนออเดอร์ใหม่ (DB + LINE) — best-effort ไม่ทำให้สร้างออเดอร์ล้มเหลวถ้าแจ้งเตือนพัง
   // ออเดอร์หน้าร้าน (POS-) บันทึกในหน้าแจ้งเตือนเสมอ แต่ push LINE เฉพาะเมื่อตั้ง LINE_NOTIFY_POS_ORDERS=true
   // (พนักงานคีย์เองอยู่หน้าร้าน ร้านขายเยอะ LINE เจ้าของจะเด้งทุกบิล — docs/LINE.md §9.5)
+  // ออเดอร์เว็บก็ไม่ push LINE เว้นแต่ตั้ง LINE_NOTIFY_NEW_ORDERS=true — ประหยัดโควตา ร้านได้ LINE ตอนสลิปเข้าแทน (§9.15)
   const isPos = orderNoPrefix(opts.channel) === "POS";
   notificationService
     .notify({
@@ -534,17 +535,14 @@ async function persistOrder(
       module: "order",
       type: "info",
       link: adminLinks.order(order._id),
-      line: !isPos || process.env.LINE_NOTIFY_POS_ORDERS === "true",
+      line: process.env.LINE_NOTIFY_NEW_ORDERS === "true" && (!isPos || process.env.LINE_NOTIFY_POS_ORDERS === "true"),
     })
     .catch((err) => log.error("order.notify_failed", { order_id: String(order._id), err }));
 
-  // แจ้งลูกค้าทาง LINE (ถ้าผูกบัญชีไว้) — เฉพาะออเดอร์จากเว็บ หน้าร้าน (POS) ลูกค้ายืนอยู่ตรงนั้นแล้ว
+  // แจ้งลูกค้า — กระดิ่งในเว็บอย่างเดียว (ไม่ส่ง LINE "ได้รับออเดอร์" — ลูกค้าเห็นในหน้าเว็บทันทีอยู่แล้ว §9.15)
+  // เฉพาะออเดอร์จากเว็บ หน้าร้าน (POS) ลูกค้ายืนอยู่ตรงนั้นแล้ว
   if (!isPos) {
-    notifyCustomerLater(
-      userId,
-      customerMessages.created("order", order.order_no, total_amount),
-      customerWeb.created("order", order._id, order.order_no, total_amount)
-    );
+    notifyCustomerLater(userId, null, customerWeb.created("order", order._id, order.order_no, total_amount));
   }
 
   return presentOrderWithItems(

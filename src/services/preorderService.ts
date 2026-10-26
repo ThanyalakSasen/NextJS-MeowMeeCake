@@ -447,7 +447,8 @@ export async function createPreorder(
     // ทุกขั้นสำเร็จ → ทิ้ง undo ก่อนอ่านผลลัพธ์ (getPreorderById อาจ throw โดยไม่ต้อง rollback)
     saga.commit();
 
-    // แจ้งเจ้าของร้าน (DB + LINE) — คู่กับ orderService.persistOrder · best-effort ไม่ทำให้สร้างพรีออเดอร์ล้มเหลว
+    // แจ้งเจ้าของร้าน — คู่กับ orderService.persistOrder · best-effort ไม่ทำให้สร้างพรีออเดอร์ล้มเหลว
+    // push LINE เฉพาะเมื่อตั้ง LINE_NOTIFY_NEW_ORDERS=true (ประหยัดโควตา ร้านได้ LINE ตอนสลิปเข้าแทน — docs/LINE.md §9.15)
     // link → หน้าพรีออเดอร์ (เปิด drawer ด้วย ?id= — frontend PR #16)
     notificationService
       .notify({
@@ -456,13 +457,11 @@ export async function createPreorder(
         module: "order",
         type: "info",
         link: adminLinks.preorder(preorder._id),
+        line: process.env.LINE_NOTIFY_NEW_ORDERS === "true",
       })
       .catch((err) => log.error("preorder.notify_failed", { preorder_id: String(preorder._id), err }));
-    notifyCustomerLater(
-      userId,
-      customerMessages.created("preorder", preorder.preorder_no, total_amount),
-      customerWeb.created("preorder", preorder._id, preorder.preorder_no, total_amount)
-    );
+    // ลูกค้า — กระดิ่งในเว็บอย่างเดียว (ไม่ส่ง LINE "ได้รับพรีออเดอร์" §9.15)
+    notifyCustomerLater(userId, null, customerWeb.created("preorder", preorder._id, preorder.preorder_no, total_amount));
     return getPreorderById(String(preorder._id));
   } catch (err) {
     await saga.rollback();
