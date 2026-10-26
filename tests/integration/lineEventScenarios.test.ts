@@ -51,6 +51,8 @@ async function placeOrder(uid: string, channel: "online" | "instore" = "online")
     storefront: channel === "online",
     items: [{ product_id: String(p._id), quantity: 1 }],
   })) as { _id: unknown; order_no: string; total_amount: number };
+  // ให้ข้อความ "ได้รับออเดอร์" ยิงเสร็จก่อนเหตุการณ์ถัดไป — งานเบื้องหลังวิ่งพร้อมกัน ลำดับที่ยิงไม่แน่นอน (CI ช้ากว่าเครื่อง)
+  await flushBackground();
   return { order, id: String(order._id) };
 }
 
@@ -155,6 +157,7 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
 
     await orderService.setPaymentStatus(id, "paid");
     expect((await orderModel.findById(id).lean<{ order_status: string }>())?.order_status).toBe("confirmed");
+    await flushBackground(); // ให้ "ชำระเงินสำเร็จ" ยิงก่อน "คืนเงิน" — ตรวจตามลำดับด้านล่าง
     await orderService.setPaymentStatus(id, "refunded");
 
     const msgs = await settled(c.lineId);
