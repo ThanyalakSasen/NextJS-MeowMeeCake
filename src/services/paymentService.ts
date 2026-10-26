@@ -20,6 +20,7 @@ import preorderModel from "../models/preorderModel";
 import userModel from "../models/userModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
+import { trackBackground } from "../lib/backgroundTasks";
 import * as orderService from "./orderService";
 import * as preorderService from "./preorderService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
@@ -313,21 +314,24 @@ export async function submitSlip(
 
   // แจ้งเตือนสลิปเข้าใหม่ (DB + LINE) — best-effort ไม่ทำให้แนบสลิปล้มเหลวถ้าแจ้งเตือนพัง
   // หัวข้อแสดงเลขเอกสารที่คนอ่านรู้เรื่อง (ORD-/POS-/PRE-…) ไม่ใช่ ObjectId — หาเลขหลังตอบลูกค้าแล้ว (ไม่หน่วง response)
-  paymentDocNo(payment)
-    .then((docNo) =>
-      notificationService.notify({
-        title: "มีคำสั่งซื้อรอตรวจสอบสลิปโอนเงิน รหัสคำสั่งซื้อ " + docNo,
-        message: `ยอด ${toBaht(payment.amount).toLocaleString("th-TH")} บาท`,
-        module: "finance",
-        type: "info",
-        link: payment.order_id
-          ? adminLinks.order(payment.order_id)
-          : payment.preorder_id
-            ? adminLinks.preorder(payment.preorder_id)
-            : null,
-      })
-    )
-    .catch((err) => log.error("payment.notify_failed", { payment_id: String(payment._id), err }));
+  // ลงทะเบียนทั้ง chain เป็นงานเบื้องหลัง — notify() เกิดหลังหาเลขเอกสาร ถ้าไม่ครอบ flushBackground() จะไม่รอขั้นนี้
+  void trackBackground(
+    paymentDocNo(payment)
+      .then((docNo) =>
+        notificationService.notify({
+          title: "มีคำสั่งซื้อรอตรวจสอบสลิปโอนเงิน รหัสคำสั่งซื้อ " + docNo,
+          message: `ยอด ${toBaht(payment.amount).toLocaleString("th-TH")} บาท`,
+          module: "finance",
+          type: "info",
+          link: payment.order_id
+            ? adminLinks.order(payment.order_id)
+            : payment.preorder_id
+              ? adminLinks.preorder(payment.preorder_id)
+              : null,
+        })
+      )
+      .catch((err) => log.error("payment.notify_failed", { payment_id: String(payment._id), err }))
+  );
 
   return presentPayment(payment.toObject());
 }
