@@ -1,6 +1,8 @@
 /**
  * POST /api/shop/promotions/validate — ลูกค้าเช็คโค้ดโปรโมชันกับตะกร้าปัจจุบัน ก่อนกดสั่งซื้อ
  *   body: { code | promotion_id, delivery_fee? }
+ *         + lines?: [{ product_id, quantity, line_total }] — หน้าชำระพรีออเดอร์ (ไม่มีตะกร้า) · ยอดเป็นแค่ตัวอย่าง
+ *           ตอนสร้างพรีออเดอร์คิดใหม่จากราคาในรอบเสมอ
  *   สำเร็จ → { discount_amount, discount_type, free_shipping, eligible_amount, promotion_code }
  *   ไม่ผ่านเงื่อนไข → 422 พร้อมข้อความอธิบาย
  *   rate-limit 20 ครั้ง/นาที ต่อ IP — กันเดารหัสโปรโมชัน (enumeration) เหมือนที่กันเดารหัสผ่านที่ /auth/login
@@ -16,6 +18,16 @@ export const POST = withAuth(async (session, req) => {
   await rateLimit(clientIp(req), "promotions:validate", { limit: 20, windowMs: 60_000 });
   const body = await req.json();
   if (!body.code && !body.promotion_id) throw badRequest("กรุณาระบุ code หรือ promotion_id");
+  if (Array.isArray(body.lines)) {
+    if (!body.code) throw badRequest("กรุณากรอกโค้ดส่วนลด");
+    return ok(
+      await promotionService.previewForLines(session.user_id, {
+        code: body.code,
+        lines: body.lines.slice(0, 100),
+        delivery_fee: body.delivery_fee,
+      })
+    );
+  }
   const result = await promotionService.previewForCart(session.user_id, {
     code: body.code,
     promotion_id: body.promotion_id,

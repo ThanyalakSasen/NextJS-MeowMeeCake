@@ -4,8 +4,8 @@ import roleModel from "@/models/roleModel";
 import { USER_HEADER, type SessionUser } from "@/lib/session";
 import { createPermission } from "@/services/permissionService";
 import * as shippingService from "@/services/shippingService";
-import { GET as listGET } from "@/app/api/admin/shipping-zones/route";
-import { PATCH as zonePATCH } from "@/app/api/admin/shipping-zones/[zone_code]/route";
+import { GET as listGET, POST as listPOST } from "@/app/api/admin/shipping-zones/route";
+import { DELETE as zoneDELETE, PATCH as zonePATCH } from "@/app/api/admin/shipping-zones/[zone_code]/route";
 import { makeUser } from "./helpers";
 
 /**
@@ -13,10 +13,13 @@ import { makeUser } from "./helpers";
  * เดิมมีแค่ GET /catalog/shipping-zones (อ่านอย่างเดียว) — แก้ได้ทาง DB เท่านั้น
  */
 
-async function sessionFor(roleType: "owner" | "staff", perms: { can_view?: boolean; can_update?: boolean } = {}) {
+async function sessionFor(
+  roleType: "owner" | "staff",
+  perms: { can_view?: boolean; can_create?: boolean; can_update?: boolean; can_delete?: boolean } = {}
+) {
   const role = await roleModel.create({ role_name: `${roleType}-${Math.random()}`, role_type: roleType });
   const user = await makeUser({ role_id: role._id });
-  if (roleType === "staff" && (perms.can_view || perms.can_update)) {
+  if (roleType === "staff" && Object.values(perms).some(Boolean)) {
     await createPermission({ role_id: String(role._id), menu_key: "shipping", granted_by: String(user._id), ...perms });
   }
   const session: SessionUser = {
@@ -47,6 +50,21 @@ async function patch(session: SessionUser, code: string, body: unknown) {
     { params: Promise.resolve({ zone_code: code }) }
   );
   return { status: res.status, body: await res.json() };
+}
+
+async function post(session: SessionUser, body: unknown) {
+  const res = await listPOST(
+    new NextRequest("http://localhost:3000/api/admin/shipping-zones", { method: "POST", headers: headers(session), body: JSON.stringify(body) })
+  );
+  return { status: res.status, body: res.status === 204 ? null : await res.json() };
+}
+
+async function del(session: SessionUser, code: string) {
+  const res = await zoneDELETE(
+    new NextRequest(`http://localhost:3000/api/admin/shipping-zones/${code}`, { method: "DELETE", headers: headers(session) }),
+    { params: Promise.resolve({ zone_code: code }) }
+  );
+  return { status: res.status, body: res.status === 204 ? null : await res.json() };
 }
 
 describe("GET /api/admin/shipping-zones", () => {
@@ -111,5 +129,51 @@ describe("PATCH /api/admin/shipping-zones/:zone_code", () => {
   it("พนักงาน: มีแค่ store_info.view → 403 · มี update → 200", async () => {
     expect((await patch(await sessionFor("staff", { can_view: true }), "A", { fee: 50 })).status).toBe(403);
     expect((await patch(await sessionFor("staff", { can_view: true, can_update: true }), "A", { fee: 50 })).status).toBe(200);
+  });
+});
+
+describe("POST /api/admin/shipping-zones (เพิ่มโซน)", () => {
+  it("ได้รหัสถัดไป (E) · ค่าส่งของจังหวัดในโซนใหม่เปลี่ยนตาม", async () => {
+    const owner = await sessionFor("owner");
+    const res = await post(owner, { zone_label: "Zone E — กรุงเทพฯ", fee: 90.555, provinces: ["กรุงเทพมหานคร"] });
+    expect(res.status).toBe(201);
+    expect(res.body.data).toMatchObject({ zone_code: "E", zone_label: "Zone E — กรุงเทพฯ", fee: 90.56, provinces: ["กรุงเทพมหานคร"] });
+
+    // โซน D (จังหวัดอื่นทั้งหมด) อยู่ท้ายรายการเสมอ
+    expect((await list(owner)).body.data.items.map((z: { zone_code: string }) => z.zone_code)).toEqual(["A", "B", "C", "E", "D"]);
+
+    const quote = await shippingService.quoteStorefrontDelivery({ province: "กรุงเทพมหานคร", productIds: [] });
+    expect(quote).toMatchObject({ zone_code: "E", fee: 90.56 });
+    expect((await post(owner, { zone_label: "อีกโซน", fee: 10, provinces: ["ภูเก็ต"] })).body.data.zone_code).toBe("F");
+  });
+
+  it("จังหวัดซ้ำโซนอื่น → 409 · ไม่มีจังหวัด/ชื่อว่าง → 400", async () => {
+    const owner = await sessionFor("owner");
+    const clash = await post(owner, { zone_label: "ซ้ำ", fee: 10, provinces: ["หนองคาย"] });
+    expect(clash.status).toBe(409);
+    expect(clash.body.error.message).toContain("หนองคาย (โซน A)");
+    expect((await post(owner, { zone_label: "ว่าง", fee: 10, provinces: [] })).status).toBe(400);
+    expect((await post(owner, { zone_label: " ", fee: 10, provinces: ["ภูเก็ต"] })).status).toBe(400);
+  });
+
+  it("พนักงาน: ไม่มีสิทธิ์ create → 403 · มี → 201", async () => {
+    expect((await post(await sessionFor("staff", { can_view: true }), { zone_label: "x", fee: 1, provinces: ["ภูเก็ต"] })).status).toBe(403);
+    expect((await post(await sessionFor("staff", { can_view: true, can_create: true }), { zone_label: "x", fee: 1, provinces: ["ภูเก็ต"] })).status).toBe(201);
+  });
+});
+
+describe("DELETE /api/admin/shipping-zones/:zone_code (ลบโซน)", () => {
+  it("ลบโซนได้ → จังหวัดของโซนนั้นไปใช้โซน D · ลบซ้ำ = 404", async () => {
+    const owner = await sessionFor("owner");
+    await post(owner, { zone_label: "Zone E", fee: 90, provinces: ["กรุงเทพมหานคร"] });
+    expect((await del(owner, "e")).status).toBe(204);
+    expect((await shippingService.quoteStorefrontDelivery({ province: "กรุงเทพมหานคร", productIds: [] })).zone_code).toBe("D");
+    expect((await del(owner, "E")).status).toBe(404);
+  });
+
+  it("โซน D ลบไม่ได้ (400) · พนักงานไม่มีสิทธิ์ delete → 403", async () => {
+    const owner = await sessionFor("owner");
+    expect((await del(owner, "D")).status).toBe(400);
+    expect((await del(await sessionFor("staff", { can_view: true }), "A")).status).toBe(403);
   });
 });

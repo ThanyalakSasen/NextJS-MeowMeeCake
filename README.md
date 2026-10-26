@@ -28,6 +28,8 @@
 - **สรุปรวมการแก้บั๊กความถูกต้องข้อมูล 2.8–2.11 → [`docs/data-integrity-fixes.md`](docs/data-integrity-fixes.md)**
 - **บันทึกกิจกรรมผู้ใช้ (audit log) → [`docs/auditLog.md`](docs/auditLog.md)**
 - **ระบบพรีออเดอร์ (รอบ / โควตา / API) → [`docs/preorder.md`](docs/preorder.md)**
+- **แชทลูกค้า ↔ ร้าน (chatconversations / chatmessages · แทนฟอร์มส่งข้อความหาเรา) → [`docs/chat.md`](docs/chat.md)**
+- **คูปอง/โค้ดส่วนลด (แจ้งเตือนในเว็บ · กันเกินโควตา · บั๊กส่วนลด · โค้ดในพรีออเดอร์) + หน้าร้านหลัก is_main → [`docs/promo-fixes.md`](docs/promo-fixes.md)**
 - **สิ่งที่ต้องแก้ไข / ปรับ / บั๊ก + Migration checklist → [`docs/BACKLOG.md`](docs/BACKLOG.md)**
 - **บั๊ก/ความเสี่ยงชุดใหม่ที่พบหลังปิด BACKLOG.md (แก้แล้ว) → [`docs/BACKLOG2.md`](docs/BACKLOG2.md)**
 - **Clean code: reuse/simplification/efficiency (ไม่ใช่บั๊ก) → [`docs/BACKLOG3.md`](docs/BACKLOG3.md)**

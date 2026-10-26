@@ -24,6 +24,9 @@ import * as promotionUsageService from "./promotionUsageService";
 import * as cartService from "./cartService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { GUEST_CUSTOMER_EMAIL } from "../lib/posGuest";
+import { channelMismatchMessage, channelsOf, normalizePromoCode, positiveLimit } from "../lib/promoCode";
+import { isObjectId } from "../lib/objectId";
+import { notifyCustomersOfNewCode, hidePromotionNotices, restorePromotionNotices } from "./couponNoticeService";
 import type { z } from "zod";
 import type { promotionCreate, promotionUpdate } from "../schemas/promotion";
 
@@ -59,7 +62,7 @@ export async function createPromotion(input: CreatePromotionInput, createdBy: st
   // ปัด 2 ตำแหน่งก่อนเก็บ — discount_value ปัดเฉพาะตอน Amount (Percentage เป็นเปอร์เซ็นต์ ไม่ใช่เงิน)
   const payload: Record<string, unknown> = {
     ...input,
-    promotion_code: input.promotion_code.trim().toUpperCase(),
+    promotion_code: normalizePromoCode(input.promotion_code),
     discount_value:
       input.discount_type === "Amount" ? toSatang(Number(input.discount_value)) : input.discount_value,
     min_order_amount:
@@ -73,6 +76,8 @@ export async function createPromotion(input: CreatePromotionInput, createdBy: st
 
   try {
     const doc = await promotionModel.create(payload);
+    // โค้ดใหม่ที่ลูกค้าเว็บใช้ได้ → กระดิ่งในเว็บของลูกค้าพร้อมรหัส (ไม่ใช้โควตา LINE · couponNoticeService)
+    notifyCustomersOfNewCode(doc.toObject());
     return presentPromotion(doc.toObject());
   } catch (err: any) {
     if (err?.code === 11000) throw conflict("รหัสโปรโมชันนี้ถูกใช้แล้ว");
@@ -133,7 +138,7 @@ export async function updatePromotion(id: string, input: UpdatePromotionInput) {
   assertObjectId(id);
   const payload: Record<string, any> = { ...input };
   if (payload.promotion_code) {
-    payload.promotion_code = String(payload.promotion_code).trim().toUpperCase();
+    payload.promotion_code = normalizePromoCode(payload.promotion_code);
   }
 
   // discount_value เป็นเงินเฉพาะตอน discount_type === "Amount" — ถ้าไม่ได้ส่ง discount_type มาด้วย
@@ -180,11 +185,14 @@ export async function deletePromotion(id: string) {
   const doc = await softDeleteDoc(promotionModel, id, {
     notFoundMsg: "ไม่พบโปรโมชันที่ระบุ หรือถูกลบไปแล้ว",
   });
+  // ลบโค้ด → ซ่อนแจ้งเตือน "โค้ดใหม่" ที่ส่งให้ลูกค้าไปแล้ว (กดคัดลอกไปใช้ไม่ได้อยู่ดี)
+  await hidePromotionNotices(id);
   return presentPromotion(doc);
 }
 
 export async function restorePromotion(id: string) {
   const doc = await restoreDoc(promotionModel, id, { notFoundMsg: "ไม่พบโปรโมชันที่ถูกลบไว้" });
+  await restorePromotionNotices(id);
   return presentPromotion(doc);
 }
 
@@ -216,11 +224,17 @@ export async function validateForOrder(input: ValidateForOrderInput): Promise<Di
     assertObjectId(input.promotion_id, "promotion_id");
     q._id = input.promotion_id;
   } else {
-    q.promotion_code = String(input.code).trim().toUpperCase();
+    q.promotion_code = normalizePromoCode(input.code);
+    if (!q.promotion_code) throw badRequest("กรุณากรอกโค้ดส่วนลด");
   }
 
   const promo = await promotionModel.findOne(q).lean<any>();
   if (!promo) throw notFound("ไม่พบโปรโมชันนี้");
+
+  // ช่องทางก่อนเงื่อนไขอื่น — โค้ดหน้าร้านที่กรอกในเว็บต้องบอก "ใช้ได้เฉพาะที่หน้าร้าน" เสมอ
+  // (เดิมตรวจใน discountEngine หลังวันที่/โควตา โค้ดหน้าร้านที่หมดอายุหรือเต็มแล้วขึ้นข้อความอื่น ลูกค้าเข้าใจผิดว่าลองใหม่ได้)
+  const channel = input.channel ?? "online";
+  if (!channelsOf(promo).includes(channel)) throw unprocessable(channelMismatchMessage(channelsOf(promo)));
 
   if (promo.is_active === false) throw unprocessable("โปรโมชันนี้ถูกปิดใช้งาน");
   // โปรที่แลกด้วยแต้ม ใช้ผ่าน "คูปองของฉัน" เท่านั้น (couponService · customer-backend-merge.md §8.11)
@@ -236,19 +250,21 @@ export async function validateForOrder(input: ValidateForOrderInput): Promise<Di
     throw unprocessable("โปรโมชันนี้หมดอายุแล้ว");
   }
 
-  if (promo.usage_limit != null && (promo.used_count ?? 0) >= promo.usage_limit) {
+  const usageLimit = positiveLimit(promo.usage_limit);
+  if (usageLimit != null && (promo.used_count ?? 0) >= usageLimit) {
     throw unprocessable("โปรโมชันนี้ถูกใช้ครบจำนวนแล้ว");
   }
   // โปรเฉพาะสมาชิก — บัญชี "ลูกค้าทั่วไป" ของ POS ใช้ไม่ได้ (ลูกค้าหน้าเว็บมีบัญชีเสมอ = สมาชิก)
   if (promo.audience === "members" && (await isPosGuest(input.user_id))) {
     throw unprocessable("โปรโมชันนี้สำหรับสมาชิกเท่านั้น — ผูกบิลกับสมาชิกก่อนใช้");
   }
-  if (promo.max_user_per_user != null) {
+  const perUser = positiveLimit(promo.max_user_per_user);
+  if (perUser != null) {
     const used = await promotionUsageService.getUserUsageCount(
       String(promo._id),
       input.user_id
     );
-    if (used >= promo.max_user_per_user) {
+    if (used >= perUser) {
       throw unprocessable("คุณใช้สิทธิ์โปรโมชันนี้ครบจำนวนแล้ว");
     }
   }
@@ -258,7 +274,7 @@ export async function validateForOrder(input: ValidateForOrderInput): Promise<Di
     lines: input.lines,
     subtotal: input.subtotal,
     delivery_fee: input.delivery_fee,
-    channel: input.channel ?? "online",
+    channel,
   });
 }
 
@@ -302,5 +318,37 @@ export async function previewForCart(
     subtotal,
     delivery_fee: Math.max(0, Number(input.delivery_fee) || 0),
     channel: input.channel ?? "online",
+  });
+}
+
+/**
+ * พรีวิวส่วนลดจากรายการที่หน้าเว็บส่งมา (หน้าชำระพรีออเดอร์ — ไม่มีตะกร้า) · ยอดเป็นแค่ตัวอย่าง:
+ * ตอนสร้างพรีออเดอร์ backend คิดราคา/ส่วนลดจริงจากรอบอีกครั้งเสมอ (preorderService.createPreorder)
+ */
+export async function previewForLines(
+  userId: string,
+  input: { code?: string; lines: Array<{ product_id: string; quantity: number; line_total: number }>; delivery_fee?: number }
+): Promise<DiscountResult> {
+  await dbConnect();
+  const lines = (input.lines ?? []).filter((l) => l && typeof l.product_id === "string" && Number(l.quantity) > 0);
+  if (lines.length === 0) throw badRequest("ยังไม่มีรายการสินค้า");
+  const prods = await productModel
+    .find({ _id: { $in: [...new Set(lines.map((l) => l.product_id))].filter((id) => isObjectId(id)) } })
+    .select("category_id")
+    .lean<Array<{ _id: any; category_id?: any }>>();
+  const catByProduct = new Map(prods.map((p) => [String(p._id), p.category_id ? String(p.category_id) : null]));
+  const discountLines: DiscountLine[] = lines.map((l) => ({
+    product_id: l.product_id,
+    category_id: catByProduct.get(l.product_id) ?? null,
+    quantity: Number(l.quantity),
+    line_total: Math.max(0, Number(l.line_total) || 0),
+  }));
+  return validateForOrder({
+    code: input.code,
+    user_id: userId,
+    lines: discountLines,
+    subtotal: discountLines.reduce((s, l) => s + l.line_total, 0),
+    delivery_fee: Math.max(0, Number(input.delivery_fee) || 0),
+    channel: "online",
   });
 }

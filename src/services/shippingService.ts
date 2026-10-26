@@ -11,7 +11,7 @@ import mongoose from "mongoose";
 import dbConnect from "../lib/dbConnect";
 import { badRequest, conflict, notFound } from "../lib/httpError";
 import { round2 } from "../lib/money";
-import type { ShippingZoneUpdate } from "../schemas/shipping";
+import type { ShippingZoneCreate, ShippingZoneUpdate } from "../schemas/shipping";
 import shippingZoneModel from "../models/shippingZoneModel";
 import storeProfileModel from "../models/storeProfileModel";
 import storeSettingsModel from "../models/storeSettingsModel";
@@ -19,6 +19,8 @@ import productModel from "../models/productModel";
 import productCategoryModel from "../models/productCategoryModel";
 import {
   DEFAULT_SHIPPING_ZONES,
+  FALLBACK_ZONE_CODE,
+  nextZoneCode,
   categoryShipsNationwide,
   checkDeliveryArea,
   productShipsNationwide,
@@ -38,7 +40,7 @@ import {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // ── โซนค่าส่ง ────────────────────────────────────────────────
-/** โซนค่าส่งทั้งหมด (A–D) — ยังไม่มีใน DB เลย → สร้างชุดเริ่มต้นให้ (แบบเดียวกับฝั่งลูกค้า) */
+/** โซนค่าส่งทั้งหมด (เรียงตามรหัส) — ยังไม่มีใน DB เลย → สร้างชุดเริ่มต้น A–D ให้ (แบบเดียวกับฝั่งลูกค้า) */
 export async function getShippingZones(): Promise<ShippingZone[]> {
   await dbConnect();
   if ((await shippingZoneModel.countDocuments()) === 0) {
@@ -46,11 +48,13 @@ export async function getShippingZones(): Promise<ShippingZone[]> {
       if (err?.code !== 11000) throw err; // อีกคำขอ seed พร้อมกัน (zone_code unique)
     });
   }
-  return shippingZoneModel
+  const zones = await shippingZoneModel
     .find()
     .select("zone_code zone_label provinces fee")
     .sort({ zone_code: 1 })
     .lean<ShippingZone[]>();
+  // โซน D (จังหวัดอื่นทั้งหมด) อยู่ท้ายเสมอ — มีโซน E, F, … แล้วก็ยังอ่านเป็น "ที่เหลือ" ได้ถูก
+  return [...zones.filter((z) => z.zone_code !== FALLBACK_ZONE_CODE), ...zones.filter((z) => z.zone_code === FALLBACK_ZONE_CODE)];
 }
 
 /**
@@ -66,21 +70,16 @@ export async function updateShippingZone(
 ): Promise<{ before: ShippingZone; after: ShippingZone }> {
   const zones = await getShippingZones(); // seed ชุดเริ่มต้นให้ถ้ายังไม่มี
   const before = zones.find((z) => z.zone_code === zoneCode);
-  if (!before) throw notFound("ไม่พบโซนค่าส่ง (มีเฉพาะ A, B, C, D)");
+  if (!before) throw notFound("ไม่พบโซนค่าส่ง");
 
   const set: Partial<ShippingZone> = {};
   if (input.zone_label !== undefined) set.zone_label = input.zone_label;
   if (input.fee !== undefined) set.fee = round2(input.fee);
   if (input.provinces !== undefined) {
-    if (zoneCode === "D" && input.provinces.length > 0) {
+    if (zoneCode === FALLBACK_ZONE_CODE && input.provinces.length > 0) {
       throw badRequest("โซน D ใช้กับจังหวัดที่ไม่อยู่ในโซน A–C อัตโนมัติ — ใส่รายชื่อจังหวัดไม่ได้");
     }
-    const taken = new Map<string, string>();
-    for (const z of zones) if (z.zone_code !== zoneCode) for (const p of z.provinces) taken.set(p.trim(), z.zone_code);
-    const clashes = input.provinces.filter((p) => taken.has(p));
-    if (clashes.length > 0) {
-      throw conflict(`จังหวัดอยู่ในโซนอื่นแล้ว: ${clashes.map((p) => `${p} (โซน ${taken.get(p)})`).join(", ")} — เอาออกจากโซนเดิมก่อน`);
-    }
+    assertNoProvinceClash(zones, zoneCode, input.provinces);
     set.provinces = input.provinces;
   }
 
@@ -88,8 +87,56 @@ export async function updateShippingZone(
     .findOneAndUpdate({ zone_code: zoneCode }, { $set: set }, { returnDocument: "after", runValidators: true })
     .select("zone_code zone_label provinces fee")
     .lean<ShippingZone | null>();
-  if (!after) throw notFound("ไม่พบโซนค่าส่ง (มีเฉพาะ A, B, C, D)");
+  if (!after) throw notFound("ไม่พบโซนค่าส่ง");
   return { before, after };
+}
+
+/** จังหวัดเดียวกันอยู่ได้โซนเดียว — ชนกับโซนอื่น (ไม่นับ exceptCode) = 409 บอกชื่อจังหวัด + โซน */
+function assertNoProvinceClash(zones: ShippingZone[], exceptCode: string | null, provinces: string[]): void {
+  const taken = new Map<string, string>();
+  for (const z of zones) if (z.zone_code !== exceptCode) for (const p of z.provinces) taken.set(p.trim(), z.zone_code);
+  const clashes = provinces.filter((p) => taken.has(p));
+  if (clashes.length > 0) {
+    throw conflict(`จังหวัดอยู่ในโซนอื่นแล้ว: ${clashes.map((p) => `${p} (โซน ${taken.get(p)})`).join(", ")} — เอาออกจากโซนเดิมก่อน`);
+  }
+}
+
+/**
+ * เพิ่มโซนค่าส่ง (POST /api/admin/shipping-zones · 2026-10-26) — รหัสโซน = ตัวอักษรถัดไปที่ว่าง (ข้าม D)
+ * จังหวัดต้องไม่ซ้ำโซนอื่น (409) · ครบ 25 โซนแล้ว = 400
+ */
+export async function createShippingZone(input: ShippingZoneCreate): Promise<ShippingZone> {
+  const zones = await getShippingZones();
+  const code = nextZoneCode(zones.map((z) => z.zone_code));
+  if (!code) throw badRequest("เพิ่มโซนได้สูงสุด 25 โซน — ลบโซนที่ไม่ใช้ก่อน");
+  assertNoProvinceClash(zones, null, input.provinces);
+  try {
+    const doc = await shippingZoneModel.create({
+      zone_code: code,
+      zone_label: input.zone_label,
+      provinces: input.provinces,
+      fee: round2(input.fee),
+    });
+    const { zone_code, zone_label, provinces, fee } = doc.toObject();
+    return { zone_code, zone_label, provinces, fee };
+  } catch (err: any) {
+    if (err?.code === 11000) throw conflict("มีคนเพิ่มโซนพร้อมกัน — ลองใหม่อีกครั้ง");
+    throw err;
+  }
+}
+
+/** ลบโซนค่าส่ง (ลบจริง) — โซน D ลบไม่ได้ · จังหวัดของโซนที่ลบจะไปใช้ค่าส่งโซน D · คืนโซนก่อนลบให้ route เขียน audit log */
+export async function deleteShippingZone(zoneCode: string): Promise<ShippingZone> {
+  if (zoneCode === FALLBACK_ZONE_CODE) {
+    throw badRequest("โซน D (จังหวัดอื่นทั้งหมด) ลบไม่ได้ — แก้ได้เฉพาะชื่อและค่าส่ง");
+  }
+  await dbConnect();
+  const before = await shippingZoneModel
+    .findOneAndDelete({ zone_code: zoneCode })
+    .select("zone_code zone_label provinces fee")
+    .lean<ShippingZone | null>();
+  if (!before) throw notFound("ไม่พบโซนค่าส่ง");
+  return before;
 }
 
 export interface StorefrontDeliveryQuote {
@@ -125,8 +172,8 @@ export async function quoteStorefrontDelivery(input: {
 
   const fee = computeShippingFee(province, zones);
   const zone =
-    zones.find((z) => z.zone_code !== "D" && z.provinces.some((p) => p.trim() === province)) ??
-    zones.find((z) => z.zone_code === "D") ??
+    zones.find((z) => z.zone_code !== FALLBACK_ZONE_CODE && z.provinces.some((p) => p.trim() === province)) ??
+    zones.find((z) => z.zone_code === FALLBACK_ZONE_CODE) ??
     null;
   return { fee, zone_code: zone?.zone_code ?? null, zone_label: zone?.zone_label ?? null };
 }
@@ -175,16 +222,33 @@ async function marketsFromBusinessHours(profile: AnyDoc): Promise<AnyDoc[]> {
  * ย้ายเวลาทำการเดิมเข้า weekly_markets + ใส่ _id ให้รายการที่ไม่มี (ครั้งเดียว · idempotent — ตรงกับฝั่งลูกค้า
  * ensureWeeklyMarketsReady เพราะใช้ StoreProfile เอกสารเดียวกัน) แล้วคืนเอกสารล่าสุด
  */
+/** หน้าร้านหลัก (is_main) แห่งเดียว อยู่ลำดับแรก — ไม่มีธงเลย = รายการแรกที่เปิดแสดง (ตรงกับ storeService.withMainFirst) */
+function mainFirst(markets: AnyDoc[]): AnyDoc[] {
+  if (markets.length === 0) return markets;
+  let idx = markets.findIndex((m) => m.is_main === true);
+  if (idx < 0) idx = Math.max(0, markets.findIndex((m) => m.is_active !== false));
+  return [{ ...markets[idx], is_main: true }, ...markets.filter((_, i) => i !== idx).map((m) => ({ ...m, is_main: false }))];
+}
+
 export async function ensureWeeklyMarketsReady(): Promise<AnyDoc> {
   let profile = await storeProfileModel.findOne().lean<AnyDoc>();
   if (!profile) profile = (await storeProfileModel.create({})).toObject() as AnyDoc;
 
   const original = (profile.weekly_markets ?? []) as AnyDoc[];
-  const markets = original.map((m) => (m._id ? m : { ...m, _id: new mongoose.Types.ObjectId() }));
-  const missingIds = markets.some((m, i) => m !== original[i]);
+  const withIds = original.map((m) => (m._id ? m : { ...m, _id: new mongoose.Types.ObjectId() }));
+  // หน้าร้านหลัก 1 แห่ง อยู่ลำดับแรก — ข้อมูลเก่าที่ไม่มีธง: รายการที่ชื่อขึ้นต้น "หน้าร้าน" (ที่ระบบย้ายจากเวลาทำการเดิมสร้างให้) ไม่งั้นรายการแรก
+  if (withIds.length && !withIds.some((m) => m.is_main === true)) {
+    const guess = withIds.findIndex((m) => String(m.name ?? "").trim().startsWith("หน้าร้าน"));
+    if (guess >= 0) withIds[guess] = { ...withIds[guess], is_main: true };
+  }
+  const markets = mainFirst(withIds);
+  const missingIds =
+    markets.length !== original.length ||
+    markets.some((m, i) => String(m._id) !== String(original[i]?._id) || (m.is_main === true) !== (original[i]?.is_main === true));
 
   if (profile.business_hours_migrated !== true) {
-    const merged = [...(await marketsFromBusinessHours(profile)), ...markets];
+    const fromHours = (await marketsFromBusinessHours(profile)).map((m, i) => ({ ...m, is_main: i === 0 && !markets.some((x) => x.is_main) }));
+    const merged = mainFirst([...fromHours, ...markets]);
     await storeProfileModel.updateOne(
       { _id: profile._id, business_hours_migrated: { $ne: true } },
       { $set: { weekly_markets: merged, business_hours_migrated: true } }

@@ -2,10 +2,25 @@
 // ค่าส่งออเดอร์/พรีออเดอร์จากหน้าเว็บลูกค้า (storefront) — หลังร้าน/POS ยังใช้ DeliveryZones (deliveryService)
 
 export interface ShippingZone {
-  zone_code: "A" | "B" | "C" | "D";
+  /** ตัวอักษรอังกฤษตัวใหญ่ 1 ตัว — A–D คือชุดเริ่มต้น · เพิ่มโซนใหม่ได้ (E, F, …) ตั้งแต่ 2026-10-26 */
+  zone_code: string;
   zone_label: string;
   provinces: string[];
   fee: number;
+}
+
+/** โซน "จังหวัดอื่นทั้งหมด" — ใช้กับจังหวัดที่ไม่อยู่ในโซนไหนเลย · ใส่จังหวัดไม่ได้ · ลบไม่ได้ */
+export const FALLBACK_ZONE_CODE = "D";
+export const ZONE_CODE_RE = /^[A-Z]$/;
+
+/** รหัสโซนถัดไปที่ยังว่าง (A→Z ข้าม D และรหัสที่มีแล้ว) · เต็มแล้ว = null */
+export function nextZoneCode(existing: string[]): string | null {
+  const used = new Set(existing);
+  for (let c = 65; c <= 90; c++) {
+    const code = String.fromCharCode(c);
+    if (code !== FALLBACK_ZONE_CODE && !used.has(code)) return code;
+  }
+  return null;
 }
 
 // ข้อมูลเริ่มต้น — ใช้ seed ตอนยังไม่มีข้อมูลใน DB เลย (shippingService.getShippingZones)
@@ -32,18 +47,18 @@ export const DEFAULT_SHIPPING_ZONES: ShippingZone[] = [
 ];
 
 /**
- * หาค่าจัดส่งจากจังหวัดของที่อยู่จัดส่ง — เทียบกับรายชื่อจังหวัดของ Zone A/B/C ก่อน
+ * หาค่าจัดส่งจากจังหวัดของที่อยู่จัดส่ง — เทียบกับรายชื่อจังหวัดของทุกโซนยกเว้น D ก่อน
  * ถ้าไม่ตรงกับโซนไหนเลย (รวมถึงกรณียังไม่ได้เลือกที่อยู่) ให้ใช้ค่าจัดส่งของ Zone D เป็นค่า fallback
  */
 export function computeShippingFee(province: string, zones: ShippingZone[]): number {
   const trimmed = (province || "").trim();
   if (trimmed) {
     const matched = zones.find(
-      (z) => z.zone_code !== "D" && z.provinces.some((p) => p.trim() === trimmed)
+      (z) => z.zone_code !== FALLBACK_ZONE_CODE && z.provinces.some((p) => p.trim() === trimmed)
     );
     if (matched) return matched.fee;
   }
-  return zones.find((z) => z.zone_code === "D")?.fee ?? 0;
+  return zones.find((z) => z.zone_code === FALLBACK_ZONE_CODE)?.fee ?? 0;
 }
 
 // ── ขอบเขตการจัดส่ง ────────────────────────────────────────────────────────────

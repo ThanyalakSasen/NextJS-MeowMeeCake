@@ -342,7 +342,7 @@ export async function listMyNotifications(userId: string, rawLimit?: unknown) {
       .find(filter)
       .sort({ visible_at: -1, created_at: -1, _id: -1 })
       .limit(limit)
-      .select("title message type link ref_type ref_id read_at created_at visible_at")
+      .select("title message type link ref_type ref_id coupon_code read_at created_at visible_at")
       .lean(),
     customerNotificationModel.countDocuments({ ...filter, read_at: null }),
   ]);

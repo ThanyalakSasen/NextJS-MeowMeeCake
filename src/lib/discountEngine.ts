@@ -9,6 +9,7 @@
  */
 import { badRequest, unprocessable } from "./httpError";
 import { round2 } from "./money";
+import { channelMismatchMessage, channelsOf, positiveLimit } from "./promoCode";
 
 export type DiscountType = "Percentage" | "Amount" | "FreeShipping";
 export type PromotionChannel = "online" | "instore";
@@ -60,18 +61,12 @@ function idIn(list: unknown[] | undefined, id: string | null | undefined): boole
   return list.some((x) => String(x) === String(id));
 }
 
-/** ข้อความเมื่อใช้โค้ดผิดช่องทาง — ลูกค้า/พนักงานเห็นตรงๆ จึงห้ามแสดงค่าภายใน (online/instore) — TC-CUS-67 */
-function channelMismatchMessage(channels: string[]): string {
-  if (channels.length === 1 && channels[0] === "instore") return "โค้ดนี้ใช้ได้เฉพาะที่หน้าร้านเท่านั้น";
-  if (channels.length === 1 && channels[0] === "online") return "โค้ดนี้ใช้ได้เฉพาะการสั่งซื้อออนไลน์เท่านั้น";
-  return "โค้ดนี้ใช้กับช่องทางการสั่งซื้อนี้ไม่ได้";
-}
-
 export function computeDiscount(promo: PromotionLike, ctx: DiscountContext): DiscountResult {
   const type = promo.discount_type as DiscountType;
 
   // ── ช่องทาง ──
-  const channels: string[] = promo.applicable_channels ?? ["online", "instore"];
+  // [] (FrontOffice เขียนตรงลง DB) = ทุกช่องทาง — เดิม [] ทำให้ทุกช่องทางใช้ไม่ได้
+  const channels = channelsOf(promo);
   if (!channels.includes(ctx.channel)) {
     throw unprocessable(channelMismatchMessage(channels));
   }
@@ -97,14 +92,16 @@ export function computeDiscount(promo: PromotionLike, ctx: DiscountContext): Dis
   }
 
   // ── ขั้นต่ำ ──
-  if (promo.min_order_amount != null && eligibleAmount < promo.min_order_amount) {
+  const minAmount = positiveLimit(promo.min_order_amount);
+  const minQty = positiveLimit(promo.min_quantity);
+  if (minAmount != null && eligibleAmount < minAmount) {
     throw unprocessable(
-      `ยอดสินค้าที่ร่วมรายการยังไม่ถึงขั้นต่ำ ${promo.min_order_amount} บาท (ปัจจุบัน ${eligibleAmount})`
+      `ยอดสินค้าที่ร่วมรายการยังไม่ถึงขั้นต่ำ ${minAmount} บาท (ปัจจุบัน ${eligibleAmount})`
     );
   }
-  if (promo.min_quantity != null && eligibleQty < promo.min_quantity) {
+  if (minQty != null && eligibleQty < minQty) {
     throw unprocessable(
-      `ต้องมีสินค้าที่ร่วมรายการอย่างน้อย ${promo.min_quantity} ชิ้น (ปัจจุบัน ${eligibleQty})`
+      `ต้องมีสินค้าที่ร่วมรายการอย่างน้อย ${minQty} ชิ้น (ปัจจุบัน ${eligibleQty})`
     );
   }
 
@@ -115,9 +112,9 @@ export function computeDiscount(promo: PromotionLike, ctx: DiscountContext): Dis
   if (type === "Percentage") {
     if (promo.discount_value == null) throw badRequest("โปรโมชันไม่มี discount_value");
     discount = eligibleAmount * (Number(promo.discount_value) / 100);
-    if (promo.max_discount_amount != null) {
-      discount = Math.min(discount, Number(promo.max_discount_amount));
-    }
+    // เพดานส่วนลดมีผลเฉพาะค่า > 0 — เดิม 0 (ฟอร์มที่เว้นว่างแล้วบันทึกเป็น 0) ตัดส่วนลดเหลือ 0 → "ส่วนลดเป็น 0" ทุกออเดอร์
+    const cap = positiveLimit(promo.max_discount_amount);
+    if (cap != null) discount = Math.min(discount, cap);
   } else if (type === "Amount") {
     discount = Math.min(Number(promo.discount_value ?? 0), eligibleAmount);
   } else if (type === "FreeShipping") {

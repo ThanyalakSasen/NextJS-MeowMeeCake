@@ -27,7 +27,7 @@ type UpdatePermissionInput = z.infer<typeof permissionUpdate>;
 
 // รายชื่อ key + ที่มาของ key หน้าย่อย อยู่ที่ src/lib/menuKeys.ts (model · schema · authGuard ใช้ร่วมกัน)
 export { MENU_KEYS, LEGACY_MENU_KEYS, SUBMENU_PARENT, type MenuKey } from "../lib/menuKeys";
-import { MENU_KEYS, SUBMENU_PARENT, type MenuKey } from "../lib/menuKeys";
+import { LATER_SUBMENU_MIGRATIONS, MENU_KEYS, SUBMENU_PARENT, type MenuKey } from "../lib/menuKeys";
 
 const FLAG_FIELDS = [
   "can_view",
@@ -279,12 +279,18 @@ export function ensureSubmenuPermissions(): Promise<void> {
   return submenuMigration;
 }
 
-/** ตัวย้ายจริง (export ให้เทสต์เรียกซ้ำได้หลังล้าง DB) — โค้ดปกติเรียกผ่าน ensureSubmenuPermissions */
+/** ตัวย้ายจริง (export ให้เทสต์เรียกซ้ำได้หลังล้าง DB) — โค้ดปกติเรียกผ่าน ensureSubmenuPermissions
+ *  ชุดแรก (SUBMENU_PARENT) + ชุดที่เพิ่มทีหลัง (LATER_SUBMENU_MIGRATIONS) — แต่ละชุดมี id ของตัวเอง ทำแล้วไม่ทำซ้ำ */
 export async function migrateSubmenuPermissions(): Promise<void> {
   await dbConnect();
-  if (await migrationModel.exists({ _id: SUBMENU_MIGRATION_ID })) return;
+  await copyParentPermissions(SUBMENU_MIGRATION_ID, SUBMENU_PARENT);
+  for (const m of LATER_SUBMENU_MIGRATIONS) await copyParentPermissions(m.id, m.parents);
+}
 
-  const children = Object.entries(SUBMENU_PARENT) as [MenuKey, MenuKey][];
+async function copyParentPermissions(migrationId: string, map: Partial<Record<MenuKey, MenuKey>>): Promise<void> {
+  if (await migrationModel.exists({ _id: migrationId })) return;
+
+  const children = Object.entries(map) as [MenuKey, MenuKey][];
   const parents = [...new Set(children.map(([, p]) => p))];
   const rows = await permissionModel
     .find({ menu_key: { $in: parents }, deleted_at: null })
@@ -314,10 +320,10 @@ export async function migrateSubmenuPermissions(): Promise<void> {
     }
   }
   try {
-    await migrationModel.create({ _id: SUBMENU_MIGRATION_ID, detail: { created } });
+    await migrationModel.create({ _id: migrationId, detail: { created } });
   } catch (err: any) {
     if (err?.code !== 11000) throw err;
   }
   if (created) await invalidatePermissionCache();
-  log.info("submenu permissions migrated", { created });
+  log.info("submenu permissions migrated", { migration: migrationId, created });
 }
