@@ -29,9 +29,13 @@ export const GET = withAuth(async (session, req) => {
   const result = await orderService.listOrders({
     pagination: parsePagination(sp),
     user_id: session.user_id, // บังคับเป็นของตัวเองเสมอ
-    order_status: q.order_status,
+    // หน้าร้านแสดง "พร้อมส่ง/พร้อมรับ" (ready) เป็น "กำลังเตรียมสินค้า" — กรอง preparing = ได้ทั้งสองสถานะ
+    order_status: q.order_status === "preparing" ? ["preparing", "ready"] : q.order_status,
     payment_status: q.payment_status,
     order_type: q.order_type,
+    // ค้นหา: เลขออเดอร์ หรือชื่อสินค้าในออเดอร์
+    search: q.search || undefined,
+    search_items: true,
     sort: parseSort(sp, ["created_at", "total_amount", "order_no"], "created_at"),
   });
   return ok(result);
@@ -61,6 +65,7 @@ export const POST = withAuth(async (session, req) => {
       : await orderService.createOrderFromCart(session.user_id, {
           ...common,
           item_notes: body.item_notes ?? {},
+          cart_item_ids: body.cart_item_ids ?? null,
         });
   audit(req, {
     action: `สั่งซื้อ ${order?.order_no ?? ""}`.trim(),

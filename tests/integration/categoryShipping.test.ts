@@ -202,3 +202,44 @@ describe("PATCH หมวด + reset_products (เปิด/ปิดทั้�
     expect(await override(c._id)).toBe(true); // หมวดอื่นไม่โดน
   });
 });
+
+describe("พรีออเดอร์ส่งได้ทุกจังหวัด (ไม่ตรวจขอบเขตจัดส่ง)", () => {
+  it("รอบพรีออเดอร์ (preorder: true) และสินค้า is_preorder ส่งนอกจังหวัดได้ · สินค้าปกติเฉพาะจังหวัดยังถูกกัน", async () => {
+    await storeSettingsModel.create({ province: "หนองคาย" });
+    const cake = await productCategoryModel.create({ product_category_name: "เค้กสดพรี", ships_nationwide: false });
+    const fresh = await makeProduct({ category_id: cake._id });
+    const pre = await makeProduct({
+      category_id: cake._id,
+      is_preorder: true,
+      product_stock_quantity: null,
+      preorder_config: { min_order_qty: 1, max_order_qty: 50, lead_time_days: 1 },
+    });
+    const quote = (ids: unknown[], preorder?: boolean) =>
+      shippingService.quoteStorefrontDelivery({ province: "เชียงใหม่", productIds: ids.map(String), preorder });
+
+    await expect(quote([fresh._id])).rejects.toMatchObject({ status: 400 });
+    // สินค้าปกติในรอบพรีออเดอร์ — สั่งผ่านพรีออเดอร์ = ส่งได้
+    expect((await quote([fresh._id], true)).fee).toBeGreaterThan(0);
+    // สินค้าพรีออเดอร์ส่งได้แม้หมวดส่งเฉพาะจังหวัด
+    expect((await quote([pre._id])).fee).toBeGreaterThan(0);
+    // ปนกับสินค้าเฉพาะจังหวัดในตะกร้าปกติ → ยังกันตามสินค้าปกติ
+    await expect(quote([pre._id, fresh._id])).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("หน้า \"การจัดส่ง\": สินค้าพรีออเดอร์ที่ตั้งส่งเฉพาะจังหวัดไม่ขึ้นในรายการเฉพาะจังหวัด", async () => {
+    const bread = await productCategoryModel.create({ product_category_name: "ซาวโดว์พรี", ships_nationwide: true });
+    await makeProduct({
+      product_name_th: "พรีเฉพาะจังหวัด",
+      category_id: bread._id,
+      ships_nationwide: false,
+      is_preorder: true,
+      product_stock_quantity: null,
+      preorder_config: { min_order_qty: 1, max_order_qty: 50, lead_time_days: 1 },
+    });
+    await makeProduct({ product_name_th: "ปกติเฉพาะจังหวัด", category_id: bread._id, ships_nationwide: false });
+    const body = await (await exceptionsGET()).json();
+    const names = body.data.province_only.map((p: { product_name_th: string }) => p.product_name_th);
+    expect(names).toContain("ปกติเฉพาะจังหวัด");
+    expect(names).not.toContain("พรีเฉพาะจังหวัด");
+  });
+});

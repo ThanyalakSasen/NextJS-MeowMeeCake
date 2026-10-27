@@ -116,3 +116,24 @@ describe("แชทลูกค้า", () => {
     expect(await chatMessageModel.countDocuments({ conversation_id: conv!._id, read_at: null })).toBe(1);
   });
 });
+
+describe("รายการแชทหลังร้าน — เฉพาะห้องของบัญชีลูกค้า", () => {
+  it("ไม่แสดงห้องรูปแบบเก่า (ไม่มี customer_id) · บัญชีพนักงาน · บัญชีที่ถูกลบ · ตัวนับข้อความที่ยังไม่อ่านนับตาม", async () => {
+    const roleModel = (await import("@/models/roleModel")).default;
+    const userModel = (await import("@/models/userModel")).default;
+    const customerRole = await roleModel.create({ role_name: `ลูกค้า-${Math.random()}`, role_type: "customer" });
+    const staffRole = await roleModel.create({ role_name: `พนักงาน-${Math.random()}`, role_type: "staff" });
+    const customer = await makeUser({ user_fullname: "ลูกค้าจริง", role_id: customerRole._id });
+    const staff = await makeUser({ user_fullname: "พนักงานลองแชท", role_id: staffRole._id });
+    const gone = await makeUser({ user_fullname: "ลูกค้าที่ลบแล้ว", role_id: customerRole._id });
+    for (const u of [customer, staff, gone]) await chatService.sendCustomerMessage(String(u._id), { body: "สวัสดี" });
+    await userModel.updateOne({ _id: gone._id }, { $set: { deleted_at: new Date() } });
+    // ห้องจาก schema เดิม (user_id แทน customer_id)
+    await chatConversationModel.collection.insertOne({ user_id: customer._id, last_message_at: new Date(), staff_unread: 3 });
+
+    const { items, meta } = await chatService.listConversations({ pagination: pg });
+    expect(items.map((c) => c.customer?.user_fullname)).toEqual(["ลูกค้าจริง"]);
+    expect(meta.total).toBe(1);
+    expect(await chatService.staffUnreadSummary()).toEqual({ conversations: 1, messages: 1 });
+  });
+});

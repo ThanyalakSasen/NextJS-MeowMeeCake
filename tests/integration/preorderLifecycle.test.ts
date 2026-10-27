@@ -86,20 +86,20 @@ const statusOf = async (id: unknown) =>
   (await preorderModel.findById(id).lean<{ order_status: string; payment_status: string }>())!;
 
 describe("กำหนดชำระเงิน", () => {
-  it("min(สั่ง + N ชม., ปิดรอบ) · ค่าเริ่มต้น 24 ชม. · ตั้งผ่าน env ได้", () => {
+  it("min(สั่ง + N ชม., ปิดรอบ) · ค่าเริ่มต้น 30 นาที · ตั้งผ่าน env ได้", () => {
     const ordered = new Date("2026-10-01T03:00:00Z");
-    expect(paymentDeadlineHours()).toBe(24);
-    expect(computePaymentDueAt(ordered, new Date("2026-10-10T00:00:00Z")).toISOString()).toBe("2026-10-02T03:00:00.000Z");
-    expect(computePaymentDueAt(ordered, new Date("2026-10-01T11:00:00Z")).toISOString()).toBe("2026-10-01T11:00:00.000Z");
+    expect(paymentDeadlineHours()).toBe(0.5);
+    expect(computePaymentDueAt(ordered, new Date("2026-10-10T00:00:00Z")).toISOString()).toBe("2026-10-01T03:30:00.000Z");
+    expect(computePaymentDueAt(ordered, new Date("2026-10-01T03:10:00Z")).toISOString()).toBe("2026-10-01T03:10:00.000Z");
     process.env.PREORDER_PAYMENT_DEADLINE_HOURS = "6";
     expect(computePaymentDueAt(ordered, new Date("2026-10-10T00:00:00Z")).toISOString()).toBe("2026-10-01T09:00:00.000Z");
     process.env.PREORDER_PAYMENT_DEADLINE_HOURS = "-1";
-    expect(paymentDeadlineHours()).toBe(24);
+    expect(paymentDeadlineHours()).toBe(0.5);
   });
 
-  it("createPreorder บันทึก payment_due_at · รอบปิดเร็วกว่า 24 ชม. → กำหนด = เวลาปิดรอบ", async () => {
+  it("createPreorder บันทึก payment_due_at · รอบปิดเร็วกว่า 30 นาที → กำหนด = เวลาปิดรอบ", async () => {
     const p = await preorderProduct();
-    const { round, itemOf } = await openRound([p], { closeInMs: 2 * HOUR });
+    const { round, itemOf } = await openRound([p], { closeInMs: 10 * 60_000 });
     const pre = await order(round, itemOf(p)._id, 1);
     const due = (await preorderModel.findById(pre._id).lean<{ payment_due_at: Date }>())!.payment_due_at;
     expect(new Date(due).getTime()).toBe(new Date(round.close_date).getTime());
@@ -115,8 +115,9 @@ describe("กำหนดชำระเงิน", () => {
       pickup_date: new Date(newClose.getTime() + 4 * DAY),
     });
     const due = new Date((await preorderModel.findById(pre._id).lean<{ payment_due_at: Date }>())!.payment_due_at).getTime();
-    expect(due).toBeLessThan(newClose.getTime()); // ตอนนี้ถูกจำกัดด้วย 24 ชม. แทน
-    expect(due).toBeGreaterThan(Date.now() + 23 * HOUR);
+    expect(due).toBeLessThan(newClose.getTime()); // ตอนนี้ถูกจำกัดด้วย 30 นาทีแทน
+    expect(due).toBeGreaterThan(Date.now() + 25 * 60_000);
+    expect(due).toBeLessThanOrEqual(Date.now() + 30 * 60_000);
   });
 });
 

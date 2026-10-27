@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import * as cartService from "@/services/cartService";
+import productModel from "@/models/productModel";
 import { makeUser, makeProduct, makeVariant, makeOption } from "./helpers";
 
 /** BACKLOG §3.4 — integration tests เพิ่ม: cartService */
@@ -96,6 +97,76 @@ describe("cartService.updateItemQuantity", () => {
     await expect(
       cartService.updateItemQuantity(String(user._id), String(item._id), -1)
     ).rejects.toThrow();
+  });
+});
+
+describe("cartService — ตรวจสต็อกตอนเพิ่มลงตะกร้า", () => {
+  it("เพิ่มเกินสต็อก → 409 · สต็อก 0 → บอกว่าหมดแล้ว", async () => {
+    const user = await makeUser();
+    const p = await makeProduct({ product_name_th: "ครัวซองต์", product_stock_quantity: 3 });
+    const sold = await makeProduct({ product_name_th: "บราวนี่", product_stock_quantity: 0 });
+
+    await expect(
+      cartService.addItem(String(user._id), { product_id: String(p._id), quantity: 4 })
+    ).rejects.toMatchObject({ status: 409, message: "ครัวซองต์ เหลือ 3 ชิ้น" });
+    await expect(
+      cartService.addItem(String(user._id), { product_id: String(sold._id), quantity: 1 })
+    ).rejects.toMatchObject({ status: 409, message: "บราวนี่ หมดแล้ว" });
+
+    const detail = await cartService.getCartDetail(String(user._id));
+    expect(detail.items.length).toBe(0);
+  });
+
+  it("นับรวมทุกบรรทัดของสินค้าเดียวกัน (ตัวเลือกต่างกันใช้สต็อกเดียวกัน)", async () => {
+    const user = await makeUser();
+    const p = await makeProduct({ product_name_th: "เค้ก", product_stock_quantity: 5 });
+    const opt = await makeOption(String(p._id), { extra_price: 10 });
+    const uid = String(user._id);
+
+    await cartService.addItem(uid, { product_id: String(p._id), quantity: 3 });
+    await expect(
+      cartService.addItem(uid, {
+        product_id: String(p._id),
+        selected_options: [{ option_id: String(opt._id) }],
+        quantity: 3,
+      })
+    ).rejects.toMatchObject({
+      status: 409,
+      message: "เค้ก เหลือ 5 ชิ้น — ในตะกร้ามีแล้ว 3 ชิ้น เพิ่มได้อีก 2 ชิ้น",
+      details: { available: 5, in_cart: 3 },
+    });
+
+    // พอดีสต็อกพอดี → ผ่าน · เพิ่มอีกชิ้น → ครบแล้ว
+    await cartService.addItem(uid, { product_id: String(p._id), quantity: 2 });
+    await expect(
+      cartService.addItem(uid, { product_id: String(p._id), quantity: 1 })
+    ).rejects.toThrow(/ในตะกร้ามีครบจำนวนแล้ว/);
+  });
+
+  it("updateItemQuantity: เพิ่มเกินสต็อก → 409 · ลดจำนวนได้เสมอแม้สต็อกลดลงต่ำกว่าในตะกร้า", async () => {
+    const user = await makeUser();
+    const p = await makeProduct({ product_stock_quantity: 5 });
+    const uid = String(user._id);
+    const item = await cartService.addItem(uid, { product_id: String(p._id), quantity: 4 });
+
+    await expect(cartService.updateItemQuantity(uid, String(item._id), 6)).rejects.toMatchObject({ status: 409 });
+    // ไม่นับบรรทัดตัวเองซ้ำ: 4 → 5 ผ่าน
+    const up = await cartService.updateItemQuantity(uid, String(item._id), 5);
+    expect(up.quantity).toBe(5);
+
+    await productModel.updateOne({ _id: p._id }, { $set: { product_stock_quantity: 1 } });
+    const down = await cartService.updateItemQuantity(uid, String(item._id), 3);
+    expect(down.quantity).toBe(3);
+  });
+
+  it("ตะกร้าคนอื่นไม่นับรวม (ไม่จองสต็อก)", async () => {
+    const a = await makeUser();
+    const b = await makeUser();
+    const p = await makeProduct({ product_stock_quantity: 2 });
+
+    await cartService.addItem(String(a._id), { product_id: String(p._id), quantity: 2 });
+    const item = await cartService.addItem(String(b._id), { product_id: String(p._id), quantity: 2 });
+    expect(item.quantity).toBe(2);
   });
 });
 

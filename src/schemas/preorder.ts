@@ -64,5 +64,7 @@ export const listPreorderQuery = z.object({
     .optional(),
   payment_status: z.enum(["pending", "paid", "failed", "refunded"]).optional(),
   order_type: z.enum(["delivery", "takeaway"]).optional(),
+  /** ค้นหาเลขบิล หรือชื่อสินค้าในบิล (ประวัติของลูกค้า) */
+  search: z.string().trim().max(100).optional(),
 });
 export type ListPreorderQuery = z.infer<typeof listPreorderQuery>;

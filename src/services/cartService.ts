@@ -7,11 +7,14 @@
  * - ราคาต่อหน่วย (price_snapshot) คำนวณ ณ ตอนหยิบใส่ตะกร้า = ราคาสินค้า (sale_price ถ้ามี)
  *   + ราคาเพิ่มของตัวเลือก (ทุกกลุ่ม) + ออปชันที่เลือก (productCustomizationService — ตัวเลือกไม่มีสต็อกแยก)
  * - soft delete ทั้ง cart และ cart item ผ่าน deleted_at
+ * - ตรวจสต็อกตอนเพิ่มลงตะกร้า / เพิ่มจำนวน (assertCartStock) — รวมทุกบรรทัดของสินค้าเดียวกันในตะกร้า
+ *   (ตัวเลือกไม่มีสต็อกแยก) เกิน product_stock_quantity → 409 · ลดจำนวนได้เสมอ · ไม่จองสต็อก —
+ *   ตอนสั่งจริง orderService ตัดสต็อกแบบ atomic อีกชั้น (คนอื่นซื้อตัดหน้าได้ระหว่างอยู่ในตะกร้า)
  *
  * หมายเหตุ: service รับ userId เป็น argument — ชั้น route/auth เป็นผู้ยืนยันว่า userId ตรงกับผู้ล็อกอิน
  */
 import dbConnect from "../lib/dbConnect";
-import { badRequest, notFound } from "../lib/httpError";
+import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import cartModel from "../models/cartModel";
@@ -60,6 +63,44 @@ export async function getOrCreateCart(userId: string) {
   const existing = await cartModel.findOne({ user_id: userId, deleted_at: null });
   if (existing) return existing;
   return cartModel.create({ user_id: userId });
+}
+
+/**
+ * สต็อกพอไหม ถ้าบรรทัดนี้มี `quantity` ชิ้น + บรรทัดอื่นของสินค้าเดียวกันในตะกร้า — กติกาเดียวกับ
+ * productService.deductStockForOrder (รวมจำนวนต่อสินค้า) · excludeItemId = บรรทัดที่กำลังแก้จำนวน (ไม่นับซ้ำ)
+ * ไม่พอ → 409 พร้อม details { product_id, available, in_cart } ให้หน้าเว็บบอกว่าเพิ่มได้อีกกี่ชิ้น
+ */
+async function assertCartStock(
+  cartId: unknown,
+  product: { _id: unknown; product_name_th?: string; is_preorder?: boolean; product_stock_quantity?: number | null },
+  quantity: number,
+  excludeItemId?: unknown
+): Promise<void> {
+  if (isPreorderProduct(product)) return;
+  const lines = await cartItemModel
+    .find({
+      cart_id: cartId,
+      product_id: product._id,
+      deleted_at: null,
+      ...(excludeItemId ? { _id: { $ne: excludeItemId } } : {}),
+    })
+    .select("quantity")
+    .lean<{ quantity?: number }[]>();
+  const inCart = lines.reduce((s, it) => s + (it.quantity ?? 0), 0);
+  const available = Math.max(0, product.product_stock_quantity ?? 0);
+  if (inCart + quantity <= available) return;
+
+  const name = product.product_name_th ?? "สินค้านี้";
+  const details = { product_id: String(product._id), available, in_cart: inCart };
+  if (available === 0) throw conflict(`${name} หมดแล้ว`, details);
+  if (inCart === 0) throw conflict(`${name} เหลือ ${available} ชิ้น`, details);
+  const canAdd = Math.max(0, available - inCart);
+  throw conflict(
+    canAdd > 0
+      ? `${name} เหลือ ${available} ชิ้น — ในตะกร้ามีแล้ว ${inCart} ชิ้น เพิ่มได้อีก ${canAdd} ชิ้น`
+      : `${name} เหลือ ${available} ชิ้น — ในตะกร้ามีครบจำนวนแล้ว`,
+    details
+  );
 }
 
 /** เหตุผลที่รายการในตะกร้าสั่งไม่ได้แล้ว (product = ค่าที่ populate มา) · null = สั่งได้ */
@@ -148,6 +189,7 @@ export async function addItem(userId: string, input: AddCartItemInput) {
   const price_snapshot = toSatang(basePrice + custom.extra_price);
 
   const cart = await getOrCreateCart(userId);
+  await assertCartStock(cart._id, product, quantity);
 
   // ถ้ามีรายการเหมือนกันเป๊ะอยู่แล้ว (สินค้า + ชุดตัวเลือก/ออปชันเดียวกัน) → เพิ่มจำนวน
   const dup = await cartItemModel.findOne({
@@ -205,6 +247,16 @@ export async function updateItemQuantity(
     item.deleted_at = new Date();
     await item.save();
     return { removed: true, _id: item._id };
+  }
+
+  // ตรวจเฉพาะตอนเพิ่มจำนวน — ลดจำนวนได้เสมอ (สต็อกลดลงหลังหยิบใส่ตะกร้า ลูกค้าต้องลดให้พอดีได้)
+  // สินค้าถูกลบไปแล้ว = ไม่ตรวจที่นี่ (getCartDetail ติด is_available: false และสั่งไม่ได้อยู่แล้ว)
+  if (qty > item.quantity) {
+    const product = await productModel
+      .findOne({ _id: item.product_id, deleted_at: null })
+      .select("product_name_th is_preorder product_stock_quantity")
+      .lean<any>();
+    if (product) await assertCartStock(cart._id, product, qty, item._id);
   }
 
   item.quantity = qty;

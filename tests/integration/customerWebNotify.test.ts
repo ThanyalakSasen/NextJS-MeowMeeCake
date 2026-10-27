@@ -43,7 +43,7 @@ describe("กระดิ่งในเว็บของลูกค้า", (
       "🧾 ร้านรับคำสั่งซื้อของคุณแล้ว",
       "👩‍🍳 ร้านกำลังเตรียมสินค้าของคุณ",
       "🛍️ สินค้าพร้อมให้มารับแล้ว",
-      "🎉 คำสั่งซื้อสำเร็จแล้ว ขอบคุณที่อุดหนุนนะคะ",
+      "📦 ส่งสินค้าแล้ว ขอบคุณที่อุดหนุนนะคะ",
     ]);
     expect(notices[0]).toMatchObject({ title: `คำสั่งซื้อ #${order.order_no}`, link: `/customer/account/purchases/${oid}`, ref_type: "order" });
     expect(notices[4].type).toBe("success");

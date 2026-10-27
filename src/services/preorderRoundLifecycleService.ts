@@ -33,10 +33,11 @@ import { adminLinks } from "../lib/adminLinks";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
-const DEFAULT_PAYMENT_DEADLINE_HOURS = 24;
+/** ค่าเริ่มต้น 30 นาที — เท่ากับออเดอร์ปกติ (lib/paymentDeadline ORDER_PAYMENT_WINDOW_MS) */
+const DEFAULT_PAYMENT_DEADLINE_HOURS = 0.5;
 
 // ── กำหนดชำระ ────────────────────────────────────────────────
-/** PREORDER_PAYMENT_DEADLINE_HOURS — จำนวนชั่วโมงหลังสั่งที่ต้องจ่าย (ค่าเริ่มต้น 24 · ค่าผิด = 24) */
+/** PREORDER_PAYMENT_DEADLINE_HOURS — จำนวนชั่วโมงหลังสั่งที่ต้องจ่าย (ทศนิยมได้ · ค่าเริ่มต้น 0.5 = 30 นาที · ค่าผิด = 0.5) */
 export function paymentDeadlineHours(): number {
   const raw = process.env.PREORDER_PAYMENT_DEADLINE_HOURS?.trim();
   if (!raw) return DEFAULT_PAYMENT_DEADLINE_HOURS;
@@ -90,10 +91,11 @@ export async function warnSlipOnCancelledPreorder(preorderId: string): Promise<b
 
 /**
  * @param opts.roundId  จำกัดเฉพาะรอบนี้
+ * @param opts.preorderId  จำกัดเฉพาะพรีออเดอร์นี้ (หน้าชำระเงินเรียกแบบ lazy — ไม่ต้องรอ cron)
  * @param opts.allInRound  ยกเลิกทุกรายการที่ยังไม่จ่ายในรอบ ไม่สนกำหนด (ใช้ตอนปิดรอบ — ปิดก่อนเวลาก็ถือว่าหมดเวลาจ่าย)
  */
 export async function cancelUnpaidPreorders(
-  opts: { now?: Date; roundId?: unknown; allInRound?: boolean } = {}
+  opts: { now?: Date; roundId?: unknown; preorderId?: unknown; allInRound?: boolean } = {}
 ): Promise<UnpaidCancelResult> {
   await dbConnect();
   const now = opts.now ?? new Date();
@@ -103,6 +105,7 @@ export async function cancelUnpaidPreorders(
     payment_status: { $in: ["pending", "failed"] },
   };
   if (opts.roundId) filter.round_id = opts.roundId;
+  if (opts.preorderId) filter._id = opts.preorderId;
   if (!opts.allInRound) filter.payment_due_at = { $ne: null, $lte: now };
 
   const due = await preorderModel.find(filter).select("_id preorder_no").lean<Array<{ _id: unknown; preorder_no: string }>>();

@@ -92,6 +92,8 @@ export interface ListRoundQuery {
   search?: string;
   /** เฉพาะรอบที่ยัง "รับสั่งได้หรือกำลังจะมา" (scheduled/open และ close_date ยังไม่ผ่าน) — ใช้ฝั่ง catalog */
   upcomingOnly?: boolean;
+  /** item_count นับเฉพาะรายการที่ลูกค้าเห็นจริง (เปิดขาย + สินค้ายังไม่ถูกลบ/ไม่ถูกซ่อน) — ใช้ฝั่ง catalog */
+  visibleItemsOnly?: boolean;
   includeDeleted?: boolean;
   sort?: Record<string, 1 | -1>;
 }
@@ -250,7 +252,24 @@ export async function listRounds(query: ListRoundQuery) {
   // แนบจำนวนรายการสินค้าในแต่ละรอบ
   const ids = items.map((r: any) => r._id);
   const counts = await preorderRoundItemModel.aggregate([
-    { $match: { round_id: { $in: ids }, deleted_at: null } },
+    { $match: { round_id: { $in: ids }, deleted_at: null, ...(query.visibleItemsOnly ? { is_active: true } : {}) } },
+    // หน้าร้าน: ไม่นับรายการที่สินค้าถูกลบไปแล้ว (ตรงกับ getRoundDetail activeItemsOnly)
+    ...(query.visibleItemsOnly
+      ? [
+          {
+            $lookup: {
+              from: productModel.collection.name,
+              let: { pid: "$product_id" },
+              pipeline: [
+                { $match: { $expr: { $eq: ["$_id", "$$pid"] }, deleted_at: null, is_visible: { $ne: false } } },
+                { $project: { _id: 1 } },
+              ],
+              as: "product",
+            },
+          },
+          { $match: { "product.0": { $exists: true } } },
+        ]
+      : []),
     { $group: { _id: "$round_id", item_count: { $sum: 1 } } },
   ]);
   const countByRound = new Map(counts.map((c: any) => [String(c._id), c.item_count]));
@@ -282,11 +301,18 @@ export async function getRoundDetail(
   const itemFilter: Record<string, any> = { round_id: round._id, deleted_at: null };
   if (opts.activeItemsOnly) itemFilter.is_active = true;
 
-  const items = await preorderRoundItemModel
+  const rows = await preorderRoundItemModel
     .find(itemFilter)
-    .populate("product_id", PRODUCT_SELECT)
+    .populate(
+      opts.activeItemsOnly
+        ? { path: "product_id", select: PRODUCT_SELECT, match: { deleted_at: null, is_visible: { $ne: false } } }
+        : { path: "product_id", select: PRODUCT_SELECT }
+    )
     .sort({ created_at: 1 })
     .lean<any[]>();
+  // หน้าร้าน: สินค้าถูกลบ / ไม่มีอยู่จริง / ถูกซ่อน (is_visible: false) → populate ได้ null → ไม่แสดง
+  // (เดิมขึ้นเป็นการ์ดว่าง หรือกดแล้วหน้าสินค้าขึ้น "ไม่พบสินค้า")
+  const items = opts.activeItemsOnly ? rows.filter((it) => it.product_id && typeof it.product_id === "object") : rows;
 
   return {
     ...round,
@@ -708,7 +734,7 @@ export async function getOrderableRoundItems(roundItemIds: string[], roundId: st
   const productIds = [...new Set(items.map((it) => String(it.product_id)))];
   const products = productIds.length
     ? await productModel
-        .find({ _id: { $in: productIds }, deleted_at: null })
+        .find({ _id: { $in: productIds }, deleted_at: null, is_visible: { $ne: false } })
         .select("product_name_th product_name_eng product_price sale_price is_preorder preorder_config")
         .lean<any[]>()
     : [];

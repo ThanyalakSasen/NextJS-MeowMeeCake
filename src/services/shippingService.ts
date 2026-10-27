@@ -148,10 +148,13 @@ export interface StorefrontDeliveryQuote {
 /**
  * ค่าส่งออเดอร์เว็บไปจังหวัดนี้ + ตรวจขอบเขตจัดส่ง (สินค้าที่ส่งทั่วประเทศไม่ได้ → เฉพาะจังหวัดร้าน)
  * ส่งไม่ได้ → 400 พร้อมข้อความให้ลูกค้าเปลี่ยนที่อยู่/รับเอง
+ * พรีออเดอร์ (preorder: true) และสินค้าพรีออเดอร์ (is_preorder) ส่งได้ทุกจังหวัด — ไม่ตรวจขอบเขต (ผู้ใช้เลือก 2026-10-27)
  */
 export async function quoteStorefrontDelivery(input: {
   province: string | null | undefined;
   productIds: string[];
+  /** สั่งในรอบพรีออเดอร์ — ทุกรายการส่งได้ทุกจังหวัด */
+  preorder?: boolean;
 }): Promise<StorefrontDeliveryQuote> {
   await dbConnect();
   const province = String(input.province ?? "").trim();
@@ -159,13 +162,16 @@ export async function quoteStorefrontDelivery(input: {
     getShippingZones(),
     storeSettingsModel.findOne().select("province").lean<{ province?: string } | null>(),
     productCategoryModel.find({ deleted_at: null }).select("product_category_name ships_nationwide").lean<any[]>(),
-    productModel.find({ _id: { $in: input.productIds } }).select("category_id ships_nationwide").lean<any[]>(),
+    input.preorder
+      ? Promise.resolve([] as any[])
+      : productModel.find({ _id: { $in: input.productIds } }).select("category_id ships_nationwide is_preorder").lean<any[]>(),
   ]);
 
   const nationwide = new Set(categories.filter(categoryShipsNationwide).map((c) => String(c._id)));
   // รายสินค้าก่อน (ตั้งยกเว้นไว้) แล้วค่อยตามหมวด — lib/shipping.ts productShipsNationwide
+  // สินค้าพรีออเดอร์ส่งได้ทุกจังหวัดเสมอ (ไม่ตามหมวด/ค่าที่ตั้งยกเว้น)
   const hasLocalOnlyItems = products.some(
-    (p) => !productShipsNationwide(p, nationwide.has(String(p.category_id ?? "")))
+    (p) => p.is_preorder !== true && !productShipsNationwide(p, nationwide.has(String(p.category_id ?? "")))
   );
   const area = checkDeliveryArea(province, String(settings?.province ?? ""), hasLocalOnlyItems);
   if (!area.ok) throw badRequest(area.message);
@@ -473,13 +479,14 @@ export interface ShippingException {
  *   nationwide    = หมวดส่งเฉพาะจังหวัด แต่สินค้าชิ้นนี้ส่งทั่วประเทศได้
  *   province_only = หมวดส่งทั่วประเทศ แต่สินค้าชิ้นนี้ส่งได้เฉพาะจังหวัดร้าน
  * เฉพาะสินค้าที่เปิดขาย (is_visible) · ค่าเดียวกับหมวด (ตั้งซ้ำ) ไม่นับ — ไม่ต้องบอกลูกค้าซ้ำกับรายชื่อหมวด
+ * สินค้าพรีออเดอร์ไม่อยู่ใน province_only — พรีออเดอร์ส่งได้ทุกจังหวัดเสมอ (quoteStorefrontDelivery)
  */
 export async function listShippingExceptions(): Promise<{ nationwide: ShippingException[]; province_only: ShippingException[] }> {
   await dbConnect();
   const [products, categories] = await Promise.all([
     productModel
       .find({ deleted_at: null, is_visible: { $ne: false }, ships_nationwide: { $type: "bool" } })
-      .select("product_name_th category_id ships_nationwide")
+      .select("product_name_th category_id ships_nationwide is_preorder")
       .lean<AnyDoc[]>(),
     productCategoryModel.find({}).select("product_category_name ships_nationwide").lean<AnyDoc[]>(),
   ]);
@@ -490,6 +497,7 @@ export async function listShippingExceptions(): Promise<{ nationwide: ShippingEx
     const cat = p.category_id ? catById.get(String(p.category_id)) : undefined;
     const catNationwide = cat ? categoryShipsNationwide(cat) : false;
     if (p.ships_nationwide === catNationwide) continue;
+    if (!p.ships_nationwide && p.is_preorder === true) continue;
     const row = { _id: String(p._id), product_name_th: String(p.product_name_th ?? ""), category_name: String(cat?.product_category_name ?? "") };
     (p.ships_nationwide ? nationwide : provinceOnly).push(row);
   }

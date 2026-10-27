@@ -141,7 +141,7 @@ ADMIN_APP_URL=https://app.example.com          # ลิงก์ 🔗 ท้า�
 CRON_SECRET=<สุ่มใหม่>
 
 # ── ไม่บังคับ (ค่าเริ่มต้นในวงเล็บ) ──
-# PREORDER_PAYMENT_DEADLINE_HOURS=     (24)
+# PREORDER_PAYMENT_DEADLINE_HOURS=     (0.5 = 30 นาที)
 # PREORDER_REMINDER_DAYS_BEFORE=       (1)
 # LINE_OWNER_QUOTA_RESERVE=            (30)
 # LINE_NOTIFY_POS_ORDERS=              (ไม่ส่ง LINE ออเดอร์หน้าร้าน)

@@ -21,6 +21,7 @@ import preorderModel from "../models/preorderModel";
 import orderItemModel from "../models/orderItemModel";
 import preorderItemModel from "../models/preorderItemModel";
 import userModel from "../models/userModel";
+import roleModel from "../models/roleModel";
 import { notificationService } from "./notificationService";
 import { notifyCustomerLater } from "./customerNotifyService";
 
@@ -263,9 +264,23 @@ export async function markReadByCustomer(customerId: string) {
 }
 
 // ── ฝั่งร้าน (/api/admin/chats) ───────────────────────────────
+/**
+ * แสดงเฉพาะห้องของ "บัญชีลูกค้า" ที่ยังใช้งานอยู่ (ผู้ใช้เลือก 2026-10-27):
+ *   ตัดห้องรูปแบบเก่าที่ไม่มี customer_id (ข้อมูลจาก schema เดิม — ขึ้นเป็นแถวไม่มีชื่อ/ซ้ำ) · บัญชีพนักงาน/เจ้าของ · บัญชีที่ถูกลบ
+ */
+async function customerRoomFilter(): Promise<Record<string, unknown>> {
+  const staffRoles = await roleModel.find({ role_type: { $ne: "customer" } }).select("_id").lean<{ _id: unknown }[]>();
+  const excluded = await userModel
+    .find({ $or: [{ role_id: { $in: staffRoles.map((r) => r._id) } }, { deleted_at: { $ne: null } }] })
+    .select("_id")
+    .lean<{ _id: unknown }[]>();
+  return { $exists: true, $ne: null, $nin: excluded.map((u) => u._id) };
+}
+
 export async function listConversations(opts: { pagination: Pagination; search?: string; unreadOnly?: boolean }) {
   await dbConnect();
-  const filter: Record<string, unknown> = { last_message_at: { $ne: null } };
+  const customerFilter = await customerRoomFilter();
+  const filter: Record<string, unknown> = { last_message_at: { $ne: null }, customer_id: customerFilter };
   if (opts.unreadOnly) filter.staff_unread = { $gt: 0 };
   const search = opts.search?.trim();
   if (search) {
@@ -275,7 +290,7 @@ export async function listConversations(opts: { pagination: Pagination; search?:
       .select("_id")
       .limit(500)
       .lean<{ _id: unknown }[]>();
-    filter.customer_id = { $in: users.map((u) => u._id) };
+    filter.customer_id = { ...customerFilter, $in: users.map((u) => u._id) };
   }
   const [rows, total] = await Promise.all([
     chatConversationModel
@@ -293,9 +308,11 @@ export async function listConversations(opts: { pagination: Pagination; search?:
 /** จำนวนห้องที่มีข้อความลูกค้ายังไม่อ่าน (ป้ายตัวเลขเมนู "แชทลูกค้า") */
 export async function staffUnreadSummary() {
   await dbConnect();
+  // นับเฉพาะห้องที่แสดงในรายการ (ห้องของบัญชีลูกค้า — customerRoomFilter)
+  const match = { staff_unread: { $gt: 0 }, customer_id: await customerRoomFilter() };
   const [conversations, agg] = await Promise.all([
-    chatConversationModel.countDocuments({ staff_unread: { $gt: 0 } }),
-    chatConversationModel.aggregate([{ $match: { staff_unread: { $gt: 0 } } }, { $group: { _id: null, n: { $sum: "$staff_unread" } } }]),
+    chatConversationModel.countDocuments(match),
+    chatConversationModel.aggregate([{ $match: match }, { $group: { _id: null, n: { $sum: "$staff_unread" } } }]),
   ]);
   return { conversations, messages: Number(agg[0]?.n ?? 0) };
 }

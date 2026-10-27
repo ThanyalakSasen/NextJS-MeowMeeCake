@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,7 +16,12 @@ import { makeUser, makePreorder } from "./helpers";
 const H = 60 * 60 * 1000;
 const NOW = new Date("2026-10-01T12:00:00Z");
 let backupDir: string | null = null;
+// ทดสอบสูตร backfill ด้วย N = 24 ชม. (ค่าเริ่มต้นจริงตอนนี้ = 30 นาที — ตั้ง env ให้คงที่)
+beforeEach(() => {
+  process.env.PREORDER_PAYMENT_DEADLINE_HOURS = "24";
+});
 afterEach(() => {
+  delete process.env.PREORDER_PAYMENT_DEADLINE_HOURS;
   if (backupDir) rmSync(backupDir, { recursive: true, force: true });
   backupDir = null;
 });

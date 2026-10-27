@@ -11,6 +11,7 @@ import { parseBody } from "@/lib/validate";
 import { updateProfileBody } from "@/schemas/user";
 import * as userService from "@/services/userService";
 import * as pointsService from "@/services/pointsService";
+import { resolveProfileSetupNotices } from "@/services/customerNotifyService";
 
 export const GET = withAuth(async (session) => {
   return ok({ user: await userService.getUserById(session.user_id, { self: true }) });
@@ -21,5 +22,7 @@ export const PATCH = withAuth(async (session, req) => {
   const user = await userService.updateProfile(session.user_id, data);
   // ข้อมูลส่วนตัวครบ → โบนัส 10 แต้มครั้งเดียว (customer-backend-merge.md §8.11)
   await pointsService.safely("profile", () => pointsService.checkProfileCompletion(session.user_id));
+  // กรอกเบอร์/วันเกิดครบ → ป๊อปอัปชวนกรอกข้อมูล (สมัครด้วย Google/LINE) หยุดเด้ง
+  await resolveProfileSetupNotices(session.user_id);
   return ok({ user });
 });

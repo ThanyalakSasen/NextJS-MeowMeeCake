@@ -222,7 +222,7 @@ if (cfg.max_order_qty != null && already + quantity > cfg.max_order_qty) throw b
 | ประเด็น | ตัดสินใจ |
 |---|---|
 | 3 ใบผลิตนับคนไม่จ่าย | ใบสั่งผลิต**นับเฉพาะพรีออเดอร์ที่ยืนยันการชำระเงินแล้ว** (`payment_status: paid`) · **ยกเลิกอัตโนมัติ**เมื่อไม่จ่ายภายในกำหนด |
-| กำหนดชำระ | **min(เวลาสั่ง + N ชม., เวลาปิดรอบ)** — N = `PREORDER_PAYMENT_DEADLINE_HOURS` (ค่าเริ่มต้น 24) |
+| กำหนดชำระ | **min(เวลาสั่ง + N ชม., เวลาปิดรอบ)** — N = `PREORDER_PAYMENT_DEADLINE_HOURS` (ค่าเริ่มต้น 0.5 = 30 นาที) |
 | แนบสลิปแล้วแต่แอดมินยังไม่ตรวจ ตอนถึงกำหนด | **ไม่ยกเลิก** รอแอดมินตรวจ · ไม่นับเข้าใบผลิตจนกว่าจะยืนยัน · แจ้งร้านให้รีบตรวจ |
 | 5 เปิด/ปิดรอบ | **อัตโนมัติตามเวลา** (cron) · แอดมินยังกดเองได้ |
 | 8 เปิดรอบที่ปิดแล้ว | **เปิดกลับได้ ถ้ายังไม่มีใบสั่งผลิต** |
@@ -306,7 +306,7 @@ route เดิม `POST /api/admin/production-orders/from-preorder-round` ย�
 
 | | |
 |---|---|
-| env `PREORDER_PAYMENT_DEADLINE_HOURS` | ชั่วโมงที่ต้องจ่ายหลังสั่ง (ค่าเริ่มต้น 24) |
+| env `PREORDER_PAYMENT_DEADLINE_HOURS` | ชั่วโมงที่ต้องจ่ายหลังสั่ง (ค่าเริ่มต้น 0.5 = 30 นาที) |
 | env `CRON_SECRET` | ต้องตั้งถ้าเรียกผ่าน HTTP (ใช้ร่วมกับ `/api/cron/preorder-reminders` — LINE.md §9.7) |
 | ตัวตั้งเวลา | ทุก 15 นาที: `GET /api/cron/preorder-rounds` + `Authorization: Bearer <CRON_SECRET>` (Vercel: `"schedule": "*/15 * * * *"`) หรือ crontab `*/15 * * * * cd /app && npm run cron:preorder-rounds` |
 | ข้อมูลเก่า | พรีออเดอร์ที่สร้างก่อนมีฟิลด์นี้มี `payment_due_at: null` → **ไม่ถูกยกเลิกตามกำหนด** (ถูกยกเลิกตอนปิดรอบถ้ายังไม่จ่าย) |

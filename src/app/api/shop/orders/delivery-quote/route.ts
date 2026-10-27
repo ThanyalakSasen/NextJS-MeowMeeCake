@@ -1,7 +1,7 @@
 /**
  * POST /api/shop/orders/delivery-quote — พรีวิวค่าจัดส่งก่อนกดสั่งซื้อ (หน้าเว็บลูกค้า)
  *   body: { province } หรือ { delivery_address: { province, ... } } · product_ids? (ไม่ส่ง = สินค้าในตะกร้าปัจจุบัน
- *         · พรีออเดอร์ส่ง product_ids ของรายการในรอบมาเอง)
+ *         · พรีออเดอร์ส่ง product_ids ของรายการในรอบมาเอง) · preorder: true = พรีออเดอร์ ส่งได้ทุกจังหวัด (ไม่ตรวจขอบเขต)
  *   คิดจาก ShippingZones ตามจังหวัด + ขอบเขตจัดส่ง (หมวดที่ไม่ส่งทั่วประเทศ → เฉพาะจังหวัดร้าน)
  *   — ตรงกับที่ POST /api/shop/orders และ /api/shop/preorders คิดจริง (docs/customer-backend-merge.md §8.7)
  *   คืน: { deliverable, message, fee, free, zone, zone_code, free_shipping_min: null }
@@ -25,7 +25,7 @@ export const POST = withAuth(async (session, req) => {
       );
 
   try {
-    const quote = await shippingService.quoteStorefrontDelivery({ province, productIds });
+    const quote = await shippingService.quoteStorefrontDelivery({ province, productIds, preorder: body.preorder === true });
     return ok({
       deliverable: true,
       message: null,

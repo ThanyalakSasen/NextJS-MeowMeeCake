@@ -14,6 +14,8 @@ import * as userLogService from "./userLogService";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
 import { signInWithLine } from "./oauthService";
+import { notifyProfileSetupLater } from "./customerNotifyService";
+import { POINT_RULES } from "./pointsService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -146,6 +148,8 @@ export async function loginWithGoogle(credential: string, ctx: { ip?: string | n
     // แทนที่จะปล่อยให้ toSessionUser() ต้อง roleModel.findById() ซ้ำ (shape เดียวกับที่ populate
     // ข้างบนให้ — เฉพาะ _id/role_name/role_type ไม่รวม field อื่นของ role)
     user.role_id = { _id: role._id, role_name: role.role_name, role_type: role.role_type };
+    // บัญชีใหม่ครั้งแรก → กระดิ่งชวนกรอกเบอร์โทร/วันเกิด (เหมือน oauthService.signInWithGoogle)
+    notifyProfileSetupLater(user._id, { provider: "google", needsEmail: false, profileBonus: POINT_RULES.PROFILE });
   }
 
   const { session, token } = await issue(user);

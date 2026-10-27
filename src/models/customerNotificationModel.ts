@@ -15,7 +15,8 @@ const customerNotificationSchema = new mongoose.Schema(
     link: { type: String, default: null },
     // อ้างอิงคำสั่งซื้อที่เกี่ยวข้อง (ไว้ตรวจสอบย้อนหลัง)
     // promotion = โค้ดส่วนลดใหม่ที่ประกาศให้ลูกค้าทุกคน (couponNoticeService — ลบโค้ดแล้วซ่อนตาม ref_id)
-    ref_type: { type: String, enum: ["order", "preorder", "coupon", "promotion", "bundle", "preorder_round", "review", null], default: null },
+    // profile_setup = ชวนกรอกข้อมูลบัญชี (สมัครด้วย Google/LINE) — หน้าเว็บเด้งเป็นป๊อปอัปจนกว่าจะกรอกครบ/อ่านแล้ว
+    ref_type: { type: String, enum: ["order", "preorder", "coupon", "promotion", "bundle", "preorder_round", "review", "profile_setup", null], default: null },
     ref_id: { type: mongoose.Schema.Types.ObjectId, default: null },
     // รหัสโค้ด/คูปอง — หน้าเว็บแสดงพร้อมปุ่มคัดลอก (แจ้งเตือนคูปอง)
     coupon_code: { type: String, default: null },
