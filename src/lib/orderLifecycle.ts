@@ -35,6 +35,24 @@ function customerDocRef(doc: Doc): { kind: CustomerDocKind; docNo: string } {
 }
 
 /**
+ * จัดส่งที่ลูกค้าเป็นคนปิดงาน — ออเดอร์เว็บ (ORD-) + พรีออเดอร์ ที่เป็นแบบจัดส่ง (ผู้ใช้เลือก 2026-10-28):
+ *   ร้านเลื่อนได้ถึง "กำลังจัดส่ง" (shipping) · ลูกค้ากด "ได้รับสินค้าแล้ว" = ส่งถึง + สำเร็จ (confirmEntityReceived)
+ * ออเดอร์หน้าร้าน (POS-) ไม่มีลูกค้าในเว็บที่จะกด — ร้านปิดงานเองเหมือนเดิม
+ */
+export function customerClosesDelivery(doc: { order_type?: unknown; order_no?: unknown; preorder_no?: unknown }): boolean {
+  if (doc.order_type !== "delivery") return false;
+  return !!doc.preorder_no || String(doc.order_no ?? "").startsWith("ORD-");
+}
+
+/** ร้านเปลี่ยนสถานะออเดอร์/ส่งถึงเองไม่ได้ เมื่อเป็นงานที่ลูกค้าปิด (route หลังร้านเรียกก่อนเปลี่ยน) */
+export function assertShopMayClose(doc: Doc, change: { order_status?: unknown; delivery_status?: unknown }, entityLabel: string): void {
+  if (!customerClosesDelivery(doc)) return;
+  if (change.order_status === "completed" || change.delivery_status === "delivered") {
+    throw conflict(`${entityLabel}จัดส่งปิดงานเมื่อลูกค้ากด "ได้รับสินค้าแล้ว" — ร้านอัปเดตได้ถึง "กำลังจัดส่ง"`);
+  }
+}
+
+/**
  * ลงทะเบียน auto-refund ใน Saga ถ้า entity จ่ายเงินแล้วตอนกำลังจะถูกยกเลิก (BACKLOG §2.8/§2b.3) —
  * ต้องเรียก**ก่อน** `saga.rollback()` เสมอ (แค่ลงทะเบียน onRollback ไว้ ไม่ได้ refund ทันที)
  */
@@ -156,6 +174,8 @@ export async function applyEntityDeliveryUpdate(opts: {
   if (doc.order_type !== "delivery") {
     throw badRequest(`${opts.entityLabel}นี้ไม่ใช่ประเภทจัดส่ง (delivery)`);
   }
+  // หลังร้านเท่านั้นที่เรียก — งานที่ลูกค้าปิดเอง ร้านตั้ง "ส่งถึงแล้ว" ไม่ได้
+  assertShopMayClose(doc, opts.input, opts.entityLabel);
 
   const payload: Record<string, unknown> = { ...opts.input };
   if (payload.delivery_status === "shipping" && !doc.shipped_at && !payload.shipped_at) {
@@ -163,6 +183,12 @@ export async function applyEntityDeliveryUpdate(opts: {
   }
   if (payload.delivery_status === "delivered" && !payload.delivered_at) {
     payload.delivered_at = new Date();
+  }
+
+  // ส่งของออกไปแล้ว = สินค้าพร้อมแน่นอน — ร้านไม่ได้กด "สินค้าพร้อม" ก่อน ก็เลื่อนเป็น ready ให้
+  // (ลูกค้ากดได้รับสินค้า → completed ได้เลย · ไม่แจ้ง ready ซ้ำ เพราะได้ข้อความ "กำลังจัดส่ง" อยู่แล้ว)
+  if (payload.delivery_status === "shipping" && ["confirmed", "preparing"].includes(String(doc.order_status))) {
+    payload.order_status = "ready";
   }
 
   const updated = await opts.model
@@ -179,6 +205,35 @@ export async function applyEntityDeliveryUpdate(opts: {
     );
   }
   return updated;
+}
+
+/**
+ * ลูกค้ากด "ได้รับสินค้าแล้ว" (ออเดอร์เว็บ/พรีออเดอร์แบบจัดส่ง) — ส่งถึง (delivered + delivered_at) แล้วปิดเป็น completed
+ * ผ่าน `complete` (updateOrderStatus/updatePreorderStatus — ให้แต้มสะสมตามปกติ) · กดซ้ำหลังสำเร็จแล้ว = คืนสถานะเดิม
+ * ได้เฉพาะตอนร้านจัดส่งแล้ว (shipping) · ไม่ใช่เจ้าของ = 404
+ */
+export async function confirmEntityReceived(opts: {
+  model: AnyModel;
+  id: string;
+  userId: string;
+  entityLabel: string;
+  complete: (id: string) => Promise<unknown>;
+}): Promise<unknown> {
+  await dbConnect();
+  assertObjectId(opts.id);
+  const doc = await opts.model.findOne({ _id: opts.id, user_id: opts.userId, deleted_at: null }).lean<Doc | null>();
+  if (!doc) throw notFound(`ไม่พบ${opts.entityLabel}ที่ระบุ`);
+  if (!customerClosesDelivery(doc)) throw badRequest(`${opts.entityLabel}นี้ไม่ใช่แบบจัดส่ง`);
+  if (doc.order_status === "completed") return opts.complete(opts.id);
+  if (doc.order_status === "cancelled") throw conflict(`${opts.entityLabel}นี้ถูกยกเลิกแล้ว`);
+  if (doc.delivery_status !== "shipping") throw conflict("ร้านยังไม่ได้จัดส่งสินค้า");
+  if (doc.order_status === "pending") throw conflict(`${opts.entityLabel}นี้ยังไม่ได้ชำระเงิน — กรุณาติดต่อร้าน`);
+
+  await opts.model.updateOne(
+    { _id: opts.id, delivery_status: "shipping" },
+    { $set: { delivery_status: "delivered", delivered_at: new Date(), ...(doc.order_status !== "ready" ? { order_status: "ready" } : {}) } }
+  );
+  return opts.complete(opts.id);
 }
 
 /** soft-delete เอนทิตี + cascade รายการลูก — เฉพาะเมื่อสถานะเป็น completed/cancelled แล้วเท่านั้น */

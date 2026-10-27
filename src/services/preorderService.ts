@@ -22,6 +22,7 @@ import {
   assertCustomerCancelAllowed,
   setEntityPaymentStatus,
   applyEntityDeliveryUpdate,
+  confirmEntityReceived,
   softDeleteEntityWithItems,
 } from "../lib/orderLifecycle";
 import preorderModel from "../models/preorderModel";
@@ -645,7 +646,8 @@ export async function getPreorderByNo(preorderNo: string) {
 export async function updatePreorderStatus(
   id: string,
   next: PreorderStatus,
-  opts: { cancelled_by?: string; cancelled_reason?: string } = {}
+  /** notifyCustomer: false = ไม่แจ้งลูกค้า (ลูกค้าเป็นคนกดเอง เช่น ได้รับสินค้าแล้ว) */
+  opts: { cancelled_by?: string; cancelled_reason?: string; notifyCustomer?: boolean } = {}
 ) {
   await dbConnect();
   assertObjectId(id);
@@ -732,7 +734,7 @@ export async function updatePreorderStatus(
   }
   // ลูกค้ายกเลิกเองไม่ต้องแจ้งกลับ (§8.12)
   const selfCancel = next === "cancelled" && !!opts.cancelled_by && String(opts.cancelled_by) === String(preorder.user_id);
-  if (!selfCancel) {
+  if (!selfCancel && opts.notifyCustomer !== false) {
     notifyCustomerLater(
       preorder.user_id,
       customerMessages.orderStatus("preorder", preorder.preorder_no, next, {
@@ -754,6 +756,17 @@ export async function updatePreorderStatus(
     );
   }
   return presentPreorderWithItems(preorder, cancelledItems);
+}
+
+/** ลูกค้ากด "ได้รับสินค้าแล้ว" — พรีออเดอร์แบบจัดส่งที่ร้านจัดส่งแล้ว → ส่งถึง + สำเร็จ (lib/orderLifecycle) */
+export async function confirmReceivedByCustomer(id: string, userId: string) {
+  return confirmEntityReceived({
+    model: preorderModel,
+    id,
+    userId,
+    entityLabel: "พรีออเดอร์",
+    complete: (preorderId) => updatePreorderStatus(preorderId, "completed", { notifyCustomer: false }),
+  });
 }
 
 /** สถานะที่ "ลูกค้า" ยกเลิกพรีออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน

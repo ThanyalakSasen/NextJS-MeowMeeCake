@@ -10,6 +10,7 @@ import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
+import { assertShopMayClose } from "@/lib/orderLifecycle";
 import * as orderService from "@/services/orderService";
 import type { OrderStatus } from "@/services/orderService";
 
@@ -20,6 +21,8 @@ export const PATCH = withPermission("orders", "update", async (session, req, ctx
   const body = await req.json();
   if (!body.order_status) throw badRequest("กรุณาระบุ order_status");
   const before = await orderService.getOrderById(id).catch(() => undefined);
+  // ออเดอร์เว็บแบบจัดส่ง: ร้านปิดเป็นสำเร็จเองไม่ได้ — ลูกค้ากด "ได้รับสินค้าแล้ว" (409)
+  if (before) assertShopMayClose(before as Record<string, unknown>, body, "ออเดอร์");
   const result = await orderService.updateOrderStatus(id, body.order_status as OrderStatus, {
     cancelled_by: session.user_id,
     cancelled_reason: body.cancelled_reason ?? undefined,
