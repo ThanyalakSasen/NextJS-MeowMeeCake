@@ -210,7 +210,8 @@ export async function createPreorder(
 
   const resolvedItems = await preorderRoundService.getOrderableRoundItems(
     input.items.map((raw) => raw.round_item_id),
-    String(round._id)
+    String(round._id),
+    { storefront: opts.storefront }
   );
 
   // docs/preorder-round-flow.md ปัญหา 2 — เดิม product.preorder_config (บังคับกรอก) ไม่ถูกใช้เลย
@@ -566,7 +567,9 @@ export async function listPreorders(query: ListPreorderQuery) {
   if (query.search) {
     const re = new RegExp(escapeRegExp(query.search.trim()), "i");
     if (query.search_items) {
-      const ids = await preorderItemModel.distinct("preorder_id", { deleted_at: null, $or: [{ "product_snapshot.product_name_th": re }, { "product_snapshot.product_name_eng": re }] });
+      // ค้นรายการสินค้าเฉพาะพรีออเดอร์ของลูกค้าคนนี้ (index preorder_id) — เหมือน orderService.listOrders
+      const own = query.user_id ? { preorder_id: { $in: await preorderModel.distinct("_id", { user_id: query.user_id, deleted_at: null }) } } : {};
+      const ids = await preorderItemModel.distinct("preorder_id", { ...own, deleted_at: null, $or: [{ "product_snapshot.product_name_th": re }, { "product_snapshot.product_name_eng": re }] });
       filter.$or = [{ preorder_no: re }, { _id: { $in: ids } }];
     } else {
       filter.preorder_no = re;

@@ -483,7 +483,13 @@ export async function expireIfDue(kind: PaymentPageKind, id: string, userId: str
   }
 }
 
-export async function getPaymentPage(kind: PaymentPageKind, id: string, userId: string) {
+export async function getPaymentPage(
+  kind: PaymentPageKind,
+  id: string,
+  userId: string,
+  /** forGroup = เรียกจากหน้าชำระรวม (ทีละบิล) — ไม่ต้องออก QR รายบิล/หากลุ่ม (หน้ารวมออก QR ยอดรวมเองและรู้กลุ่มอยู่แล้ว) */
+  opts: { forGroup?: boolean } = {}
+) {
   await dbConnect();
   if (!isObjectId(id)) throw notFound("ไม่พบคำสั่งซื้อ");
   await expireIfDue(kind, id, userId);
@@ -509,7 +515,7 @@ export async function getPaymentPage(kind: PaymentPageKind, id: string, userId: 
   const lateUpload = kind === "order" && orderService.canReopenWithLateSlip(doc);
   let qr: { qr_image: string; account_name: string } | null = null;
   let qrError: string | null = null;
-  if (!blocked && amount > 0) {
+  if (!blocked && amount > 0 && !opts.forGroup) {
     try {
       qr = await buildPromptPayQr(amount);
     } catch (err: any) {
@@ -537,7 +543,7 @@ export async function getPaymentPage(kind: PaymentPageKind, id: string, userId: 
     payment_due_at: doc.payment_due_at ?? null,
     server_time: new Date(),
     // สั่งพร้อมบิลอื่น (ตะกร้ารวม) — หน้าเว็บแสดงลิงก์ไปชำระรวม /customer/account/payment-group/{group_id}
-    group_id: await (await import("./paymentGroupService")).groupIdOf(doc._id),
+    group_id: opts.forGroup ? null : await (await import("./paymentGroupService")).groupIdOf(doc._id),
   };
 }
 

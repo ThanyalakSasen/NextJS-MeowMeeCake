@@ -218,7 +218,11 @@ describe("ป๊อปอัปกรอกข้อมูล (profile_setup) �
     await userModel.updateOne({ _id: a.user_id }, { $set: { user_phone: "0812345678", user_birthdate: new Date("1995-01-01") } });
     await resolveProfileSetupNotices(a.user_id);
     expect(await unread(a.user_id)).toBe(1);
-    await userModel.updateOne({ _id: a.user_id }, { $set: { email: "real-line@test.local" } });
+    // ตั้งอีเมลแล้วแต่ยังไม่ได้กดลิงก์ยืนยัน → ยังค้าง
+    await userModel.updateOne({ _id: a.user_id }, { $set: { email: "real-line@test.local", is_email_verified: false } });
+    await resolveProfileSetupNotices(a.user_id);
+    expect(await unread(a.user_id)).toBe(1);
+    await userModel.updateOne({ _id: a.user_id }, { $set: { is_email_verified: true } });
     await resolveProfileSetupNotices(a.user_id);
     expect(await unread(a.user_id)).toBe(0);
   });
