@@ -151,12 +151,12 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
     expect(await settled(b.lineId)).toHaveLength(1);
   });
 
-  it("ชำระเงิน: สำเร็จ → แจ้ง (และยืนยันออเดอร์อัตโนมัติ) · คืนเงิน → แจ้ง", async () => {
+  it("ชำระเงิน: สำเร็จ → แจ้ง (และเลื่อนเป็นกำลังเตรียมสินค้าอัตโนมัติ) · คืนเงิน → แจ้ง", async () => {
     const c = await customer();
     const { id } = await placeOrder(c.uid);
 
     await orderService.setPaymentStatus(id, "paid");
-    expect((await orderModel.findById(id).lean<{ order_status: string }>())?.order_status).toBe("confirmed");
+    expect((await orderModel.findById(id).lean<{ order_status: string }>())?.order_status).toBe("preparing");
     await flushBackground(); // ให้ "ชำระเงินสำเร็จ" ยิงก่อน "คืนเงิน" — ตรวจตามลำดับด้านล่าง
     await orderService.setPaymentStatus(id, "refunded");
 

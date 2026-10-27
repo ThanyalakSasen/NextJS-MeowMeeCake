@@ -891,8 +891,9 @@ export async function updateOrderStatus(
 // กำหนดชำระออเดอร์เว็บ — ค่าคงที่อยู่ที่ src/lib/paymentDeadline.ts (ใช้ร่วมกับ customerNotifyService)
 export { ORDER_PAYMENT_WINDOW_MS, PAYMENT_EXPIRED_REASON };
 
-/** สถานะที่ "ลูกค้า" ยกเลิกออเดอร์เองได้ — พอร้านเริ่มเตรียม (preparing ขึ้นไป) ต้องติดต่อร้าน */
-export const CUSTOMER_CANCELABLE_STATUSES: readonly OrderStatus[] = ["pending", "confirmed"];
+/** สถานะที่ "ลูกค้า" ยกเลิกออเดอร์เองได้ — preparing รวมด้วยเพราะยืนยันชำระเงินแล้วเลื่อนเป็น preparing อัตโนมัติ
+ *  (setEntityPaymentStatus) · พอร้านกดสินค้าพร้อม (ready ขึ้นไป) ต้องติดต่อร้าน */
+export const CUSTOMER_CANCELABLE_STATUSES: readonly OrderStatus[] = ["pending", "confirmed", "preparing"];
 
 export async function cancelOrder(
   id: string,
@@ -961,7 +962,7 @@ export async function deleteOrder(id: string) {
 // ── นโยบายยกเลิกของลูกค้า (ออเดอร์เว็บ) — docs/customer-backend-merge.md §8.8 ─────────────
 /**
  * ลูกค้ายกเลิกออเดอร์ของตัวเอง (แบบฝั่งลูกค้า — ผู้ใช้เลือก 2026-10-05):
- *   - pending / confirmed เท่านั้น (ร้านเริ่มเตรียมแล้ว = ติดต่อร้าน) · ออเดอร์หน้าร้าน (POS-) ยกเลิกผ่านร้านเท่านั้น
+ *   - pending / confirmed / preparing เท่านั้น (สินค้าพร้อมแล้ว = ติดต่อร้าน) · ออเดอร์หน้าร้าน (POS-) ยกเลิกผ่านร้านเท่านั้น
  *   - ยังไม่ชำระ → ยกเลิก + คืนสต็อก/สิทธิ์โปรโมชัน
  *   - ชำระแล้ว → ยกเลิกได้ด้วย แต่ **ไม่** ตั้ง payment เป็น refunded ให้ — ออเดอร์เป็น "ยกเลิก + ชำระแล้ว" = รอโอนคืน
  *     แจ้งเจ้าของร้าน · ร้านโอนคืนแล้วกดคืนเงินเอง (POST /api/admin/payments/[id]/refund) ตัวเลขบัญชีจึงตรงความจริง

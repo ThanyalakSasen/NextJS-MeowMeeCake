@@ -82,26 +82,28 @@ export async function assertCustomerCancelAllowed(opts: {
     .select("order_status payment_status")
     .lean<{ order_status: string; payment_status?: string } | null>();
   if (!doc) throw notFound(`ไม่พบ${opts.entityLabel}ที่ระบุ`);
+  // เอนทิตีที่ชำระเงินแล้ว: ลูกค้ายกเลิกเองไม่ได้ — ต้องให้แอดมินยกเลิก + คืนเงิน (refundPayment)
+  // ไม่งั้นจะได้ order_status = cancelled แต่ payment_status ยัง paid โดยไม่มี refund record
+  // เช็คก่อนสถานะ — จ่ายแล้วเลื่อนเป็น preparing อัตโนมัติ (setEntityPaymentStatus) จะได้ข้อความที่บอกเหตุจริง
+  if (doc.payment_status === "paid") {
+    throw conflict(
+      `${opts.entityLabel}นี้ชำระเงินแล้ว ยกเลิกเองไม่ได้ — กรุณาติดต่อร้านเพื่อขอยกเลิกและคืนเงิน`
+    );
+  }
   if (!opts.allowedFrom.includes(doc.order_status)) {
     throw conflict(
       `ยกเลิก${opts.entityLabel}เองได้เฉพาะตอนสถานะ ${opts.allowedFrom.join(" / ")} เท่านั้น ` +
         `(สถานะปัจจุบัน: "${doc.order_status}") — หากต้องการยกเลิกกรุณาติดต่อร้าน`
     );
   }
-  // เอนทิตีที่ชำระเงินแล้ว: ลูกค้ายกเลิกเองไม่ได้ — ต้องให้แอดมินยกเลิก + คืนเงิน (refundPayment)
-  // ไม่งั้นจะได้ order_status = cancelled แต่ payment_status ยัง paid โดยไม่มี refund record
-  if (doc.payment_status === "paid") {
-    throw conflict(
-      `${opts.entityLabel}นี้ชำระเงินแล้ว ยกเลิกเองไม่ได้ — กรุณาติดต่อร้านเพื่อขอยกเลิกและคืนเงิน`
-    );
-  }
 }
 
 /**
- * อัปเดต payment_status + auto-confirm เมื่อจ่ายสำเร็จตอนยัง pending (BACKLOG §2b.2) — sync
- * order_status ที่เพิ่ง auto-confirm ลง doc ที่คืนด้วย (ของเดิมทั้งสองฝั่งไม่ sync ทำให้ผลลัพธ์ที่คืน
- * ค้างเป็น "pending" ทั้งที่ DB เพิ่งเปลี่ยนเป็น "confirmed" ไปแล้ว — ไม่กระทบผู้เรียกปัจจุบันเพราะ
- * paymentService.propagateStatus ไม่ได้ใช้ค่าที่คืนกลับมาเลย แต่แก้ให้ถูกไว้กันงงในอนาคต)
+ * อัปเดต payment_status + เลื่อน order_status อัตโนมัติเมื่อจ่ายสำเร็จตอนยัง pending (BACKLOG §2b.2)
+ * — ยืนยันการชำระเงินแล้วข้ามไป "preparing" (กำลังเตรียมสินค้า) เลย ไม่ค้างที่ "confirmed" ให้พนักงานกดเลื่อนเอง
+ * (pending → preparing ข้าม state machine NEXT_STATUS ได้เพราะเขียนตรงที่นี่ ·
+ * ออเดอร์เว็บที่จ่ายแล้วลูกค้ายังยกเลิกเองได้ที่ preparing — ดู orderService.CUSTOMER_CANCELABLE_STATUSES)
+ * · sync order_status ลง doc ที่คืนด้วย
  */
 export async function setEntityPaymentStatus(opts: {
   model: AnyModel;
@@ -126,8 +128,8 @@ export async function setEntityPaymentStatus(opts: {
   if (!doc) throw notFound(`ไม่พบ${opts.entityLabel}ที่ระบุ`);
 
   if (opts.status === "paid" && doc.order_status === "pending") {
-    await opts.model.updateOne({ _id: opts.id }, { $set: { order_status: "confirmed" } });
-    doc.order_status = "confirmed";
+    await opts.model.updateOne({ _id: opts.id }, { $set: { order_status: "preparing" } });
+    doc.order_status = "preparing";
   }
 
   const { kind, docNo } = customerDocRef(doc);
