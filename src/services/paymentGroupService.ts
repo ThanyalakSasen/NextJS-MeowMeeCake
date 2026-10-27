@@ -17,6 +17,8 @@ import { adminLinks } from "../lib/adminLinks";
 import { toBaht } from "../lib/money";
 import paymentGroupModel from "../models/paymentGroupModel";
 import paymentModel from "../models/paymentModel";
+import orderModel from "../models/orderModel";
+import preorderModel from "../models/preorderModel";
 import { notificationService } from "./notificationService";
 import { buildPromptPayQr } from "./promptpayService";
 import * as paymentService from "./paymentService";
@@ -58,8 +60,10 @@ export async function getGroupPaymentPage(groupId: string, userId: string) {
   const allPaid = bills.every((b) => b.payment_status === "paid");
   // สลิปเดียวกันรอตรวจครบทุกบิล = ส่งสลิปรวมแล้ว
   const awaitingReview = !allPaid && bills.every((b) => b.payment_status === "paid" || (b.payment_record_status === "pending" && !!b.slip_url));
-  // ชำระรวมได้: ทุกบิลยังรอชำระ (ไม่ยกเลิก/ไม่จ่ายแล้ว) และยังไม่ได้ส่งสลิปรวมที่รอตรวจ
-  const canPayTogether = !allPaid && !awaitingReview && bills.every((b) => b.can_pay && b.payment_status !== "paid");
+  // ชำระรวมได้: ทุกบิลยังรอชำระ (ไม่ยกเลิก/ไม่จ่ายแล้ว) และไม่มีบิลไหนมีสลิปรอตรวจ (สลิปรวม หรือลูกค้าจ่ายแยกบิลนั้นไปแล้ว
+  // — ออก QR ยอดรวม = จ่ายบิลนั้นซ้ำ และสลิปรวมจะทับสลิปเดิม)
+  const hasPendingSlip = (b: { payment_record_status?: unknown; slip_url?: unknown }) => b.payment_record_status === "pending" && !!b.slip_url;
+  const canPayTogether = !allPaid && !awaitingReview && bills.every((b) => b.can_pay && b.payment_status !== "paid" && !hasPendingSlip(b));
   const dueTimes = bills.map((b) => (b.payment_due_at ? new Date(b.payment_due_at).getTime() : null)).filter((t): t is number => t !== null);
 
   let qr: { qr_image: string; account_name: string } | null = null;
@@ -88,7 +92,8 @@ export async function getGroupPaymentPage(groupId: string, userId: string) {
 
 /**
  * สลิปเดียวสำหรับทุกบิลในกลุ่ม — แต่ละบิลได้ Payment (ยอดของบิล) ที่ใช้สลิปนี้ + group_id
- * มีใบรอตรวจ/ถูกปฏิเสธอยู่แล้ว = แนบกับใบเดิม (submitSlip) · ยังไม่มี = สร้างใหม่พร้อมสลิป (createPayment)
+ * มีใบที่ยังไม่มีสลิป/ถูกปฏิเสธอยู่แล้ว = แนบกับใบเดิม (submitSlip) · ยังไม่มี = สร้างใหม่พร้อมสลิป (createPayment)
+ * ทั้งหมดหรือไม่เลย: บิลไหนพัง → คืนใบที่ทำไปแล้วกลับสภาพเดิม (route ลบไฟล์สลิปได้โดยไม่มีใบไหนชี้ไฟล์ที่หายไป)
  * แจ้งร้านครั้งเดียว (ไม่ใช่ทีละบิล)
  */
 export async function submitGroupSlip(groupId: string, userId: string, slipUrl: string) {
@@ -97,33 +102,47 @@ export async function submitGroupSlip(groupId: string, userId: string, slipUrl: 
     throw conflict(
       page.status === "awaiting_review"
         ? "ส่งสลิปรวมแล้ว กำลังรอร้านตรวจสอบ"
-        : "บางบิลชำระแล้ว ถูกยกเลิก หรือหมดเวลาชำระ — กรุณาชำระแยกที่หน้ารายละเอียดของแต่ละบิล"
+        : "บางบิลชำระแล้ว ถูกยกเลิก มีสลิปรอตรวจ หรือหมดเวลาชำระ — กรุณาชำระแยกที่หน้ารายละเอียดของแต่ละบิล"
     );
   }
 
   const results = [];
-  for (const b of page.bills) {
-    const filter = b.kind === "order" ? { order_id: b.id } : { preorder_id: b.id };
-    const reusable = await paymentModel
-      .findOne({ ...filter, deleted_at: null, status: { $in: ["pending", "failed"] } })
-      .sort({ created_at: -1 })
-      .select("_id")
-      .lean<{ _id: unknown } | null>();
-    if (reusable) {
-      await paymentModel.updateOne({ _id: reusable._id }, { $set: { group_id: groupId } });
-      results.push(await paymentService.submitSlip(String(reusable._id), { slip_image_url: slipUrl }, { notify: false }));
-    } else {
-      results.push(
-        await paymentService.createPayment({
+  const undo: Array<() => Promise<unknown>> = [];
+  try {
+    for (const b of page.bills) {
+      const filter = b.kind === "order" ? { order_id: b.id } : { preorder_id: b.id };
+      const reusable = await paymentModel
+        .findOne({ ...filter, deleted_at: null, $or: [{ status: "failed" }, { status: "pending", slip_image_url: null }] })
+        .sort({ created_at: -1 })
+        .select("_id status slip_image_url promptpay_ref group_id")
+        .lean<any>();
+      if (reusable) {
+        const prev = { status: reusable.status, slip_image_url: reusable.slip_image_url, promptpay_ref: reusable.promptpay_ref, group_id: reusable.group_id };
+        undo.push(() => paymentModel.updateOne({ _id: reusable._id }, { $set: prev }));
+        results.push(await paymentService.submitSlip(String(reusable._id), { slip_image_url: slipUrl }, { notify: false, groupId }));
+      } else {
+        const billModel: any = b.kind === "order" ? orderModel : preorderModel;
+        const prevPaymentId = (await billModel.findOne({ _id: b.id }).select("payment_id").lean())?.payment_id ?? null;
+        const created: any = await paymentService.createPayment({
           user_id: userId,
           order_id: b.kind === "order" ? b.id : null,
           preorder_id: b.kind === "preorder" ? b.id : null,
           amount: b.amount,
           slip_image_url: slipUrl,
           group_id: groupId,
-        })
-      );
+        });
+        undo.push(async () => {
+          await paymentModel.deleteOne({ _id: created._id });
+          await billModel.updateOne({ _id: b.id }, { $set: { payment_id: prevPaymentId } });
+        });
+        results.push(created);
+      }
     }
+  } catch (err) {
+    for (const fn of undo.reverse()) {
+      await fn().catch((e) => log.error("payment_group.slip_rollback_failed", { group_id: groupId, err: e }));
+    }
+    throw err;
   }
 
   void trackBackground(
@@ -168,4 +187,46 @@ export async function groupSummaries(groupIds: string[]): Promise<Map<string, { 
     });
   }
   return out;
+}
+
+/**
+ * รวมค่าส่ง (checkoutService): บิลนี้ไม่เก็บค่าส่งเพราะบิลอื่นเก็บแทน — บิลที่เก็บแทนถูกยกเลิก (หรือเลยกำหนดชำระ) โดยยังไม่ได้จ่าย
+ * → คืนค่าส่งให้บิลนี้ (delivery_fee + total_amount) ก่อนออกยอด/QR ไม่งั้นร้านส่งของโดยไม่ได้ค่าส่ง
+ * ทำเฉพาะบิลที่ยังไม่จ่ายและไม่มีสลิปรอตรวจ (จ่ายไปแล้ว = ยอดตามสลิป ร้านรับค่าส่งเอง — log ไว้)
+ * $pull waiver ก่อน (atomic) — เปิดหน้าพร้อมกันหลายแท็บ ค่าส่งถูกบวกครั้งเดียว
+ */
+export async function restoreWaivedShipping(kind: "order" | "preorder", id: string, userId: string): Promise<void> {
+  const group = await paymentGroupModel
+    .findOne({ user_id: userId, deleted_at: null, "shipping_waivers.ref_id": id })
+    .select("shipping_waivers")
+    .lean<any>();
+  const waiver = group?.shipping_waivers?.find((w: any) => String(w.ref_id) === String(id));
+  if (!waiver) return;
+
+  await paymentService.expireIfDue(waiver.payer_kind, String(waiver.payer_ref_id), userId);
+  const payerModel: any = waiver.payer_kind === "order" ? orderModel : preorderModel;
+  const payer = await payerModel.findOne({ _id: waiver.payer_ref_id }).select("order_status payment_status").lean();
+  if (payer && (payer.order_status !== "cancelled" || payer.payment_status === "paid")) return;
+
+  const billModel: any = kind === "order" ? orderModel : preorderModel;
+  const bill = await billModel.findOne({ _id: id, deleted_at: null }).select("order_status payment_status").lean();
+  if (!bill || bill.order_status === "cancelled") return;
+  const billFilter = kind === "order" ? { order_id: id } : { preorder_id: id };
+  const hasSlip = await paymentModel.exists({ ...billFilter, deleted_at: null, status: { $in: ["pending", "paid"] }, slip_image_url: { $ne: null } });
+  if (bill.payment_status === "paid" || hasSlip) {
+    log.warn("payment_group.waived_shipping_unrecoverable", { kind, id, payer_ref_id: String(waiver.payer_ref_id), fee: waiver.fee });
+    return;
+  }
+
+  const pulled = await paymentGroupModel.updateOne(
+    { _id: group._id, "shipping_waivers.ref_id": id },
+    { $pull: { shipping_waivers: { ref_id: id } } }
+  );
+  if (pulled.modifiedCount === 0) return;
+  const fee = Number(waiver.fee) || 0;
+  if (fee <= 0) return;
+  await billModel.updateOne({ _id: id }, { $inc: { delivery_fee: fee, total_amount: fee } });
+  // ใบชำระที่ยังไม่มีสลิป (ยอดเดิม) ให้ยอดตรงกับบิล
+  await paymentModel.updateMany({ ...billFilter, deleted_at: null, status: "pending", slip_image_url: null }, { $inc: { amount: fee } });
+  log.info("payment_group.waived_shipping_restored", { kind, id, payer_ref_id: String(waiver.payer_ref_id), fee });
 }

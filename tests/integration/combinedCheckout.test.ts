@@ -1,9 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import orderModel from "@/models/orderModel";
 import preorderModel from "@/models/preorderModel";
 import paymentModel from "@/models/paymentModel";
 import * as cartService from "@/services/cartService";
 import * as checkoutService from "@/services/checkoutService";
+import * as orderService from "@/services/orderService";
 import * as paymentGroupService from "@/services/paymentGroupService";
 import * as paymentService from "@/services/paymentService";
 import * as preorderRoundService from "@/services/preorderRoundService";
@@ -184,6 +185,64 @@ describe("ชำระรวม (paymentGroupService)", () => {
     const other = await makeUser();
     await expect(paymentGroupService.getGroupPaymentPage(res.group_id!, String(other._id))).rejects.toMatchObject({ status: 404 });
   });
+
+  it("สลิปรวมถูกปฏิเสธ แล้วจ่ายแยกบิลเดียว → ยืนยันใบนั้นไม่ลามไปบิลอื่น", async () => {
+    const { uid, r1, preorder } = await setup();
+    const res = await checkoutService.checkout(uid, body({ order: { order_type: "takeaway" }, preorders: [preorder(r1, 1)] }));
+    await paymentGroupService.submitGroupSlip(res.group_id!, uid, SLIP);
+    const admin = await makeUser();
+    const orderPay = (await paymentModel.findOne({ order_id: res.bills[0]._id }).lean<{ _id: unknown }>())!;
+    await paymentService.verifyPayment(String(orderPay._id), { verified_by: String(admin._id), approved: false });
+
+    // ลูกค้าจ่ายเฉพาะออเดอร์ (สลิปของบิลนี้บิลเดียว) → ใบนั้นหลุดจากกลุ่ม
+    await paymentService.submitSlip(String(orderPay._id), { slip_image_url: "/api/files/slips/order-only.jpg" });
+    expect((await paymentModel.findById(orderPay._id).lean<{ group_id: unknown }>())!.group_id).toBeNull();
+    await paymentService.verifyPayment(String(orderPay._id), { verified_by: String(admin._id), approved: true });
+
+    expect((await orderModel.findById(res.bills[0]._id).lean<{ payment_status: string }>())!.payment_status).toBe("paid");
+    expect((await preorderModel.findById(res.bills[1]._id).lean<{ payment_status: string }>())!.payment_status).not.toBe("paid");
+    expect((await paymentModel.findOne({ preorder_id: res.bills[1]._id }).lean<{ status: string }>())!.status).toBe("failed");
+  });
+
+  it("บิลในกลุ่มถูกยกเลิกระหว่างรอตรวจสลิปรวม → ยืนยันใบอื่นไม่ทำให้บิลที่ยกเลิกเป็น 'ชำระแล้ว'", async () => {
+    const { uid, r1, preorder } = await setup();
+    const res = await checkoutService.checkout(uid, body({ order: { order_type: "takeaway" }, preorders: [preorder(r1, 1)] }));
+    await paymentGroupService.submitGroupSlip(res.group_id!, uid, SLIP);
+    const admin = await makeUser();
+    await preorderService.cancelPreorder(res.bills[1]._id, { cancelled_by: String(admin._id), cancelled_reason: "ร้านยกเลิก" });
+
+    const orderPay = (await paymentModel.findOne({ order_id: res.bills[0]._id }).lean<{ _id: unknown }>())!;
+    await paymentService.verifyPayment(String(orderPay._id), { verified_by: String(admin._id), approved: true });
+    expect((await preorderModel.findById(res.bills[1]._id).lean<{ payment_status: string }>())!.payment_status).not.toBe("paid");
+  });
+
+  it("จ่ายแยกบิลหนึ่งไปแล้ว (สลิปรอตรวจ) → ชำระรวมไม่ได้ · สลิปเดิมไม่ถูกทับ", async () => {
+    const { uid, r1, preorder } = await setup();
+    const res = await checkoutService.checkout(uid, body({ order: { order_type: "takeaway" }, preorders: [preorder(r1, 1)] }));
+    const own = "/api/files/slips/order-own.jpg";
+    await paymentService.createPayment({ user_id: uid, order_id: res.bills[0]._id, amount: res.bills[0].total_amount, slip_image_url: own });
+
+    const page = await paymentGroupService.getGroupPaymentPage(res.group_id!, uid);
+    expect(page).toMatchObject({ can_pay_together: false, qr_image: null });
+    await expect(paymentGroupService.submitGroupSlip(res.group_id!, uid, SLIP)).rejects.toMatchObject({ status: 409 });
+    expect((await paymentModel.findOne({ order_id: res.bills[0]._id }).lean<{ slip_image_url: string }>())!.slip_image_url).toBe(own);
+  });
+
+  it("ส่งสลิปรวมพังกลางทาง → คืนใบที่ทำไปแล้ว ไม่มีใบไหนชี้สลิปนี้", async () => {
+    const { uid, r1, preorder } = await setup();
+    const res = await checkoutService.checkout(uid, body({ order: { order_type: "takeaway" }, preorders: [preorder(r1, 1)] }));
+    // บิลแรก (ออเดอร์) ผ่าน · บิลที่สอง (พรีออเดอร์) พัง
+    const real = paymentService.createPayment;
+    vi.spyOn(paymentService, "createPayment")
+      .mockImplementationOnce(real)
+      .mockRejectedValueOnce(new Error("DB สะดุดชั่วคราว"));
+    await expect(paymentGroupService.submitGroupSlip(res.group_id!, uid, SLIP)).rejects.toThrow("DB สะดุดชั่วคราว");
+    vi.restoreAllMocks();
+
+    expect(await paymentModel.countDocuments({ slip_image_url: SLIP })).toBe(0);
+    expect((await orderModel.findById(res.bills[0]._id).lean<{ payment_id: unknown }>())!.payment_id).toBeNull();
+    expect((await paymentGroupService.getGroupPaymentPage(res.group_id!, uid)).can_pay_together).toBe(true);
+  });
 });
 
 describe("เลือกสั่งบางรายการในตะกร้า (cart_item_ids)", () => {
@@ -263,5 +322,28 @@ describe("รวมค่าส่ง — ที่อยู่เดียว�
     );
     const pre = await preorderModel.findById(res.bills[1]._id).lean<{ delivery_fee: number; total_amount: number }>();
     expect(pre!.delivery_fee).toBeGreaterThan(0);
+  });
+
+  it("บิลที่เก็บค่าส่งแทนถูกยกเลิกก่อนชำระ → เปิดหน้าชำระบิลที่รวมไว้ = คืนค่าส่ง (ครั้งเดียว)", async () => {
+    const { uid, r1 } = await setup();
+    const address = { recipient_name: "ทดสอบ", recipient_phone: "0812345678", ...A };
+    const res = await checkoutService.checkout(
+      uid,
+      body({
+        order: { order_type: "delivery", delivery_address: address },
+        preorders: [{ round_id: r1.round_id, order_type: "delivery", delivery_address: address, items: [{ round_item_id: r1.round_item_id, quantity: 1, selected_options: [] }] }],
+      })
+    );
+    const fee = (await orderModel.findById(res.bills[0]._id).lean<{ delivery_fee: number }>())!.delivery_fee;
+    expect(fee).toBeGreaterThan(0);
+
+    // ยังไม่ยกเลิก = ยังไม่คืน
+    expect((await paymentService.getPaymentPage("preorder", res.bills[1]._id, uid)).amount).toBe(100);
+
+    await orderService.cancelOrderByCustomer(res.bills[0]._id, uid, "เปลี่ยนใจ");
+    expect((await paymentService.getPaymentPage("preorder", res.bills[1]._id, uid)).amount).toBe(100 + fee);
+    expect((await paymentService.getPaymentPage("preorder", res.bills[1]._id, uid)).amount).toBe(100 + fee);
+    const pre = await preorderModel.findById(res.bills[1]._id).lean<{ delivery_fee: number; total_amount: number }>();
+    expect(pre).toMatchObject({ delivery_fee: fee, total_amount: 100 + fee });
   });
 });

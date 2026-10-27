@@ -13,10 +13,23 @@ const memberSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// บิลที่ไม่เก็บค่าส่งเพราะรวมกับบิลอื่น (checkoutService) — บิลที่เก็บแทนถูกยกเลิกก่อนชำระ = คืนค่าส่งให้บิลนี้
+// (paymentGroupService.restoreWaivedShipping) · fee = ค่าส่งของบิลที่เก็บแทน (คิดจากจังหวัด — ที่อยู่เดียวกัน = เท่ากัน)
+const shippingWaiverSchema = new mongoose.Schema(
+  {
+    ref_id: { type: mongoose.Schema.Types.ObjectId, required: true },
+    payer_kind: { type: String, enum: ["order", "preorder"], required: true },
+    payer_ref_id: { type: mongoose.Schema.Types.ObjectId, required: true },
+    fee: { type: Number, required: true, min: 0 },
+  },
+  { _id: false }
+);
+
 const paymentGroupSchema = new mongoose.Schema(
   {
     user_id: { type: mongoose.Schema.Types.ObjectId, ref: "Users", required: true },
     members: { type: [memberSchema], default: [] },
+    shipping_waivers: { type: [shippingWaiverSchema], default: [] },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" }, collection: "paymentgroups" }

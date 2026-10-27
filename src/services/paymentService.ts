@@ -289,8 +289,11 @@ export async function paymentDocNo(payment: { order_id?: unknown; preorder_id?: 
 export async function submitSlip(
   id: string,
   input: { slip_image_url?: string | null; promptpay_ref?: string | null },
-  /** notify: false = ไม่แจ้งร้านทีละใบ (ชำระรวม — paymentGroupService แจ้งครั้งเดียวทั้งกลุ่ม) */
-  opts: { notify?: boolean } = {}
+  /**
+   * notify: false = ไม่แจ้งร้านทีละใบ (ชำระรวม — paymentGroupService แจ้งครั้งเดียวทั้งกลุ่ม)
+   * groupId = สลิปรวมของกลุ่มนี้ · ไม่ส่ง = สลิปของบิลนี้บิลเดียว → ล้าง group_id เดิม (ไม่ให้ยืนยันแล้วลามไปบิลอื่น)
+   */
+  opts: { notify?: boolean; groupId?: string | null } = {}
 ) {
   await dbConnect();
   assertObjectId(id);
@@ -324,6 +327,7 @@ export async function submitSlip(
   }
 
   payment.slip_image_url = input.slip_image_url;
+  payment.group_id = opts.groupId ?? null;
   if (input.promptpay_ref !== undefined) payment.promptpay_ref = input.promptpay_ref;
   payment.status = "pending"; // ส่งใหม่หลังเคยถูกปฏิเสธ → กลับมารอตรวจ
   await payment.save();
@@ -381,15 +385,23 @@ export async function verifyPayment(
 
   await propagateStatus(payment, status);
 
-  // ชำระรวม (สลิปเดียวหลายบิล) — ยืนยัน/ปฏิเสธใบหนึ่ง = ทุกใบในกลุ่มที่ยังรอตรวจ
-  if (payment.group_id) {
+  // ชำระรวม (สลิปเดียวหลายบิล) — ยืนยัน/ปฏิเสธใบหนึ่ง = ทุกใบในกลุ่มที่ยังรอตรวจ "สลิปเดียวกัน"
+  // เฉพาะ pending + slip เดียวกัน: ใบที่ถูกปฏิเสธไปแล้ว/ส่งสลิปแยกเอง ไม่ใช่เงินก้อนนี้ · บิลที่ถูกยกเลิกไม่ผูกสถานะตาม
+  if (payment.group_id && payment.slip_image_url) {
     const siblings = await paymentModel
-      .find({ group_id: payment.group_id, _id: { $ne: payment._id }, deleted_at: null, status: { $in: ["pending", "failed"] } })
-      .select("_id")
-      .lean<{ _id: unknown }[]>();
+      .find({ group_id: payment.group_id, _id: { $ne: payment._id }, deleted_at: null, status: "pending", slip_image_url: payment.slip_image_url })
+      .select("_id order_id preorder_id")
+      .lean<{ _id: unknown; order_id?: unknown; preorder_id?: unknown }[]>();
     for (const s of siblings) {
+      const bill = s.order_id
+        ? await orderModel.findOne({ _id: s.order_id }).select("order_status").lean<{ order_status?: string } | null>()
+        : await preorderModel.findOne({ _id: s.preorder_id }).select("order_status").lean<{ order_status?: string } | null>();
+      if (!bill || bill.order_status === "cancelled") {
+        log.warn("payment.group_sibling_skipped", { payment_id: String(s._id), group_id: String(payment.group_id) });
+        continue;
+      }
       const sib = await paymentModel.findOneAndUpdate(
-        { _id: s._id, deleted_at: null, status: { $in: ["pending", "failed"] } },
+        { _id: s._id, deleted_at: null, status: "pending", slip_image_url: payment.slip_image_url },
         { $set: { status, verified_by: input.verified_by, verified_at: new Date() } },
         { returnDocument: "after" }
       );
@@ -458,18 +470,25 @@ function paymentBlockedReason(doc: any, kind: PaymentPageKind): string | null {
  *   QR ออกเฉพาะตอนยังต้องชำระ · หมดเวลาแล้ว (ออเดอร์) → late_upload = แนบสลิปย้อนหลังเพื่อเปิดกลับได้ (ไม่ออก QR ใหม่)
  *   ร้านยังไม่ตั้งเลขพร้อมเพย์ → qr_image null + qr_error (ไม่ทำให้หน้าพัง)
  */
-export async function getPaymentPage(kind: PaymentPageKind, id: string, userId: string) {
-  await dbConnect();
-  if (!isObjectId(id)) throw notFound("ไม่พบคำสั่งซื้อ");
+/** ยกเลิกบิลของลูกค้าที่เลยกำหนดชำระ (lazy — ไม่ต้องรอ cron) · มีสลิปรอตรวจ = ไม่ยกเลิก */
+export async function expireIfDue(kind: PaymentPageKind, id: string, userId: string): Promise<void> {
   if (kind === "order") await orderService.expireUnpaidOrders({ userId, orderId: id });
   else {
-    // พรีออเดอร์เลยกำหนด (30 นาที) → ยกเลิกทันทีตอนเปิดหน้า ไม่ต้องรอ cron รอบถัดไป (มีสลิปรอตรวจ = ไม่ยกเลิก)
+    // พรีออเดอร์เลยกำหนด (30 นาที) → ยกเลิกทันทีตอนเปิดหน้า ไม่ต้องรอ cron รอบถัดไป
     const own = await preorderModel.exists({ _id: id, user_id: userId, deleted_at: null });
     if (own) {
       const { cancelUnpaidPreorders } = await import("./preorderRoundLifecycleService");
       await cancelUnpaidPreorders({ preorderId: id });
     }
   }
+}
+
+export async function getPaymentPage(kind: PaymentPageKind, id: string, userId: string) {
+  await dbConnect();
+  if (!isObjectId(id)) throw notFound("ไม่พบคำสั่งซื้อ");
+  await expireIfDue(kind, id, userId);
+  // สั่งซื้อรวม: บิลที่รวมค่าส่งไว้ถูกยกเลิกก่อนชำระ → คืนค่าส่งให้บิลนี้ก่อนออกยอด/QR
+  await (await import("./paymentGroupService")).restoreWaivedShipping(kind, id, userId);
 
   const model: any = kind === "order" ? orderModel : preorderModel;
   const numberField = kind === "order" ? "order_no" : "preorder_no";
