@@ -12,6 +12,8 @@ const paymentSchema = new mongoose.Schema(
     slip_image_url: { type: String, default: null },
     verified_by: { type: mongoose.Schema.Types.ObjectId, ref: "Users", default: null },
     verified_at: { type: Date, default: null },
+    // ชำระรวมหลายบิล (สลิปเดียว — paymentGroupService) · ยืนยัน/ปฏิเสธใบหนึ่ง = ทุกใบในกลุ่ม
+    group_id: { type: mongoose.Schema.Types.ObjectId, ref: "PaymentGroups", default: null },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }
@@ -21,6 +23,7 @@ paymentSchema.index({ order_id: 1 });
 paymentSchema.index({ preorder_id: 1 });
 paymentSchema.index({ user_id: 1 });
 paymentSchema.index({ status: 1 });
+paymentSchema.index({ group_id: 1 }, { partialFilterExpression: { group_id: { $type: "objectId" } } });
 
 // 1 order / 1 preorder มี payment ที่ยัง "pending" (ไม่ถูกลบ) ได้ใบเดียว — กันสร้างซ้ำระดับ DB
 // ($type: "objectId" เพื่อไม่ index เอกสารที่ order_id/preorder_id เป็น null)

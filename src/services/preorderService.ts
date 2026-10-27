@@ -117,8 +117,11 @@ export interface CreatePreorderInput {
 export interface ListPreorderQuery {
   pagination: Pagination;
   user_id?: string;
+  /** true = search หาจากชื่อสินค้าในพรีออเดอร์ด้วย (ไทย/อังกฤษ) — ประวัติพรีออเดอร์ของลูกค้า · ไม่ระบุ = เลขพรีออเดอร์อย่างเดียว */
+  search_items?: boolean;
   round_id?: string;
-  order_status?: PreorderStatus;
+  /** หลายค่า = สถานะใดก็ได้ ($in) */
+  order_status?: PreorderStatus | PreorderStatus[];
   payment_status?: PaymentStatus;
   order_type?: "delivery" | "takeaway";
   search?: string;
@@ -147,7 +150,8 @@ export async function createPreorder(
   userId: string,
   input: CreatePreorderInput,
   /** storefront = สั่งจากหน้าเว็บลูกค้า → ค่าส่งจาก ShippingZones + ขอบเขตจัดส่ง (docs/customer-backend-merge.md §8.7) */
-  opts: { allowManualDiscount?: boolean; storefront?: boolean } = {}
+  /** waive_delivery_fee = ไม่เก็บค่าส่งบิลนี้ (รวมกับบิลอื่นในการสั่งซื้อรวม — checkoutService) · ยังตรวจขอบเขตจัดส่ง */
+  opts: { allowManualDiscount?: boolean; storefront?: boolean; waive_delivery_fee?: boolean } = {}
 ) {
   await dbConnect();
   await assertRefExists(userModel, userId, "ผู้ใช้", "user_id");
@@ -296,8 +300,11 @@ export async function createPreorder(
       await shippingService.quoteStorefrontDelivery({
         province: delivery_address?.province ?? null,
         productIds: lines.map((l) => String(l.product_id)),
+        preorder: true, // สินค้าในรอบพรีออเดอร์ส่งได้ทุกจังหวัด
       })
     ).fee;
+    // สั่งซื้อรวม: ส่งที่เดียวกันภายใน 7 วัน → ค่าส่งเก็บที่บิลอื่นแล้ว
+    if (opts.waive_delivery_fee) delivery_fee = 0;
   } else if (input.order_type === "delivery") {
     delivery_fee = toSatang(
       (
@@ -553,10 +560,18 @@ export async function listPreorders(query: ListPreorderQuery) {
     assertObjectId(query.round_id, "round_id");
     filter.round_id = query.round_id;
   }
-  if (query.order_status) filter.order_status = query.order_status;
+  if (query.order_status) filter.order_status = Array.isArray(query.order_status) ? { $in: query.order_status } : query.order_status;
   if (query.payment_status) filter.payment_status = query.payment_status;
   if (query.order_type) filter.order_type = query.order_type;
-  if (query.search) filter.preorder_no = new RegExp(escapeRegExp(query.search.trim()), "i");
+  if (query.search) {
+    const re = new RegExp(escapeRegExp(query.search.trim()), "i");
+    if (query.search_items) {
+      const ids = await preorderItemModel.distinct("preorder_id", { deleted_at: null, $or: [{ "product_snapshot.product_name_th": re }, { "product_snapshot.product_name_eng": re }] });
+      filter.$or = [{ preorder_no: re }, { _id: { $in: ids } }];
+    } else {
+      filter.preorder_no = re;
+    }
+  }
   if (query.date_from || query.date_to) {
     filter.created_at = {};
     if (query.date_from) filter.created_at.$gte = new Date(query.date_from);

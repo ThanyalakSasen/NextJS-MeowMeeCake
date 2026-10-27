@@ -17,6 +17,7 @@ export const GET = route(async (req: NextRequest) => {
     round_status: (sp.get("status") as RoundStatus | null) ?? undefined,
     search: sp.get("search") ?? undefined,
     upcomingOnly: !showAll,
+    visibleItemsOnly: true,
     sort: parseSort(sp, ["open_date", "close_date", "pickup_date", "created_at"], "open_date"),
   });
   return ok(result);

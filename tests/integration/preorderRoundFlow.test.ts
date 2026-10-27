@@ -220,3 +220,32 @@ describe("ปัญหา 7 — แก้รายการในรอบที
     await expect(preorderRoundService.updateRoundItem(itemId, { max_qty_total: 70 })).rejects.toThrow(/แก้ไขรายการสินค้าไม่ได้/);
   });
 });
+
+describe("หน้าร้าน: รอบพรีออเดอร์ไม่แสดงสินค้าที่ถูกลบ / ไม่มีในฐานข้อมูล / ถูกซ่อน", () => {
+  it("getRoundDetail(activeItemsOnly) + item_count ของ listRounds(visibleItemsOnly) นับเฉพาะสินค้าที่ลูกค้าเห็น · สั่งสินค้าที่ซ่อนไม่ได้", async () => {
+    const productModel = (await import("@/models/productModel")).default;
+    const shown = await preorderProduct();
+    const hidden = await preorderProduct();
+    const deleted = await preorderProduct();
+    const missing = await preorderProduct();
+    const { round, itemOf } = await openRound([shown, hidden, deleted, missing]);
+    await productModel.updateOne({ _id: hidden._id }, { $set: { is_visible: false } });
+    await productModel.updateOne({ _id: deleted._id }, { $set: { deleted_at: new Date() } });
+    await productModel.deleteOne({ _id: missing._id });
+
+    const detail = (await preorderRoundService.getRoundDetail(String(round._id), { activeItemsOnly: true })) as {
+      items: Array<{ product_id: { _id: unknown } }>;
+    };
+    expect(detail.items.map((i) => String(i.product_id._id))).toEqual([String(shown._id)]);
+
+    const admin = (await preorderRoundService.getRoundDetail(String(round._id))) as { items: unknown[] };
+    expect(admin.items).toHaveLength(4); // หลังร้านยังเห็นครบ
+
+    const list = await preorderRoundService.listRounds({ pagination: { page: 1, limit: 20, skip: 0 }, upcomingOnly: true, visibleItemsOnly: true });
+    const row = list.items.find((r: { _id: unknown }) => String(r._id) === String(round._id)) as { item_count: number };
+    expect(row.item_count).toBe(1);
+
+    const buyer = await makeUser();
+    await expect(order(buyer._id, round, itemOf(hidden)._id, 1)).rejects.toMatchObject({ status: 404 });
+  });
+});

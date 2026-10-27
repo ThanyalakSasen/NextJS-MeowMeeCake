@@ -7,6 +7,9 @@ import * as userService from "@/services/userService";
 import * as pointsService from "@/services/pointsService";
 import { signInWithGoogle, signInWithLine, isPlaceholderEmail } from "@/services/oauthService";
 import { assertSessionStillValid } from "@/lib/authGuard";
+import { flushBackground } from "@/lib/backgroundTasks";
+import customerNotificationModel from "@/models/customerNotificationModel";
+import { resolveProfileSetupNotices } from "@/services/customerNotifyService";
 import type { SessionUser } from "@/lib/session";
 
 /** ขั้น 3 — สมัครแบบยืนยันอีเมล · ลืมรหัสผ่าน · Google/LINE ผ่าน next-auth · session next-auth (customer-backend-merge.md §8.9) */
@@ -151,5 +154,72 @@ describe("Google / LINE ผ่าน next-auth", () => {
     await expect(
       assertSessionStillValid({ ...a, source: "nextauth", auth_time: Date.now() })
     ).rejects.toMatchObject({ status: 401 });
+  });
+});
+
+describe("แจ้งเตือนกรอกข้อมูลบัญชี (สมัครครั้งแรกด้วย Google/LINE)", () => {
+  const noticesOf = async (userId: string) => {
+    await flushBackground();
+    return customerNotificationModel.find({ user_id: userId, link: "/customer/account" }).lean<{ title: string; message: string }[]>();
+  };
+
+  it("Google: บัญชีใหม่ได้ 1 รายการ (เบอร์โทร/วันเกิด) · ล็อกอินครั้งต่อไปไม่แจ้งซ้ำ · ผูกบัญชีเดิมไม่แจ้ง", async () => {
+    const a = await signInWithGoogle({ email: "new-g@test.local", name: "จี", sub: "g-n1" });
+    let list = await noticesOf(a.user_id);
+    expect(list).toHaveLength(1);
+    expect(list[0].message).toMatch(/เบอร์โทรและวันเกิด/);
+    expect(list[0].message).not.toMatch(/อีเมล/);
+
+    await signInWithGoogle({ email: "new-g@test.local", name: "จี", sub: "g-n1" });
+    list = await noticesOf(a.user_id);
+    expect(list).toHaveLength(1);
+
+    const existing = await accountService.signup(signupInput("old@test.local"));
+    const linked = await signInWithGoogle({ email: "old@test.local", sub: "g-n2" });
+    expect(linked.user_id).toBe(existing.user_id);
+    expect(await noticesOf(linked.user_id)).toHaveLength(0);
+  });
+
+  it("LINE: ไม่มีอีเมล → ชวนกรอกอีเมลด้วย · มีอีเมลจาก LINE → เฉพาะเบอร์โทร/วันเกิด · ครั้งต่อไปไม่แจ้งซ้ำ", async () => {
+    const a = await signInWithLine({ sub: "Unotice1", name: "ไลน์" });
+    let list = await noticesOf(a.user_id);
+    expect(list).toHaveLength(1);
+    expect(list[0].message).toMatch(/อีเมล เบอร์โทร และวันเกิด/);
+    await signInWithLine({ sub: "Unotice1" });
+    list = await noticesOf(a.user_id);
+    expect(list).toHaveLength(1);
+
+    const b = await signInWithLine({ sub: "Unotice2", email: "line-mail@test.local" });
+    const listB = await noticesOf(b.user_id);
+    expect(listB).toHaveLength(1);
+    expect(listB[0].message).toMatch(/เพิ่มเบอร์โทรและวันเกิด/);
+  });
+});
+
+describe("ป๊อปอัปกรอกข้อมูล (profile_setup) ปิดเองเมื่อกรอกครบ", () => {
+  const unread = async (userId: string) => {
+    await flushBackground();
+    return customerNotificationModel.countDocuments({ user_id: userId, ref_type: "profile_setup", read_at: null });
+  };
+
+  it("Google: กรอกเบอร์ + วันเกิดแล้ว → อ่านแล้ว · ยังไม่ครบ → ยังค้าง", async () => {
+    const a = await signInWithGoogle({ email: "setup-g@test.local", name: "จี", sub: "g-setup" });
+    expect(await unread(a.user_id)).toBe(1);
+    await userModel.updateOne({ _id: a.user_id }, { $set: { user_phone: "0812345678" } });
+    await resolveProfileSetupNotices(a.user_id);
+    expect(await unread(a.user_id)).toBe(1);
+    await userModel.updateOne({ _id: a.user_id }, { $set: { user_birthdate: new Date("1995-01-01") } });
+    await resolveProfileSetupNotices(a.user_id);
+    expect(await unread(a.user_id)).toBe(0);
+  });
+
+  it("LINE ไม่มีอีเมล: เบอร์ + วันเกิดครบแต่ยังใช้อีเมลชั่วคราว → ยังค้าง", async () => {
+    const a = await signInWithLine({ sub: "Usetup1", name: "ไลน์" });
+    await userModel.updateOne({ _id: a.user_id }, { $set: { user_phone: "0812345678", user_birthdate: new Date("1995-01-01") } });
+    await resolveProfileSetupNotices(a.user_id);
+    expect(await unread(a.user_id)).toBe(1);
+    await userModel.updateOne({ _id: a.user_id }, { $set: { email: "real-line@test.local" } });
+    await resolveProfileSetupNotices(a.user_id);
+    expect(await unread(a.user_id)).toBe(0);
   });
 });

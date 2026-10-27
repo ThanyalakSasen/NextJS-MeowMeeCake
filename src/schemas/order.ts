@@ -39,6 +39,8 @@ const orderBodyBase = z.object({
   pickup_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "pickup_date ต้องเป็น YYYY-MM-DD").nullish(),
   items: z.array(orderLine).optional(),
   item_notes: z.record(z.string(), z.string()).optional(),
+  // source "cart": สั่งเฉพาะบางรายการในตะกร้า (ติ๊กเลือก) — ไม่ส่ง = ทั้งตะกร้า
+  cart_item_ids: z.array(objectId).min(1).max(200).nullish(),
 });
 
 // เงื่อนไขร่วมของทั้งฝั่งลูกค้า/แอดมิน — เขียนซ้ำ 2 รอบแทนดึงเป็นฟังก์ชันกลาง เพราะ zod v4
@@ -106,6 +108,8 @@ export const listOrderQuery = z.object({
     .optional(),
   payment_status: z.enum(["pending", "paid", "failed", "refunded"]).optional(),
   order_type: z.enum(["delivery", "takeaway"]).optional(),
+  /** ค้นหาเลขบิล หรือชื่อสินค้าในบิล (ประวัติของลูกค้า) */
+  search: z.string().trim().max(100).optional(),
 });
 export type ListOrderQuery = z.infer<typeof listOrderQuery>;
 

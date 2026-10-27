@@ -141,7 +141,7 @@ export interface WebNotice {
   type: WebNoticeType;
   /** path ในหน้าเว็บลูกค้า เช่น /customer/account/purchases/<id> */
   link: string | null;
-  ref_type: "order" | "preorder" | "review" | null;
+  ref_type: "order" | "preorder" | "review" | "profile_setup" | null;
   ref_id: unknown;
   /** เลขเอกสาร — ใช้ข้ามบิลหน้าร้าน (POS-) */
   doc_no?: string | null;
@@ -208,7 +208,7 @@ export const customerWeb = {
       case "ready":
         return web(kind, id, docNo, isDelivery ? "📦 สินค้าพร้อมจัดส่งแล้ว" : "🛍️ สินค้าพร้อมให้มารับแล้ว", "info");
       case "completed":
-        return web(kind, id, docNo, "🎉 คำสั่งซื้อสำเร็จแล้ว ขอบคุณที่อุดหนุนนะคะ", "success");
+        return web(kind, id, docNo, "📦 ส่งสินค้าแล้ว ขอบคุณที่อุดหนุนนะคะ", "success");
       case "cancelled": {
         const reason = opts.reason?.trim() ?? "";
         const lines = [`❌ คำสั่งซื้อถูกยกเลิก${reason ? `\nเหตุผล: ${reason}` : ""}`];
@@ -244,6 +244,55 @@ export const customerWeb = {
     return web(kind, id, docNo, body || lineText, type);
   },
 };
+
+/** หน้าบัญชีของฉัน (แก้ข้อมูลส่วนตัว · ตั้งอีเมลจริงของบัญชี LINE) */
+export const MY_ACCOUNT_PATH = "/customer/account";
+
+/**
+ * กระดิ่งต้อนรับบัญชีใหม่ที่สมัครด้วย Google/LINE — ชวนไปกรอกข้อมูลบัญชีให้ครบ (เบอร์โทร · วันเกิด · LINE ไม่มีอีเมล = อีเมลด้วย)
+ * แจ้งครั้งเดียวตอนสร้างบัญชี (oauthService / authService.loginWithGoogle) · แจ้งในเว็บอย่างเดียว ไม่ใช้โควตา LINE
+ * ref_type "profile_setup" — หน้าเว็บเด้งเป็นป๊อปอัป (กรอกเลย / ไว้ภายหลัง) จนกว่าจะอ่าน หรือกรอกครบ (resolveProfileSetupNotices)
+ */
+export function profileSetupNotice(opts: { provider: "google" | "line"; needsEmail: boolean; profileBonus: number }): WebNotice {
+  // ข้อความตามที่ร้านกำหนด (2026-10-27) — LINE ที่ไม่มีอีเมลต้องกรอกอีเมลด้วย (ใช้ยืนยันบัญชี/รับลิงก์)
+  const fields = opts.needsEmail ? "อีเมล เบอร์โทร และวันเกิด" : "เบอร์โทรและวันเกิด";
+  const via = opts.provider === "line" ? "LINE" : "Google";
+  return {
+    title: `สมัครด้วย ${via} สำเร็จแล้ว`,
+    message: `กรุณาเพิ่ม${fields}ในหน้าบัญชีของฉัน เพื่อให้ร้านติดต่อเรื่องคำสั่งซื้อได้`,
+    type: "warning",
+    link: MY_ACCOUNT_PATH,
+    ref_type: "profile_setup",
+    ref_id: null,
+  };
+}
+
+/**
+ * กรอกเบอร์โทร + วันเกิดแล้ว (และไม่ได้ใช้อีเมลชั่วคราวของ LINE) → แจ้งเตือนชวนกรอกข้อมูลถือว่าอ่านแล้ว (ป๊อปอัปหยุดเด้ง)
+ * เรียกหลังแก้โปรไฟล์ / ตั้งอีเมล · ไม่ throw
+ */
+export async function resolveProfileSetupNotices(userId: string): Promise<void> {
+  try {
+    await dbConnect();
+    const user = await userModel
+      .findOne({ _id: userId, deleted_at: null })
+      .select("user_phone user_birthdate email")
+      .lean<{ user_phone?: string | null; user_birthdate?: Date | null; email?: string | null } | null>();
+    if (!user?.user_phone || !user.user_birthdate) return;
+    if (!user.email || user.email.toLowerCase().endsWith("@line-user.invalid")) return;
+    await customerNotificationModel.updateMany(
+      { user_id: userId, ref_type: "profile_setup", read_at: null, deleted_at: null },
+      { $set: { read_at: new Date() } }
+    );
+  } catch (err) {
+    log.warn("customer_notify.profile_setup_resolve_failed", { user_id: userId, err });
+  }
+}
+
+/** แจ้งบัญชีใหม่จาก Google/LINE ให้กรอกข้อมูลให้ครบ — fire-and-forget ไม่ throw */
+export function notifyProfileSetupLater(userId: unknown, opts: { provider: "google" | "line"; needsEmail: boolean; profileBonus: number }): void {
+  notifyCustomerLater(userId, null, profileSetupNotice(opts));
+}
 
 /** บันทึกกระดิ่ง 1 รายการ — ไม่ throw */
 async function recordWebNotice(userId: string, notice: WebNotice): Promise<void> {

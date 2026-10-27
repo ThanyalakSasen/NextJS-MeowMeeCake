@@ -7,10 +7,14 @@
 import { ok } from "@/lib/apiResponse";
 import { withAuth } from "@/lib/authGuard";
 import * as accountService from "@/services/accountService";
+import { resolveProfileSetupNotices } from "@/services/customerNotifyService";
 
 export const GET = withAuth(async (session) => ok(await accountService.emailStatus(session.user_id)));
 
 export const POST = withAuth(async (session, req) => {
   const body = await req.json().catch(() => ({}));
-  return ok(await accountService.setLineAccountEmail(session.user_id, body?.email));
+  const result = await accountService.setLineAccountEmail(session.user_id, body?.email);
+  // ตั้งอีเมลจริงแล้ว + เบอร์/วันเกิดครบ → ป๊อปอัปชวนกรอกข้อมูลหยุดเด้ง
+  await resolveProfileSetupNotices(session.user_id);
+  return ok(result);
 });

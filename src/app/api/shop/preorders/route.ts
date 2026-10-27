@@ -24,9 +24,13 @@ export const GET = withAuth(async (session, req) => {
     pagination: parsePagination(sp),
     user_id: session.user_id, // บังคับเป็นของตัวเองเสมอ
     round_id: q.round_id,
-    order_status: q.order_status,
+    // หน้าร้านแสดง "พร้อมส่ง/พร้อมรับ" (ready) เป็น "กำลังเตรียมสินค้า" — กรอง preparing = ได้ทั้งสองสถานะ
+    order_status: q.order_status === "preparing" ? ["preparing", "ready"] : q.order_status,
     payment_status: q.payment_status,
     order_type: q.order_type,
+    // ค้นหา: เลขพรีออเดอร์ หรือชื่อสินค้าในพรีออเดอร์
+    search: q.search || undefined,
+    search_items: true,
     sort: parseSort(sp, ["created_at", "total_amount", "preorder_no"], "created_at"),
   });
   return ok(result);

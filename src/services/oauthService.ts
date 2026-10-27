@@ -13,7 +13,8 @@ import dbConnect from "../lib/dbConnect";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
 import type { SessionUser } from "../lib/session";
-import { awardWelcomeBonus, safely } from "./pointsService";
+import { awardWelcomeBonus, POINT_RULES, safely } from "./pointsService";
+import { notifyProfileSetupLater } from "./customerNotifyService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -123,11 +124,14 @@ export async function signInWithGoogle(profile: {
     );
     // Google ยืนยันอีเมลให้แล้ว → โบนัสสมาชิกใหม่ทันที (§8.11)
     await safely("welcome", () => awardWelcomeBonus(String(abandoned._id)));
+    notifyProfileSetupLater(abandoned._id, { provider: "google", needsEmail: false, profileBonus: POINT_RULES.PROFILE });
     return toOAuthUser(abandoned._id);
   }
   if (candidates.length) throw new OAuthAccountError(DELETED_ACCOUNT_MESSAGE);
   const created = await userModel.create(fields);
   await safely("welcome", () => awardWelcomeBonus(String(created._id)));
+  // บัญชีใหม่ครั้งแรก → กระดิ่งชวนกรอกเบอร์โทร/วันเกิด
+  notifyProfileSetupLater(created._id, { provider: "google", needsEmail: false, profileBonus: POINT_RULES.PROFILE });
   return toOAuthUser(created._id);
 }
 
@@ -168,5 +172,7 @@ export async function signInWithLine(profile: {
     is_active: true,
     last_login_at: new Date(),
   });
+  // บัญชีใหม่ครั้งแรก → กระดิ่งชวนกรอกข้อมูล (LINE ไม่ให้อีเมล = ต้องกรอกอีเมลจริงด้วย)
+  notifyProfileSetupLater(created._id, { provider: "line", needsEmail: !email, profileBonus: POINT_RULES.PROFILE });
   return toOAuthUser(created._id);
 }

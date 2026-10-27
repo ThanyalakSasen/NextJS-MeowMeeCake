@@ -135,6 +135,11 @@ export interface CreateOrderCommon {
    * ไม่ระบุ = หลังร้าน/POS (DeliveryZones · ไม่มีกำหนดชำระ)
    */
   storefront?: boolean;
+  /**
+   * ไม่เก็บค่าส่งบิลนี้ — รวมค่าส่งกับบิลอื่นในการสั่งซื้อรวม (checkoutService.combinedShipping: ที่อยู่เดียวกัน · วันรับห่าง ≤ 7 วัน)
+   * ยังตรวจว่าส่งถึงจังหวัดนี้ได้ตามปกติ · ตั้งจากฝั่ง server เท่านั้น (ไม่อยู่ใน schema ของ request)
+   */
+  waive_delivery_fee?: boolean;
   /** takeaway: จุดรับ (_id ของหน้าร้านประจำสัปดาห์) + วันรับ "YYYY-MM-DD" — ไม่ส่ง = รับที่ร้านแบบเดิม */
   pickup_location_id?: string | null;
   pickup_date?: string | null;
@@ -146,6 +151,8 @@ export interface CreateOrderCommon {
 
 export interface CreateOrderFromCartInput extends CreateOrderCommon {
   item_notes?: Record<string, string>; // cartItemId -> special_request
+  /** สั่งเฉพาะบางรายการในตะกร้า (ลูกค้าติ๊กเลือก) — ไม่ส่ง = ทั้งตะกร้า · รายการที่ไม่ได้เลือกยังอยู่ในตะกร้า */
+  cart_item_ids?: string[] | null;
 }
 
 export interface CreateOrderInput extends CreateOrderCommon {
@@ -155,7 +162,10 @@ export interface CreateOrderInput extends CreateOrderCommon {
 export interface ListOrderQuery {
   pagination: Pagination;
   user_id?: string;
-  order_status?: OrderStatus;
+  /** true = search หาจากชื่อสินค้าในออเดอร์ด้วย (ไทย/อังกฤษ) — ประวัติการสั่งซื้อของลูกค้า · ไม่ระบุ = เลขออเดอร์อย่างเดียว */
+  search_items?: boolean;
+  /** หลายค่า = สถานะใดก็ได้ ($in) */
+  order_status?: OrderStatus | OrderStatus[];
   payment_status?: PaymentStatus;
   order_type?: "delivery" | "takeaway";
   search?: string;
@@ -319,6 +329,8 @@ async function persistOrder(
           productIds: lines.map((l) => String(l.product_id)),
         })
       ).fee;
+      // สั่งซื้อรวม: ส่งที่เดียวกันภายใน 7 วัน → ค่าส่งเก็บที่บิลอื่นแล้ว (ยังตรวจขอบเขตจัดส่งด้านบน)
+      if (opts.waive_delivery_fee) delivery_fee = 0;
     } else {
       delivery_fee = toSatang(
         (
@@ -564,6 +576,12 @@ export async function createOrderFromCart(
 
   const detail = await cartService.getCartDetail(userId);
   if (detail.items.length === 0) throw badRequest("ตะกร้าว่าง ไม่สามารถสร้างออเดอร์ได้");
+  // เลือกสั่งบางรายการ — ตรวจ/คิดราคาเฉพาะที่เลือก · ที่ไม่ได้เลือกคงอยู่ในตะกร้า
+  const picked = input.cart_item_ids ? new Set(input.cart_item_ids.map(String)) : null;
+  if (picked) {
+    detail.items = (detail.items as any[]).filter((it) => picked.has(String(it._id)));
+    if (detail.items.length === 0) throw badRequest("ไม่พบสินค้าที่เลือกในตะกร้า — กรุณารีเฟรชตะกร้าแล้วเลือกใหม่");
+  }
 
   // สินค้าที่ถูกลบ/ปิดการขายหลังหยิบใส่ตะกร้า — บอกชัดว่าชิ้นไหน (เดิมได้ error "product_id ไม่ถูกต้อง" ที่ลูกค้าแก้เองไม่ได้)
   const unavailable = (detail.items as any[]).filter((it) => it.is_available === false);
@@ -622,9 +640,10 @@ export async function createOrderFromCart(
   // เคลียร์ตะกร้า — best-effort เหมือน notify ด้านบน: ออเดอร์ commit สำเร็จไปแล้ว (persistOrder
   // saga.commit() แล้ว) ถ้า clearCart พังไม่ควรทำให้ client เห็น 500 ทั้งที่ออเดอร์สร้างสำเร็จจริง
   // (BACKLOG 2c.1 — เดิมไม่มี .catch() จุดเดียวในไฟล์นี้ที่รันหลัง commit แล้วไม่กันพัง)
-  await cartService
-    .clearCart(userId)
-    .catch((err) => log.error("order.clear_cart_failed", { user_id: userId, order_id: String(order._id), err }));
+  await (picked
+    ? Promise.all((detail.items as any[]).map((it) => cartService.removeItem(userId, String(it._id))))
+    : cartService.clearCart(userId)
+  ).catch((err) => log.error("order.clear_cart_failed", { user_id: userId, order_id: String(order._id), err }));
   return order;
 }
 
@@ -685,11 +704,18 @@ export async function listOrders(query: ListOrderQuery) {
     assertObjectId(query.user_id, "user_id");
     filter.user_id = query.user_id;
   }
-  if (query.order_status) filter.order_status = query.order_status;
+  if (query.order_status) filter.order_status = Array.isArray(query.order_status) ? { $in: query.order_status } : query.order_status;
   if (query.payment_status) filter.payment_status = query.payment_status;
   if (query.order_type) filter.order_type = query.order_type;
   if (query.search) {
-    filter.order_no = new RegExp(escapeRegExp(query.search.trim()), "i");
+    const re = new RegExp(escapeRegExp(query.search.trim()), "i");
+    if (query.search_items) {
+      // เลขออเดอร์ หรือมีสินค้าชื่อตรง — ผลจำกัดด้วย user_id/สถานะของ filter หลักอยู่แล้ว
+      const ids = await orderItemModel.distinct("order_id", { deleted_at: null, $or: [{ "product_snapshot.product_name_th": re }, { "product_snapshot.product_name_eng": re }] });
+      filter.$or = [{ order_no: re }, { _id: { $in: ids } }];
+    } else {
+      filter.order_no = re;
+    }
   }
   if (query.date_from || query.date_to) {
     filter.created_at = {};
