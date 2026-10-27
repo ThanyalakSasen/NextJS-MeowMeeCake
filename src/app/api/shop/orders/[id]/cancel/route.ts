@@ -2,7 +2,7 @@
  * POST /api/shop/orders/[id]/cancel — ลูกค้ายกเลิกออเดอร์ของตัวเอง
  *   body: { reason? }
  *   นโยบายฝั่งลูกค้า (docs/customer-backend-merge.md §8.8 — orderService.cancelOrderByCustomer):
- *   - ยกเลิกเองได้เฉพาะสถานะ pending / confirmed · ออเดอร์หน้าร้าน (POS-) ยกเลิกผ่านร้านเท่านั้น
+ *   - ยกเลิกเองได้เฉพาะสถานะ pending / confirmed / preparing · ออเดอร์หน้าร้าน (POS-) ยกเลิกผ่านร้านเท่านั้น
  *   - ชำระแล้วก็ยกเลิกได้ → "ยกเลิก + ชำระแล้ว" = รอร้านโอนคืน (ไม่ตั้ง refunded ให้อัตโนมัติ) + แจ้งเจ้าของร้าน
  *     ร้านโอนคืนแล้วกดคืนเงินเอง (POST /api/admin/payments/[id]/refund)
  *   - คืนสต็อก + คืนสิทธิ์โปรโมชันให้อัตโนมัติ

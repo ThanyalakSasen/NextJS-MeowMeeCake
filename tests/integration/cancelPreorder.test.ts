@@ -33,7 +33,7 @@ describe("preorderService — payment/cancellation hardening (BACKLOG 2b)", () =
       .findById(preorder._id)
       .lean<{ payment_status: string; order_status: string } | null>();
     expect(updated!.payment_status).toBe("paid");
-    expect(updated!.order_status).toBe("confirmed"); // auto-advance จาก pending
+    expect(updated!.order_status).toBe("preparing"); // auto-advance จาก pending → กำลังเตรียมสินค้า
   });
 
   it("2b.3: แอดมินยกเลิกพรีออเดอร์ที่จ่ายแล้ว → auto-refund (payment + preorder.payment_status = refunded)", async () => {

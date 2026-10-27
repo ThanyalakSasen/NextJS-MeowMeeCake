@@ -109,10 +109,11 @@ describe("นโยบายยกเลิกของลูกค้า", () =
     expect((await orderModel.findById(a.order._id).lean<{ payment_status: string }>())!.payment_status).toBe("refunded");
   });
 
-  it("ร้านเริ่มเตรียมแล้ว / ออเดอร์หน้าร้าน → 409", async () => {
+  it("สินค้าพร้อมแล้ว (ready) / ออเดอร์หน้าร้าน → 409", async () => {
     const a = await webOrder();
     await orderService.updateOrderStatus(a.oid, "confirmed");
     await orderService.updateOrderStatus(a.oid, "preparing");
+    await orderService.updateOrderStatus(a.oid, "ready");
     await expect(orderService.cancelOrderByCustomer(a.oid, a.uid)).rejects.toMatchObject({ status: 409 });
 
     const user = await makeUser();

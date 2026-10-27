@@ -43,7 +43,7 @@ const KIND_LABEL: Record<CustomerDocKind, string> = { order: "ออเดอร
 
 /**
  * สถานะที่แจ้งลูกค้า — ประหยัดโควตา LINE OA (ฟรี 300 ข้อความ/เดือน — docs/LINE.md §9.6 ข้อ ก)
- * ไม่แจ้ง: pending (ได้ข้อความ "ได้รับออเดอร์" แล้ว) · confirmed (จ่ายแล้วได้ "ชำระเงินสำเร็จ" + auto-confirm อยู่แล้ว)
+ * ไม่แจ้ง: pending (ได้ข้อความ "ได้รับออเดอร์" แล้ว) · confirmed (ไม่ผ่านแล้ว — จ่ายแล้วเลื่อนเป็น preparing อัตโนมัติ ได้แค่ "ชำระเงินสำเร็จ" ข้อความเดียว)
  * · preparing / completed (ไม่ต้องทำอะไรต่อ ดูในเว็บได้) · ready ของออเดอร์จัดส่ง (ได้ "กำลังจัดส่ง" แทน)
  */
 const ORDER_STATUS_TEXT: Record<string, string> = {
