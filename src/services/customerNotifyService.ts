@@ -207,8 +207,9 @@ export const customerWeb = {
         return web(kind, id, docNo, "👩‍🍳 ร้านกำลังเตรียมสินค้าของคุณ", "info");
       case "ready":
         return web(kind, id, docNo, isDelivery ? "📦 สินค้าพร้อมจัดส่งแล้ว" : "🛍️ สินค้าพร้อมให้มารับแล้ว", "info");
+      // จัดส่ง: แจ้ง "จัดส่งแล้ว" ไปตอน shipping แล้ว (deliveryStatus) — สำเร็จ = ปิดงาน · รับเอง = ลูกค้ามารับแล้ว
       case "completed":
-        return web(kind, id, docNo, "📦 ส่งสินค้าแล้ว ขอบคุณที่อุดหนุนนะคะ", "success");
+        return web(kind, id, docNo, isDelivery ? "🎉 คำสั่งซื้อสำเร็จแล้ว ขอบคุณที่อุดหนุนนะคะ" : "🛍️ รับสินค้าเรียบร้อยแล้ว ขอบคุณที่อุดหนุนนะคะ", "success");
       case "cancelled": {
         const reason = opts.reason?.trim() ?? "";
         const lines = [`❌ คำสั่งซื้อถูกยกเลิก${reason ? `\nเหตุผล: ${reason}` : ""}`];
@@ -268,18 +269,20 @@ export function profileSetupNotice(opts: { provider: "google" | "line"; needsEma
 }
 
 /**
- * กรอกเบอร์โทร + วันเกิดแล้ว (และไม่ได้ใช้อีเมลชั่วคราวของ LINE) → แจ้งเตือนชวนกรอกข้อมูลถือว่าอ่านแล้ว (ป๊อปอัปหยุดเด้ง)
- * เรียกหลังแก้โปรไฟล์ / ตั้งอีเมล · ไม่ throw
+ * กรอกเบอร์โทร + วันเกิดแล้ว + อีเมลจริงที่ยืนยันแล้ว (ไม่ใช่อีเมลชั่วคราวของ LINE) → แจ้งเตือนชวนกรอกข้อมูลถือว่าอ่านแล้ว (ป๊อปอัปหยุดเด้ง)
+ * เรียกหลังแก้โปรไฟล์ / ตั้งอีเมล / ยืนยันอีเมล · ไม่ throw
  */
 export async function resolveProfileSetupNotices(userId: string): Promise<void> {
   try {
     await dbConnect();
     const user = await userModel
       .findOne({ _id: userId, deleted_at: null })
-      .select("user_phone user_birthdate email")
-      .lean<{ user_phone?: string | null; user_birthdate?: Date | null; email?: string | null } | null>();
+      .select("user_phone user_birthdate email is_email_verified")
+      .lean<{ user_phone?: string | null; user_birthdate?: Date | null; email?: string | null; is_email_verified?: boolean } | null>();
     if (!user?.user_phone || !user.user_birthdate) return;
-    if (!user.email || user.email.toLowerCase().endsWith("@line-user.invalid")) return;
+    // import ตอนเรียก — oauthService import ไฟล์นี้อยู่ (กัน import วน)
+    const { isPlaceholderEmail } = await import("./oauthService");
+    if (!user.email || isPlaceholderEmail(user.email) || user.is_email_verified !== true) return;
     await customerNotificationModel.updateMany(
       { user_id: userId, ref_type: "profile_setup", read_at: null, deleted_at: null },
       { $set: { read_at: new Date() } }

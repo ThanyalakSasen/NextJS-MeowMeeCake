@@ -139,6 +139,9 @@ export async function verifyEmail(token: unknown) {
   );
   // โบนัสสมาชิกใหม่ให้ตอนยืนยันอีเมล (ไม่ใช่ตอนสมัคร — กันสมัครด้วยอีเมลปลอมเก็บแต้ม · §8.11)
   await safely("welcome", () => awardWelcomeBonus(String(user._id)));
+  // บัญชี LINE ที่ตั้งอีเมลไว้ — ยืนยันแล้วครบ = ป๊อปอัปชวนกรอกข้อมูลหยุดเด้ง (ไม่ throw)
+  const { resolveProfileSetupNotices } = await import("./customerNotifyService");
+  await resolveProfileSetupNotices(String(user._id));
   return { message: "ยืนยันอีเมลสำเร็จ" };
 }
 

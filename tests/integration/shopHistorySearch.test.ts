@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import * as cartService from "@/services/cartService";
 import * as orderService from "@/services/orderService";
 import { makeUser, makeProduct } from "./helpers";
@@ -30,6 +30,19 @@ describe("ค้นหาประวัติการสั่งซื้อ 
     expect(await list("ครัวซองต์เนยสด en")).toEqual([croissant.order_no]);
     expect(await list(croissant.order_no.slice(-6))).toEqual([croissant.order_no]);
     expect(await list("ไม่มีสินค้านี้")).toEqual([]);
+  });
+
+  it("ค้นชื่อสินค้าดูเฉพาะรายการสินค้าในออเดอร์ของตัวเอง (ไม่สแกนของลูกค้าทุกคน)", async () => {
+    const me = String((await makeUser())._id);
+    const other = String((await makeUser())._id);
+    await orderWith(me, "มาการองวานิลลา");
+    await orderWith(other, "มาการองช็อกโกแลต");
+    const orderItemModel = (await import("@/models/orderItemModel")).default;
+    const spy = vi.spyOn(orderItemModel, "distinct");
+    await orderService.listOrders({ pagination: page, user_id: me, search: "มาการอง", search_items: true });
+    const itemFilter = spy.mock.calls[0][1] as { order_id?: { $in: unknown[] } };
+    spy.mockRestore();
+    expect(itemFilter.order_id?.$in.map(String)).toHaveLength(1);
   });
 
   it("ไม่ใส่ search_items (หลังร้าน) = ค้นเลขออเดอร์อย่างเดียวเหมือนเดิม", async () => {

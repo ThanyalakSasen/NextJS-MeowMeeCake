@@ -27,6 +27,11 @@ import * as paymentService from "./paymentService";
 
 type Member = { kind: "order" | "preorder"; ref_id: unknown; doc_no: string };
 
+/** กลุ่มนี้เป็นของผู้ใช้นี้ (ไม่ใช่ = 404) — route แนบสลิปตรวจก่อนรับไฟล์ โดยไม่ต้องโหลดหน้าชำระรวมทั้งหน้า */
+export async function assertGroupOwner(groupId: string, userId: string): Promise<void> {
+  await loadGroup(groupId, userId);
+}
+
 async function loadGroup(groupId: string, userId: string): Promise<{ _id: unknown; members: Member[] }> {
   await dbConnect();
   if (!isObjectId(groupId)) throw notFound("ไม่พบรายการชำระรวม");
@@ -38,10 +43,11 @@ async function loadGroup(groupId: string, userId: string): Promise<{ _id: unknow
 /** หน้าชำระรวม — สถานะแต่ละบิล (จาก getPaymentPage ซึ่งยกเลิกบิลที่หมดเวลาให้ก่อน) + ยอดรวม/QR เมื่อชำระรวมได้ */
 export async function getGroupPaymentPage(groupId: string, userId: string) {
   const group = await loadGroup(groupId, userId);
-  const bills = [];
-  for (const m of group.members) {
-    const page = await paymentService.getPaymentPage(m.kind, String(m.ref_id), userId);
-    bills.push({
+  // ทุกบิลพร้อมกัน · ไม่ออก QR รายบิล (forGroup) — QR ยอดรวมออกด้านล่างครั้งเดียว
+  const pages = await Promise.all(group.members.map((m) => paymentService.getPaymentPage(m.kind, String(m.ref_id), userId, { forGroup: true })));
+  const bills = group.members.map((m, i) => {
+    const page = pages[i];
+    return {
       kind: m.kind,
       id: String(m.ref_id),
       doc_no: page.order_no || m.doc_no,
@@ -53,8 +59,8 @@ export async function getGroupPaymentPage(groupId: string, userId: string) {
       payment_record_status: page.payment_record_status,
       slip_url: page.slip_url,
       payment_due_at: page.payment_due_at,
-    });
-  }
+    };
+  });
 
   const total = Math.round(bills.reduce((s, b) => s + b.amount, 0) * 100) / 100;
   const allPaid = bills.every((b) => b.payment_status === "paid");

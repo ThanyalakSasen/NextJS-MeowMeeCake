@@ -16,7 +16,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const POST = withAuth(async (session, req: NextRequest, ctx: Ctx) => {
   const { id } = await ctx.params;
   // ตรวจว่าเป็นของตัวเองก่อนรับไฟล์ (ไม่ใช่ = 404 ไม่เขียนไฟล์ทิ้งไว้)
-  await paymentGroupService.getGroupPaymentPage(id, session.user_id);
+  await paymentGroupService.assertGroupOwner(id, session.user_id);
   const { file } = await readSingleUpload(req, ["file", "slip"]);
   const saved = await savePrivateImage(file, UPLOAD_DIRS.slips);
   let result;

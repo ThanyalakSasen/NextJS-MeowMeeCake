@@ -246,6 +246,10 @@ describe("หน้าร้าน: รอบพรีออเดอร์ไ�
     expect(row.item_count).toBe(1);
 
     const buyer = await makeUser();
-    await expect(order(buyer._id, round, itemOf(hidden)._id, 1)).rejects.toMatchObject({ status: 404 });
+    const hiddenItem = { round_id: String(round._id), order_type: "takeaway" as const, items: [{ round_item_id: String(itemOf(hidden)._id), quantity: 1 }] };
+    // หน้าร้าน: สินค้าที่ซ่อนสั่งไม่ได้ · หลังร้าน (สินค้าพรีออเดอร์อย่างเดียวที่ซ่อนจากแคตตาล็อก) ยังสั่งได้
+    await expect(preorderService.createPreorder(String(buyer._id), hiddenItem, { storefront: true })).rejects.toMatchObject({ status: 409 });
+    await expect(order(buyer._id, round, itemOf(hidden)._id, 1)).resolves.toBeTruthy();
+    await expect(order(buyer._id, round, itemOf(deleted)._id, 1)).rejects.toMatchObject({ status: 404 });
   });
 });

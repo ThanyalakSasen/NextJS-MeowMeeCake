@@ -722,7 +722,12 @@ export async function assertRoundOrderable(roundId: string) {
  * orderService.resolveLines() ที่แก้ไว้แล้วใน §3.18 — คืนผลลัพธ์เรียงตามลำดับ `roundItemIds` เดิม
  * เป๊ะ (รายการไหนไม่พบ/ไม่ active จะ throw ตอน join ตามลำดับนั้น เหมือนพฤติกรรมเดิมทุกประการ)
  */
-export async function getOrderableRoundItems(roundItemIds: string[], roundId: string) {
+export async function getOrderableRoundItems(
+  roundItemIds: string[],
+  roundId: string,
+  /** storefront = ลูกค้าสั่งจากหน้าเว็บ → สินค้าที่ซ่อน (is_visible: false) สั่งไม่ได้ (ตรงกับที่หน้าร้านไม่แสดง) · หลังร้านสั่งได้ */
+  opts: { storefront?: boolean } = {}
+) {
   await dbConnect();
   roundItemIds.forEach((id) => assertObjectId(id, "round_item_id"));
 
@@ -734,8 +739,8 @@ export async function getOrderableRoundItems(roundItemIds: string[], roundId: st
   const productIds = [...new Set(items.map((it) => String(it.product_id)))];
   const products = productIds.length
     ? await productModel
-        .find({ _id: { $in: productIds }, deleted_at: null, is_visible: { $ne: false } })
-        .select("product_name_th product_name_eng product_price sale_price is_preorder preorder_config")
+        .find({ _id: { $in: productIds }, deleted_at: null })
+        .select("product_name_th product_name_eng product_price sale_price is_preorder preorder_config is_visible")
         .lean<any[]>()
     : [];
   const productById = new Map(products.map((p) => [String(p._id), p]));
@@ -747,6 +752,7 @@ export async function getOrderableRoundItems(roundItemIds: string[], roundId: st
 
     const product = productById.get(String(item.product_id));
     if (!product) throw notFound("ไม่พบสินค้าของรายการนี้");
+    if (opts.storefront && product.is_visible === false) throw conflict("สินค้านี้ปิดการขายแล้ว");
 
     const unit_price = item.price_override ?? product.sale_price ?? product.product_price ?? 0;
     return { item, product, unit_price };
