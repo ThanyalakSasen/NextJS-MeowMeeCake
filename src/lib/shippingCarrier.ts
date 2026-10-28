@@ -33,3 +33,11 @@ export const SHIPPING_CARRIER_TEXT: Record<ShippingCarrier, string> = {
   store: "ร้านจัดส่งเอง",
   other: "อื่น ๆ",
 };
+
+/**
+ * ขนส่งพัสดุที่มีเลขติดตาม — ออเดอร์/พรีออเดอร์แบบจัดส่งที่ใช้ขนส่งพวกนี้ต้องมี tracking_no ก่อนปิดเป็น completed
+ * ไรเดอร์ (lalamove/grab/lineman) · ร้านส่งเอง · อื่น ๆ ไม่บังคับ (ตรงกับหน้าเว็บ constants/enumConfig.ts carrierNeedsTracking)
+ */
+const TRACKED_CARRIERS: readonly ShippingCarrier[] = ["thailand_post", "kerry", "flash", "jt", "ninjavan", "best", "scg"];
+
+export const carrierNeedsTracking = (carrier: ShippingCarrier) => TRACKED_CARRIERS.includes(carrier);

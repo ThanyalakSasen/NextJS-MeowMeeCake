@@ -30,6 +30,7 @@ import {
   assertCustomerCancelAllowed,
   setEntityPaymentStatus,
   applyEntityDeliveryUpdate,
+  assertDeliveryReadyToComplete,
   softDeleteEntityWithItems,
 } from "../lib/orderLifecycle";
 import orderModel from "../models/orderModel";
@@ -829,6 +830,10 @@ export async function updateOrderStatus(
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
   if (next === "cancelled" && opts.cancelled_by) assertObjectId(opts.cancelled_by, "cancelled_by");
+  // ออเดอร์หน้าร้าน (POS) ปิดงานที่เคาน์เตอร์ในคำขอเดียว (posCheckoutService) — ไม่มีขั้นจัดส่ง
+  if (next === "completed" && !String(existing.order_no ?? "").startsWith(`${orderNoPrefix("instore")}-`)) {
+    assertDeliveryReadyToComplete(existing, "ออเดอร์");
+  }
 
   // จองการเปลี่ยนสถานะแบบ atomic ก่อนทำ side effect (คืนสต็อก/สิทธิ์โปร/คืนเงิน) — เดิมอ่าน → คืนสต็อก → save
   // ทำให้คำขอยกเลิกที่มาพร้อมกัน (cron หมดเวลาชำระ + หน้าเว็บที่ยกเลิกแบบ lazy หลาย endpoint + ลูกค้ากดเอง)

@@ -22,6 +22,7 @@ import {
   assertCustomerCancelAllowed,
   setEntityPaymentStatus,
   applyEntityDeliveryUpdate,
+  assertDeliveryReadyToComplete,
   softDeleteEntityWithItems,
 } from "../lib/orderLifecycle";
 import preorderModel from "../models/preorderModel";
@@ -663,6 +664,7 @@ export async function updatePreorderStatus(
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
   if (next === "cancelled" && opts.cancelled_by) assertObjectId(opts.cancelled_by, "cancelled_by");
+  if (next === "completed") assertDeliveryReadyToComplete(existing, "พรีออเดอร์");
 
   // จองการเปลี่ยนสถานะแบบ atomic ก่อนคืนโควตา/คืนเงิน — กันยกเลิกพร้อมกัน (cron ไม่จ่ายตามกำหนด + ปิดรอบ +
   // ลูกค้ากดเอง) แล้วต่างคนต่างคืนโควตารอบ → รับจองเกินโควตา (เทียบ orderService.updateOrderStatus)
