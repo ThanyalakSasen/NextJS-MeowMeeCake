@@ -124,6 +124,13 @@ const productSchema = new mongoose.Schema(
       min: 0,
       default: null,
     },
+    // อายุสินค้า (วัน) — ใช้ตั้งวันหมดอายุเริ่มต้นของล็อตตอนปิดงานผลิต (วันผลิต + อายุ · แก้ได้ตามจริง — productLotService)
+    // ใช้ทั้งสินค้าปกติและพรีออเดอร์ · null = ไม่ได้ตั้ง (ล็อตไม่มีวันหมดอายุเริ่มต้น)
+    shelf_life_days: {
+      type: Number,
+      min: 1,
+      default: null,
+    },
     avg_rating: {
       type: mongoose.Schema.Types.Decimal128,
       min: 0,

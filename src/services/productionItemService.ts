@@ -174,7 +174,8 @@ export async function listByOrder(orderId: string) {
   assertObjectId(orderId, "production_order_id");
   return productionItemModel
     .find({ production_order_id: orderId, deleted_at: null })
-    .populate("product_id", "product_name_th product_name_eng")
+    // shelf_life_days — หน้าปิดงานคำนวณวันหมดอายุเริ่มต้นของล็อต
+    .populate("product_id", "product_name_th product_name_eng shelf_life_days")
     .populate("recipe_id", "recipe_name yield_qty")
     .sort({ created_at: 1 })
     .lean();
@@ -187,7 +188,7 @@ export async function listByOrders(orderIds: string[]) {
   if (orderIds.length === 0) return byOrder;
   const items = await productionItemModel
     .find({ production_order_id: { $in: orderIds }, deleted_at: null })
-    .populate("product_id", "product_name_th product_name_eng")
+    .populate("product_id", "product_name_th product_name_eng shelf_life_days")
     .populate("recipe_id", "recipe_name yield_qty")
     .sort({ created_at: 1 })
     .lean<any[]>();

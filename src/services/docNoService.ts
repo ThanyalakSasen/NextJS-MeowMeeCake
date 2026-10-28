@@ -9,7 +9,8 @@ import DocCounterModel from "../models/docCounterModel";
 import { bangkokDateString } from "../lib/datetime";
 import { formatDailyDocNo } from "../lib/productCode";
 
-export type DailyDocPrefix = "ORD" | "POS" | "PRE";
+/** LOT = เลขล็อตสินค้าที่ผลิตเสร็จ (บาร์โค้ดบนฉลาก — productLotService) นับตามวันผลิต */
+export type DailyDocPrefix = "ORD" | "POS" | "PRE" | "LOT";
 
 export async function nextDailyDocNo(prefix: DailyDocPrefix, now: Date = new Date()): Promise<string> {
   const ymd = bangkokDateString(now).replace(/-/g, "");

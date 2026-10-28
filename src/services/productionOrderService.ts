@@ -11,6 +11,7 @@
  *  - startProduction   : planned → in_progress, เซ็ต started_at
  *  - completeProduction: in_progress → done, หักสต็อกวัตถุดิบของรายการที่ยังไม่ถูกหักให้ครบ
  *                        + เพิ่มสต็อกสินค้าสำเร็จรูปของสินค้าปกติ (BACKLOG4 Y2)
+ *                        + สร้างล็อตสินค้า (วันผลิต/วันหมดอายุ · บาร์โค้ด — productLotService)
  *  - cancelProduction  : → cancelled, คืนสต็อกของรายการที่หักไปแล้ว
  */
 import dbConnect from "../lib/dbConnect";
@@ -30,7 +31,9 @@ import recipeModel from "../models/recipeModel";
 import productModel from "../models/productModel";
 import * as productionItemService from "./productionItemService";
 import * as productService from "./productService";
+import * as productLotService from "./productLotService";
 import type { AddItemInput } from "./productionItemService";
+import type { LotDateInput } from "./productLotService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -440,13 +443,21 @@ export async function startProduction(id: string) {
  */
 export async function completeProduction(
   id: string,
-  opts: { performed_by: string; use_actual?: boolean; allowNegative?: boolean }
+  opts: {
+    performed_by: string;
+    use_actual?: boolean;
+    allowNegative?: boolean;
+    /** วันผลิต/วันหมดอายุจริงต่อรายการ (ไม่ส่ง = ค่าเริ่มต้นจากใบสั่งผลิต + อายุสินค้า) */
+    lots?: LotDateInput[];
+  }
 ) {
   await dbConnect();
   assertObjectId(id);
   if (!opts.performed_by) throw badRequest("ต้องระบุ performed_by");
 
   const order = await transition(id, "done");
+  // ตรวจวันที่ของล็อตก่อนตัดวัตถุดิบ/ปิดงาน — กรอกผิดแล้วงานยังไม่ถูกปิดครึ่ง ๆ กลาง ๆ
+  const lotInputs = await productLotService.validateLotInputs(String(order._id), opts.lots);
 
   const pendingItems = await productionItemModel
     .find({
@@ -471,6 +482,7 @@ export async function completeProduction(
 
   // docs/BACKLOG4.md Y2 — เดิมผลิตเสร็จแล้วหักแค่วัตถุดิบ ไม่เพิ่มสต็อกสินค้า ต้องไปปรับสต็อกเองทุกครั้ง
   await addFinishedGoodsStock(String(order._id), { use_actual: opts.use_actual });
+  await productLotService.createLotsForProduction(order, { use_actual: opts.use_actual, lots: lotInputs });
   return getProductionOrderById(id);
 }
 
