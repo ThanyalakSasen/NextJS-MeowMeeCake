@@ -56,7 +56,7 @@ describe("ปิดงานผลิต → สร้างล็อตสิ�
     expect(lots).toHaveLength(2);
     const b = lots.find((l) => String(l.product_id) === String(brownie._id))!;
     const c = lots.find((l) => String(l.product_id) === String(cake._id))!;
-    expect(b.lot_no).toMatch(/^LOT-20261028-MMC\d{3,}$/);
+    expect(b.lot_no).toMatch(/^L261028\d{4}$/);
     expect(b).toMatchObject({ produced_date: PRODUCTION_DATE, expiry_date: "2026-11-02", qty_produced: 12, qty_remaining: 12 });
     // ไม่ได้ตั้งอายุสินค้า → ไม่มีวันหมดอายุ · พรีออเดอร์ไม่มีสต็อก
     expect(c).toMatchObject({ expiry_date: null, qty_produced: 3, qty_remaining: null });
@@ -108,7 +108,7 @@ describe("ปิดงานผลิต → สร้างล็อตสิ�
     const found = await productLotService.getLotByNo(` ${lot.lot_no.toLowerCase()} `);
     expect(found).toMatchObject({ lot_no: lot.lot_no, product_name_th: a.product_name_th, expiry_date: "2026-10-30" });
     expect(found.production_no).toMatch(/^PRD-/);
-    await expect(productLotService.getLotByNo("LOT-NOPE")).rejects.toMatchObject({ status: 404 });
+    await expect(productLotService.getLotByNo("L0000000000")).rejects.toMatchObject({ status: 404 });
   });
 });
 

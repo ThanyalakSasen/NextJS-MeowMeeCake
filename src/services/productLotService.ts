@@ -18,7 +18,7 @@ import { isPreorderProduct } from "../lib/productCode";
 import productLotModel from "../models/productLotModel";
 import productionItemModel from "../models/productionItemModel";
 import productModel from "../models/productModel";
-import { nextDailyDocNo } from "./docNoService";
+import { nextLotNo } from "./docNoService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -126,8 +126,7 @@ export async function createLotsForProduction(
 
     try {
       await productLotModel.create({
-        // นับเลขตามวันผลิต (LOT-YYYYMMDD-MMC001) — เที่ยงวันเวลาไทยของวันนั้น
-        lot_no: await nextDailyDocNo("LOT", new Date(`${produced}T12:00:00+07:00`)),
+        lot_no: await nextLotNo(produced),
         product_id: it.product_id,
         production_order_id: order._id,
         production_item_id: it._id,
