@@ -35,21 +35,15 @@ function customerDocRef(doc: Doc): { kind: CustomerDocKind; docNo: string } {
 }
 
 /**
- * จัดส่งที่ลูกค้าเป็นคนปิดงาน — ออเดอร์เว็บ (ORD-) + พรีออเดอร์ ที่เป็นแบบจัดส่ง (ผู้ใช้เลือก 2026-10-28):
- *   ร้านเลื่อนได้ถึง "กำลังจัดส่ง" (shipping) · ลูกค้ากด "ได้รับสินค้าแล้ว" = ส่งถึง + สำเร็จ (confirmEntityReceived)
- * ออเดอร์หน้าร้าน (POS-) ไม่มีลูกค้าในเว็บที่จะกด — ร้านปิดงานเองเหมือนเดิม
+ * จัดส่ง (order_type = delivery) ปิดงานทางเดียว — ร้านตั้งสถานะจัดส่ง "จัดส่งเรียบร้อย" (delivered) ผ่าน
+ * applyEntityDeliveryUpdate ซึ่งบังคับเลขพัสดุแล้วเลื่อนเป็น completed ให้ (ผู้ใช้เลือก 2026-10-28)
+ * route เปลี่ยนสถานะหลังร้านเรียกก่อน — กด "สำเร็จ" ตรง ๆ จะข้ามการบังคับเลขพัสดุ (409)
+ * (POS checkout ปิดงานผ่าน updateOrderStatus โดยตรง ไม่ผ่าน route นี้)
  */
-export function customerClosesDelivery(doc: { order_type?: unknown; order_no?: unknown; preorder_no?: unknown }): boolean {
-  if (doc.order_type !== "delivery") return false;
-  return !!doc.preorder_no || String(doc.order_no ?? "").startsWith("ORD-");
-}
-
-/** ร้านเปลี่ยนสถานะออเดอร์/ส่งถึงเองไม่ได้ เมื่อเป็นงานที่ลูกค้าปิด (route หลังร้านเรียกก่อนเปลี่ยน) */
-export function assertShopMayClose(doc: Doc, change: { order_status?: unknown; delivery_status?: unknown }, entityLabel: string): void {
-  if (!customerClosesDelivery(doc)) return;
-  if (change.order_status === "completed" || change.delivery_status === "delivered") {
-    throw conflict(`${entityLabel}จัดส่งปิดงานเมื่อลูกค้ากด "ได้รับสินค้าแล้ว" — ร้านอัปเดตได้ถึง "กำลังจัดส่ง"`);
-  }
+export function assertShopMayComplete(doc: Doc, change: { order_status?: unknown }, entityLabel: string): void {
+  if (doc.order_type !== "delivery" || change.order_status !== "completed") return;
+  if (doc.delivery_status === "delivered") return;
+  throw conflict(`${entityLabel}จัดส่งปิดงานโดยตั้งสถานะจัดส่งเป็น "จัดส่งเรียบร้อย" พร้อมเลขพัสดุ`);
 }
 
 /**
@@ -159,12 +153,17 @@ export async function setEntityPaymentStatus(opts: {
   return doc;
 }
 
-/** เช็ค order_type==="delivery" + auto-set shipped_at/delivered_at ถ้ายังไม่มี แล้ว $set payload ที่เหลือ */
+/**
+ * อัปเดตข้อมูลจัดส่ง (หลังร้าน) — เช็ค order_type==="delivery" + auto-set shipped_at/delivered_at ถ้ายังไม่มี แล้ว $set payload ที่เหลือ
+ * "จัดส่งเรียบร้อย" (delivered) = ร้านนำส่งแล้ว ปิดงาน: ต้องมีเลขพัสดุทุกขนส่ง · ต้องชำระแล้ว · เลื่อนเป็น completed
+ * ผ่าน `complete` (updateOrderStatus/updatePreorderStatus — ให้แต้มสะสมตามปกติ · ไม่แจ้งสำเร็จซ้ำ ข้อความจัดส่งเรียบร้อยบอกแล้ว)
+ */
 export async function applyEntityDeliveryUpdate(opts: {
   model: AnyModel;
   id: string;
   input: Record<string, unknown>;
   entityLabel: string;
+  complete: (id: string) => Promise<unknown>;
 }): Promise<Doc | null> {
   await dbConnect();
   assertObjectId(opts.id);
@@ -174,8 +173,21 @@ export async function applyEntityDeliveryUpdate(opts: {
   if (doc.order_type !== "delivery") {
     throw badRequest(`${opts.entityLabel}นี้ไม่ใช่ประเภทจัดส่ง (delivery)`);
   }
-  // หลังร้านเท่านั้นที่เรียก — งานที่ลูกค้าปิดเอง ร้านตั้ง "ส่งถึงแล้ว" ไม่ได้
-  assertShopMayClose(doc, opts.input, opts.entityLabel);
+
+  const nextStatus = opts.input.delivery_status ?? doc.delivery_status;
+  const nextTracking = opts.input.tracking_no !== undefined ? opts.input.tracking_no : doc.tracking_no;
+  // เช็คจากค่าหลังบันทึก — กันลบเลขพัสดุทิ้งทีหลังด้วย
+  if (nextStatus === "delivered" && !String(nextTracking ?? "").trim()) {
+    throw badRequest('กรุณากรอกเลขพัสดุก่อนตั้งสถานะ "จัดส่งเรียบร้อย"');
+  }
+  const delivering = opts.input.delivery_status === "delivered" && doc.delivery_status !== "delivered";
+  if (delivering) {
+    if (doc.order_status === "cancelled") throw conflict(`${opts.entityLabel}นี้ถูกยกเลิกแล้ว`);
+    if (doc.order_status === "pending") throw conflict(`${opts.entityLabel}นี้ยังไม่ได้ชำระเงิน`);
+  }
+  if (doc.order_status === "completed" && doc.delivery_status === "delivered" && nextStatus !== "delivered") {
+    throw conflict(`${opts.entityLabel}นี้จัดส่งเรียบร้อยและสำเร็จแล้ว — เปลี่ยนสถานะจัดส่งไม่ได้`);
+  }
 
   const payload: Record<string, unknown> = { ...opts.input };
   if (payload.delivery_status === "shipping" && !doc.shipped_at && !payload.shipped_at) {
@@ -186,14 +198,19 @@ export async function applyEntityDeliveryUpdate(opts: {
   }
 
   // ส่งของออกไปแล้ว = สินค้าพร้อมแน่นอน — ร้านไม่ได้กด "สินค้าพร้อม" ก่อน ก็เลื่อนเป็น ready ให้
-  // (ลูกค้ากดได้รับสินค้า → completed ได้เลย · ไม่แจ้ง ready ซ้ำ เพราะได้ข้อความ "กำลังจัดส่ง" อยู่แล้ว)
-  if (payload.delivery_status === "shipping" && ["confirmed", "preparing"].includes(String(doc.order_status))) {
+  // (จัดส่งเรียบร้อย → completed ต่อได้เลย · ไม่แจ้ง ready ซ้ำ เพราะได้ข้อความสถานะจัดส่งอยู่แล้ว)
+  if ((payload.delivery_status === "shipping" || delivering) && ["confirmed", "preparing"].includes(String(doc.order_status))) {
     payload.order_status = "ready";
   }
 
-  const updated = await opts.model
+  let updated = await opts.model
     .findByIdAndUpdate(opts.id, { $set: payload }, { returnDocument: "after", runValidators: true })
     .lean<Doc | null>();
+
+  if (updated && delivering && updated.order_status !== "completed") {
+    await opts.complete(opts.id);
+    updated = await opts.model.findById(opts.id).lean<Doc | null>();
+  }
 
   // แจ้งลูกค้าเฉพาะตอนสถานะจัดส่งเปลี่ยนจริง (แก้แค่ tracking_no/note ไม่แจ้งซ้ำ)
   if (updated && payload.delivery_status && payload.delivery_status !== doc.delivery_status) {
@@ -205,35 +222,6 @@ export async function applyEntityDeliveryUpdate(opts: {
     );
   }
   return updated;
-}
-
-/**
- * ลูกค้ากด "ได้รับสินค้าแล้ว" (ออเดอร์เว็บ/พรีออเดอร์แบบจัดส่ง) — ส่งถึง (delivered + delivered_at) แล้วปิดเป็น completed
- * ผ่าน `complete` (updateOrderStatus/updatePreorderStatus — ให้แต้มสะสมตามปกติ) · กดซ้ำหลังสำเร็จแล้ว = คืนสถานะเดิม
- * ได้เฉพาะตอนร้านจัดส่งแล้ว (shipping) · ไม่ใช่เจ้าของ = 404
- */
-export async function confirmEntityReceived(opts: {
-  model: AnyModel;
-  id: string;
-  userId: string;
-  entityLabel: string;
-  complete: (id: string) => Promise<unknown>;
-}): Promise<unknown> {
-  await dbConnect();
-  assertObjectId(opts.id);
-  const doc = await opts.model.findOne({ _id: opts.id, user_id: opts.userId, deleted_at: null }).lean<Doc | null>();
-  if (!doc) throw notFound(`ไม่พบ${opts.entityLabel}ที่ระบุ`);
-  if (!customerClosesDelivery(doc)) throw badRequest(`${opts.entityLabel}นี้ไม่ใช่แบบจัดส่ง`);
-  if (doc.order_status === "completed") return opts.complete(opts.id);
-  if (doc.order_status === "cancelled") throw conflict(`${opts.entityLabel}นี้ถูกยกเลิกแล้ว`);
-  if (doc.delivery_status !== "shipping") throw conflict("ร้านยังไม่ได้จัดส่งสินค้า");
-  if (doc.order_status === "pending") throw conflict(`${opts.entityLabel}นี้ยังไม่ได้ชำระเงิน — กรุณาติดต่อร้าน`);
-
-  await opts.model.updateOne(
-    { _id: opts.id, delivery_status: "shipping" },
-    { $set: { delivery_status: "delivered", delivered_at: new Date(), ...(doc.order_status !== "ready" ? { order_status: "ready" } : {}) } }
-  );
-  return opts.complete(opts.id);
 }
 
 /** soft-delete เอนทิตี + cascade รายการลูก — เฉพาะเมื่อสถานะเป็น completed/cancelled แล้วเท่านั้น */

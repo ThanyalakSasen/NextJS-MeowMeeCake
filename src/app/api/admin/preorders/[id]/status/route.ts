@@ -7,7 +7,7 @@ import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
-import { assertShopMayClose } from "@/lib/orderLifecycle";
+import { assertShopMayComplete } from "@/lib/orderLifecycle";
 import * as preorderService from "@/services/preorderService";
 import type { PreorderStatus } from "@/services/preorderService";
 
@@ -18,8 +18,8 @@ export const PATCH = withPermission("preorder", "update", async (session, req, c
   const body = await req.json();
   if (!body.order_status) throw badRequest("กรุณาระบุ order_status");
   const before = await preorderService.getPreorderById(id).catch(() => undefined);
-  // พรีออเดอร์แบบจัดส่ง: ร้านปิดเป็นสำเร็จเองไม่ได้ — ลูกค้ากด "ได้รับสินค้าแล้ว" (409)
-  if (before) assertShopMayClose(before as Record<string, unknown>, body, "พรีออเดอร์");
+  // แบบจัดส่ง: ปิดงานผ่าน "จัดส่งเรียบร้อย" (บังคับเลขพัสดุ) เท่านั้น — กดสำเร็จตรง ๆ = 409
+  if (before) assertShopMayComplete(before as Record<string, unknown>, body, "พรีออเดอร์");
   const result = await preorderService.updatePreorderStatus(id, body.order_status as PreorderStatus, {
     cancelled_by: session.user_id,
     cancelled_reason: body.cancelled_reason ?? undefined,

@@ -103,7 +103,7 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
     expect(msgs[1]).toContain("สินค้าพร้อมรับที่ร้านแล้ว");
   });
 
-  it("จัดส่ง: ready ไม่แจ้ง · เริ่มส่งแจ้งพร้อมขนส่ง+เลขพัสดุ · แก้เลขพัสดุไม่แจ้งซ้ำ · ลูกค้ากดได้รับเองไม่แจ้งกลับ", async () => {
+  it("จัดส่ง: ready ไม่แจ้ง · เริ่มส่งแจ้งพร้อมขนส่ง+เลขพัสดุ · แก้เลขพัสดุไม่แจ้งซ้ำ · จัดส่งเรียบร้อย = สำเร็จ แจ้งครั้งเดียว", async () => {
     const c = await customer();
     const { id } = await placeDeliveryOrder(c.uid);
     for (const s of ["confirmed", "preparing", "ready"] as const) {
@@ -121,11 +121,14 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
     await orderService.updateDelivery(id, { delivery_status: "shipping", tracking_no: "TH222" });
     expect(await settled(c.lineId)).toHaveLength(2);
 
-    // ร้านตั้ง "ส่งถึงแล้ว" เองไม่ได้ — ลูกค้ากด "ได้รับสินค้าแล้ว" (ลูกค้ากดเอง = ไม่ส่ง LINE กลับ)
-    await expect(orderService.updateDelivery(id, { delivery_status: "delivered" })).rejects.toMatchObject({ status: 409 });
-    await orderService.confirmReceivedByCustomer(id, c.uid);
+    // จัดส่งเรียบร้อย = สำเร็จในตัว — ข้อความเดียวพร้อมเลขพัสดุ (ไม่ส่ง "สำเร็จ" ซ้ำ)
+    await orderService.updateDelivery(id, { delivery_status: "delivered" });
     msgs = await settled(c.lineId);
-    expect(msgs).toHaveLength(2);
+    expect(msgs).toHaveLength(3);
+    expect(msgs[2]).toContain("จัดส่งเรียบร้อยแล้ว");
+    expect(msgs[2]).toContain("เลขพัสดุ: TH222");
+    expect(msgs[2]).toContain("คำสั่งซื้อสำเร็จ");
+    expect((await orderService.getOrderById(id)).order_status).toBe("completed");
   });
 
   it("จัดส่งไม่สำเร็จ → แจ้งว่าร้านจะติดต่อกลับ", async () => {

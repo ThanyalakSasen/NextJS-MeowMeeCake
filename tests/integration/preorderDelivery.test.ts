@@ -39,33 +39,32 @@ describe("preorderService.updateDelivery (BACKLOG2 §4)", () => {
     expect(updated.delivered_at).toBeFalsy();
   });
 
-  it("ร้านตั้ง delivered เองไม่ได้ (409) · ลูกค้ากดได้รับสินค้า → delivered + delivered_at + completed", async () => {
+  it("จัดส่งเรียบร้อย (delivered) → delivered_at + สำเร็จทันที · ส่งของออกก่อนกดสินค้าพร้อม = ready ให้", async () => {
     const customer = await makeUser();
     const preorder = await makePreorder(String(customer._id), { order_type: "delivery", order_status: "preparing", payment_status: "paid" });
 
-    await expect(updateDelivery(String(preorder._id), { delivery_status: "delivered" })).rejects.toMatchObject({ status: 409 });
-    // ส่งของออก = สินค้าพร้อม → ready ให้เอง
     expect((await updateDelivery(String(preorder._id), { delivery_status: "shipping" })) as unknown as { order_status: string }).toMatchObject({ order_status: "ready" });
-
-    await preorderService.confirmReceivedByCustomer(String(preorder._id), String(customer._id));
-    const fromDb = await preorderModel.findById(preorder._id).lean<{ delivery_status: string; delivered_at: Date | null; order_status: string }>();
-    expect(fromDb).toMatchObject({ delivery_status: "delivered", order_status: "completed" });
-    expect(fromDb!.delivered_at).toBeTruthy();
+    const done = (await updateDelivery(String(preorder._id), { delivery_status: "delivered", tracking_no: "TH555" })) as unknown as DeliveryResult & { order_status: string };
+    expect(done).toMatchObject({ delivery_status: "delivered", order_status: "completed", tracking_no: "TH555" });
+    expect(done.delivered_at).toBeTruthy();
+    const fromDb = await preorderModel.findById(preorder._id).lean<{ order_status: string }>();
+    expect(fromDb!.order_status).toBe("completed");
   });
 
-  it("ลูกค้ากดได้รับสินค้า: ยังไม่จัดส่ง = 409 · ของคนอื่น = 404 · รับเอง = 400 · กดซ้ำได้", async () => {
-    const customer = await makeUser();
-    const other = await makeUser();
-    const uid = String(customer._id);
-    const pre = await makePreorder(uid, { order_type: "delivery", order_status: "preparing", payment_status: "paid" });
-    await expect(preorderService.confirmReceivedByCustomer(String(pre._id), uid)).rejects.toMatchObject({ status: 409 });
-    await updateDelivery(String(pre._id), { delivery_status: "shipping" });
-    await expect(preorderService.confirmReceivedByCustomer(String(pre._id), String(other._id))).rejects.toMatchObject({ status: 404 });
-    await preorderService.confirmReceivedByCustomer(String(pre._id), uid);
-    await expect(preorderService.confirmReceivedByCustomer(String(pre._id), uid)).resolves.toBeTruthy();
+  it("จัดส่งเรียบร้อยต้องมีเลขพัสดุ (400) · ยังไม่ชำระ = 409 · ลบเลขพัสดุทีหลังไม่ได้ · สำเร็จแล้วถอยสถานะจัดส่งไม่ได้", async () => {
+    const uid = String((await makeUser())._id);
+    const pre = await makePreorder(uid, { order_type: "delivery", order_status: "ready", payment_status: "paid" });
+    await expect(updateDelivery(String(pre._id), { delivery_status: "delivered" })).rejects.toMatchObject({ status: 400 });
+    await expect(updateDelivery(String(pre._id), { delivery_status: "delivered", tracking_no: "  " })).rejects.toMatchObject({ status: 400 });
+    // ใช้เลขพัสดุที่บันทึกไว้ตอนกำลังจัดส่งได้
+    await updateDelivery(String(pre._id), { delivery_status: "shipping", tracking_no: "TH777" });
+    await expect(updateDelivery(String(pre._id), { delivery_status: "delivered" })).resolves.toMatchObject({ delivery_status: "delivered" });
+    await expect(updateDelivery(String(pre._id), { tracking_no: null })).rejects.toMatchObject({ status: 400 });
+    await expect(updateDelivery(String(pre._id), { delivery_status: "shipping" })).rejects.toMatchObject({ status: 409 });
+    await expect(updateDelivery(String(pre._id), { tracking_no: "TH778" })).resolves.toMatchObject({ tracking_no: "TH778" });
 
-    const takeaway = await makePreorder(uid, { order_type: "takeaway", order_status: "ready", payment_status: "paid" });
-    await expect(preorderService.confirmReceivedByCustomer(String(takeaway._id), uid)).rejects.toMatchObject({ status: 400 });
+    const unpaid = await makePreorder(uid, { order_type: "delivery", order_status: "pending", payment_status: "pending" });
+    await expect(updateDelivery(String(unpaid._id), { delivery_status: "delivered", tracking_no: "TH1" })).rejects.toMatchObject({ status: 409 });
   });
 
   it("ไม่ทับ shipped_at เดิมถ้ามีอยู่แล้ว", async () => {
@@ -117,16 +116,14 @@ describe("preorderService.updateDelivery (BACKLOG2 §4)", () => {
   });
 });
 
-describe("assertShopMayClose — ร้านอัปเดตได้ถึงกำลังจัดส่ง (route หลังร้าน)", () => {
-  it("ออเดอร์เว็บ/พรีออเดอร์แบบจัดส่ง: completed / delivered = 409 · หน้าร้าน (POS-) และรับเอง ปิดเองได้", async () => {
-    const { assertShopMayClose } = await import("@/lib/orderLifecycle");
-    const web = { order_no: "ORD-20261028-MMC001", order_type: "delivery" };
-    expect(() => assertShopMayClose(web, { order_status: "completed" }, "ออเดอร์")).toThrow(/ได้รับสินค้าแล้ว/);
-    expect(() => assertShopMayClose(web, { delivery_status: "delivered" }, "ออเดอร์")).toThrow();
-    expect(() => assertShopMayClose(web, { order_status: "ready" }, "ออเดอร์")).not.toThrow();
-    expect(() => assertShopMayClose(web, { delivery_status: "failed" }, "ออเดอร์")).not.toThrow();
-    expect(() => assertShopMayClose({ preorder_no: "PRE-1", order_type: "delivery" }, { order_status: "completed" }, "พรีออเดอร์")).toThrow();
-    expect(() => assertShopMayClose({ order_no: "POS-20261028-MMC001", order_type: "delivery" }, { order_status: "completed" }, "ออเดอร์")).not.toThrow();
-    expect(() => assertShopMayClose({ order_no: "ORD-1", order_type: "takeaway" }, { order_status: "completed" }, "ออเดอร์")).not.toThrow();
+describe("assertShopMayComplete — จัดส่งปิดงานผ่านจัดส่งเรียบร้อยเท่านั้น (route หลังร้าน)", () => {
+  it("แบบจัดส่งกดสำเร็จตรง ๆ = 409 จนกว่าจะจัดส่งเรียบร้อย · รับเองปิดได้", async () => {
+    const { assertShopMayComplete } = await import("@/lib/orderLifecycle");
+    const web = { order_no: "ORD-20261028-MMC001", order_type: "delivery", delivery_status: "shipping" };
+    expect(() => assertShopMayComplete(web, { order_status: "completed" }, "ออเดอร์")).toThrow(/จัดส่งเรียบร้อย/);
+    expect(() => assertShopMayComplete(web, { order_status: "ready" }, "ออเดอร์")).not.toThrow();
+    expect(() => assertShopMayComplete({ ...web, delivery_status: "delivered" }, { order_status: "completed" }, "ออเดอร์")).not.toThrow();
+    expect(() => assertShopMayComplete({ preorder_no: "PRE-1", order_type: "delivery" }, { order_status: "completed" }, "พรีออเดอร์")).toThrow();
+    expect(() => assertShopMayComplete({ order_no: "ORD-1", order_type: "takeaway" }, { order_status: "completed" }, "ออเดอร์")).not.toThrow();
   });
 });

@@ -59,7 +59,7 @@ const PAYMENT_STATUS_TEXT: Record<string, string> = {
 
 const DELIVERY_STATUS_TEXT: Record<string, string> = {
   shipping: "กำลังจัดส่ง 🚚",
-  delivered: "จัดส่งสำเร็จแล้ว",
+  delivered: "จัดส่งเรียบร้อยแล้ว ✅",
   failed: "จัดส่งไม่สำเร็จ ร้านจะติดต่อกลับค่ะ",
 };
 
@@ -67,7 +67,7 @@ function header(kind: CustomerDocKind, docNo: string): string {
   return `🧁 MeowMeeCake\n${KIND_LABEL[kind]} ${docNo}`;
 }
 
-/** บรรทัดบริษัทขนส่ง + เลขพัสดุตอนเริ่มจัดส่ง (ไม่มีข้อมูล = ไม่ใส่บรรทัดนั้น) */
+/** บรรทัดบริษัทขนส่ง + เลขพัสดุตอนจัดส่ง/จัดส่งเรียบร้อย (ไม่มีข้อมูล = ไม่ใส่บรรทัดนั้น) */
 function shippingLines(trackingNo?: string | null, carrier?: string | null): string {
   const name = carrier ? SHIPPING_CARRIER_TEXT[carrier as ShippingCarrier] : null;
   return `${name ? `\nขนส่ง: ${name}` : ""}${trackingNo ? `\nเลขพัสดุ: ${trackingNo}` : ""}`;
@@ -128,8 +128,10 @@ export const customerMessages = {
   deliveryStatus(kind: CustomerDocKind, docNo: string, status: string, trackingNo?: string | null, carrier?: string | null): string | null {
     const text = DELIVERY_STATUS_TEXT[status];
     if (!text) return null;
-    const tracking = status === "shipping" ? shippingLines(trackingNo, carrier) : "";
-    return `${header(kind, docNo)}\n${text}${tracking}`;
+    const tracking = status === "shipping" || status === "delivered" ? shippingLines(trackingNo, carrier) : "";
+    // จัดส่งเรียบร้อย = ปิดงาน (สำเร็จ) ในตัว — ไม่ส่งข้อความ "สำเร็จ" แยกอีกรอบ (lib/orderLifecycle)
+    const done = status === "delivered" ? "\nคำสั่งซื้อสำเร็จ ขอบคุณที่อุดหนุนนะคะ" : "";
+    return `${header(kind, docNo)}\n${text}${tracking}${done}`;
   },
 };
 
@@ -234,7 +236,9 @@ export const customerWeb = {
     if (status === "shipping") {
       return web(kind, id, docNo, `🚚 จัดส่งสินค้าแล้ว${shippingLines(trackingNo, carrier)}`, "info");
     }
-    if (status === "delivered") return web(kind, id, docNo, "🏠 สินค้าจัดส่งถึงแล้ว", "success");
+    if (status === "delivered") {
+      return web(kind, id, docNo, `📦 ร้านจัดส่งสินค้าเรียบร้อยแล้ว${shippingLines(trackingNo, carrier)}`, "success");
+    }
     if (status === "failed") return web(kind, id, docNo, "⚠️ การจัดส่งมีปัญหา ร้านจะติดต่อกลับโดยเร็ว", "warning");
     return null;
   },

@@ -30,7 +30,6 @@ import {
   assertCustomerCancelAllowed,
   setEntityPaymentStatus,
   applyEntityDeliveryUpdate,
-  confirmEntityReceived,
   softDeleteEntityWithItems,
 } from "../lib/orderLifecycle";
 import orderModel from "../models/orderModel";
@@ -810,7 +809,7 @@ export async function updateOrderStatus(
      * แล้วร้านกดคืนเงินเอง (นโยบายฝั่งลูกค้า · cancelOrderByCustomer · docs/customer-backend-merge.md §8.8)
      */
     skipAutoRefund?: boolean;
-    /** false = ไม่แจ้งลูกค้า (ลูกค้าเป็นคนกดเอง เช่น ได้รับสินค้าแล้ว) */
+    /** false = ไม่แจ้งลูกค้า (สำเร็จจากจัดส่งเรียบร้อย — ได้ข้อความจัดส่งไปแล้ว) */
     notifyCustomer?: boolean;
   } = {}
 ) {
@@ -919,17 +918,6 @@ export async function updateOrderStatus(
   return presentOrderWithItems(order, cancelledItems);
 }
 
-/** ลูกค้ากด "ได้รับสินค้าแล้ว" — ออเดอร์เว็บแบบจัดส่งที่ร้านจัดส่งแล้ว → ส่งถึง + สำเร็จ (lib/orderLifecycle) */
-export async function confirmReceivedByCustomer(id: string, userId: string) {
-  return confirmEntityReceived({
-    model: orderModel,
-    id,
-    userId,
-    entityLabel: "ออเดอร์",
-    complete: (orderId) => updateOrderStatus(orderId, "completed", { notifyCustomer: false }),
-  });
-}
-
 // กำหนดชำระออเดอร์เว็บ — ค่าคงที่อยู่ที่ src/lib/paymentDeadline.ts (ใช้ร่วมกับ customerNotifyService)
 export { ORDER_PAYMENT_WINDOW_MS, PAYMENT_EXPIRED_REASON };
 
@@ -985,6 +973,8 @@ export async function updateDelivery(id: string, input: UpdateDeliveryInput) {
     id,
     input,
     entityLabel: "ออเดอร์",
+    // จัดส่งเรียบร้อย → สำเร็จ (ไม่แจ้งซ้ำ — ข้อความ "จัดส่งเรียบร้อย" บอกลูกค้าแล้ว)
+    complete: (entityId) => updateOrderStatus(entityId, "completed", { notifyCustomer: false }),
   });
   return updated ? presentOrder(updated) : updated;
 }
