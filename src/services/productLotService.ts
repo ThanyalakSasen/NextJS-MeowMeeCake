@@ -6,6 +6,7 @@
  *   - หน้าปิดงานส่งวันผลิต/วันหมดอายุจริงต่อรายการมาแทนได้ (lots[]) — ตรวจก่อนปิดงานด้วย validateLotInputs
  *   - จำนวน = จำนวนเดียวกับที่เพิ่มสต็อกสินค้า (product_stock_added_qty) / ผลิตได้จริง / วางแผน
  *   - สินค้าพรีออเดอร์ก็มีล็อต (ฉลากวันผลิต/หมดอายุ) แต่ qty_remaining = null — ไม่มีสต็อก
+ *   - สร้างรหัสประจำชิ้น (ProductLotPieces) 1..qty_produced พร้อมล็อต — ฉลากแต่ละดวงพิมพ์รหัสชิ้นของตัวเอง
  *
  * ยังไม่ตัด qty_remaining ตอนขาย (เฟส 2 — ตัดล็อตที่สแกนที่ POS / หมดอายุก่อนสำหรับออเดอร์เว็บ)
  */
@@ -16,6 +17,7 @@ import { bangkokDateString } from "../lib/datetime";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import { isPreorderProduct } from "../lib/productCode";
 import productLotModel from "../models/productLotModel";
+import productLotPieceModel from "../models/productLotPieceModel";
 import productionItemModel from "../models/productionItemModel";
 import productModel from "../models/productModel";
 import { nextLotNo } from "./docNoService";
@@ -125,7 +127,7 @@ export async function createLotsForProduction(
     if (expiry && expiry < produced) throw badRequest("วันหมดอายุต้องไม่ก่อนวันผลิต");
 
     try {
-      await productLotModel.create({
+      const lot = await productLotModel.create({
         lot_no: await nextLotNo(produced),
         product_id: it.product_id,
         production_order_id: order._id,
@@ -136,6 +138,7 @@ export async function createLotsForProduction(
         qty_produced: qty,
         qty_remaining: isPreorderProduct(product) ? null : qty,
       });
+      await ensurePieces(lot);
     } catch (err) {
       // รายการนี้มีล็อตแล้ว (ปิดงานซ้อน) — ข้าม
       if ((err as { code?: number })?.code === 11000) continue;
@@ -207,12 +210,76 @@ export async function listLots(query: ListLotQuery) {
   return { items: (items as any[]).map((l) => presentLot(l, today)), meta: buildMeta(total, query.pagination) };
 }
 
-/** ค้นจากเลขล็อต (สแกนบาร์โค้ด) — ไม่สนตัวพิมพ์เล็ก/ใหญ่ + ตัดช่องว่าง */
-export async function getLotByNo(lotNo: string) {
+/**
+ * รหัสประจำชิ้น = "<เลขล็อต>-<ลำดับชิ้น>" (เช่น L2610290001-001) — ลำดับ 1..qty_produced เติม 0 อย่างน้อย 3 หลัก
+ * (ล็อตเกิน 999 ชิ้น = ยาวตามจำนวน) · เก็บใน ProductLotPieces (ensurePieces) — ฉลาก/การสแกนอ่านจากตารางนั้น
+ */
+export function pieceCode(lotNo: string, piece: number, qtyProduced: number): string {
+  return `${lotNo}-${String(piece).padStart(Math.max(3, String(qtyProduced).length), "0")}`;
+}
+
+/**
+ * สร้างรหัสประจำชิ้นที่ยังไม่มีของล็อต (1..qty_produced) — upsert รายชิ้น เรียกซ้ำ/ซ้อนได้ไม่สร้างซ้ำ
+ * เรียกตอนสร้างล็อต + ตอนขอรายการชิ้น (ล็อตที่สร้างก่อนมีตาราง ProductLotPieces)
+ */
+export async function ensurePieces(lot: { _id: unknown; lot_no: string; product_id: unknown; qty_produced: number }) {
+  const existing = await productLotPieceModel.countDocuments({ lot_id: lot._id });
+  if (existing >= lot.qty_produced) return;
+  await productLotPieceModel.bulkWrite(
+    Array.from({ length: lot.qty_produced }, (_, i) => ({
+      updateOne: {
+        filter: { lot_id: lot._id, piece_no: i + 1 },
+        update: {
+          $setOnInsert: {
+            piece_code: pieceCode(lot.lot_no, i + 1, lot.qty_produced),
+            product_id: lot.product_id,
+          },
+        },
+        upsert: true,
+      },
+    })),
+    { ordered: false }
+  );
+}
+
+const findLotByNo = (lotNo: string): Promise<any> =>
+  populateLot(productLotModel.findOne({ lot_no: lotNo, deleted_at: null })).lean();
+
+/** รหัสประจำชิ้นทั้งล็อตเรียงตามลำดับ (สำหรับพิมพ์ฉลาก) — ล็อตเก่าที่ยังไม่มีรหัสชิ้น สร้างให้ก่อน */
+export async function listPieces(lotNo: string) {
   await dbConnect();
   const no = String(lotNo ?? "").trim().toUpperCase();
-  if (!no) throw badRequest("ต้องระบุเลขล็อต");
-  const lot = await populateLot(productLotModel.findOne({ lot_no: no, deleted_at: null })).lean();
+  const lot = await productLotModel.findOne({ lot_no: no, deleted_at: null }).lean<any>();
   if (!lot) throw notFound(`ไม่พบล็อต ${no}`);
-  return presentLot(lot, bangkokDateString());
+  await ensurePieces({ ...lot, product_id: lot.product_id });
+  const pieces = await productLotPieceModel
+    .find({ lot_id: lot._id, piece_no: { $lte: lot.qty_produced } })
+    .sort({ piece_no: 1 })
+    .select("piece_no piece_code")
+    .lean<Array<{ piece_no: number; piece_code: string }>>();
+  return pieces.map((p) => ({ piece_no: p.piece_no, piece_code: p.piece_code }));
+}
+
+/**
+ * ค้นจากบาร์โค้ดบนฉลาก — รหัสประจำชิ้น (ProductLotPieces) หรือเลขล็อต · ไม่สนตัวพิมพ์เล็ก/ใหญ่ + ตัดช่องว่าง
+ * piece_no / piece_code = ชิ้นที่สแกน (สแกนเลขล็อตตรง ๆ = null)
+ */
+export async function getLotByNo(code: string) {
+  await dbConnect();
+  const no = String(code ?? "").trim().toUpperCase();
+  if (!no) throw badRequest("ต้องระบุเลขล็อต");
+
+  const piece = await productLotPieceModel
+    .findOne({ piece_code: no })
+    .select("lot_id piece_no piece_code")
+    .lean<{ lot_id: unknown; piece_no: number; piece_code: string } | null>();
+  const lot: any = piece
+    ? await populateLot(productLotModel.findOne({ _id: piece.lot_id, deleted_at: null })).lean()
+    : await findLotByNo(no);
+  if (!lot) throw notFound(`ไม่พบล็อต ${no}`);
+  return {
+    ...presentLot(lot, bangkokDateString()),
+    piece_no: piece?.piece_no ?? null,
+    piece_code: piece?.piece_code ?? null,
+  };
 }
