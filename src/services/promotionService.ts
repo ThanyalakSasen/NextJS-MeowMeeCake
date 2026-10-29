@@ -152,20 +152,29 @@ export async function updatePromotion(id: string, input: UpdatePromotionInput) {
   if (stackableWith === undefined) delete payload.stackable_with;
   else payload.stackable_with = stackableWith;
 
-  // discount_value เป็นเงินเฉพาะตอน discount_type === "Amount" — ถ้าไม่ได้ส่ง discount_type มาด้วย
-  // ต้องอ่านค่าปัจจุบันจาก DB มาดูก่อนว่าประเภทที่ "จะเป็นหลังอัปเดต" คืออะไร (ไม่ใช่เดาจาก payload
-  // อย่างเดียว) — ถ้าไม่ได้แก้ discount_value เลยในรอบนี้ ไม่ต้องอ่านอะไรเพิ่ม ปล่อยผ่านเหมือนเดิม
-  if (payload.discount_value !== undefined) {
-    let effectiveType = payload.discount_type;
-    if (effectiveType === undefined) {
-      const existing = await promotionModel
-        .findOne({ _id: id, deleted_at: null })
-        .select("discount_type")
-        .lean<{ discount_type: string } | null>();
-      if (!existing) throw notFound("ไม่พบโปรโมชันที่ระบุ");
-      effectiveType = existing.discount_type;
+  // discount_value เป็นเงินเฉพาะตอน discount_type === "Amount" — แปลงตามประเภทที่ "จะเป็นหลังอัปเดต" (อ่านจาก DB)
+  // cross-field เดียวกับตอนสร้าง (schema ทำกับ partial ไม่ได้) — เทียบกับค่าที่ "จะเป็นหลังอัปเดต"
+  // เดิมไม่ตรวจเลย: PATCH end_date ก่อน start_date / Percentage เกิน 100 ได้ · เปลี่ยน discount_type
+  // โดยไม่ส่ง discount_value → ค่าเดิมถูกตีความผิดหน่วย (10% กลายเป็น ฿0.10 · ฿50 กลายเป็น 5000%)
+  const crossFields = ["discount_type", "discount_value", "start_date", "end_date"];
+  if (crossFields.some((k) => payload[k] !== undefined)) {
+    const existing = await promotionModel
+      .findOne({ _id: id, deleted_at: null })
+      .select("discount_type discount_value start_date end_date")
+      .lean<{ discount_type: string; discount_value: number; start_date: Date; end_date: Date } | null>();
+    if (!existing) throw notFound("ไม่พบโปรโมชันที่ระบุ");
+    const effectiveType = payload.discount_type ?? existing.discount_type;
+    if (effectiveType !== existing.discount_type && payload.discount_value === undefined) {
+      throw badRequest("เปลี่ยนประเภทส่วนลดต้องระบุ discount_value ใหม่ด้วย");
     }
-    if (effectiveType === "Amount") {
+    if (effectiveType === "Percentage" && payload.discount_value !== undefined && Number(payload.discount_value) > 100) {
+      throw badRequest("โปร Percentage: discount_value ต้องไม่เกิน 100");
+    }
+    const start = new Date(payload.start_date ?? existing.start_date);
+    const end = new Date(payload.end_date ?? existing.end_date);
+    if (end < start) throw badRequest("end_date ต้องไม่ก่อน start_date");
+
+    if (payload.discount_value !== undefined && effectiveType === "Amount") {
       payload.discount_value = toSatang(Number(payload.discount_value));
     }
   }

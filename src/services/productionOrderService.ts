@@ -605,6 +605,8 @@ async function addFinishedGoodsStock(
 /**
  * ยกเลิกงานผลิต → cancelled
  * รายการที่หักสต็อกไปแล้วจะถูกคืนสต็อก (สร้างรายการ receive ชดเชย)
+ * ใบที่ปิดงานค้างครึ่งทาง (เพิ่มสต็อกสินค้า/สร้างล็อตแล้วแต่ยังไม่ done) → ตัดสต็อกสินค้าที่เพิ่มคืน + ลบล็อต
+ * (เดิมคืนแค่วัตถุดิบ สินค้าที่ไม่ได้ผลิตจริงค้างอยู่ในสต็อกและล็อต)
  */
 export async function cancelProduction(
   id: string,
@@ -631,6 +633,30 @@ export async function cancelProduction(
       performed_by: opts.performed_by as string,
     });
   }
+
+  const creditedItems = await productionItemModel
+    .find({ production_order_id: order._id, product_stock_added_at: { $ne: null } })
+    .lean<any[]>();
+  for (const it of creditedItems) {
+    const released = await productionItemModel.findOneAndUpdate(
+      { _id: it._id, product_stock_added_at: { $ne: null } },
+      { $set: { product_stock_added_at: null, product_stock_added_qty: null } }
+    );
+    const qty = Number(released?.product_stock_added_qty ?? 0);
+    if (!(qty > 0)) continue;
+    // สินค้าอาจขายไปบางส่วนแล้ว — ยอมติดลบให้เห็นในสต็อก ดีกว่าค้างยอดที่ไม่มีของจริง
+    await productService.decreaseStock(String(it.product_id), qty, {
+      allowNegative: true,
+      log: {
+        type: "adjust",
+        ref_type: "production_order",
+        ref_id: String(order._id),
+        performed_by: opts.performed_by ?? null,
+        note: "ยกเลิกใบสั่งผลิต — ตัดสต็อกสินค้าที่เพิ่มตอนปิดงานคืน",
+      },
+    });
+  }
+  await productLotService.removeLotsForProduction(order._id);
 
   await productionItemModel.updateMany(
     { production_order_id: order._id, deleted_at: null, item_status: { $ne: "cancelled" } },
