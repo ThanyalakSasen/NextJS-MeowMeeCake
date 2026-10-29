@@ -40,19 +40,19 @@ describe("productService — product_price/sale_price เก็บสตาง�
       product_name_th: "เค้ก",
       product_name_eng: "Cake",
       category_id: String(cat._id),
-      product_price: 99.5,
-      sale_price: 79.25,
+      product_price: 99,
+      sale_price: 79,
       unit_id: String(unit._id),
       is_preorder: false,
     })) as { _id: unknown; product_price: number; sale_price: number | null };
-    expect(created.product_price).toBe(99.5);
-    expect(created.sale_price).toBe(79.25);
+    expect(created.product_price).toBe(99);
+    expect(created.sale_price).toBe(79);
 
     const raw = await productModel
       .findById(created._id)
       .lean<{ product_price: number; sale_price: number }>();
-    expect(raw!.product_price).toBe(99.5);
-    expect(raw!.sale_price).toBe(79.25);
+    expect(raw!.product_price).toBe(99);
+    expect(raw!.sale_price).toBe(79);
 
     const updated = (await productService.updateProduct(String(created._id), {
       product_price: 120,
@@ -65,6 +65,24 @@ describe("productService — product_price/sale_price เก็บสตาง�
       .lean<{ product_price: number; sale_price: number | null }>();
     expect(rawAfter!.product_price).toBe(120);
     expect(rawAfter!.sale_price).toBeNull();
+
+    // ราคาขาย = บาทเต็ม — ทศนิยม → 400 ทั้งตอนสร้างและแก้
+    await expect(
+      productService.updateProduct(String(created._id), { product_price: 120.5 })
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      productService.updateProduct(String(created._id), { sale_price: 99.25 })
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      productService.createProduct({
+        product_name_th: "เค้กทศนิยม",
+        product_name_eng: "Decimal",
+        category_id: String(cat._id),
+        product_price: 10.5,
+        unit_id: String(unit._id),
+        is_preorder: false,
+      })
+    ).rejects.toMatchObject({ status: 400 });
   });
 
   it("getProductById/getProducts: คืนค่าเป็นบาทเสมอ", async () => {

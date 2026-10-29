@@ -13,6 +13,7 @@ import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, type Pagination } from "../lib/queryParams";
+import { isIntegerOnlyUnit } from "../lib/unitRules";
 import ingredientTransactionModel from "../models/ingredientTransactionModel";
 import ingredientModel from "../models/ingredientModel";
 import unitModel from "../models/unitModel";
@@ -78,6 +79,15 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   const unitId = input.unit_id || String(ingredient.unit_id);
   await assertRefExists(unitModel, unitId, "หน่วยนับ", "unit_id");
+
+  // ทำรายการด้วยมือกับวัตถุดิบหน่วยนับเป็นชิ้น (ฟอง/ชิ้น/กล่อง) → จำนวนเต็มเท่านั้น (หน้าเว็บล็อกไว้แล้ว)
+  // การหักจากงานผลิต (production_item_id) คิดตามสูตร × จำนวน — เศษได้ ไม่ตรวจ
+  if (!input.production_item_id && !Number.isInteger(qty)) {
+    const unit = await unitModel.findById(unitId).select("unit_type unit_name unit_abbr").lean<{ unit_type?: string; unit_name?: string; unit_abbr?: string } | null>();
+    if (isIntegerOnlyUnit(unit)) {
+      throw badRequest(`วัตถุดิบหน่วย "${unit?.unit_abbr || unit?.unit_name}" ต้องกรอกเป็นจำนวนเต็ม`);
+    }
+  }
 
   if (input.production_item_id) {
     await assertRefExists(productionItemModel, input.production_item_id, "รายการผลิต", "production_item_id");

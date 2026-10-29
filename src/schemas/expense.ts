@@ -2,6 +2,7 @@
  * schemas/expense — validation ของ /api/admin/expenses (crudRoutes validate)
  */
 import { z } from "zod";
+import { WHOLE_BAHT } from "./common";
 
 const CATEGORIES = [
   "วัตถุดิบ",
@@ -20,7 +21,7 @@ export const expenseCreate = z.object({
   description: z.string().trim().min(1).max(300),
   category: z.enum(CATEGORIES),
   // รายจ่าย 0 บาทไม่มีความหมาย — กันฟอร์มที่ลืมกรอกจำนวนเงินแล้วบันทึกเป็น 0 (TC-ADM-96)
-  amount: z.number().positive("จำนวนเงินต้องมากกว่า 0"),
+  amount: z.number().int(WHOLE_BAHT).positive("จำนวนเงินต้องมากกว่า 0"),
   payment_method: z.enum(PAYMENT_METHODS),
   vendor: z.string().trim().max(200).optional(),
   note: z.string().trim().max(1000).optional(),

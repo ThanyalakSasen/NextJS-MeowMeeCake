@@ -3,7 +3,7 @@
  * discountEngine ตรวจ logic ระดับออเดอร์อีกชั้น (min/scope/ช่องทาง) — ที่นี่ตรวจแค่ shape + range
  */
 import { z } from "zod";
-import { objectId } from "./common";
+import { objectId, WHOLE_BAHT } from "./common";
 
 const DISCOUNT_TYPES = ["Percentage", "Amount", "FreeShipping"] as const;
 const CHANNELS = ["online", "instore"] as const;
@@ -14,18 +14,19 @@ const base = z.object({
   promotion_name: z.string().trim().min(1).max(200),
   promotion_desc: z.string().trim().max(1000).optional(),
   discount_type: z.enum(DISCOUNT_TYPES),
-  discount_value: z.number().nonnegative(),
+  // Amount = บาท · Percentage = % — หน้าเว็บกรอกได้เฉพาะจำนวนเต็มทั้งคู่
+  discount_value: z.number().int(WHOLE_BAHT).nonnegative(),
   is_active: z.boolean().optional(),
   applicable_channels: z.array(z.enum(CHANNELS)).min(1).optional(),
   audience: z.enum(AUDIENCES).optional(),
   stackable: z.boolean().optional(),
   // ใช้ร่วมได้เฉพาะโปรเหล่านี้ — ว่าง = ร่วมกับโปรที่ stackable ได้ทุกตัว
   stackable_with: z.array(objectId).max(100).optional(),
-  min_order_amount: z.number().nonnegative().nullish(),
+  min_order_amount: z.number().int(WHOLE_BAHT).nonnegative().nullish(),
   min_quantity: z.number().int().nonnegative().nullish(),
   applicable_products: z.array(objectId).optional(),
   applicable_categories: z.array(objectId).optional(),
-  max_discount_amount: z.number().nonnegative().nullish(),
+  max_discount_amount: z.number().int(WHOLE_BAHT).nonnegative().nullish(),
   usage_limit: z.number().int().positive().nullish(),
   max_user_per_user: z.number().int().positive().nullish(),
   // แต้มที่ใช้แลกเป็นคูปองส่วนตัว (null = ไม่เปิดให้แลก · customer-backend-merge.md §8.11)

@@ -280,6 +280,7 @@ export async function createProduct(input: CreateProductInput) {
   if (input.sale_price != null && input.sale_price < 0) {
     throw new ProductError("sale_price ต้องไม่ติดลบ", 400);
   }
+  assertWholeBahtPrices(input);
   if (input.purchase_cost != null && input.purchase_cost < 0) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
@@ -534,6 +535,7 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   if (input.sale_price != null && input.sale_price < 0) {
     throw new ProductError("sale_price ต้องไม่ติดลบ", 400);
   }
+  assertWholeBahtPrices(input);
   if (input.purchase_cost != null && input.purchase_cost < 0) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
@@ -728,6 +730,16 @@ export interface StockAdjustOptions {
   allowNegative?: boolean;
   /** บันทึกประวัติสต็อก — ผู้ทำ/หมายเหตุ/เอกสารต้นทาง (productStockHistoryService) */
   log?: StockLogContext;
+}
+
+// ราคาขาย / ราคาลด = บาทเต็ม (หน้าเว็บล็อกไว้แล้ว · เดิมยิง API ตรงตั้งราคา 12.50 ได้) — ต้นทุนยังเป็นทศนิยมได้
+function assertWholeBahtPrices(input: { product_price?: unknown; sale_price?: unknown }): void {
+  for (const field of ["product_price", "sale_price"] as const) {
+    const v = input[field];
+    if (v != null && v !== "" && !Number.isInteger(Number(v))) {
+      throw new ProductError(`${field} ต้องเป็นบาทเต็ม (ไม่มีทศนิยม)`, 400);
+    }
+  }
 }
 
 // สต็อกสินค้านับเป็นชิ้น — จำนวนเต็มเท่านั้น (หน้าเว็บล็อกแล้ว · เดิมยิง API ตรงตั้ง 1.5 ชิ้นได้)

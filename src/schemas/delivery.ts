@@ -2,12 +2,13 @@
  * schemas/delivery — validation ของ /api/admin/delivery-zones (BACKLOG §3.15)
  */
 import { z } from "zod";
+import { WHOLE_BAHT } from "./common";
 
 export const deliveryZoneCreate = z.object({
   zone_name: z.string().trim().min(1).max(200),
   provinces: z.array(z.string().trim().min(1)).default([]),
   is_catch_all: z.boolean().default(false),
-  fee: z.coerce.number().min(0),
+  fee: z.coerce.number().int(WHOLE_BAHT).min(0),
   sort_order: z.coerce.number().int().default(0),
   is_active: z.boolean().default(true),
 });
@@ -22,7 +23,7 @@ export const deliveryZoneUpdate = z
     zone_name: z.string().trim().min(1).max(200).optional(),
     provinces: z.array(z.string().trim().min(1)).optional(),
     is_catch_all: z.boolean().optional(),
-    fee: z.coerce.number().min(0).optional(),
+    fee: z.coerce.number().int(WHOLE_BAHT).min(0).optional(),
     sort_order: z.coerce.number().int().optional(),
     is_active: z.boolean().optional(),
   })

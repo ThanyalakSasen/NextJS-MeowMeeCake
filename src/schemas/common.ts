@@ -32,3 +32,6 @@ export const sortQuery = {
 
 /** string ที่ trim แล้วต้องไม่ว่าง + จำกัดความยาว */
 export const nonEmpty = (max: number) => z.string().trim().min(1).max(max);
+
+/** ช่องเงินที่หลังร้านกรอก = บาทเต็ม (หน้าเว็บล็อกไว้แล้ว · เดิมยิง API ตรงใส่ 12.50 ได้) */
+export const WHOLE_BAHT = "จำนวนเงินต้องเป็นบาทเต็ม (ไม่มีทศนิยม)";

@@ -4,7 +4,7 @@
  */
 import { z } from "zod";
 import { isThaiProvince } from "@/lib/thaiProvinces";
-import { objectId } from "./common";
+import { objectId, WHOLE_BAHT } from "./common";
 
 const provinceList = z
   .array(z.string().trim().min(1))
@@ -20,7 +20,7 @@ const provinceList = z
 export const shippingZoneUpdate = z
   .object({
     zone_label: z.string().trim().min(1).max(120).optional(),
-    fee: z.coerce.number().min(0).max(100_000).optional(),
+    fee: z.coerce.number().int(WHOLE_BAHT).min(0).max(100_000).optional(),
     provinces: provinceList.optional(),
   })
   .refine((d) => Object.keys(d).some((k) => d[k as keyof typeof d] !== undefined), {
@@ -31,7 +31,7 @@ export type ShippingZoneUpdate = z.infer<typeof shippingZoneUpdate>;
 /** POST /api/admin/shipping-zones — เพิ่มโซนใหม่ (รหัสโซนระบบตั้งให้: ตัวอักษรถัดไปที่ว่าง) · ต้องมีจังหวัดอย่างน้อย 1 */
 export const shippingZoneCreate = z.object({
   zone_label: z.string().trim().min(1, "กรุณากรอกชื่อโซน").max(120),
-  fee: z.coerce.number().min(0).max(100_000),
+  fee: z.coerce.number().int(WHOLE_BAHT).min(0).max(100_000),
   provinces: provinceList.refine((list) => list.length > 0, "เลือกอย่างน้อย 1 จังหวัด"),
 });
 export type ShippingZoneCreate = z.infer<typeof shippingZoneCreate>;
