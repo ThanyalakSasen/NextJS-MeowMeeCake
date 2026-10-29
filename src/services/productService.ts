@@ -370,9 +370,10 @@ export async function resolveScan(code: string) {
 }
 
 // ── READ (list สำหรับ POS) ────────────────────────────────────
-/** ฟิลด์ที่ POS ใช้ — ไม่มี purchase_cost (พนักงานหน้าร้านที่มีแค่สิทธิ์ orders ไม่ควรเห็นต้นทุน) */
+/** ฟิลด์ที่ POS ใช้ — ไม่มี purchase_cost (พนักงานหน้าร้านที่มีแค่สิทธิ์ orders ไม่ควรเห็นต้นทุน)
+ *  low_stock_threshold: หน้าสต็อกสินค้า (stock-list) ใช้จัดสถานะใกล้หมดตามเกณฑ์รายสินค้า */
 const POS_PRODUCT_FIELDS =
-  "product_id product_name_th product_name_eng category_id unit_id product_price sale_price product_img product_stock_quantity is_preorder";
+  "product_id product_name_th product_name_eng category_id unit_id product_price sale_price product_img product_stock_quantity is_preorder low_stock_threshold";
 
 export interface PosProductQuery {
   pagination: Pagination;

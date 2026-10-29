@@ -34,7 +34,7 @@ async function call(session: SessionUser) {
 
 describe("GET /api/admin/products/stock-list", () => {
   it("มีแค่ stock.view ได้รายการสินค้าปกติ — ไม่มีพรีออเดอร์ · ไม่มีที่ถูกลบ · ไม่มี purchase_cost", async () => {
-    const normal = await makeProduct({ product_name_th: "ขนมปังสต็อก", product_stock_quantity: 7, purchase_cost: 2500 });
+    const normal = await makeProduct({ product_name_th: "ขนมปังสต็อก", product_stock_quantity: 7, purchase_cost: 2500, low_stock_threshold: 10 });
     await makeProduct({ product_name_th: "เค้กพรีออเดอร์", is_preorder: true });
     await makeProduct({ product_name_th: "สินค้าลบแล้ว", deleted_at: new Date() });
 
@@ -47,6 +47,7 @@ describe("GET /api/admin/products/stock-list", () => {
     const row = body.data.items.find((p: { _id: string }) => p._id === String(normal._id));
     expect(row.product_stock_quantity).toBe(7);
     expect(row.purchase_cost).toBeUndefined();
+    expect(row.low_stock_threshold).toBe(10); // หน้าสต็อกจัดสถานะใกล้หมดตามเกณฑ์รายสินค้า
   });
 
   it("ไม่มี stock.view = 403 (มีแค่ products ก็ไม่ได้ — หน้าสินค้าใช้ /admin/products อยู่แล้ว)", async () => {
