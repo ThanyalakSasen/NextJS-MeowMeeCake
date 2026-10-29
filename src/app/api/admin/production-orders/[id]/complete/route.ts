@@ -1,7 +1,9 @@
 /**
  * POST /api/admin/production-orders/[id]/complete — in_progress → done (production.approve)
  *   body: { use_actual?: boolean, allowNegative?: boolean,
- *           lots?: [{ item_id, produced_date?: "YYYY-MM-DD", expiry_date?: "YYYY-MM-DD" | null }] }  ; performed_by = ผู้ทำรายการ
+ *           lots?: [{ item_id, produced_date?: "YYYY-MM-DD", expiry_date?: "YYYY-MM-DD" | null }],
+ *           actuals?: [{ item_id, actual_qty }] }  ; performed_by = ผู้ทำรายการ
+ *   actuals = จำนวนที่ผลิตได้จริง บันทึกพร้อมปิดงาน (0 = ยกเลิกรายการ) — ทั้งใบสำเร็จหรือไม่เปลี่ยนอะไรเลย
  *   หักสต็อกวัตถุดิบของรายการที่ยังไม่ถูกหักให้ครบ + สร้างล็อตสินค้า (วันผลิต/วันหมดอายุ — productLotService)
  */
 import { ok } from "@/lib/apiResponse";
@@ -21,6 +23,7 @@ export const POST = withPermission("production", "approve", async (session, req,
     use_actual: !!body.use_actual,
     allowNegative: !!body.allowNegative,
     lots: body.lots,
+    actuals: body.actuals,
   });
   // วัตถุดิบที่ถูกหักรอบนี้ = stock_impact หลังปิด ลบที่หักไว้แล้วก่อนหน้า (รายการที่หักแยกไปก่อน)
   const after: any = await productionOrderService.getProductionOrderById(id, { includeDeleted: true }).catch(() => undefined);
