@@ -14,7 +14,8 @@ import { createRoundBody } from "@/schemas/preorderRound";
 import * as preorderRoundService from "@/services/preorderRoundService";
 import type { RoundStatus } from "@/services/preorderRoundService";
 
-export const GET = withPermission("preorder", "view", async (_s, req) => {
+// หน้าผลิตอ่านได้ด้วย — สร้างใบสั่งผลิตจากรอบที่ปิดรับแล้ว · ดูโควตาของรอบในรายละเอียดใบ
+export const GET = withPermission(["preorder", "production"], "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await preorderRoundService.listRounds({
     pagination: parsePagination(sp),
