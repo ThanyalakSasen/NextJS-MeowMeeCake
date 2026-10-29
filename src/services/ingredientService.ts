@@ -8,13 +8,15 @@
  */
 import type { Model } from "mongoose";
 import dbConnect from "../lib/dbConnect";
-import { badRequest, notFound } from "../lib/httpError";
+import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { createCrudService } from "../lib/crudService";
 import ingredientModel from "../models/ingredientModel";
 import ingredientCategoryModel from "../models/ingredientCategoryModel";
 import unitModel from "../models/unitModel";
+import recipeModel from "../models/recipeModel";
+import componentModel from "../models/componentModel";
 import { toSatang, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -54,6 +56,22 @@ const base = createCrudService(ingredientModel as Model<any>, {
   present: presentIngredient, // BACKLOG3 §8 — ครอบ list/getById/create/update/remove/restore ให้เองในตัว
 });
 
+/** เปลี่ยนหน่วยของวัตถุดิบ = ตัวเลขเดิมถูกตีความเป็นหน่วยใหม่ (ไม่มีการแปลงหน่วย) — เช่นสต็อก 500 g กลายเป็น 500 kg
+ *  และสูตรที่ใช้ "500" ตามหน่วยเดิมจะหักสต็อกผิด · ยอมให้เปลี่ยนเฉพาะตอนสต็อกเป็น 0 และยังไม่มีสูตร/ส่วนประกอบใช้ */
+async function assertUnitChangeAllowed(id: string, unitId: string): Promise<void> {
+  assertObjectId(id);
+  await dbConnect();
+  const cur = await ingredientModel.findOne({ _id: id, deleted_at: null }).select("unit_id current_stock").lean<any>();
+  if (!cur || String(cur.unit_id) === unitId) return;
+  if ((cur.current_stock ?? 0) !== 0) {
+    throw conflict("เปลี่ยนหน่วยไม่ได้ เพราะวัตถุดิบยังมียอดคงเหลือ (ยอดเดิมจะถูกนับเป็นหน่วยใหม่) — ปรับยอดเป็น 0 ก่อน");
+  }
+  const match = { "ingredients.ingredient_id": cur._id, deleted_at: null };
+  if ((await recipeModel.exists(match).lean()) || (await componentModel.exists(match).lean())) {
+    throw conflict("เปลี่ยนหน่วยไม่ได้ เพราะมีสูตร/ส่วนประกอบใช้วัตถุดิบนี้อยู่ (ปริมาณในสูตรคิดตามหน่วยเดิม)");
+  }
+}
+
 async function assertRefs(input: Record<string, any>): Promise<void> {
   if (input.ingredient_category_id) {
     await assertRefExists(
@@ -91,6 +109,7 @@ export const ingredientService = {
 
   async update(id: string, input: Record<string, any>) {
     await assertRefs(input);
+    if (input.unit_id) await assertUnitChangeAllowed(id, String(input.unit_id));
     const payload =
       input.cost_per_unit != null
         ? { ...input, cost_per_unit: toSatang(Number(input.cost_per_unit)) }

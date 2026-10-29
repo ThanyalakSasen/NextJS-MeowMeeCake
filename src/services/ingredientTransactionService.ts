@@ -79,6 +79,10 @@ export async function createTransaction(input: CreateTransactionInput) {
 
   const unitId = input.unit_id || String(ingredient.unit_id);
   await assertRefExists(unitModel, unitId, "หน่วยนับ", "unit_id");
+  // ทำรายการด้วยมือต้องใช้หน่วยของวัตถุดิบ — ไม่มีการแปลงหน่วย รับ "2 kg" กับวัตถุดิบหน่วย g = สต็อกผิด (เดิมไม่ตรวจ)
+  if (!input.production_item_id && unitId !== String(ingredient.unit_id)) {
+    throw badRequest("unit_id ต้องเป็นหน่วยของวัตถุดิบนี้ (ระบบไม่แปลงหน่วยให้)");
+  }
 
   // ทำรายการด้วยมือกับวัตถุดิบหน่วยนับเป็นชิ้น (ฟอง/ชิ้น/กล่อง) → จำนวนเต็มเท่านั้น (หน้าเว็บล็อกไว้แล้ว)
   // การหักจากงานผลิต (production_item_id) คิดตามสูตร × จำนวน — เศษได้ ไม่ตรวจ

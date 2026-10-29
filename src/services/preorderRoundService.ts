@@ -144,6 +144,11 @@ function assertMaxQty(n: unknown): number {
   return v;
 }
 
+/** ขั้นต่ำต่อออเดอร์ต้องไม่เกินโควตารวมของรอบ — เกิน = ไม่มีใครสั่งได้เลย (เดิมไม่ตรวจ) */
+function assertMinWithinMax(min: number, max: number): void {
+  if (min > max) throw badRequest(`min_order_qty (${min}) ต้องไม่เกิน max_qty_total (${max})`);
+}
+
 // ── CREATE ───────────────────────────────────────────────────
 export async function createRound(input: CreateRoundInput, createdBy: string) {
   await dbConnect();
@@ -198,6 +203,8 @@ export async function createRound(input: CreateRoundInput, createdBy: string) {
         max_qty_total: assertMaxQty(it.max_qty_total),
         is_active: it.is_active ?? true,
       });
+      const added = resolvedItems[resolvedItems.length - 1];
+      assertMinWithinMax(added.min_order_qty, added.max_qty_total);
     }
   }
 
@@ -623,6 +630,7 @@ export async function addRoundItem(roundId: string, input: RoundItemInput) {
     throw badRequest(`สินค้า "${product.product_name_th}" ไม่ใช่สินค้าพรีออเดอร์`);
   }
   assertLeadTime(round.close_date, round.pickup_date, [product]);
+  assertMinWithinMax(Math.max(1, Number(input.min_order_qty) || 1), assertMaxQty(input.max_qty_total));
 
   try {
     const doc = await preorderRoundItemModel.create({
@@ -671,6 +679,8 @@ export async function updateRoundItem(itemId: string, input: UpdateRoundItemInpu
       throw conflict(`max_qty_total (${payload.max_qty_total}) น้อยกว่ายอดที่จองไปแล้ว (${item.current_qty})`);
     }
   }
+
+  assertMinWithinMax(payload.min_order_qty ?? item.min_order_qty ?? 1, payload.max_qty_total ?? item.max_qty_total);
 
   Object.assign(item, payload);
   await item.save();
