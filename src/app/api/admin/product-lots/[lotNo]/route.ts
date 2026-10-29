@@ -1,6 +1,7 @@
 /**
- * GET /api/admin/product-lots/[lotNo] — ค้นล็อตจากเลขล็อต (สแกนบาร์โค้ดบนฉลาก) (production / stock / pos .view)
- *   คืน สินค้า · วันผลิต · วันหมดอายุ · expiry_state · ใบสั่งผลิต · รอบพรีออเดอร์ · จำนวนผลิต/คงเหลือ
+ * GET /api/admin/product-lots/[lotNo] — ค้นล็อตจากบาร์โค้ดบนฉลาก (production / stock / pos .view)
+ *   รับเลขล็อต (L2610290001) หรือรหัสประจำชิ้น (L2610290001-003 — ProductLotPieces)
+ *   คืน สินค้า · วันผลิต · วันหมดอายุ · expiry_state · ใบสั่งผลิต · รอบพรีออเดอร์ · จำนวนผลิต/คงเหลือ · piece_no / piece_code (ชิ้นที่สแกน / null)
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import productLotModel from "@/models/productLotModel";
+import productLotPieceModel from "@/models/productLotPieceModel";
 import productionItemModel from "@/models/productionItemModel";
 import productionOrderModel from "@/models/productionOrderModel";
 import * as productionOrderService from "@/services/productionOrderService";
@@ -109,6 +110,44 @@ describe("ปิดงานผลิต → สร้างล็อตสิ�
     expect(found).toMatchObject({ lot_no: lot.lot_no, product_name_th: a.product_name_th, expiry_date: "2026-10-30" });
     expect(found.production_no).toMatch(/^PRD-/);
     await expect(productLotService.getLotByNo("L0000000000")).rejects.toMatchObject({ status: 404 });
+  });
+
+  it("ปิดงานผลิต → เก็บรหัสประจำชิ้นครบทุกชิ้น · สแกนรหัสชิ้น → ล็อต + ชิ้นที่ · ไม่มีในตาราง = 404", async () => {
+    const a = await makeProduct({ product_stock_quantity: 0 });
+    const { orderId, adminId } = await orderWith([{ product: a, qty: 12 }]);
+    await productionOrderService.completeProduction(orderId, { performed_by: adminId });
+    const [lot] = await lotsOf(orderId);
+
+    const stored = await productLotPieceModel.find({ product_id: a._id }).sort({ piece_no: 1 }).lean<Array<{ piece_no: number; piece_code: string }>>();
+    expect(stored.map((p) => p.piece_no)).toEqual(Array.from({ length: 12 }, (_, i) => i + 1));
+    expect(stored[0].piece_code).toBe(`${lot.lot_no}-001`);
+    expect(stored[11].piece_code).toBe(`${lot.lot_no}-012`);
+    expect(productLotService.pieceCode(lot.lot_no, 7, 1200)).toBe(`${lot.lot_no}-0007`);
+
+    const byLot = await productLotService.getLotByNo(lot.lot_no);
+    expect(byLot).toMatchObject({ piece_no: null, piece_code: null });
+    const byPiece = await productLotService.getLotByNo(` ${lot.lot_no.toLowerCase()}-012 `);
+    expect(byPiece).toMatchObject({ lot_no: lot.lot_no, piece_no: 12, piece_code: `${lot.lot_no}-012`, qty_produced: 12 });
+
+    await expect(productLotService.getLotByNo(`${lot.lot_no}-013`)).rejects.toMatchObject({ status: 404 });
+    await expect(productLotService.getLotByNo("L0000000000-001")).rejects.toMatchObject({ status: 404 });
+
+    // ปิดงานซ้ำ/เรียก ensure ซ้ำ ไม่สร้างชิ้นซ้ำ
+    expect(await productLotService.listPieces(lot.lot_no)).toHaveLength(12);
+    expect(await productLotPieceModel.countDocuments({ product_id: a._id })).toBe(12);
+  });
+
+  it("ล็อตเก่าที่ยังไม่มีรหัสชิ้น → listPieces สร้างให้ครั้งแรก แล้วสแกนเจอ", async () => {
+    const a = await makeProduct({ product_stock_quantity: 0 });
+    const { orderId, adminId } = await orderWith([{ product: a, qty: 3 }]);
+    await productionOrderService.completeProduction(orderId, { performed_by: adminId });
+    const [lot] = await lotsOf(orderId);
+    await productLotPieceModel.deleteMany({ product_id: a._id });
+    await expect(productLotService.getLotByNo(`${lot.lot_no}-001`)).rejects.toMatchObject({ status: 404 });
+
+    const pieces = await productLotService.listPieces(lot.lot_no);
+    expect(pieces).toEqual([1, 2, 3].map((n) => ({ piece_no: n, piece_code: `${lot.lot_no}-00${n}` })));
+    expect(await productLotService.getLotByNo(`${lot.lot_no}-002`)).toMatchObject({ piece_no: 2 });
   });
 });
 
