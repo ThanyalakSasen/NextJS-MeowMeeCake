@@ -15,7 +15,7 @@ import { parseBody } from "@/lib/validate";
 import { parseBool } from "@/lib/queryParams";
 import { updateUserBody } from "@/schemas/user";
 import * as userService from "@/services/userService";
-import { assertMayAssignRole, assertMayManageUser } from "@/services/ownerProtection";
+import { assertKeepsOwner, assertMayAssignRole, assertMayManageUser } from "@/services/ownerProtection";
 import { assertMayManageUserWithin } from "@/services/permissionCeiling";
 
 type Ctx = { params: Promise<{ id: string }> };
@@ -32,6 +32,7 @@ export const PATCH = withPermission("employees", "update", async (session, req, 
   await assertMayManageUser(session, id);
   if (body.role_id !== undefined) await assertMayAssignRole(session, body.role_id);
   await assertMayManageUserWithin(session, id, body.role_id);
+  await assertKeepsOwner(session, id, { is_active: body.is_active, role_id: body.role_id });
   const before = await userService.getUserById(id, { includeDeleted: true }).catch(() => undefined);
   const result = await userService.updateUser(id, body);
   // ทุกการแก้ไข log ก่อน/หลังรายฟิลด์ (เดิม log เฉพาะเปลี่ยนบทบาท/เปิด-ปิดบัญชี โดยไม่มีค่า)
@@ -51,6 +52,7 @@ export const DELETE = withPermission("employees", "delete", async (session, req,
   const { id } = await ctx.params;
   await assertMayManageUser(session, id);
   await assertMayManageUserWithin(session, id);
+  await assertKeepsOwner(session, id, { remove: true });
   const before = await userService.getUserById(id, { includeDeleted: true }).catch(() => undefined);
   const result = await userService.deleteUser(id);
   auditChange(req, {
