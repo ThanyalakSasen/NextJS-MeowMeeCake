@@ -172,8 +172,9 @@ export async function addItem(orderId: string, input: AddItemInput) {
   }
 
   if (!input.product_id || !input.recipe_id) throw badRequest("ต้องระบุ product_id และ recipe_id");
-  if (input.planned_qty == null || Number(input.planned_qty) <= 0) {
-    throw badRequest("planned_qty ต้องมากกว่า 0");
+  // จำนวนชิ้น = จำนวนเต็มเท่านั้น (หน้าเว็บล็อกแล้ว — กันยิง API ตรงแล้วได้สต็อกสินค้า 1.5 ชิ้น)
+  if (input.planned_qty == null || !Number.isInteger(Number(input.planned_qty)) || Number(input.planned_qty) <= 0) {
+    throw badRequest("planned_qty ต้องเป็นจำนวนเต็มมากกว่า 0");
   }
   await assertRefExists(productModel, input.product_id, "สินค้า", "product_id");
 
@@ -223,8 +224,9 @@ export async function addItems(orderId: string, inputs: AddItemInput[]) {
 
   for (const input of inputs) {
     if (!input.product_id || !input.recipe_id) throw badRequest("ต้องระบุ product_id และ recipe_id");
-    if (input.planned_qty == null || Number(input.planned_qty) <= 0) {
-      throw badRequest("planned_qty ต้องมากกว่า 0");
+    // จำนวนชิ้น = จำนวนเต็มเท่านั้น (หน้าเว็บล็อกแล้ว — กันยิง API ตรงแล้วได้สต็อกสินค้า 1.5 ชิ้น)
+    if (input.planned_qty == null || !Number.isInteger(Number(input.planned_qty)) || Number(input.planned_qty) <= 0) {
+      throw badRequest("planned_qty ต้องเป็นจำนวนเต็มมากกว่า 0");
     }
     assertObjectId(input.product_id, "product_id");
     assertObjectId(input.recipe_id, "recipe_id");
@@ -310,7 +312,9 @@ export async function updateItem(id: string, input: Record<string, any>) {
     throw badRequest(`item_status ต้องเป็นหนึ่งใน: ${ITEM_STATUSES.join(", ")}`);
   }
   for (const f of ["planned_qty", "actual_qty"] as const) {
-    if (input[f] != null && Number(input[f]) < 0) throw badRequest(`${f} ต้องไม่ติดลบ`);
+    if (input[f] != null && (!Number.isInteger(Number(input[f])) || Number(input[f]) < 0)) {
+      throw badRequest(`${f} ต้องเป็นจำนวนเต็มไม่ติดลบ`);
+    }
   }
 
   for (const f of ["planned_qty", "actual_qty", "notes", "item_status"] as const) {

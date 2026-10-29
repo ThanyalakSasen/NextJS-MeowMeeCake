@@ -451,7 +451,7 @@ function parseActuals(items: any[], raw: unknown): Map<string, number> {
     const it = byId.get(itemId);
     if (!it) throw badRequest(`actuals: ไม่พบรายการผลิต ${itemId} ในใบสั่งผลิตนี้`);
     const qty = Number(a?.actual_qty);
-    if (a?.actual_qty == null || !Number.isFinite(qty) || qty < 0) throw badRequest("actual_qty ต้องเป็นตัวเลขไม่ติดลบ");
+    if (a?.actual_qty == null || !Number.isInteger(qty) || qty < 0) throw badRequest("actual_qty ต้องเป็นจำนวนเต็มไม่ติดลบ");
     if (qty === 0 && it.stock_updated_at) {
       throw conflict("รายการที่หักวัตถุดิบไปแล้วตั้งจำนวนผลิตได้เป็น 0 ไม่ได้ — คืนวัตถุดิบ (reverse-stock) ก่อน");
     }
