@@ -97,6 +97,8 @@ export interface CreateProductInput {
   product_stock_quantity?: number | null;
   /** เกณฑ์สินค้าใกล้หมดรายสินค้า (จำนวนเต็ม ≥ 0) · null/ไม่ส่ง = ใช้ค่าเริ่มต้น 5 (src/lib/lowStock.ts) */
   low_stock_threshold?: number | null;
+  /** อายุสินค้า (วัน, จำนวนเต็ม ≥ 1) — วันหมดอายุเริ่มต้นของล็อตผลิต · null = ไม่ตั้ง */
+  shelf_life_days?: number | null;
   preorder_config?: PreorderConfigInput | null;
 }
 
@@ -149,6 +151,14 @@ function assertLowStockThreshold(value: unknown): void {
   if (value == null) return;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new ProductError("low_stock_threshold ต้องเป็นจำนวนเต็มไม่ติดลบ (หรือ null = ใช้ค่าเริ่มต้น)", 400);
+  }
+}
+
+/** shelf_life_days: null = ไม่ตั้ง · ไม่งั้นต้องเป็นจำนวนเต็ม ≥ 1 */
+function assertShelfLifeDays(value: unknown): void {
+  if (value == null) return;
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new ProductError("shelf_life_days ต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป (หรือ null = ไม่ตั้ง)", 400);
   }
 }
 
@@ -254,6 +264,7 @@ export async function createProduct(input: CreateProductInput) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
   assertLowStockThreshold(input.low_stock_threshold);
+  assertShelfLifeDays(input.shelf_life_days);
 
   await assertCategoryExists(input.category_id);
   await assertUnitExists(input.unit_id);
@@ -277,6 +288,7 @@ export async function createProduct(input: CreateProductInput) {
     product_stock_quantity: isPreorder ? null : input.product_stock_quantity ?? 0,
     // พรีออเดอร์ไม่มีสต็อก → ไม่มีเกณฑ์ใกล้หมด
     low_stock_threshold: isPreorder ? null : input.low_stock_threshold ?? null,
+    shelf_life_days: input.shelf_life_days ?? null,
     preorder_config: isPreorder ? input.preorder_config : null,
   };
 
@@ -505,6 +517,7 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
   assertLowStockThreshold(input.low_stock_threshold);
+  assertShelfLifeDays(input.shelf_life_days);
   // input.purchase_cost/product_price/sale_price เป็นบาทจาก request — ปัด 2 ตำแหน่งก่อนให้ loop `updatable`
   // ด้านล่างเขียนลง existing.*
   if (input.purchase_cost != null) {
@@ -564,6 +577,7 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     "purchase_cost",
     "unit_id",
     "is_preorder",
+    "shelf_life_days",
   ];
   for (const field of updatable) {
     if (input[field] !== undefined) {
