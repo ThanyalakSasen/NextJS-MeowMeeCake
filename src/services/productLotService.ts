@@ -147,6 +147,15 @@ export async function createLotsForProduction(
   }
 }
 
+/** ลบล็อต + ชิ้นของใบสั่งผลิต — ใช้ตอนยกเลิกใบที่ปิดงานค้างครึ่งทาง (สร้างล็อตไปแล้วแต่ใบยังไม่ done) */
+export async function removeLotsForProduction(orderId: unknown): Promise<void> {
+  const lots = await productLotModel.find({ production_order_id: orderId }).select("_id").lean<Array<{ _id: unknown }>>();
+  if (lots.length === 0) return;
+  const ids = lots.map((l) => l._id);
+  await productLotPieceModel.deleteMany({ lot_id: { $in: ids } });
+  await productLotModel.deleteMany({ _id: { $in: ids } });
+}
+
 function presentLot(lot: any, today: string) {
   const product = lot.product_id && typeof lot.product_id === "object" ? lot.product_id : null;
   const order = lot.production_order_id && typeof lot.production_order_id === "object" ? lot.production_order_id : null;

@@ -120,18 +120,40 @@ describe("promotionService.createPromotion/updatePromotion — discount_value �
     expect(raw!.discount_value).toBe(99);
   });
 
-  it("update: ไม่ได้ส่ง discount_value มาด้วยเลย → ค่าเดิมใน DB ไม่ถูกแตะ แม้จะเปลี่ยน discount_type", async () => {
+  it("update: เปลี่ยน discount_type โดยไม่ส่ง discount_value → 400 ไม่แตะข้อมูล (เดิม 10% กลายเป็น ฿0.10)", async () => {
     const user = await makeUser();
     const created = (await promotionService.createPromotion(
       base({ discount_type: "Percentage", discount_value: 10 }),
       String(user._id)
     )) as PromoDoc;
-    // เปลี่ยน type เป็น Amount แต่ไม่ส่ง discount_value มาด้วย — ค่าเดิม (10, ยังไม่เคยถูกแปลง) ต้องคงเดิม
-    await promotionService.updatePromotion(String(created._id), {
-      discount_type: "Amount",
-    } as UpdateInput);
-    const raw = await promotionModel.findById(created._id).lean<{ discount_value: number }>();
-    expect(raw!.discount_value).toBe(10); // ไม่ถูกคูณย้อนหลัง
+    await expect(
+      promotionService.updatePromotion(String(created._id), { discount_type: "Amount" } as UpdateInput)
+    ).rejects.toMatchObject({ status: 400 });
+    const raw = await promotionModel.findById(created._id).lean<{ discount_type: string; discount_value: number }>();
+    expect(raw!.discount_type).toBe("Percentage");
+    expect(raw!.discount_value).toBe(10);
+  });
+
+  it("update: ตรวจ cross-field เทียบกับค่าเดิมใน DB — end ก่อน start / Percentage เกิน 100 → 400", async () => {
+    const user = await makeUser();
+    const pct = (await promotionService.createPromotion(
+      base({ discount_type: "Percentage", discount_value: 10 }),
+      String(user._id)
+    )) as PromoDoc;
+    const id = String(pct._id);
+    await expect(
+      promotionService.updatePromotion(id, { end_date: new Date(Date.now() - 86_400_000) } as UpdateInput)
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      promotionService.updatePromotion(id, { start_date: new Date(Date.now() + 5 * 86_400_000) } as UpdateInput)
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(promotionService.updatePromotion(id, { discount_value: 150 } as UpdateInput)).rejects.toMatchObject({
+      status: 400,
+    });
+    // ค่าที่ถูกต้องยังผ่าน
+    await promotionService.updatePromotion(id, { discount_value: 20 } as UpdateInput);
+    const raw = await promotionModel.findById(id).lean<{ discount_value: number }>();
+    expect(raw!.discount_value).toBe(20);
   });
 
   it("list/getById คืนค่าเป็นบาทเสมอ ตามชนิดของแต่ละโปรโมชัน", async () => {

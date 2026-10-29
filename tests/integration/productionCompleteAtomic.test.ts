@@ -3,6 +3,7 @@ import ingredientModel from "@/models/ingredientModel";
 import productModel from "@/models/productModel";
 import productionItemModel from "@/models/productionItemModel";
 import productionOrderModel from "@/models/productionOrderModel";
+import productLotModel from "@/models/productLotModel";
 import * as productionOrderService from "@/services/productionOrderService";
 import * as productLotService from "@/services/productLotService";
 import { makeUser, makeProduct, makeRecipe, makeIngredient } from "./helpers";
@@ -144,5 +145,30 @@ describe("completeProduction — ทั้งใบหรือไม่เล�
     expect(await statusOf(order._id)).toBe("done");
     expect(await stockOf(milk._id)).toBe(20);
     expect(await productStockOf(rows[0].product._id)).toBe(5);
+  });
+
+  it("ปิดงานค้างครึ่งทาง (เพิ่มสต็อกสินค้า/สร้างล็อตแล้ว) แล้วยกเลิก → คืนวัตถุดิบ ตัดสต็อกสินค้าคืน ลบล็อต", async () => {
+    const cream = await makeIngredient({ current_stock: 30 });
+    const { order, admin, rows } = await orderUsing([{ ingredient: cream, perUnit: 2, qty: 5 }]);
+    const id = String(order._id);
+    const by = String(admin._id);
+
+    // ล็อตสร้างแล้วจริง แต่ปิดใบไม่สำเร็จ (ล้มหลังขั้นล็อต)
+    const real = productLotService.createLotsForProduction;
+    const spy = vi.spyOn(productLotService, "createLotsForProduction").mockImplementationOnce(async (...args) => {
+      await real(...args);
+      throw new Error("save failed");
+    });
+    await expect(productionOrderService.completeProduction(id, { performed_by: by })).rejects.toThrow("save failed");
+    spy.mockRestore();
+    expect(await statusOf(order._id)).toBe("in_progress");
+    expect(await productStockOf(rows[0].product._id)).toBe(5);
+    expect(await productLotModel.countDocuments({ production_order_id: order._id })).toBe(1);
+
+    await productionOrderService.cancelProduction(id, { performed_by: by });
+    expect(await statusOf(order._id)).toBe("cancelled");
+    expect(await stockOf(cream._id)).toBe(30);
+    expect(await productStockOf(rows[0].product._id)).toBe(0);
+    expect(await productLotModel.countDocuments({ production_order_id: order._id })).toBe(0);
   });
 });
