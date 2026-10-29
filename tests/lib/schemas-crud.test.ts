@@ -12,6 +12,7 @@ import {
   semanticTermUpdate,
 } from "@/schemas/sentiment";
 import { roleCreate, roleUpdate } from "@/schemas/rbac";
+import { bannerUpdate } from "@/schemas/catalog";
 
 const OID = "5f9d88b9c3a1e2b3c4d5e6f7";
 
@@ -90,5 +91,12 @@ describe("schemas/rbac — role", () => {
     });
     expect(roleCreate.safeParse({ role_name: "x", role_type: "admin" }).success).toBe(false);
     expect(roleUpdate.safeParse({ is_active: false }).success).toBe(true);
+  });
+});
+
+describe("schemas/catalog — banner", () => {
+  it("update: start/end_date = null ล้างช่วงวันที่ได้ (ไม่ถูก coerce เป็น 1970)", () => {
+    expect(bannerUpdate.parse({ start_date: null, end_date: null })).toEqual({ start_date: null, end_date: null });
+    expect(bannerUpdate.parse({ start_date: "2026-11-01" }).start_date).toBeInstanceOf(Date);
   });
 });

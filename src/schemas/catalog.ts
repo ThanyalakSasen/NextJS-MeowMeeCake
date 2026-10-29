@@ -53,8 +53,9 @@ export const bannerCreate = z.object({
   // (1000) เตี้ยเกินไปสำหรับ base64 จริง แต่พอสำหรับ URL path ปกติ)
   banner_img: z.string().trim().min(1).max(500),
   banner_link: z.string().trim().max(1000).optional(),
-  start_date: z.coerce.date().optional(),
-  end_date: z.coerce.date().optional(),
+  // null = ล้างช่วงวันที่ (แสดงตลอด) — nullish อยู่นอก coerce: null ไม่ถูกแปลงเป็น 1970-01-01
+  start_date: z.coerce.date().nullish(),
+  end_date: z.coerce.date().nullish(),
   sort_order: z.number().int().min(0),
   is_active: z.boolean().optional(),
 });
