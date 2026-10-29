@@ -478,8 +478,11 @@ async function persistOrder(
     total_amount = toSatang(subtotal - discount_amount + delivery_fee);
 
     // 1) ตัดสต็อก (productService ข้าม preorder ให้เอง, คืนสต็อกอัตโนมัติถ้ารายการใดไม่พอ)
-    await productService.deductStockForOrder(stockItems);
-    saga.onRollback("restock", () => productService.restockForOrder(stockItems));
+    const stockRef = { ref_type: "order" as const, ref_id: orderId };
+    await productService.deductStockForOrder(stockItems, stockRef);
+    saga.onRollback("restock", () =>
+      productService.restockForOrder(stockItems, { ...stockRef, note: "สร้างออเดอร์ไม่สำเร็จ" })
+    );
 
     // 2) สร้างออเดอร์ (retry เมื่อเลขออเดอร์ชนกัน)
     for (let attempt = 0; attempt < 5 && !order; attempt++) {
@@ -875,7 +878,14 @@ export async function updateOrderStatus(
       quantity: it.quantity,
     }));
     if (stockItems.length) {
-      cleanup.onRollback("restock", () => productService.restockForOrder(stockItems));
+      cleanup.onRollback("restock", () =>
+        productService.restockForOrder(stockItems, {
+          ref_type: "order",
+          ref_id: order._id,
+          performed_by: opts.cancelled_by ?? null,
+          note: opts.cancelled_reason ? `ยกเลิกออเดอร์: ${opts.cancelled_reason}` : "ยกเลิกออเดอร์",
+        })
+      );
     }
     cleanup.onRollback("revoke-promo-usage", () =>
       promotionUsageService.revokeUsage({ order_id: String(order._id) })
@@ -1172,8 +1182,9 @@ export async function reopenExpiredOrder(id: string): Promise<void> {
     .select("product_id quantity")
     .lean<Array<{ product_id: unknown; quantity: number }>>();
   const stockItems = items.map((it) => ({ product_id: String(it.product_id), quantity: it.quantity }));
+  const stockRef = { ref_type: "order" as const, ref_id: id };
   try {
-    await productService.deductStockForOrder(stockItems);
+    await productService.deductStockForOrder(stockItems, { ...stockRef, note: "เปิดออเดอร์กลับ (แนบสลิปหลังหมดเวลา)" });
   } catch (err) {
     if ((err as { status?: number })?.status === 409) {
       throw conflict("สินค้าบางรายการหมดแล้ว เปิดคำสั่งซื้อกลับไม่ได้ — กรุณาติดต่อร้านเพื่อขอคืนเงิน");
@@ -1196,7 +1207,7 @@ export async function reopenExpiredOrder(id: string): Promise<void> {
   if (!reopened) {
     // มีคนเปลี่ยนสถานะแทรกเข้ามา → คืนสต็อกที่เพิ่งตัด
     await productService
-      .restockForOrder(stockItems)
+      .restockForOrder(stockItems, { ...stockRef, note: "เปิดออเดอร์กลับไม่สำเร็จ" })
       .catch((err) => log.error("order.reopen_restock_failed", { order_id: id, err }));
     throw conflict("สถานะคำสั่งซื้อเปลี่ยนไปแล้ว กรุณาโหลดหน้าใหม่");
   }

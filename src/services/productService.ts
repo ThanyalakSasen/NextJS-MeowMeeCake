@@ -23,6 +23,8 @@ import { log } from "../lib/logger";
 import { deleteImages } from "../lib/upload";
 import { toSatang, toBahtFields } from "../lib/money";
 import { adminLinks } from "../lib/adminLinks";
+import * as stockHistory from "./productStockHistoryService";
+import type { StockLogContext } from "./productStockHistoryService";
 import {
   DEFAULT_LOW_STOCK_THRESHOLD,
   LOW_STOCK_EXPR,
@@ -705,6 +707,8 @@ export interface StockItemInput {
 export interface StockAdjustOptions {
   /** ยอมให้สต็อกติดลบได้ (ปกติ = false) */
   allowNegative?: boolean;
+  /** บันทึกประวัติสต็อก — ผู้ทำ/หมายเหตุ/เอกสารต้นทาง (productStockHistoryService) */
+  log?: StockLogContext;
 }
 
 function assertPositiveQty(qty: number, field = "quantity"): void {
@@ -734,7 +738,12 @@ export async function getStock(id: string): Promise<number> {
 }
 
 // ── ตั้งค่าสต็อกแบบระบุจำนวนตรง ๆ (นับสต็อก / แก้ยอด) ────────
-export async function setStock(id: string, quantity: number) {
+export async function setStock(id: string, quantity: number, log?: StockLogContext) {
+  return (await setStockDetailed(id, quantity, log)).product;
+}
+
+/** setStock + ยอดก่อนตั้ง (อ่านแบบ atomic จาก findOneAndUpdate) — route ใช้ทำ log ก่อน → หลังให้ตรงกับประวัติ */
+export async function setStockDetailed(id: string, quantity: number, log: StockLogContext = {}) {
   await dbConnect();
   if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity < 0) {
     throw new ProductError("quantity ต้องเป็นตัวเลขไม่ติดลบ", 400);
@@ -752,8 +761,14 @@ export async function setStock(id: string, quantity: number) {
   if (!previous) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
-  notifyIfLowStockCrossed(previous, previous.product_stock_quantity ?? 0, quantity);
-  return { ...previous, product_stock_quantity: quantity };
+  const before = previous.product_stock_quantity ?? 0;
+  notifyIfLowStockCrossed(previous, before, quantity);
+  await stockHistory.record(
+    [{ product_id: previous._id, qty_before: before, qty_after: quantity }],
+    log.type ?? "adjust",
+    log
+  );
+  return { product: { ...previous, product_stock_quantity: quantity }, before };
 }
 
 // ── ปรับสต็อกด้วยส่วนต่าง (+ รับเข้า / - ตัดออก) ──────────────
@@ -799,13 +814,18 @@ export async function adjustStock(
   }
   const after = (product as { product_stock_quantity?: number }).product_stock_quantity ?? 0;
   notifyIfLowStockCrossed(product as { _id: unknown; product_name_th?: string }, after - delta, after);
+  await stockHistory.record(
+    [{ product_id: (product as { _id: unknown })._id, qty_before: after - delta, qty_after: after }],
+    options.log?.type ?? (delta > 0 ? "receive" : "use"),
+    options.log
+  );
   return product;
 }
 
 // ── รับสินค้าเข้าสต็อก ───────────────────────────────────────
-export async function increaseStock(id: string, quantity: number) {
+export async function increaseStock(id: string, quantity: number, log?: StockLogContext) {
   assertPositiveQty(quantity);
-  return adjustStock(id, Math.abs(quantity));
+  return adjustStock(id, Math.abs(quantity), { log });
 }
 
 // ── ตัดสต็อกออก (เช่น ขาย / เสียหาย) ─────────────────────────
@@ -866,7 +886,8 @@ export async function checkStockAvailability(items: StockItemInput[]) {
 
 // ── ตัดสต็อกหลายรายการพร้อมกัน (เช่น ตอนยืนยันออเดอร์) ───────
 //    ตัดทีละรายการแบบ atomic ถ้ามีรายการใดไม่พอจะคืนสต็อกที่ตัดไปแล้วกลับ
-export async function deductStockForOrder(items: StockItemInput[]) {
+//    ประวัติสต็อก (type "sale") บันทึกเมื่อตัดครบทุกรายการเท่านั้น — ตัดไม่ครบ = คืนแล้ว ไม่มีอะไรให้บันทึก
+export async function deductStockForOrder(items: StockItemInput[], log: StockLogContext = {}) {
   await dbConnect();
   if (!Array.isArray(items) || items.length === 0) {
     throw new ProductError("items ต้องเป็น array ที่ไม่ว่าง", 400);
@@ -881,6 +902,7 @@ export async function deductStockForOrder(items: StockItemInput[]) {
   }
 
   const applied: { product_id: string; quantity: number }[] = [];
+  const changes: stockHistory.StockChange[] = [];
   try {
     for (const [product_id, quantity] of merged) {
       const product = await productModel.findOne({
@@ -912,6 +934,8 @@ export async function deductStockForOrder(items: StockItemInput[]) {
         );
       }
       applied.push({ product_id, quantity });
+      const after = updated.product_stock_quantity ?? 0;
+      changes.push({ product_id: updated._id, qty_before: after + quantity, qty_after: after });
 
       notifyIfLowStockCrossed(
         product,
@@ -932,11 +956,12 @@ export async function deductStockForOrder(items: StockItemInput[]) {
     throw err;
   }
 
+  await stockHistory.record(changes, log.type ?? "sale", log);
   return { ok: true, deducted: applied };
 }
 
 // ── คืนสต็อกหลายรายการ (เช่น ยกเลิก / คืนสินค้า) ─────────────
-export async function restockForOrder(items: StockItemInput[]) {
+export async function restockForOrder(items: StockItemInput[], log: StockLogContext = {}) {
   await dbConnect();
   if (!Array.isArray(items) || items.length === 0) {
     throw new ProductError("items ต้องเป็น array ที่ไม่ว่าง", 400);
@@ -950,17 +975,25 @@ export async function restockForOrder(items: StockItemInput[]) {
   }
 
   const restocked: { product_id: string; quantity: number }[] = [];
+  const changes: stockHistory.StockChange[] = [];
   for (const [product_id, quantity] of merged) {
     await ensureNumericStock(product_id);
-    const updated = await productModel.updateOne(
-      { _id: product_id, deleted_at: null, ...STOCKABLE_MATCH },
-      { $inc: { product_stock_quantity: quantity } }
-    );
-    if (updated.modifiedCount > 0) {
+    const updated = await productModel
+      .findOneAndUpdate(
+        { _id: product_id, deleted_at: null, ...STOCKABLE_MATCH },
+        { $inc: { product_stock_quantity: quantity } },
+        { returnDocument: "after" }
+      )
+      .select("product_stock_quantity")
+      .lean<{ _id: unknown; product_stock_quantity?: number } | null>();
+    if (updated) {
       restocked.push({ product_id, quantity });
+      const after = updated.product_stock_quantity ?? 0;
+      changes.push({ product_id: updated._id, qty_before: after - quantity, qty_after: after });
     }
   }
 
+  await stockHistory.record(changes, log.type ?? "sale_return", log);
   return { ok: true, restocked };
 }
 
@@ -1018,6 +1051,7 @@ const productService = {
   // Stock
   getStock,
   setStock,
+  setStockDetailed,
   adjustStock,
   increaseStock,
   decreaseStock,

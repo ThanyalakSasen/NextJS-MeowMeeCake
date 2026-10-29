@@ -3,7 +3,8 @@
  *   GET   — อ่านจำนวนคงเหลือ (stock.view)
  *   PUT   — ตั้งค่าสต็อกเป็นจำนวนที่ระบุ (stock.update)   body: { quantity, note? }
  *   PATCH — ปรับสต็อกด้วยส่วนต่าง (stock.update)          body: { delta, note? } หรือ { action, quantity, note? }
- *   note — หมายเหตุ (เหตุผลที่รับเข้า/เบิกใช้/ปรับยอด) ไม่มีที่เก็บบนสินค้า → เก็บในบันทึกการทำงาน (ข้อความ + details + after)
+ *   note — หมายเหตุ (เหตุผลที่รับเข้า/เบิกใช้/ปรับยอด) → ประวัติสต็อกสินค้า (ProductStockTransactions) + บันทึกการทำงาน
+ *   ผู้ทำรายการ = session ผู้เรียก (performed_by ในประวัติสต็อก)
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
@@ -51,33 +52,41 @@ export const GET = withPermission("stock", "view", async (_s, _r, ctx: Ctx) => {
   return ok({ product_id: id, quantity: await productService.getStock(id) });
 });
 
-export const PUT = withPermission("stock", "update", async (_s, req, ctx: Ctx) => {
+export const PUT = withPermission("stock", "update", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await req.json();
-  const quantity = body.quantity;
-  const before = await productService.getStock(id);
-  const result = await productService.setStock(id, Number(quantity));
-  auditStock(req, id, result, "ตั้งยอด", before, Number(quantity), { set: Number(quantity) }, noteOf(body));
-  return ok(result);
+  const quantity = Number(body.quantity);
+  const note = noteOf(body);
+  // ยอดก่อนตั้งอ่านแบบ atomic ในคำสั่งเดียวกับที่ตั้ง — เดิมอ่าน getStock() แยกก่อน ขายแทรกแล้ว log คลาด
+  const { product, before } = await productService.setStockDetailed(id, quantity, {
+    note,
+    performed_by: session.user_id,
+  });
+  auditStock(req, id, product, "ตั้งยอด", before, quantity, { set: quantity }, note);
+  return ok(product);
 });
 
-export const PATCH = withPermission("stock", "update", async (_s, req, ctx: Ctx) => {
+export const PATCH = withPermission("stock", "update", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await req.json();
+  const note = noteOf(body);
+  const log = { note, performed_by: session.user_id };
 
   let result;
   let detail: Record<string, unknown>;
   if (body.action === "increase") {
-    result = await productService.increaseStock(id, Number(body.quantity));
+    result = await productService.increaseStock(id, Number(body.quantity), log);
     detail = { action: "increase", quantity: Number(body.quantity) };
   } else if (body.action === "decrease") {
     result = await productService.decreaseStock(id, Number(body.quantity), {
       allowNegative: Boolean(body.allowNegative),
+      log,
     });
     detail = { action: "decrease", quantity: Number(body.quantity) };
   } else if (body.delta !== undefined) {
     result = await productService.adjustStock(id, Number(body.delta), {
       allowNegative: Boolean(body.allowNegative),
+      log,
     });
     detail = { delta: Number(body.delta) };
   } else {
@@ -90,6 +99,6 @@ export const PATCH = withPermission("stock", "update", async (_s, req, ctx: Ctx)
     body.delta !== undefined
       ? Number(body.delta)
       : (body.action === "decrease" ? -1 : 1) * Math.abs(Number(body.quantity));
-  auditStock(req, id, product, delta >= 0 ? "เพิ่ม" : "ลด", after - delta, after, detail, noteOf(body));
+  auditStock(req, id, product, delta >= 0 ? "เพิ่ม" : "ลด", after - delta, after, detail, note);
   return ok(result);
 });

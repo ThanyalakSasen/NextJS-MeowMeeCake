@@ -481,7 +481,7 @@ export async function completeProduction(
   await order.save();
 
   // docs/BACKLOG4.md Y2 — เดิมผลิตเสร็จแล้วหักแค่วัตถุดิบ ไม่เพิ่มสต็อกสินค้า ต้องไปปรับสต็อกเองทุกครั้ง
-  await addFinishedGoodsStock(String(order._id), { use_actual: opts.use_actual });
+  await addFinishedGoodsStock(String(order._id), { use_actual: opts.use_actual, performed_by: opts.performed_by });
   await productLotService.createLotsForProduction(order, { use_actual: opts.use_actual, lots: lotInputs });
   return getProductionOrderById(id);
 }
@@ -491,10 +491,13 @@ export async function completeProduction(
  *   - เฉพาะสินค้าปกติ (is_preorder: false) — พรีออเดอร์ไม่มีสต็อก ของส่งตรงให้ลูกค้าที่สั่ง
  *   - จำนวน = actual_qty ถ้าส่ง use_actual และกรอกไว้ ไม่งั้น planned_qty (เดียวกับที่ใช้หักวัตถุดิบ)
  *   - ข้ามรายการที่ยกเลิก / จำนวน 0 · ครั้งเดียวต่อรายการ (จอง product_stock_added_at แบบ atomic)
- *   - เพิ่มผ่าน productService.increaseStock (atomic $inc เดียวกับการรับสินค้าเข้าสต็อก)
+ *   - เพิ่มผ่าน productService.increaseStock (atomic $inc เดียวกับการรับสินค้าเข้าสต็อก) · ประวัติสต็อก type "production"
  *   - สินค้าที่มีตัวเลือกก็เพิ่มที่ตัวสินค้า — ตัวเลือกเป็นแค่ราคาเพิ่ม ไม่มีสต็อกแยก (docs/customer-backend-merge.md §8)
  */
-async function addFinishedGoodsStock(orderId: string, opts: { use_actual?: boolean } = {}): Promise<void> {
+async function addFinishedGoodsStock(
+  orderId: string,
+  opts: { use_actual?: boolean; performed_by?: string } = {}
+): Promise<void> {
   const items = await productionItemModel
     .find({
       production_order_id: orderId,
@@ -521,7 +524,12 @@ async function addFinishedGoodsStock(orderId: string, opts: { use_actual?: boole
       { $set: { product_stock_added_at: new Date(), product_stock_added_qty: qty } }
     );
     if (!claimed) continue;
-    await productService.increaseStock(String(it.product_id), qty);
+    await productService.increaseStock(String(it.product_id), qty, {
+      type: "production",
+      ref_type: "production_order",
+      ref_id: orderId,
+      performed_by: opts.performed_by ?? null,
+    });
   }
 }
 
