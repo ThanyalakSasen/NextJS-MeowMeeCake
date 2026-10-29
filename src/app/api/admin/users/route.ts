@@ -1,12 +1,13 @@
 /**
  * /api/admin/users
  *   GET  — รายการผู้ใช้ (employees.view) — ?search= ?role_id= ?role_type=owner,staff ?is_active= ?employment_type=
+ *          production.view อ่านได้เฉพาะเจ้าของ/พนักงานที่ยังไม่ถูกลบ (เลือกผู้รับผิดชอบใบสั่งผลิต) — ไม่เห็นข้อมูลลูกค้า
  *   POST — สร้างผู้ใช้ (employees.create) — auth_provider "local" ต้องมี password / "google" ต้องมี googleId
  *          ผู้ใช้ในบทบาทประเภท owner สร้างได้เฉพาะ owner (ownerProtection)
  *          บทบาทของผู้ใช้ใหม่ต้องมีสิทธิ์ไม่เกินของผู้สร้าง (permissionCeiling)
  */
 import { ok, created } from "@/lib/apiResponse";
-import { withPermission } from "@/lib/authGuard";
+import { hasPermission, withPermission } from "@/lib/authGuard";
 import { auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
 import { badRequest } from "@/lib/httpError";
@@ -27,16 +28,20 @@ function parseRoleTypes(raw: string | null): (typeof ROLE_TYPES)[number][] | und
   return parts as (typeof ROLE_TYPES)[number][];
 }
 
-export const GET = withPermission(["employees", "permissions", "user_log"], "view", async (_s, req) => {
+const USER_ADMIN_MENUS = ["employees", "permissions", "user_log"] as const;
+
+export const GET = withPermission([...USER_ADMIN_MENUS, "production"], "view", async (session, req) => {
   const sp = req.nextUrl.searchParams;
+  // มีแค่สิทธิ์หน้าผลิต = เห็นเฉพาะทีมงาน (ไม่สนใจ role_type/includeDeleted ที่ขอมา)
+  const staffOnly = !(await hasPermission(session, USER_ADMIN_MENUS, "view"));
   const result = await userService.listUsers({
     pagination: parsePagination(sp),
     search: sp.get("search") ?? undefined,
     role_id: sp.get("role_id") ?? undefined,
-    role_type: parseRoleTypes(sp.get("role_type")),
+    role_type: staffOnly ? ["owner", "staff"] : parseRoleTypes(sp.get("role_type")),
     is_active: parseBool(sp.get("is_active")),
     employment_type: (sp.get("employment_type") as "full_time" | "part_time" | null) ?? undefined,
-    includeDeleted: parseBool(sp.get("includeDeleted")) ?? false,
+    includeDeleted: staffOnly ? false : parseBool(sp.get("includeDeleted")) ?? false,
     sort: parseSort(
       sp,
       ["created_at", "user_fullname", "last_login_at", "start_working_date"],

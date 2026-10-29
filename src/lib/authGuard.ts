@@ -5,6 +5,7 @@
  *   authenticate(req)                      → requireAuth + ตรวจบัญชีกับ DB (ปิด/ลบ/เปลี่ยนรหัส/เปลี่ยน role มีผลทันที)
  *   requireRole(session, ...roles)         → role_type ต้องอยู่ในลิสต์ ไม่งั้น 403
  *   requirePermission(session, menu, act)  → เช็คสิทธิ์เมนูจาก Permissions (owner ผ่านหมด) ไม่งั้น 403
+ *   hasPermission(session, menu, act)      → เหมือน requirePermission แต่คืน boolean (route ที่ผลต่างตามสิทธิ์)
  *   requireSelfOrRole(session, uid, ...r)  → เป็นเจ้าของข้อมูลเอง หรือมี role ที่ระบุ
  *
  * และ wrapper ที่ประกอบกับ route() ให้เขียน route สั้นลง:
@@ -42,16 +43,23 @@ export function requireRole(session: SessionUser, ...roles: RoleType[]): void {
   }
 }
 
+export async function hasPermission(
+  session: SessionUser,
+  menu: MenuSpec,
+  action: PermAction
+): Promise<boolean> {
+  if (session.role_type === "owner") return true; // เจ้าของร้านผ่านทุกสิทธิ์
+  const { permissions } = await getEffectivePermissions(session.role_id);
+  return menusOf(menu).some((m) => permissions[m]?.[`can_${action}`]);
+}
+
 export async function requirePermission(
   session: SessionUser,
   menu: MenuSpec,
   action: PermAction
 ): Promise<void> {
-  if (session.role_type === "owner") return; // เจ้าของร้านผ่านทุกสิทธิ์
-  const { permissions } = await getEffectivePermissions(session.role_id);
-  const menus = menusOf(menu);
-  const allowed = menus.some((m) => permissions[m]?.[`can_${action}`]);
-  if (!allowed) {
+  if (!(await hasPermission(session, menu, action))) {
+    const menus = menusOf(menu);
     throw forbidden(`ไม่มีสิทธิ์ "${action}" ในเมนู "${menus.join(" / ")}"`);
   }
 }

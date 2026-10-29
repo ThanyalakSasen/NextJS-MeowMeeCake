@@ -14,7 +14,8 @@ import * as preorderRoundService from "@/services/preorderRoundService";
 
 type Ctx = { params: Promise<{ id: string }> };
 
-export const GET = withPermission("preorder", "view", async (_s, req, ctx: Ctx) => {
+// หน้าผลิตอ่านได้ด้วย — สร้างใบสั่งผลิตจากรอบที่ปิดรับแล้ว · ดูโควตาของรอบในรายละเอียดใบ
+export const GET = withPermission(["preorder", "production"], "view", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const includeDeleted = parseBool(req.nextUrl.searchParams.get("includeDeleted")) ?? false;
   return ok(await preorderRoundService.getRoundDetail(id, { includeDeleted }));
