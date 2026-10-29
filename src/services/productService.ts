@@ -225,6 +225,19 @@ function validateTypeConsistency(isPreorder: boolean, data: UpdateProductInput):
  *   product_type (string, รุ่นแรก) / product_types (array, รุ่น 2026-09-24) → 400 ให้ส่ง is_preorder แทน
  * is_preorder ต้องเป็น boolean
  */
+/**
+ * ชื่อสินค้า (ไทย/อังกฤษ) — ตัดช่องว่างหัวท้าย · ส่งมาแล้วต้องไม่ว่าง (route นี้ไม่ผ่าน zod schema)
+ * เดิมสร้างด้วย "   " ได้ และแก้ไขตั้งเป็น "" ได้เลย (update ไม่ตรวจ) → สินค้าไม่มีชื่อในหน้าร้าน/บิล
+ */
+function normalizeNames(input: UpdateProductInput): void {
+  for (const field of ["product_name_th", "product_name_eng"] as const) {
+    if (input[field] === undefined) continue;
+    const v = input[field];
+    if (typeof v !== "string" || v.trim() === "") throw new ProductError(`กรุณาระบุ ${field}`, 400);
+    input[field] = v.trim();
+  }
+}
+
 function normalizeTypesInput(input: UpdateProductInput): void {
   const raw = input as Record<string, unknown>;
   for (const legacy of ["product_type", "product_types"]) {
@@ -245,6 +258,7 @@ function normalizeTypesInput(input: UpdateProductInput): void {
 export async function createProduct(input: CreateProductInput) {
   await dbConnect();
   normalizeTypesInput(input);
+  normalizeNames(input);
 
   const required: (keyof CreateProductInput)[] = [
     "product_name_th",
@@ -507,6 +521,7 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
   await dbConnect();
   assertObjectId(id);
   normalizeTypesInput(input);
+  normalizeNames(input);
 
   const existing = await productModel.findOne({ _id: id, deleted_at: null });
   if (!existing) {
