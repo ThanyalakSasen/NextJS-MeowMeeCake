@@ -194,6 +194,10 @@ function validateTypeConsistency(isPreorder: boolean, data: UpdateProductInput):
     if (data.preorder_config != null) {
       throw new ProductError("สินค้าปกติ (is_preorder: false) ต้องไม่มี preorder_config", 400);
     }
+    const stock = data.product_stock_quantity;
+    if (stock != null && (typeof stock !== "number" || !Number.isInteger(stock) || stock < 0)) {
+      throw new ProductError("product_stock_quantity ต้องเป็นจำนวนเต็มไม่ติดลบ", 400);
+    }
     return;
   }
 
@@ -711,9 +715,10 @@ export interface StockAdjustOptions {
   log?: StockLogContext;
 }
 
+// สต็อกสินค้านับเป็นชิ้น — จำนวนเต็มเท่านั้น (หน้าเว็บล็อกแล้ว · เดิมยิง API ตรงตั้ง 1.5 ชิ้นได้)
 function assertPositiveQty(qty: number, field = "quantity"): void {
-  if (typeof qty !== "number" || !Number.isFinite(qty) || qty <= 0) {
-    throw new ProductError(`${field} ต้องเป็นตัวเลขมากกว่า 0`, 400);
+  if (typeof qty !== "number" || !Number.isInteger(qty) || qty <= 0) {
+    throw new ProductError(`${field} ต้องเป็นจำนวนเต็มมากกว่า 0`, 400);
   }
 }
 
@@ -745,8 +750,8 @@ export async function setStock(id: string, quantity: number, log?: StockLogConte
 /** setStock + ยอดก่อนตั้ง (อ่านแบบ atomic จาก findOneAndUpdate) — route ใช้ทำ log ก่อน → หลังให้ตรงกับประวัติ */
 export async function setStockDetailed(id: string, quantity: number, log: StockLogContext = {}) {
   await dbConnect();
-  if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity < 0) {
-    throw new ProductError("quantity ต้องเป็นตัวเลขไม่ติดลบ", 400);
+  if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 0) {
+    throw new ProductError("quantity ต้องเป็นจำนวนเต็มไม่ติดลบ", 400);
   }
   await loadStockableProduct(id);
 
@@ -778,8 +783,8 @@ export async function adjustStock(
   options: StockAdjustOptions = {}
 ) {
   await dbConnect();
-  if (typeof delta !== "number" || !Number.isFinite(delta) || delta === 0) {
-    throw new ProductError("delta ต้องเป็นตัวเลขที่ไม่ใช่ 0", 400);
+  if (typeof delta !== "number" || !Number.isInteger(delta) || delta === 0) {
+    throw new ProductError("delta ต้องเป็นจำนวนเต็มที่ไม่ใช่ 0", 400);
   }
   await loadStockableProduct(id);
   await ensureNumericStock(id);
