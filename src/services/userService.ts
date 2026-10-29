@@ -82,6 +82,8 @@ export function assertPasswordStrength(pw: string): void {
   if (typeof pw !== "string" || pw.length < MIN_PASSWORD_LENGTH) {
     throw badRequest(`รหัสผ่านต้องยาวอย่างน้อย ${MIN_PASSWORD_LENGTH} ตัวอักษร`);
   }
+  // ช่องว่างล้วน (เช่น กด Spacebar 8 ครั้ง) — ความยาวผ่านแต่ไม่ใช่รหัสผ่านจริง · หน้าเว็บกันแล้ว backend กันซ้ำกันยิง API ตรง
+  if (pw.trim() === "") throw badRequest("รหัสผ่านต้องไม่เป็นช่องว่างล้วน");
 }
 
 export function hashPassword(pw: string): Promise<string> {

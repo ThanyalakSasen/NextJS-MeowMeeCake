@@ -179,3 +179,10 @@ describe("schemas/delivery — deliveryZoneCreate/Update (BACKLOG §3.15)", () =
     expect(deliveryZoneUpdate.safeParse({ is_active: false }).success).toBe(true);
   });
 });
+
+describe("schemas/inventory — ingredient max_stock", () => {
+  it("update: max_stock = null ล้างเพดานได้ · ติดลบยังไม่ผ่าน", () => {
+    expect(ingredientUpdate.parse({ max_stock: null })).toEqual({ max_stock: null });
+    expect(ingredientUpdate.safeParse({ max_stock: -1 }).success).toBe(false);
+  });
+});

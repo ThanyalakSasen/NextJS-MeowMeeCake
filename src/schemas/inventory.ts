@@ -12,7 +12,8 @@ export const ingredientCreate = z.object({
   current_stock: z.number().nonnegative().optional(),
   cost_per_unit: z.number().nonnegative(),
   reorder_point: z.number().nonnegative().optional(),
-  max_stock: z.number().nonnegative().optional(),
+  // null = ล้างค่า (ไม่ตั้งเพดาน) — เดิม .optional() อย่างเดียว ลบค่าออกจากฟอร์มแล้วส่ง null ไม่ได้ ค่าเดิมค้างตลอด
+  max_stock: z.number().nonnegative().nullish(),
   supplier: z.string().trim().max(200).optional(),
 });
 
