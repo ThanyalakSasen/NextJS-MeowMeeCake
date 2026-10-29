@@ -1,7 +1,7 @@
 /**
  * GET /api/admin/reviews — รายการรีวิวของหลังร้าน (reports.view · customer-backend-merge.md §8.20) — เห็นทุกสถานะ + ข้อมูลภายใน
  *   กรอง: product_id · category_id · user_id · status (pending|approved|hidden) · rating | rating_min / rating_max ·
- *         sentiment_group (positive|neutral|negative) · aspect_id (+ sentiment) · replied · read · has_media (1|0) ·
+ *         sentiment_group (positive|neutral|negative) · aspect_id (+ sentiment) · replied · read · has_media (1|0) · has_note (1|0) ·
  *         since / until (ISO) · source (customer|inferred|model|none) · order_kind (order|preorder) · q · is_visible · is_analyzed
  *   sort = newest | oldest | lowest | highest | needs_reply · ?page= ?limit= · summary=1 → { count, avg_rating, negative_rate, unreplied_negative }
  */

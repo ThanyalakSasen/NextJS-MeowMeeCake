@@ -133,18 +133,21 @@ describe("PATCH /api/admin/shipping-zones/:zone_code", () => {
 });
 
 describe("POST /api/admin/shipping-zones (เพิ่มโซน)", () => {
-  it("ได้รหัสถัดไป (E) · ค่าส่งของจังหวัดในโซนใหม่เปลี่ยนตาม", async () => {
+  it("โซนใหม่ได้รหัสของโซนจังหวัดอื่นทั้งหมด (D) · โซนจังหวัดอื่นทั้งหมดเลื่อนเป็นตัวสุดท้าย (E)", async () => {
     const owner = await sessionFor("owner");
-    const res = await post(owner, { zone_label: "Zone E — กรุงเทพฯ", fee: 90.555, provinces: ["กรุงเทพมหานคร"] });
+    const res = await post(owner, { zone_label: "Zone D — กรุงเทพฯ", fee: 90.555, provinces: ["กรุงเทพมหานคร"] });
     expect(res.status).toBe(201);
-    expect(res.body.data).toMatchObject({ zone_code: "E", zone_label: "Zone E — กรุงเทพฯ", fee: 90.56, provinces: ["กรุงเทพมหานคร"] });
+    expect(res.body.data).toMatchObject({ zone_code: "D", zone_label: "Zone D — กรุงเทพฯ", fee: 90.56, provinces: ["กรุงเทพมหานคร"] });
 
-    // โซน D (จังหวัดอื่นทั้งหมด) อยู่ท้ายรายการเสมอ
-    expect((await list(owner)).body.data.items.map((z: { zone_code: string }) => z.zone_code)).toEqual(["A", "B", "C", "E", "D"]);
+    const items = (await list(owner)).body.data.items as { zone_code: string; zone_label: string; is_fallback: boolean }[];
+    expect(items.map((z) => z.zone_code)).toEqual(["A", "B", "C", "D", "E"]);
+    // ชื่อ "Zone D — …" ของโซนจังหวัดอื่นทั้งหมดเปลี่ยนตามรหัสใหม่
+    expect(items[4]).toMatchObject({ zone_code: "E", zone_label: "Zone E — จังหวัดนอกภาคอีสาน", is_fallback: true });
 
-    const quote = await shippingService.quoteStorefrontDelivery({ province: "กรุงเทพมหานคร", productIds: [] });
-    expect(quote).toMatchObject({ zone_code: "E", fee: 90.56 });
-    expect((await post(owner, { zone_label: "อีกโซน", fee: 10, provinces: ["ภูเก็ต"] })).body.data.zone_code).toBe("F");
+    expect(await shippingService.quoteStorefrontDelivery({ province: "กรุงเทพมหานคร", productIds: [] })).toMatchObject({ zone_code: "D", fee: 90.56 });
+    expect(await shippingService.quoteStorefrontDelivery({ province: "ภูเก็ต", productIds: [] })).toMatchObject({ zone_code: "E", fee: 100 });
+    expect((await post(owner, { zone_label: "อีกโซน", fee: 10, provinces: ["ภูเก็ต"] })).body.data.zone_code).toBe("E");
+    expect((await list(owner)).body.data.items.at(-1)).toMatchObject({ zone_code: "F", is_fallback: true });
   });
 
   it("จังหวัดซ้ำโซนอื่น → 409 · ไม่มีจังหวัด/ชื่อว่าง → 400", async () => {
@@ -163,15 +166,30 @@ describe("POST /api/admin/shipping-zones (เพิ่มโซน)", () => {
 });
 
 describe("DELETE /api/admin/shipping-zones/:zone_code (ลบโซน)", () => {
-  it("ลบโซนได้ → จังหวัดของโซนนั้นไปใช้โซน D · ลบซ้ำ = 404", async () => {
+  it("ลบโซนได้ → จังหวัดของโซนนั้นไปใช้โซนจังหวัดอื่นทั้งหมด · โซนถัดไปเลื่อนรหัสขึ้นมา · ลบซ้ำ = 404", async () => {
     const owner = await sessionFor("owner");
-    await post(owner, { zone_label: "Zone E", fee: 90, provinces: ["กรุงเทพมหานคร"] });
-    expect((await del(owner, "e")).status).toBe(204);
-    expect((await shippingService.quoteStorefrontDelivery({ province: "กรุงเทพมหานคร", productIds: [] })).zone_code).toBe("D");
+    await post(owner, { zone_label: "Zone D — กรุงเทพฯ", fee: 90, provinces: ["กรุงเทพมหานคร"] });
+    expect((await del(owner, "b")).status).toBe(204);
+    const items = (await list(owner)).body.data.items as { zone_code: string; zone_label: string; is_fallback: boolean }[];
+    expect(items.map((z) => z.zone_code)).toEqual(["A", "B", "C", "D"]);
+    expect(items[2]).toMatchObject({ zone_label: "Zone C — กรุงเทพฯ" });
+    expect(items[3]).toMatchObject({ zone_label: "Zone D — จังหวัดนอกภาคอีสาน", is_fallback: true });
+    expect((await shippingService.quoteStorefrontDelivery({ province: "อุดรธานี", productIds: [] })).zone_code).toBe("D");
+    expect((await shippingService.quoteStorefrontDelivery({ province: "กรุงเทพมหานคร", productIds: [] })).zone_code).toBe("C");
     expect((await del(owner, "E")).status).toBe(404);
   });
 
-  it("โซน D ลบไม่ได้ (400) · พนักงานไม่มีสิทธิ์ delete → 403", async () => {
+  it("ข้อมูลเก่า (โซน E ต่อท้าย D ที่ไม่มีจังหวัด) → จัดรหัสใหม่ให้ D เป็นโซนใหม่ · E = จังหวัดอื่นทั้งหมด", async () => {
+    const shippingZoneModel = (await import("@/models/shippingZoneModel")).default;
+    await shippingService.getShippingZones();
+    await shippingZoneModel.updateMany({}, { $unset: { is_fallback: 1 } });
+    await shippingZoneModel.create({ zone_code: "E", zone_label: "Zone E — กรุงเทพฯ", provinces: ["กรุงเทพมหานคร"], fee: 90 });
+    const zones = await shippingService.getShippingZones();
+    expect(zones.map((z) => [z.zone_code, z.is_fallback])).toEqual([["A", false], ["B", false], ["C", false], ["D", false], ["E", true]]);
+    expect(zones[3]).toMatchObject({ zone_label: "Zone D — กรุงเทพฯ", provinces: ["กรุงเทพมหานคร"] });
+  });
+
+  it("โซนจังหวัดอื่นทั้งหมด (D) ลบไม่ได้ (400) · พนักงานไม่มีสิทธิ์ delete → 403", async () => {
     const owner = await sessionFor("owner");
     expect((await del(owner, "D")).status).toBe(400);
     expect((await del(await sessionFor("staff", { can_view: true }), "A")).status).toBe(403);

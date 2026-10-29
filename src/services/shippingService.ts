@@ -19,8 +19,10 @@ import productModel from "../models/productModel";
 import productCategoryModel from "../models/productCategoryModel";
 import {
   DEFAULT_SHIPPING_ZONES,
-  FALLBACK_ZONE_CODE,
-  nextZoneCode,
+  MAX_ZONES,
+  fallbackZoneOf,
+  zoneCodeAt,
+  zoneForProvince,
   categoryShipsNationwide,
   checkDeliveryArea,
   productShipsNationwide,
@@ -40,7 +42,46 @@ import {
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 // ── โซนค่าส่ง ────────────────────────────────────────────────
-/** โซนค่าส่งทั้งหมด (เรียงตามรหัส) — ยังไม่มีใน DB เลย → สร้างชุดเริ่มต้น A–D ให้ (แบบเดียวกับฝั่งลูกค้า) */
+const ZONE_FIELDS = "zone_code zone_label provinces fee is_fallback";
+
+const loadZones = () => shippingZoneModel.find().select(ZONE_FIELDS).sort({ zone_code: 1 }).lean<ShippingZone[]>();
+
+/** ชื่อโซนที่ขึ้นต้นด้วย "Zone X" ให้เปลี่ยนตัวอักษรตามรหัสใหม่ (ชื่อแบบอื่นไม่แตะ) */
+const relabel = (label: string, from: string, to: string) => label.replace(new RegExp(`^(Zone\\s+)${from}(?![A-Za-z])`), `$1${to}`);
+
+/**
+ * จัดรหัสโซนให้เรียง A, B, C, … ไม่มีช่องว่าง และโซนจังหวัดอื่นทั้งหมด (is_fallback) เป็นตัวอักษรสุดท้ายเสมอ
+ *   ข้อมูลเก่ายังไม่มี flag: โซน D ที่ไม่มีจังหวัด = โซนจังหวัดอื่นทั้งหมด (เดิมตายตัวที่ D) · ไม่มี = โซนรหัสท้ายสุด
+ * ตรงอยู่แล้ว = ไม่เขียน DB · เปลี่ยนรหัส 2 รอบ (รหัสชั่วคราว → รหัสจริง) กันชน unique index
+ */
+async function normalizeZones(zones: ShippingZone[]): Promise<ShippingZone[]> {
+  if (zones.length === 0) return zones;
+  const fallback =
+    zones.find((z) => z.is_fallback === true) ??
+    zones.find((z) => z.zone_code === "D" && z.provinces.length === 0) ??
+    fallbackZoneOf(zones)!;
+  const ordered = [...zones.filter((z) => z !== fallback).sort((a, b) => a.zone_code.localeCompare(b.zone_code)), fallback];
+  const plan = ordered.map((z, i) => ({ z, code: zoneCodeAt(i), fallback: z === fallback }));
+  if (plan.every((p) => p.z.zone_code === p.code && (p.z.is_fallback === true) === p.fallback)) return ordered;
+
+  const moved = plan.filter((p) => p.z.zone_code !== p.code);
+  // รอบ 1: รหัสชั่วคราว (updateOne ไม่ตรวจ validator /^[A-Z]$/) · รอบ 2: รหัสจริง + ชื่อ "Zone X" ตามรหัสใหม่
+  for (const [i, p] of moved.entries()) {
+    await shippingZoneModel.updateOne({ zone_code: p.z.zone_code }, { $set: { zone_code: `_${i}` } });
+  }
+  for (const [i, p] of moved.entries()) {
+    await shippingZoneModel.updateOne(
+      { zone_code: `_${i}` },
+      { $set: { zone_code: p.code, zone_label: relabel(p.z.zone_label, p.z.zone_code, p.code) } }
+    );
+  }
+  const lastCode = plan[plan.length - 1].code;
+  await shippingZoneModel.updateMany({ zone_code: { $ne: lastCode } }, { $set: { is_fallback: false } });
+  await shippingZoneModel.updateOne({ zone_code: lastCode }, { $set: { is_fallback: true } });
+  return loadZones();
+}
+
+/** โซนค่าส่งทั้งหมด (A, B, … · โซนจังหวัดอื่นทั้งหมดอยู่ท้ายเสมอ) — ยังไม่มีใน DB เลย → สร้างชุดเริ่มต้น A–D ให้ */
 export async function getShippingZones(): Promise<ShippingZone[]> {
   await dbConnect();
   if ((await shippingZoneModel.countDocuments()) === 0) {
@@ -48,19 +89,13 @@ export async function getShippingZones(): Promise<ShippingZone[]> {
       if (err?.code !== 11000) throw err; // อีกคำขอ seed พร้อมกัน (zone_code unique)
     });
   }
-  const zones = await shippingZoneModel
-    .find()
-    .select("zone_code zone_label provinces fee")
-    .sort({ zone_code: 1 })
-    .lean<ShippingZone[]>();
-  // โซน D (จังหวัดอื่นทั้งหมด) อยู่ท้ายเสมอ — มีโซน E, F, … แล้วก็ยังอ่านเป็น "ที่เหลือ" ได้ถูก
-  return [...zones.filter((z) => z.zone_code !== FALLBACK_ZONE_CODE), ...zones.filter((z) => z.zone_code === FALLBACK_ZONE_CODE)];
+  return (await normalizeZones(await loadZones())).map((z) => ({ ...z, is_fallback: z.is_fallback === true }));
 }
 
 /**
  * แก้โซนค่าส่ง 1 โซน (หลังร้าน · PATCH /api/admin/shipping-zones/:zone_code · frontend Q-BE2)
  *   - รูปแบบ (ชื่อจังหวัด 77 จังหวัด · fee ≥ 0) ตรวจที่ schemas/shipping.ts แล้ว
- *   - โซน D = จังหวัดที่ไม่อยู่ใน A–C (computeShippingFee ไม่ดู provinces ของ D) → ใส่จังหวัดไม่ได้
+ *   - โซนจังหวัดอื่นทั้งหมด (is_fallback) = จังหวัดที่ไม่อยู่ในโซนอื่น (computeShippingFee ไม่ดู provinces ของโซนนี้) → ใส่จังหวัดไม่ได้
  *   - จังหวัดเดียวกันอยู่ได้โซนเดียว — ชนกับโซนอื่น = 409 บอกชื่อจังหวัด + โซน
  * คืน { before, after } ให้ route เขียน audit log
  */
@@ -76,8 +111,8 @@ export async function updateShippingZone(
   if (input.zone_label !== undefined) set.zone_label = input.zone_label;
   if (input.fee !== undefined) set.fee = round2(input.fee);
   if (input.provinces !== undefined) {
-    if (zoneCode === FALLBACK_ZONE_CODE && input.provinces.length > 0) {
-      throw badRequest("โซน D ใช้กับจังหวัดที่ไม่อยู่ในโซน A–C อัตโนมัติ — ใส่รายชื่อจังหวัดไม่ได้");
+    if (before.is_fallback && input.provinces.length > 0) {
+      throw badRequest(`โซน ${zoneCode} (จังหวัดอื่นทั้งหมด) ใช้กับจังหวัดที่ไม่อยู่ในโซนอื่นอัตโนมัติ — ใส่รายชื่อจังหวัดไม่ได้`);
     }
     assertNoProvinceClash(zones, zoneCode, input.provinces);
     set.provinces = input.provinces;
@@ -85,7 +120,7 @@ export async function updateShippingZone(
 
   const after = await shippingZoneModel
     .findOneAndUpdate({ zone_code: zoneCode }, { $set: set }, { returnDocument: "after", runValidators: true })
-    .select("zone_code zone_label provinces fee")
+    .select(ZONE_FIELDS)
     .lean<ShippingZone | null>();
   if (!after) throw notFound("ไม่พบโซนค่าส่ง");
   return { before, after };
@@ -102,14 +137,22 @@ function assertNoProvinceClash(zones: ShippingZone[], exceptCode: string | null,
 }
 
 /**
- * เพิ่มโซนค่าส่ง (POST /api/admin/shipping-zones · 2026-10-26) — รหัสโซน = ตัวอักษรถัดไปที่ว่าง (ข้าม D)
- * จังหวัดต้องไม่ซ้ำโซนอื่น (409) · ครบ 25 โซนแล้ว = 400
+ * เพิ่มโซนค่าส่ง (POST /api/admin/shipping-zones) — โซนใหม่ได้รหัสของโซนจังหวัดอื่นทั้งหมด แล้วโซนนั้นเลื่อนไปตัวถัดไป
+ *   เช่น A–C + D(จังหวัดอื่นทั้งหมด) → เพิ่มโซนใหม่ = D · จังหวัดอื่นทั้งหมดเลื่อนเป็น E (อยู่ท้ายสุดเสมอ)
+ * จังหวัดต้องไม่ซ้ำโซนอื่น (409) · ครบ 26 โซน (A–Z) แล้ว = 400
  */
 export async function createShippingZone(input: ShippingZoneCreate): Promise<ShippingZone> {
   const zones = await getShippingZones();
-  const code = nextZoneCode(zones.map((z) => z.zone_code));
-  if (!code) throw badRequest("เพิ่มโซนได้สูงสุด 25 โซน — ลบโซนที่ไม่ใช้ก่อน");
+  if (zones.length >= MAX_ZONES) throw badRequest(`เพิ่มโซนได้สูงสุด ${MAX_ZONES - 1} โซน — ลบโซนที่ไม่ใช้ก่อน`);
   assertNoProvinceClash(zones, null, input.provinces);
+  const fallback = zones[zones.length - 1];
+  const code = fallback.zone_code;
+  const nextCode = zoneCodeAt(zones.length);
+  // เลื่อนโซนจังหวัดอื่นทั้งหมดไปตัวถัดไปก่อน (ตัวถัดไปว่างแน่ — โซนนี้อยู่ท้ายสุด) แล้วใช้รหัสเดิมกับโซนใหม่
+  await shippingZoneModel.updateOne(
+    { zone_code: code },
+    { $set: { zone_code: nextCode, zone_label: relabel(fallback.zone_label, code, nextCode) } }
+  );
   try {
     const doc = await shippingZoneModel.create({
       zone_code: code,
@@ -120,22 +163,29 @@ export async function createShippingZone(input: ShippingZoneCreate): Promise<Shi
     const { zone_code, zone_label, provinces, fee } = doc.toObject();
     return { zone_code, zone_label, provinces, fee };
   } catch (err: any) {
+    // สร้างไม่สำเร็จ = ย้ายโซนจังหวัดอื่นทั้งหมดกลับที่เดิม
+    await shippingZoneModel
+      .updateOne({ zone_code: nextCode }, { $set: { zone_code: code, zone_label: fallback.zone_label } })
+      .catch(() => undefined);
     if (err?.code === 11000) throw conflict("มีคนเพิ่มโซนพร้อมกัน — ลองใหม่อีกครั้ง");
     throw err;
   }
 }
 
-/** ลบโซนค่าส่ง (ลบจริง) — โซน D ลบไม่ได้ · จังหวัดของโซนที่ลบจะไปใช้ค่าส่งโซน D · คืนโซนก่อนลบให้ route เขียน audit log */
+/**
+ * ลบโซนค่าส่ง (ลบจริง) — โซนจังหวัดอื่นทั้งหมดลบไม่ได้ · จังหวัดของโซนที่ลบจะไปใช้ค่าส่งโซนจังหวัดอื่นทั้งหมด
+ * ลบแล้วโซนถัดไปเลื่อนรหัสขึ้นมาแทน (ไม่มีช่องว่างตัวอักษร) · คืนโซนก่อนลบให้ route เขียน audit log
+ */
 export async function deleteShippingZone(zoneCode: string): Promise<ShippingZone> {
-  if (zoneCode === FALLBACK_ZONE_CODE) {
-    throw badRequest("โซน D (จังหวัดอื่นทั้งหมด) ลบไม่ได้ — แก้ได้เฉพาะชื่อและค่าส่ง");
+  const zones = await getShippingZones();
+  const target = zones.find((z) => z.zone_code === zoneCode);
+  if (!target) throw notFound("ไม่พบโซนค่าส่ง");
+  if (target.is_fallback) {
+    throw badRequest(`โซน ${zoneCode} (จังหวัดอื่นทั้งหมด) ลบไม่ได้ — แก้ได้เฉพาะชื่อและค่าส่ง`);
   }
-  await dbConnect();
-  const before = await shippingZoneModel
-    .findOneAndDelete({ zone_code: zoneCode })
-    .select("zone_code zone_label provinces fee")
-    .lean<ShippingZone | null>();
+  const before = await shippingZoneModel.findOneAndDelete({ zone_code: zoneCode }).select(ZONE_FIELDS).lean<ShippingZone | null>();
   if (!before) throw notFound("ไม่พบโซนค่าส่ง");
+  await normalizeZones(await loadZones());
   return before;
 }
 
@@ -177,10 +227,7 @@ export async function quoteStorefrontDelivery(input: {
   if (!area.ok) throw badRequest(area.message);
 
   const fee = computeShippingFee(province, zones);
-  const zone =
-    zones.find((z) => z.zone_code !== FALLBACK_ZONE_CODE && z.provinces.some((p) => p.trim() === province)) ??
-    zones.find((z) => z.zone_code === FALLBACK_ZONE_CODE) ??
-    null;
+  const zone = zoneForProvince(province, zones);
   return { fee, zone_code: zone?.zone_code ?? null, zone_label: zone?.zone_label ?? null };
 }
 
