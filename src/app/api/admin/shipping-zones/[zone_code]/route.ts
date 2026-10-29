@@ -1,5 +1,5 @@
 /**
- * DELETE /api/admin/shipping-zones/:zone_code — ลบโซน (shipping.delete · 2026-10-26) · โซน D ลบไม่ได้ (400)
+ * DELETE /api/admin/shipping-zones/:zone_code — ลบโซน (shipping.delete · 2026-10-26) · โซนจังหวัดอื่นทั้งหมด (is_fallback) ลบไม่ได้ (400) · ลบแล้วโซนถัดไปเลื่อนรหัสขึ้นมา
  * PATCH /api/admin/shipping-zones/:zone_code — แก้โซนค่าส่งเว็บ (shipping.update · frontend Q-BE2)
  *   body { zone_label?, fee?, provinces? } อย่างน้อย 1 ฟิลด์
  *   - provinces ต้องเป็นชื่อทางการใน 77 จังหวัด · ซ้ำกับโซนอื่น = 409 · โซน D ใส่จังหวัดไม่ได้ (เป็นโซนที่เหลือทั้งหมด)
@@ -21,7 +21,7 @@ export const PATCH = withPermission("shipping", "update", async (_s, req, ctx: C
   const { before, after } = await shippingService.updateShippingZone(zone_code.toUpperCase(), body);
   auditChange(req, {
     op: "update",
-    noun: "ค่าส่งเว็บ โซน",
+    noun: "ค่าจัดส่งตามพื้นที่",
     label: after.zone_code,
     entity: "ShippingZone",
     entity_id: null,
@@ -35,6 +35,6 @@ export const PATCH = withPermission("shipping", "update", async (_s, req, ctx: C
 export const DELETE = withPermission("shipping", "delete", async (_s, req, ctx: Ctx) => {
   const { zone_code } = await ctx.params;
   const before = await shippingService.deleteShippingZone(zone_code.toUpperCase());
-  auditChange(req, { op: "delete", noun: "ค่าส่งเว็บ โซน", label: before.zone_code, entity: "ShippingZone", entity_id: null, before });
+  auditChange(req, { op: "delete", noun: "ค่าจัดส่งตามพื้นที่", label: before.zone_code, entity: "ShippingZone", entity_id: null, before });
   return noContent();
 });

@@ -724,7 +724,8 @@ export async function listOrders(query: ListOrderQuery) {
       // ไม่งั้นคำสั้น ๆ สแกนรายการสินค้าของทุกคน แล้วได้ id เป็นหมื่นใส่ $in
       const own = query.user_id ? { order_id: { $in: await orderModel.distinct("_id", { user_id: query.user_id, deleted_at: null }) } } : {};
       const ids = await orderItemModel.distinct("order_id", { ...own, deleted_at: null, $or: [{ "product_snapshot.product_name_th": re }, { "product_snapshot.product_name_eng": re }] });
-      filter.$or = [{ order_no: re }, { _id: { $in: ids } }];
+      // เลขบิล = ตรงกับ "ท้าย" เลข (รหัส 6 ตัวท้าย เช่น MMC004 · หรือพิมพ์เลขเต็ม) — ไม่ใช่ทุกส่วนของเลข (เดิมพิมพ์ "2026" ได้ทุกบิล)
+      filter.$or = [{ order_no: new RegExp(`${escapeRegExp(query.search.trim())}$`, "i") }, { _id: { $in: ids } }];
     } else {
       filter.order_no = re;
     }
