@@ -229,12 +229,23 @@ function validateTypeConsistency(isPreorder: boolean, data: UpdateProductInput):
  * ชื่อสินค้า (ไทย/อังกฤษ) — ตัดช่องว่างหัวท้าย · ส่งมาแล้วต้องไม่ว่าง (route นี้ไม่ผ่าน zod schema)
  * เดิมสร้างด้วย "   " ได้ และแก้ไขตั้งเป็น "" ได้เลย (update ไม่ตรวจ) → สินค้าไม่มีชื่อในหน้าร้าน/บิล
  */
+// เพดานความยาว — เดิมไม่จำกัด (วางข้อความยาวเท่าไรก็บันทึกได้ · หน้าเว็บตั้ง maxLength เท่ากัน)
+const MAX_NAME_LENGTH = 200;
+const MAX_DESCRIPTION_LENGTH = 2000;
+
 function normalizeNames(input: UpdateProductInput): void {
   for (const field of ["product_name_th", "product_name_eng"] as const) {
     if (input[field] === undefined) continue;
     const v = input[field];
     if (typeof v !== "string" || v.trim() === "") throw new ProductError(`กรุณาระบุ ${field}`, 400);
+    if (v.trim().length > MAX_NAME_LENGTH) {
+      throw new ProductError(`${field} ยาวได้ไม่เกิน ${MAX_NAME_LENGTH} ตัวอักษร`, 400);
+    }
     input[field] = v.trim();
+  }
+  const desc = input.product_description;
+  if (typeof desc === "string" && desc.length > MAX_DESCRIPTION_LENGTH) {
+    throw new ProductError(`product_description ยาวได้ไม่เกิน ${MAX_DESCRIPTION_LENGTH} ตัวอักษร`, 400);
   }
 }
 
