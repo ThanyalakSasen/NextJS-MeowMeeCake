@@ -41,18 +41,35 @@ function assertBannerImg(url: unknown, existing?: unknown): void {
   }
 }
 
+/**
+ * วันสิ้นสุดต้องไม่ก่อนวันเริ่ม (เทียบค่าที่ "จะเป็นหลังบันทึก" — PATCH ส่งมาข้างเดียวก็ตรวจกับค่าเดิม)
+ * เดิมไม่ตรวจ: ตั้งช่วงกลับหัวผ่าน API ได้ แบนเนอร์ไม่ขึ้นหน้าร้านเลยโดยไม่มีใครรู้
+ */
+function assertDateRange(start: unknown, end: unknown): void {
+  if (start == null || end == null) return;
+  if (new Date(end as string).getTime() < new Date(start as string).getTime()) {
+    throw badRequest("end_date ต้องไม่ก่อน start_date");
+  }
+}
+
 async function create(input: Record<string, unknown>) {
   assertBannerImg(input.banner_img);
+  assertDateRange(input.start_date, input.end_date);
   return base.create(input);
 }
 
 async function update(id: string, input: Record<string, unknown>) {
-  // ดึงรูปเดิมไว้ก่อนเขียนทับ — เฉพาะตอนที่ input มี banner_img ส่งมาจริง (ไม่งั้นไม่ต้องยุ่งกับรูปเลย)
-  const oldImg =
-    input.banner_img !== undefined
-      ? ((await base.getById(id).catch(() => null)) as { banner_img?: string } | null)?.banner_img
-      : undefined;
+  // ดึงข้อมูลเดิมเฉพาะตอนต้องใช้ — รูปเดิม (ลบไฟล์ตอนแทนที่) / วันที่เดิม (ตรวจช่วงวัน)
+  const needsExisting = input.banner_img !== undefined || input.start_date !== undefined || input.end_date !== undefined;
+  const existing = needsExisting
+    ? ((await base.getById(id).catch(() => null)) as { banner_img?: string; start_date?: unknown; end_date?: unknown } | null)
+    : null;
+  const oldImg = input.banner_img !== undefined ? existing?.banner_img : undefined;
   assertBannerImg(input.banner_img, oldImg);
+  assertDateRange(
+    input.start_date !== undefined ? input.start_date : existing?.start_date,
+    input.end_date !== undefined ? input.end_date : existing?.end_date
+  );
 
   const result = await base.update(id, input);
 

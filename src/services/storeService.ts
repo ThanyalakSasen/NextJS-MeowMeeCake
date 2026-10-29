@@ -240,6 +240,8 @@ async function buildProfileUpdate(body: Record<string, unknown>, previousMarkets
   const update: AnyDoc = {};
   if ("store_name" in body) {
     const name = String(body.store_name ?? "").trim();
+    // ชื่อร้านขึ้นหัวเว็บ / ใบเสร็จ / LINE — ว่างไม่ได้ (หน้าเว็บบังคับอยู่แล้ว · เดิม API ล้างเป็น "" ได้)
+    if (!name) throw badRequest("กรุณาระบุชื่อร้าน");
     if (name.length > 100) throw badRequest("ชื่อร้านยาวได้ไม่เกิน 100 ตัวอักษร");
     update.store_name = name;
   }
@@ -327,6 +329,8 @@ export async function updateSettings(body: unknown) {
   for (const f of ADDRESS_FIELDS) {
     if (!(f in body)) continue;
     const v = String(body[f] ?? "").trim();
+    // ที่อยู่ร้านต้องครบ — จังหวัดใช้เป็นขอบเขตจัดส่งของสินค้าที่ส่งทั่วประเทศไม่ได้ (หน้าเว็บบังคับอยู่แล้ว)
+    if (!v) throw badRequest(`กรุณาระบุ ${f}`);
     if (v.length > 200) throw badRequest(`${f} ยาวเกินไป`);
     update[f] = v;
   }
