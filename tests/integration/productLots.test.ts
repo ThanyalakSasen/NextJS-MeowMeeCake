@@ -100,13 +100,15 @@ describe("ปิดงานผลิต → สร้างล็อตสิ�
   });
 
   it("ค้นล็อตจากเลข (สแกนบาร์โค้ด) — ไม่สนตัวพิมพ์ · มีสินค้า ใบสั่งผลิต และสถานะหมดอายุ", async () => {
-    const a = await makeProduct({ product_stock_quantity: 0, shelf_life_days: 2 });
+    const a = await makeProduct({ product_stock_quantity: 0, shelf_life_days: 2, product_price: 85, sale_price: 69 });
     const { orderId, adminId } = await orderWith([{ product: a, qty: 6 }]);
     await productionOrderService.completeProduction(orderId, { performed_by: adminId });
     const [lot] = await lotsOf(orderId);
 
     const found = await productLotService.getLotByNo(` ${lot.lot_no.toLowerCase()} `);
     expect(found).toMatchObject({ lot_no: lot.lot_no, product_name_th: a.product_name_th, expiry_date: "2026-10-30" });
+    // รหัสสินค้า + ราคาบนฉลาก
+    expect(found).toMatchObject({ product_code: a.product_id, product_price: 85, sale_price: 69 });
     expect(found.production_no).toMatch(/^PRD-/);
     await expect(productLotService.getLotByNo("L0000000000")).rejects.toMatchObject({ status: 404 });
   });

@@ -153,6 +153,9 @@ function presentLot(lot: any, today: string) {
     product_id: product?._id ?? lot.product_id,
     product_name_th: product?.product_name_th ?? null,
     product_code: product?.product_id ?? null,
+    // ราคาบนฉลาก — ราคาลด (sale_price) ถ้ามี ไม่งั้นราคาปกติ · ราคาปัจจุบันของสินค้า ไม่ใช่ราคาตอนผลิต
+    product_price: product?.product_price ?? null,
+    sale_price: product?.sale_price ?? null,
     is_preorder: product ? isPreorderProduct(product) : false,
     production_order_id: order?._id ?? lot.production_order_id,
     production_no: order?.production_no ?? null,
@@ -164,7 +167,7 @@ function presentLot(lot: any, today: string) {
 
 const populateLot = (q: any) =>
   q
-    .populate("product_id", "product_id product_name_th is_preorder")
+    .populate("product_id", "product_id product_name_th is_preorder product_price sale_price")
     .populate("production_order_id", "production_no production_date")
     .populate("round_id", "round_name");
 
