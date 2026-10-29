@@ -21,7 +21,7 @@ export const PATCH = withPermission("shipping", "update", async (_s, req, ctx: C
   });
   auditChange(req, {
     op: "update",
-    verb: "ตั้งพื้นที่จังหวัดที่จัดส่ง",
+    verb: "ตั้งขอบเขตจัดส่ง",
     noun: "หมวดหมู่สินค้า",
     label: after.product_category_name,
     suffix: products_reset > 0 ? ` (ล้างค่ารายสินค้า ${products_reset} รายการ)` : undefined,

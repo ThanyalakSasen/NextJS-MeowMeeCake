@@ -73,7 +73,7 @@ function flag(name: string, v: string | null): boolean | null {
 /**
  * เงื่อนไข $match จาก query (ใช้กับ aggregate จึงแปลง id เป็น ObjectId เอง) — ผิด = 400
  * product_id · category_id · status · rating | rating_min / rating_max · sentiment_group (positive|neutral|negative) ·
- * aspect_id (+ sentiment positive|negative) · replied · read · has_media (1|0) · has_note (1|0) · since / until (ISO) ·
+ * aspect_id (+ sentiment positive|negative) · replied · read · has_media (1|0) · since / until (ISO) ·
  * source (customer|inferred|model|none) · order_kind (order|preorder) · q (ค้นข้อความ) · user_id · is_visible · is_analyzed
  */
 export async function buildReviewMatch(sp: URLSearchParams): Promise<Record<string, unknown>> {
@@ -142,11 +142,6 @@ export async function buildReviewMatch(sp: URLSearchParams): Promise<Record<stri
   const read = flag("read", sp.get("read"));
   if (read === true) and.push({ read_at: { $ne: null } });
   else if (read === false) and.push({ read_at: null });
-
-  // มีโน้ตภายในของร้าน (แดชบอร์ด "โน้ตภายใน")
-  const note = flag("has_note", sp.get("has_note"));
-  if (note === true) and.push({ "internal_note.text": { $nin: [null, ""] } });
-  else if (note === false) and.push({ $or: [{ internal_note: null }, { "internal_note.text": { $in: [null, ""] } }] });
 
   const media = flag("has_media", sp.get("has_media"));
   if (media === true) and.push(HAS_MEDIA);

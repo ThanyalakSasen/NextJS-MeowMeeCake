@@ -17,6 +17,6 @@ export const GET = withPermission("shipping", "view", async () => okList(await s
 export const POST = withPermission("shipping", "create", async (_s, req) => {
   const body = await parseBody(req, shippingZoneCreate);
   const zone = await shippingService.createShippingZone(body);
-  auditChange(req, { op: "create", noun: "ค่าจัดส่งตามพื้นที่", label: zone.zone_code, entity: "ShippingZone", entity_id: null, after: zone });
+  auditChange(req, { op: "create", noun: "ค่าส่งเว็บ โซน", label: zone.zone_code, entity: "ShippingZone", entity_id: null, after: zone });
   return created(zone);
 });

@@ -38,5 +38,3 @@ export const GET = withPermission("reports_reviews", "view", async (_s, req) => 
     }),
   );
 });
-
-

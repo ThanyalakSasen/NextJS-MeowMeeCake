@@ -18,7 +18,7 @@ export const PATCH = withPermission("shipping", "update", async (_s, req) => {
   const { updated, before, after } = await shippingService.setProductShipping(product_ids, ships_nationwide);
   auditChange(req, {
     op: "update",
-    verb: "ตั้งพื้นที่จังหวัดที่จัดส่ง",
+    verb: "ตั้งขอบเขตจัดส่ง",
     noun: "สินค้า",
     label: `${updated} รายการ`,
     entity: "Product",
