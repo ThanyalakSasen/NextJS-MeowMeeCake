@@ -4,6 +4,7 @@ import promotionModel from "@/models/promotionModel";
 import promotionUsagesModel from "@/models/promotionUsagesModel";
 import orderModel from "@/models/orderModel";
 import * as orderService from "@/services/orderService";
+import * as promotionService from "@/services/promotionService";
 import { isHttpError } from "@/lib/httpError";
 import { GUEST_CUSTOMER_EMAIL } from "@/lib/posGuest";
 import { makeUser, makeProduct } from "./helpers";
@@ -76,6 +77,40 @@ describe("POS ซ้อนโปร (promotion_ids) + โปรเฉพาะ�
     ).rejects.toSatisfy((e: unknown) => isHttpError(e) && e.status === 400);
     expect(await orderModel.countDocuments({ user_id: user._id })).toBe(0);
     expect((await promotionModel.findById(a._id).lean<{ used_count: number }>())!.used_count).toBe(0);
+  });
+
+  it("stackable_with: ซ้อนได้เมื่อทั้งสองฝั่งยอมกัน · ว่าง = ยอมทุกโปรที่ stackable", async () => {
+    const user = await makeUser();
+    const p = await makeProduct({ product_price: 100 });
+    const a = await makePromo({ stackable: true, discount_value: 10 });
+    const b = await makePromo({ stackable: true, discount_value: 10 });
+    const c = await makePromo({ stackable: true, discount_value: 10 });
+    // a ร่วมได้เฉพาะ b · b/c ว่าง (ยอมทุกตัว)
+    await promotionModel.updateOne({ _id: a._id }, { $set: { stackable_with: [b._id] } });
+
+    const ok = await posOrder(String(user._id), String(p._id), { promotion_ids: [String(a._id), String(b._id)] });
+    expect(ok.discount_amount).toBe(20);
+    // a ไม่ได้เลือก c → c ยอมก็ซ้อนไม่ได้
+    await expect(
+      posOrder(String(user._id), String(p._id), { promotion_ids: [String(c._id), String(a._id)] })
+    ).rejects.toSatisfy(is422);
+    // b ร่วมได้เฉพาะ c → a+b ไม่ได้แล้วแม้ a เลือก b ไว้
+    await promotionModel.updateOne({ _id: b._id }, { $set: { stackable_with: [c._id] } });
+    await expect(
+      posOrder(String(user._id), String(p._id), { promotion_ids: [String(a._id), String(b._id)] })
+    ).rejects.toSatisfy(is422);
+    expect(await orderModel.countDocuments({ user_id: user._id })).toBe(1);
+  });
+
+  it("แก้โปร: stackable_with ตัดซ้ำ/ตัดตัวเอง · ปิด stackable = ล้างรายการ", async () => {
+    const a = await makePromo({ stackable: true });
+    const b = await makePromo({ stackable: true });
+    const id = String(a._id);
+
+    const updated = await promotionService.updatePromotion(id, { stackable_with: [String(b._id), String(b._id), id] });
+    expect((updated.stackable_with as unknown[]).map(String)).toEqual([String(b._id)]);
+    const off = await promotionService.updatePromotion(id, { stackable: false });
+    expect(off.stackable_with).toEqual([]);
   });
 
   it("โปรเฉพาะสมาชิก: บัญชีลูกค้าทั่วไปของ POS ใช้ไม่ได้ · สมาชิกใช้ได้", async () => {

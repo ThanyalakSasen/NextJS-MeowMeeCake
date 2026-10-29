@@ -60,6 +60,7 @@ import { isPreorderProduct } from "../lib/productCode";
 import { nextDailyDocNo } from "./docNoService";
 import type { z } from "zod";
 import type { updateDeliveryBody } from "../schemas/order";
+import type { DiscountResult } from "../lib/discountEngine";
 import { adminLinks } from "../lib/adminLinks";
 
 type UpdateDeliveryInput = z.infer<typeof updateDeliveryBody>;
@@ -380,7 +381,7 @@ async function persistOrder(
 
   if (promoRefs.length) {
     // ซ้อนโปร: ทุกตัวคิดจากรายการเดียวกัน (ไม่คิดทบจากยอดหลังหัก) แล้วรวมกัน — ตรวจเพดานยอดด้านล่าง
-    const results = [];
+    const results: DiscountResult[] = [];
     for (const ref of promoRefs) {
       results.push(
         await promotionService.validateForOrder({
@@ -397,6 +398,13 @@ async function persistOrder(
       const single = results.find((r) => !r.stackable);
       if (single) {
         throw unprocessable(`โปรโมชัน ${single.promotion_code} ใช้ร่วมกับโปรอื่นไม่ได้`);
+      }
+      // stackable_with: ซ้อนได้เมื่อทั้งสองฝั่งยอมกัน (ว่าง = ยอมทุกโปรที่ stackable)
+      const allows = (a: DiscountResult, b: DiscountResult) =>
+        a.stackable_with.length === 0 || a.stackable_with.includes(b.promotion_id);
+      for (const [i, a] of results.entries()) {
+        const b = results.slice(i + 1).find((x) => !allows(a, x) || !allows(x, a));
+        if (b) throw unprocessable(`โปรโมชัน ${a.promotion_code} ใช้ร่วมกับ ${b.promotion_code} ไม่ได้`);
       }
       if (results.filter((r) => r.free_shipping).length > 1) {
         throw unprocessable("ใช้โปรส่งฟรีได้บิลละ 1 โปร");

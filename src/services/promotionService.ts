@@ -48,6 +48,13 @@ function presentPromotion<T extends Record<string, unknown>>(promo: T): T {
   return out;
 }
 
+/** stackable_with: ตัดซ้ำ + ตัดตัวเอง · ปิด stackable = ล้างรายการ (ไม่มีความหมายแล้ว) */
+function normalizeStackableWith(list: string[] | undefined, stackable: boolean | undefined, selfId?: string) {
+  if (stackable === false) return [];
+  if (list === undefined) return undefined;
+  return [...new Set(list.map(String))].filter((id) => id !== selfId);
+}
+
 type CreatePromotionInput = z.infer<typeof promotionCreate>;
 type UpdatePromotionInput = z.infer<typeof promotionUpdate>;
 
@@ -71,6 +78,7 @@ export async function createPromotion(input: CreatePromotionInput, createdBy: st
       input.max_discount_amount != null
         ? toSatang(Number(input.max_discount_amount))
         : input.max_discount_amount,
+    stackable_with: normalizeStackableWith(input.stackable_with, input.stackable) ?? [],
     created_by: createdBy,
   };
 
@@ -140,6 +148,9 @@ export async function updatePromotion(id: string, input: UpdatePromotionInput) {
   if (payload.promotion_code) {
     payload.promotion_code = normalizePromoCode(payload.promotion_code);
   }
+  const stackableWith = normalizeStackableWith(payload.stackable_with, payload.stackable, id);
+  if (stackableWith === undefined) delete payload.stackable_with;
+  else payload.stackable_with = stackableWith;
 
   // discount_value เป็นเงินเฉพาะตอน discount_type === "Amount" — ถ้าไม่ได้ส่ง discount_type มาด้วย
   // ต้องอ่านค่าปัจจุบันจาก DB มาดูก่อนว่าประเภทที่ "จะเป็นหลังอัปเดต" คืออะไร (ไม่ใช่เดาจาก payload
