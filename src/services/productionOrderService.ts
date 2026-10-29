@@ -438,8 +438,37 @@ export async function startProduction(id: string) {
 }
 
 /**
+ * actuals ของ completeProduction → Map(item_id → actual_qty) · ตรวจทั้งก้อนก่อนแตะข้อมูล
+ * รายการที่หักวัตถุดิบไปแล้วตั้งเป็น 0 (ยกเลิก) ไม่ได้ — วัตถุดิบที่หักไปจะไม่ถูกคืน ต้อง reverse-stock ก่อน
+ */
+function parseActuals(items: any[], raw: unknown): Map<string, number> {
+  const out = new Map<string, number>();
+  if (raw == null) return out;
+  if (!Array.isArray(raw)) throw badRequest("actuals ต้องเป็น array");
+  const byId = new Map(items.map((it) => [String(it._id), it]));
+  for (const a of raw as any[]) {
+    const itemId = String(a?.item_id ?? "");
+    const it = byId.get(itemId);
+    if (!it) throw badRequest(`actuals: ไม่พบรายการผลิต ${itemId} ในใบสั่งผลิตนี้`);
+    const qty = Number(a?.actual_qty);
+    if (a?.actual_qty == null || !Number.isFinite(qty) || qty < 0) throw badRequest("actual_qty ต้องเป็นตัวเลขไม่ติดลบ");
+    if (qty === 0 && it.stock_updated_at) {
+      throw conflict("รายการที่หักวัตถุดิบไปแล้วตั้งจำนวนผลิตได้เป็น 0 ไม่ได้ — คืนวัตถุดิบ (reverse-stock) ก่อน");
+    }
+    out.set(itemId, qty);
+  }
+  return out;
+}
+
+/**
  * ปิดงานผลิต: in_progress → done
  * รายการที่ยังไม่ถูกหักสต็อก (stock_updated_at = null) และไม่ถูกยกเลิก จะถูกหักสต็อกให้ตอนนี้
+ *
+ * ทำให้ "สำเร็จทั้งใบ หรือไม่เปลี่ยนอะไรเลย" (เดิมพลาดกลางทางแล้วค้างครึ่ง ๆ):
+ *   1. ตรวจทุกอย่างก่อนแตะข้อมูล — วันที่ล็อต · actuals · วัตถุดิบพอ "รวมทั้งใบ" (ไม่ใช่ทีละรายการ)
+ *   2. บันทึก actuals + หักวัตถุดิบ — ล้มกลางทาง = คืนวัตถุดิบ/ค่าเดิมของรายการที่ทำไปรอบนี้ ใบยัง in_progress
+ *   3. เพิ่มสต็อกสินค้า + สร้างล็อต แล้วจึงตั้ง done เป็นขั้นสุดท้าย — สองขั้นนี้ทำซ้ำได้ (ครั้งเดียวต่อรายการ)
+ *      ล้มตรงนี้ใบยัง in_progress กดปิดงานอีกครั้งจะทำต่อจากที่ค้าง (เดิมใบ done ไปแล้ว ไม่มีสต็อก/ล็อต และกดซ้ำไม่ได้)
  */
 export async function completeProduction(
   id: string,
@@ -449,6 +478,9 @@ export async function completeProduction(
     allowNegative?: boolean;
     /** วันผลิต/วันหมดอายุจริงต่อรายการ (ไม่ส่ง = ค่าเริ่มต้นจากใบสั่งผลิต + อายุสินค้า) */
     lots?: LotDateInput[];
+    /** จำนวนที่ผลิตได้จริงต่อรายการ [{ item_id, actual_qty }] — 0 = ยกเลิกรายการ (ไม่หักวัตถุดิบ/ไม่เพิ่มสต็อก)
+     *  เดิมหน้าเว็บ PATCH ทีละรายการก่อนเรียกปิดงาน → ปิดงานพลาดแล้วรายการถูกยกเลิกค้างไว้ */
+    actuals?: unknown;
   }
 ) {
   await dbConnect();
@@ -456,33 +488,70 @@ export async function completeProduction(
   if (!opts.performed_by) throw badRequest("ต้องระบุ performed_by");
 
   const order = await transition(id, "done");
-  // ตรวจวันที่ของล็อตก่อนตัดวัตถุดิบ/ปิดงาน — กรอกผิดแล้วงานยังไม่ถูกปิดครึ่ง ๆ กลาง ๆ
+  // ── 1. ตรวจ ──
   const lotInputs = await productLotService.validateLotInputs(String(order._id), opts.lots);
+  const items = await productionItemModel.find({ production_order_id: order._id, deleted_at: null }).lean<any[]>();
+  const actuals = parseActuals(items, opts.actuals);
 
-  const pendingItems = await productionItemModel
-    .find({
-      production_order_id: order._id,
-      deleted_at: null,
-      stock_updated_at: null,
-      item_status: { $ne: "cancelled" },
-    })
-    .lean<any[]>();
+  const actualOf = (it: any) => (actuals.has(String(it._id)) ? actuals.get(String(it._id))! : it.actual_qty);
+  const pending = items.filter(
+    (it) => !it.stock_updated_at && it.item_status !== "cancelled" && actuals.get(String(it._id)) !== 0
+  );
+  const consumeQty = (it: any) => (opts.use_actual && actualOf(it) != null ? Number(actualOf(it)) : Number(it.planned_qty));
 
-  for (const it of pendingItems) {
-    await productionItemService.consumeStock(String(it._id), {
-      performed_by: opts.performed_by,
-      use_actual: opts.use_actual,
-      allowNegative: opts.allowNegative,
-    });
+  if (pending.length) {
+    const check = await productionItemService.checkIngredientStock(
+      pending.map((it) => ({ recipe_id: String(it.recipe_id), planned_qty: consumeQty(it) }))
+    );
+    if (check.items.some((r) => r.recipe_invalid)) {
+      throw badRequest("มีรายการที่ไม่พบสูตรการผลิต หรือสูตรมี yield_qty เป็น 0 — คำนวณการหักวัตถุดิบไม่ได้");
+    }
+    if (!opts.allowNegative && check.total_shortages.length) {
+      throw conflict(
+        "สต็อกวัตถุดิบไม่พอ: " +
+          check.total_shortages.map((s) => `${s.ingredient_name} (มี ${s.in_stock}, ต้องใช้ ${s.required})`).join(", ")
+      );
+    }
   }
+
+  // ── 2. บันทึก actuals + หักวัตถุดิบ (ล้ม = ย้อนกลับเฉพาะที่ทำรอบนี้) ──
+  const touched = items.filter((it) => actuals.has(String(it._id)) || pending.includes(it));
+  const consumed: string[] = [];
+  try {
+    for (const [itemId, qty] of actuals) {
+      await productionItemModel.updateOne(
+        { _id: itemId },
+        { $set: qty > 0 ? { actual_qty: qty } : { actual_qty: 0, item_status: "cancelled" } }
+      );
+    }
+    for (const it of pending) {
+      await productionItemService.consumeStock(String(it._id), {
+        performed_by: opts.performed_by,
+        use_actual: opts.use_actual,
+        allowNegative: opts.allowNegative,
+      });
+      consumed.push(String(it._id));
+    }
+  } catch (err) {
+    for (const itemId of consumed) {
+      await productionItemService.reverseStock(itemId, { performed_by: opts.performed_by }).catch(() => undefined);
+    }
+    for (const it of touched) {
+      await productionItemModel
+        .updateOne({ _id: it._id }, { $set: { actual_qty: it.actual_qty ?? null, item_status: it.item_status } })
+        .catch(() => undefined);
+    }
+    throw err;
+  }
+
+  // ── 3. สต็อกสินค้า + ล็อต แล้วค่อยปิดใบ ──
+  // docs/BACKLOG4.md Y2 — เดิมผลิตเสร็จแล้วหักแค่วัตถุดิบ ไม่เพิ่มสต็อกสินค้า ต้องไปปรับสต็อกเองทุกครั้ง
+  await addFinishedGoodsStock(String(order._id), { use_actual: opts.use_actual, performed_by: opts.performed_by });
+  await productLotService.createLotsForProduction(order, { use_actual: opts.use_actual, lots: lotInputs });
 
   order.production_status = "done";
   order.completed_at = new Date();
   await order.save();
-
-  // docs/BACKLOG4.md Y2 — เดิมผลิตเสร็จแล้วหักแค่วัตถุดิบ ไม่เพิ่มสต็อกสินค้า ต้องไปปรับสต็อกเองทุกครั้ง
-  await addFinishedGoodsStock(String(order._id), { use_actual: opts.use_actual, performed_by: opts.performed_by });
-  await productLotService.createLotsForProduction(order, { use_actual: opts.use_actual, lots: lotInputs });
   return getProductionOrderById(id);
 }
 
