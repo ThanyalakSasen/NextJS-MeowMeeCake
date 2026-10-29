@@ -34,6 +34,8 @@ const employeeShape = {
   user_allergies: z.array(z.string().trim().min(1).max(100)).optional(),
   is_active: z.boolean().optional(),
   start_working_date: z.coerce.date().nullish(),
+  // เดิมมีแค่ใน update — ตอนเพิ่มพนักงาน zod ตัดทิ้งเงียบ ๆ ทั้งที่ฟอร์มมีช่องนี้
+  last_working_date: z.coerce.date().nullish(),
   employment_type: z.enum(EMPLOYMENT_TYPES).nullish(),
   emp_salary: z.coerce.number().int(WHOLE_BAHT).nonnegative().nullish(),
   part_time_hours: z.coerce.number().nonnegative().nullish(),
@@ -58,7 +60,6 @@ export const updateUserBody = z.object({
   user_fullname: z.string().trim().min(1).max(120).optional(),
   email: z.string().trim().toLowerCase().email().optional(),
   role_id: objectId.optional(),
-  last_working_date: z.coerce.date().nullish(),
   ...employeeShape,
 });
 export type UpdateUserBody = z.infer<typeof updateUserBody>;
