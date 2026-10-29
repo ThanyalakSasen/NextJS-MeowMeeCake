@@ -56,9 +56,7 @@ export interface ItemStat {
 
 export interface CategoryStat extends ItemStat {
   negative: number;
-  /** รีวิวดี (4–5 คะแนน) */
-  positive: number;
-  /** แง่มุมของหมวดนี้: ที่ถูกติมากสุด 3 + ที่ถูกชมมากสุด 3 (ไม่ซ้ำ) เรียงที่ถูกติมากสุดก่อน */
+  /** แง่มุมของหมวดนี้ เรียงที่ถูกติมากสุดก่อน (สูงสุด 3) */
   aspects: AspectCount[];
 }
 
@@ -102,13 +100,6 @@ export interface ReviewStats {
 
 const FIELDS = "rating created_at shop_reply read_at image video aspect_feedback selected_presets product_id user_id review_text";
 
-/** แง่มุมของหมวด: ถูกติมากสุด N + ถูกชมมากสุด N (ไม่ซ้ำ) → เรียงที่ถูกติมากสุดก่อน */
-function categoryAspects(all: AspectCount[]): AspectCount[] {
-  const worst = all.filter((a) => a.negative > 0).sort((a, b) => b.negative - a.negative || b.positive - a.positive).slice(0, CATEGORY_ASPECTS_N);
-  const best = all.filter((a) => a.positive > 0).sort((a, b) => b.positive - a.positive || a.negative - b.negative).slice(0, CATEGORY_ASPECTS_N);
-  const picked = new Map([...worst, ...best].map((a) => [a.name, a]));
-  return [...picked.values()].sort((a, b) => b.negative - a.negative || b.positive - a.positive);
-}
 const isNegative = (r: any) => Number(r.rating) <= NEGATIVE_REVIEW_MAX_RATING;
 const isReplied = (r: any) => typeof r.shop_reply?.text === "string" && r.shop_reply.text.trim() !== "";
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -212,7 +203,7 @@ export async function getReviewStats(q: {
   const buckets = new Map<string, { count: number; sum: number }>();
   const aspectMap = new Map<string, AspectCount>();
   const productStats = new Map<string, { count: number; sum: number; negative: number; aspects: Map<string, AspectCount> }>();
-  const categoryStats = new Map<string, { count: number; sum: number; negative: number; positive: number; aspects: Map<string, AspectCount> }>();
+  const categoryStats = new Map<string, { count: number; sum: number; negative: number; aspects: Map<string, AspectCount> }>();
 
   for (const r of rows) {
     const rating = Math.min(5, Math.max(1, Math.round(Number(r.rating) || 1)));
@@ -239,11 +230,10 @@ export async function getReviewStats(q: {
 
       const cid = String(productById.get(pid)?.category_id ?? "");
       if (cid) {
-        const cs = categoryStats.get(cid) ?? { count: 0, sum: 0, negative: 0, positive: 0, aspects: new Map<string, AspectCount>() };
+        const cs = categoryStats.get(cid) ?? { count: 0, sum: 0, negative: 0, aspects: new Map<string, AspectCount>() };
         cs.count++;
         cs.sum += Number(r.rating) || 0;
         if (isNegative(r)) cs.negative++;
-        if (Number(r.rating) >= 4) cs.positive++;
         for (const tp of topics) addAspect(cs.aspects, tp.name, tp.sentiment);
         categoryStats.set(cid, cs);
       }
@@ -317,8 +307,9 @@ export async function getReviewStats(q: {
         count: s.count,
         avg: round2(s.sum / s.count),
         negative: s.negative,
-        positive: s.positive,
-        aspects: categoryAspects([...s.aspects.values()]),
+        aspects: [...s.aspects.values()]
+          .sort((a, b) => b.negative - a.negative || byVolume(a, b))
+          .slice(0, CATEGORY_ASPECTS_N),
       }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "th")),
     products: productTable,
