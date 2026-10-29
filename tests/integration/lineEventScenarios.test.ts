@@ -51,7 +51,7 @@ async function placeOrder(uid: string, channel: "online" | "instore" = "online")
     storefront: channel === "online",
     items: [{ product_id: String(p._id), quantity: 1 }],
   })) as { _id: unknown; order_no: string; total_amount: number };
-  // ให้งานแจ้งเตือนตอนสร้างเสร็จก่อนเหตุการณ์ถัดไป — งานเบื้องหลังวิ่งพร้อมกัน ลำดับที่ยิงไม่แน่นอน (CI ช้ากว่าเครื่อง)
+  // ให้ข้อความ "ได้รับออเดอร์" ยิงเสร็จก่อนเหตุการณ์ถัดไป — งานเบื้องหลังวิ่งพร้อมกัน ลำดับที่ยิงไม่แน่นอน (CI ช้ากว่าเครื่อง)
   await flushBackground();
   return { order, id: String(order._id) };
 }
@@ -75,30 +75,23 @@ afterEach(async () => {
   delete process.env.LINE_CHANNEL_ACCESS_TOKEN;
   delete process.env.LINE_TARGET_ID;
   delete process.env.ADMIN_APP_URL;
-  delete process.env.LINE_NOTIFY_NEW_ORDERS;
   vi.unstubAllGlobals();
 });
 
 describe("ลูกค้า — ออเดอร์หน้าเว็บ (ORD-)", () => {
-  it("สั่งออเดอร์ (ค่าเริ่มต้น) → ไม่ยิง LINE ทั้งลูกค้าและเจ้าของร้าน · ยังบันทึก 'ออเดอร์ใหม่' ในหน้าแจ้งเตือน (§9.15)", async () => {
+  it("สั่งออเดอร์ → ลูกค้าได้ 'ได้รับออเดอร์' พร้อมยอด · เจ้าของร้านได้ 'ออเดอร์ใหม่'", async () => {
     const c = await customer();
     const { order } = await placeOrder(c.uid);
 
-    expect(await settled(c.lineId)).toEqual([]);
-    expect(pushedTo(OWNER)).toEqual([]);
-    expect(await notificationModel.exists({ title: `ออเดอร์ใหม่ ${order.order_no}` })).toBeTruthy();
-  });
+    const toCustomer = await settled(c.lineId);
+    expect(toCustomer).toHaveLength(1);
+    expect(toCustomer[0]).toContain(`ออเดอร์ ${order.order_no}`);
+    expect(toCustomer[0]).toContain("ได้รับออเดอร์แล้ว ยอดรวม 100 บาท");
 
-  it("LINE_NOTIFY_NEW_ORDERS=true → เจ้าของร้านได้ 'ออเดอร์ใหม่' ทาง LINE · ลูกค้ายังไม่ได้", async () => {
-    process.env.LINE_NOTIFY_NEW_ORDERS = "true";
-    const c = await customer();
-    const { order } = await placeOrder(c.uid);
-
-    expect(await settled(c.lineId)).toEqual([]);
     expect(pushedTo(OWNER).some((t) => t.includes(`ออเดอร์ใหม่ ${order.order_no}`))).toBe(true);
   });
 
-  it("รับเองที่ร้าน: ไล่ confirmed → preparing → ready → completed → LINE แค่ 'พร้อมรับ' (รวมทั้งหมด 1 ข้อความ)", async () => {
+  it("รับเองที่ร้าน: ไล่ confirmed → preparing → ready → completed → LINE แค่ 'พร้อมรับ' (รวมทั้งหมด 2 ข้อความ)", async () => {
     const c = await customer();
     const { id } = await placeOrder(c.uid);
     for (const s of ["confirmed", "preparing", "ready", "completed"] as const) {
@@ -106,30 +99,32 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
     }
 
     const msgs = await settled(c.lineId);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toContain("สินค้าพร้อมรับที่ร้านแล้ว");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[1]).toContain("สินค้าพร้อมรับที่ร้านแล้ว");
   });
 
-  it("จัดส่ง: ready ไม่แจ้ง · เริ่มส่งแจ้งพร้อมขนส่ง+เลขพัสดุ · แก้เลขพัสดุไม่แจ้งซ้ำ · ส่งถึงไม่แจ้งทาง LINE (กระดิ่งเว็บแทน — §9.15)", async () => {
+  it("จัดส่ง: ready ไม่แจ้ง · เริ่มส่งแจ้งพร้อมขนส่ง+เลขพัสดุ · แก้เลขพัสดุไม่แจ้งซ้ำ · ส่งถึงแจ้ง", async () => {
     const c = await customer();
     const { id } = await placeDeliveryOrder(c.uid);
     for (const s of ["confirmed", "preparing", "ready"] as const) {
       await orderService.updateOrderStatus(id, s);
     }
-    expect(await settled(c.lineId)).toHaveLength(0);
+    expect(await settled(c.lineId)).toHaveLength(1); // มีแค่ 'ได้รับออเดอร์'
 
     await orderService.updateDelivery(id, { delivery_status: "shipping", tracking_no: "TH111", shipping_carrier: "flash" });
-    const msgs = await settled(c.lineId);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toContain("กำลังจัดส่ง");
-    expect(msgs[0]).toContain("ขนส่ง: Flash Express");
-    expect(msgs[0]).toContain("เลขพัสดุ: TH111");
+    let msgs = await settled(c.lineId);
+    expect(msgs).toHaveLength(2);
+    expect(msgs[1]).toContain("กำลังจัดส่ง");
+    expect(msgs[1]).toContain("ขนส่ง: Flash Express");
+    expect(msgs[1]).toContain("เลขพัสดุ: TH111");
 
     await orderService.updateDelivery(id, { delivery_status: "shipping", tracking_no: "TH222" });
-    expect(await settled(c.lineId)).toHaveLength(1);
+    expect(await settled(c.lineId)).toHaveLength(2);
 
     await orderService.updateDelivery(id, { delivery_status: "delivered" });
-    expect(await settled(c.lineId)).toHaveLength(1);
+    msgs = await settled(c.lineId);
+    expect(msgs).toHaveLength(3);
+    expect(msgs[2]).toContain("จัดส่งสำเร็จแล้ว");
   });
 
   it("จัดส่งไม่สำเร็จ → แจ้งว่าร้านจะติดต่อกลับ", async () => {
@@ -146,14 +141,14 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
     const byShop = await placeOrder(a.uid);
     await orderService.updateOrderStatus(byShop.id, "cancelled", { cancelled_reason: "เค้กหมดแล้ว" });
     const msgs = await settled(a.lineId);
-    expect(msgs).toHaveLength(1);
-    expect(msgs[0]).toContain("ถูกยกเลิก");
-    expect(msgs[0]).toContain("เหตุผล: เค้กหมดแล้ว");
+    expect(msgs).toHaveLength(2);
+    expect(msgs[1]).toContain("ถูกยกเลิก");
+    expect(msgs[1]).toContain("เหตุผล: เค้กหมดแล้ว");
 
     const b = await customer();
     const bySelf = await placeOrder(b.uid);
     await orderService.cancelOrderByCustomer(bySelf.id, b.uid, "สั่งผิด");
-    expect(await settled(b.lineId)).toHaveLength(0);
+    expect(await settled(b.lineId)).toHaveLength(1);
   });
 
   it("ชำระเงิน: สำเร็จ → แจ้ง (และเลื่อนเป็นกำลังเตรียมสินค้าอัตโนมัติ) · คืนเงิน → แจ้ง", async () => {
@@ -166,9 +161,9 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
     await orderService.setPaymentStatus(id, "refunded");
 
     const msgs = await settled(c.lineId);
-    expect(msgs).toHaveLength(2);
-    expect(msgs[0]).toContain("ชำระเงินสำเร็จ");
-    expect(msgs[1]).toContain("คืนเงินเรียบร้อยแล้ว");
+    expect(msgs).toHaveLength(3);
+    expect(msgs[1]).toContain("ชำระเงินสำเร็จ");
+    expect(msgs[2]).toContain("คืนเงินเรียบร้อยแล้ว");
   });
 
   it("สลิปไม่ผ่าน → แจ้งให้แนบสลิปใหม่", async () => {
@@ -181,7 +176,6 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
   });
 
   it("ลูกค้ายังไม่ผูก LINE → ไม่ยิงหาลูกค้า แต่เจ้าของร้านยังได้ 'ออเดอร์ใหม่'", async () => {
-    process.env.LINE_NOTIFY_NEW_ORDERS = "true";
     const user = await makeUser();
     const { order, id } = await placeOrder(String(user._id));
     await orderService.updateOrderStatus(id, "confirmed");
@@ -209,8 +203,7 @@ describe("ลูกค้า — บิลหน้าร้าน (POS-)", () =
 });
 
 describe("ลูกค้า + เจ้าของร้าน — พรีออเดอร์ใหม่ (PRE-)", () => {
-  it("สั่งพรีออเดอร์ → ลูกค้าไม่ได้ LINE · เจ้าของได้ 'พรีออเดอร์ใหม่' พร้อมชื่อรอบ (เปิด LINE_NOTIFY_NEW_ORDERS) · สลิปไม่ผ่าน → แจ้งลูกค้า", async () => {
-    process.env.LINE_NOTIFY_NEW_ORDERS = "true";
+  it("สั่งพรีออเดอร์ → ลูกค้าได้ 'ได้รับพรีออเดอร์' · เจ้าของได้ 'พรีออเดอร์ใหม่' พร้อมชื่อรอบ · สลิปไม่ผ่าน → แจ้งลูกค้า", async () => {
     const c = await customer();
     const product = await makeProduct({ is_preorder: true, product_price: 150 });
     const roundName = `รอบทดสอบ LINE ${Date.now()}`;
@@ -231,7 +224,10 @@ describe("ลูกค้า + เจ้าของร้าน — พรี�
       items: [{ round_item_id: String(roundItem._id), quantity: 2 }],
     })) as { _id: unknown; preorder_no: string };
 
-    expect(await settled(c.lineId)).toEqual([]);
+    const toCustomer = await settled(c.lineId);
+    expect(toCustomer).toHaveLength(1);
+    expect(toCustomer[0]).toContain(`พรีออเดอร์ ${pre.preorder_no}`);
+    expect(toCustomer[0]).toContain("ได้รับพรีออเดอร์แล้ว ยอดรวม 300 บาท");
 
     const toOwner = pushedTo(OWNER).find((t) => t.includes(`พรีออเดอร์ใหม่ ${pre.preorder_no}`));
     expect(toOwner).toContain(roundName);
@@ -280,7 +276,6 @@ describe("เจ้าของร้าน", () => {
 
   it("ตั้ง ADMIN_APP_URL → ข้อความถึงเจ้าของร้านแนบลิงก์ 🔗 ไปหน้าออเดอร์ในเว็บหลังร้าน", async () => {
     process.env.ADMIN_APP_URL = "https://admin.example/";
-    process.env.LINE_NOTIFY_NEW_ORDERS = "true";
     const c = await customer();
     const { order } = await placeOrder(c.uid);
 
@@ -292,7 +287,6 @@ describe("เจ้าของร้าน", () => {
 
 describe("LINE ล่ม / ตอบ error — ธุรกรรมหลักต้องไม่ล้ม", () => {
   it("network error ทุกครั้ง → สร้างออเดอร์สำเร็จ · notification บันทึก line_error ไว้ · line_sent = false", async () => {
-    process.env.LINE_NOTIFY_NEW_ORDERS = "true";
     fetchSpy.mockRejectedValue(new Error("ECONNRESET"));
     const c = await customer();
     const { order, id } = await placeOrder(c.uid);
@@ -322,7 +316,6 @@ describe("LINE ล่ม / ตอบ error — ธุรกรรมหลัก
   });
 
   it("ลูกค้าบล็อก OA (LINE ตอบ 400) → ข้ามเงียบ ๆ ไม่กระทบเจ้าของร้าน", async () => {
-    process.env.LINE_NOTIFY_NEW_ORDERS = "true";
     const c = await customer();
     fetchSpy.mockImplementation(async (url: string, init: { body: string }) => {
       if (url === PUSH_URL && JSON.parse(init.body).to === c.lineId) {
@@ -330,12 +323,9 @@ describe("LINE ล่ม / ตอบ error — ธุรกรรมหลัก
       }
       return { ok: true };
     });
-    const { order, id } = await placeOrder(c.uid);
-    await orderService.setPaymentStatus(id, "paid"); // ยิงหาลูกค้า → 400
+    const { order } = await placeOrder(c.uid);
     await flushBackground();
 
-    expect(pushedTo(c.lineId)).toHaveLength(1);
-    expect((await orderModel.findById(id).lean<{ payment_status: string }>())?.payment_status).toBe("paid");
     const note = await notificationModel.findOne({ title: `ออเดอร์ใหม่ ${order.order_no}` }).lean<{ line_sent?: boolean }>();
     expect(note?.line_sent).toBe(true);
   });

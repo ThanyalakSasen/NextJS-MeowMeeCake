@@ -22,7 +22,6 @@ import { assertObjectId } from "./objectId";
 import dbConnect from "./dbConnect";
 import { log } from "./logger";
 import paymentModel from "../models/paymentModel";
-import { carrierNeedsTracking, type ShippingCarrier } from "./shippingCarrier";
 import { customerMessages, customerWeb, notifyCustomerLater, type CustomerDocKind } from "../services/customerNotifyService";
 
 type AnyModel = Model<unknown>;
@@ -140,23 +139,6 @@ export async function setEntityPaymentStatus(opts: {
     customerWeb.paymentStatus(kind, doc._id, docNo, opts.status)
   );
   return doc;
-}
-
-/**
- * ออเดอร์/พรีออเดอร์แบบจัดส่งจะปิดเป็น completed ได้ต้องระบุบริษัทขนส่งแล้ว + เลขพัสดุ (เฉพาะขนส่งพัสดุ —
- * carrierNeedsTracking) — หน้าแอดมินบังคับผ่านปุ่ม "จัดส่งเรียบร้อยแล้ว" อยู่แล้ว ที่นี่กันทางอื่น (API ตรง/หน้าจออื่น)
- * ข้ามการกรอกข้อมูลจัดส่ง · รับเอง (takeaway) ไม่เช็ค
- */
-export function assertDeliveryReadyToComplete(
-  doc: { order_type?: unknown; shipping_carrier?: unknown; tracking_no?: unknown },
-  entityLabel: string
-): void {
-  if (doc.order_type !== "delivery") return;
-  const carrier = (doc.shipping_carrier ?? null) as ShippingCarrier | null;
-  if (!carrier) throw badRequest(`${entityLabel}แบบจัดส่งต้องระบุบริษัทขนส่งก่อนปิดเป็นสำเร็จ`);
-  if (carrierNeedsTracking(carrier) && !doc.tracking_no) {
-    throw badRequest(`${entityLabel}แบบจัดส่งต้องกรอกเลขพัสดุก่อนปิดเป็นสำเร็จ`);
-  }
 }
 
 /** เช็ค order_type==="delivery" + auto-set shipped_at/delivered_at ถ้ายังไม่มี แล้ว $set payload ที่เหลือ */

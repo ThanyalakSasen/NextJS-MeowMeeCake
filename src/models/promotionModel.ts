@@ -36,11 +36,6 @@ const promotionSchema = new mongoose.Schema({
         type: Boolean,
         default: false,
     },
-    stackable_with: { //ใช้ร่วมได้เฉพาะโปรเหล่านี้ (มีผลเมื่อ stackable) — ว่าง [] = ร่วมกับโปรที่ stackable ได้ทุกตัว
-        // ซ้อนกันได้เมื่อ "ทั้งสองฝั่ง" ยอมกัน (orderService ตรวจทีละคู่)
-        type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Promotions" }],
-        default: [],
-    },
     // เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (ทั้ง DB และ API — docs/money-units.md) เฉพาะตอน discount_type === "Amount"
     // ตอน "Percentage" เป็นตัวเลข % (0-100) ไม่ใช่เงิน · "FreeShipping" ไม่ใช้ (ปล่อย 0) — ดู promotionService
     discount_value: { //ค่าของส่วนลด

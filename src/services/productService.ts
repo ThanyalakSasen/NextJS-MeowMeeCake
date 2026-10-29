@@ -23,8 +23,6 @@ import { log } from "../lib/logger";
 import { deleteImages } from "../lib/upload";
 import { toSatang, toBahtFields } from "../lib/money";
 import { adminLinks } from "../lib/adminLinks";
-import * as stockHistory from "./productStockHistoryService";
-import type { StockLogContext } from "./productStockHistoryService";
 import {
   DEFAULT_LOW_STOCK_THRESHOLD,
   LOW_STOCK_EXPR,
@@ -99,8 +97,6 @@ export interface CreateProductInput {
   product_stock_quantity?: number | null;
   /** เกณฑ์สินค้าใกล้หมดรายสินค้า (จำนวนเต็ม ≥ 0) · null/ไม่ส่ง = ใช้ค่าเริ่มต้น 5 (src/lib/lowStock.ts) */
   low_stock_threshold?: number | null;
-  /** อายุสินค้า (วัน, จำนวนเต็ม ≥ 1) — วันหมดอายุเริ่มต้นของล็อตผลิต · null = ไม่ตั้ง */
-  shelf_life_days?: number | null;
   preorder_config?: PreorderConfigInput | null;
 }
 
@@ -153,14 +149,6 @@ function assertLowStockThreshold(value: unknown): void {
   if (value == null) return;
   if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
     throw new ProductError("low_stock_threshold ต้องเป็นจำนวนเต็มไม่ติดลบ (หรือ null = ใช้ค่าเริ่มต้น)", 400);
-  }
-}
-
-/** shelf_life_days: null = ไม่ตั้ง · ไม่งั้นต้องเป็นจำนวนเต็ม ≥ 1 */
-function assertShelfLifeDays(value: unknown): void {
-  if (value == null) return;
-  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
-    throw new ProductError("shelf_life_days ต้องเป็นจำนวนเต็มตั้งแต่ 1 ขึ้นไป (หรือ null = ไม่ตั้ง)", 400);
   }
 }
 
@@ -266,7 +254,6 @@ export async function createProduct(input: CreateProductInput) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
   assertLowStockThreshold(input.low_stock_threshold);
-  assertShelfLifeDays(input.shelf_life_days);
 
   await assertCategoryExists(input.category_id);
   await assertUnitExists(input.unit_id);
@@ -290,7 +277,6 @@ export async function createProduct(input: CreateProductInput) {
     product_stock_quantity: isPreorder ? null : input.product_stock_quantity ?? 0,
     // พรีออเดอร์ไม่มีสต็อก → ไม่มีเกณฑ์ใกล้หมด
     low_stock_threshold: isPreorder ? null : input.low_stock_threshold ?? null,
-    shelf_life_days: input.shelf_life_days ?? null,
     preorder_config: isPreorder ? input.preorder_config : null,
   };
 
@@ -372,10 +358,9 @@ export async function resolveScan(code: string) {
 }
 
 // ── READ (list สำหรับ POS) ────────────────────────────────────
-/** ฟิลด์ที่ POS ใช้ — ไม่มี purchase_cost (พนักงานหน้าร้านที่มีแค่สิทธิ์ orders ไม่ควรเห็นต้นทุน)
- *  low_stock_threshold: หน้าสต็อกสินค้า (stock-list) ใช้จัดสถานะใกล้หมดตามเกณฑ์รายสินค้า */
+/** ฟิลด์ที่ POS ใช้ — ไม่มี purchase_cost (พนักงานหน้าร้านที่มีแค่สิทธิ์ orders ไม่ควรเห็นต้นทุน) */
 const POS_PRODUCT_FIELDS =
-  "product_id product_name_th product_name_eng category_id unit_id product_price sale_price product_img product_stock_quantity is_preorder low_stock_threshold";
+  "product_id product_name_th product_name_eng category_id unit_id product_price sale_price product_img product_stock_quantity is_preorder";
 
 export interface PosProductQuery {
   pagination: Pagination;
@@ -519,7 +504,6 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     throw new ProductError("purchase_cost ต้องไม่ติดลบ", 400);
   }
   assertLowStockThreshold(input.low_stock_threshold);
-  assertShelfLifeDays(input.shelf_life_days);
   // input.purchase_cost/product_price/sale_price เป็นบาทจาก request — ปัด 2 ตำแหน่งก่อนให้ loop `updatable`
   // ด้านล่างเขียนลง existing.*
   if (input.purchase_cost != null) {
@@ -579,7 +563,6 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
     "purchase_cost",
     "unit_id",
     "is_preorder",
-    "shelf_life_days",
   ];
   for (const field of updatable) {
     if (input[field] !== undefined) {
@@ -707,8 +690,6 @@ export interface StockItemInput {
 export interface StockAdjustOptions {
   /** ยอมให้สต็อกติดลบได้ (ปกติ = false) */
   allowNegative?: boolean;
-  /** บันทึกประวัติสต็อก — ผู้ทำ/หมายเหตุ/เอกสารต้นทาง (productStockHistoryService) */
-  log?: StockLogContext;
 }
 
 function assertPositiveQty(qty: number, field = "quantity"): void {
@@ -738,12 +719,7 @@ export async function getStock(id: string): Promise<number> {
 }
 
 // ── ตั้งค่าสต็อกแบบระบุจำนวนตรง ๆ (นับสต็อก / แก้ยอด) ────────
-export async function setStock(id: string, quantity: number, log?: StockLogContext) {
-  return (await setStockDetailed(id, quantity, log)).product;
-}
-
-/** setStock + ยอดก่อนตั้ง (อ่านแบบ atomic จาก findOneAndUpdate) — route ใช้ทำ log ก่อน → หลังให้ตรงกับประวัติ */
-export async function setStockDetailed(id: string, quantity: number, log: StockLogContext = {}) {
+export async function setStock(id: string, quantity: number) {
   await dbConnect();
   if (typeof quantity !== "number" || !Number.isFinite(quantity) || quantity < 0) {
     throw new ProductError("quantity ต้องเป็นตัวเลขไม่ติดลบ", 400);
@@ -761,14 +737,8 @@ export async function setStockDetailed(id: string, quantity: number, log: StockL
   if (!previous) {
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
-  const before = previous.product_stock_quantity ?? 0;
-  notifyIfLowStockCrossed(previous, before, quantity);
-  await stockHistory.record(
-    [{ product_id: previous._id, qty_before: before, qty_after: quantity }],
-    log.type ?? "adjust",
-    log
-  );
-  return { product: { ...previous, product_stock_quantity: quantity }, before };
+  notifyIfLowStockCrossed(previous, previous.product_stock_quantity ?? 0, quantity);
+  return { ...previous, product_stock_quantity: quantity };
 }
 
 // ── ปรับสต็อกด้วยส่วนต่าง (+ รับเข้า / - ตัดออก) ──────────────
@@ -814,18 +784,13 @@ export async function adjustStock(
   }
   const after = (product as { product_stock_quantity?: number }).product_stock_quantity ?? 0;
   notifyIfLowStockCrossed(product as { _id: unknown; product_name_th?: string }, after - delta, after);
-  await stockHistory.record(
-    [{ product_id: (product as { _id: unknown })._id, qty_before: after - delta, qty_after: after }],
-    options.log?.type ?? (delta > 0 ? "receive" : "use"),
-    options.log
-  );
   return product;
 }
 
 // ── รับสินค้าเข้าสต็อก ───────────────────────────────────────
-export async function increaseStock(id: string, quantity: number, log?: StockLogContext) {
+export async function increaseStock(id: string, quantity: number) {
   assertPositiveQty(quantity);
-  return adjustStock(id, Math.abs(quantity), { log });
+  return adjustStock(id, Math.abs(quantity));
 }
 
 // ── ตัดสต็อกออก (เช่น ขาย / เสียหาย) ─────────────────────────
@@ -886,8 +851,7 @@ export async function checkStockAvailability(items: StockItemInput[]) {
 
 // ── ตัดสต็อกหลายรายการพร้อมกัน (เช่น ตอนยืนยันออเดอร์) ───────
 //    ตัดทีละรายการแบบ atomic ถ้ามีรายการใดไม่พอจะคืนสต็อกที่ตัดไปแล้วกลับ
-//    ประวัติสต็อก (type "sale") บันทึกเมื่อตัดครบทุกรายการเท่านั้น — ตัดไม่ครบ = คืนแล้ว ไม่มีอะไรให้บันทึก
-export async function deductStockForOrder(items: StockItemInput[], log: StockLogContext = {}) {
+export async function deductStockForOrder(items: StockItemInput[]) {
   await dbConnect();
   if (!Array.isArray(items) || items.length === 0) {
     throw new ProductError("items ต้องเป็น array ที่ไม่ว่าง", 400);
@@ -902,7 +866,6 @@ export async function deductStockForOrder(items: StockItemInput[], log: StockLog
   }
 
   const applied: { product_id: string; quantity: number }[] = [];
-  const changes: stockHistory.StockChange[] = [];
   try {
     for (const [product_id, quantity] of merged) {
       const product = await productModel.findOne({
@@ -934,8 +897,6 @@ export async function deductStockForOrder(items: StockItemInput[], log: StockLog
         );
       }
       applied.push({ product_id, quantity });
-      const after = updated.product_stock_quantity ?? 0;
-      changes.push({ product_id: updated._id, qty_before: after + quantity, qty_after: after });
 
       notifyIfLowStockCrossed(
         product,
@@ -956,12 +917,11 @@ export async function deductStockForOrder(items: StockItemInput[], log: StockLog
     throw err;
   }
 
-  await stockHistory.record(changes, log.type ?? "sale", log);
   return { ok: true, deducted: applied };
 }
 
 // ── คืนสต็อกหลายรายการ (เช่น ยกเลิก / คืนสินค้า) ─────────────
-export async function restockForOrder(items: StockItemInput[], log: StockLogContext = {}) {
+export async function restockForOrder(items: StockItemInput[]) {
   await dbConnect();
   if (!Array.isArray(items) || items.length === 0) {
     throw new ProductError("items ต้องเป็น array ที่ไม่ว่าง", 400);
@@ -975,25 +935,17 @@ export async function restockForOrder(items: StockItemInput[], log: StockLogCont
   }
 
   const restocked: { product_id: string; quantity: number }[] = [];
-  const changes: stockHistory.StockChange[] = [];
   for (const [product_id, quantity] of merged) {
     await ensureNumericStock(product_id);
-    const updated = await productModel
-      .findOneAndUpdate(
-        { _id: product_id, deleted_at: null, ...STOCKABLE_MATCH },
-        { $inc: { product_stock_quantity: quantity } },
-        { returnDocument: "after" }
-      )
-      .select("product_stock_quantity")
-      .lean<{ _id: unknown; product_stock_quantity?: number } | null>();
-    if (updated) {
+    const updated = await productModel.updateOne(
+      { _id: product_id, deleted_at: null, ...STOCKABLE_MATCH },
+      { $inc: { product_stock_quantity: quantity } }
+    );
+    if (updated.modifiedCount > 0) {
       restocked.push({ product_id, quantity });
-      const after = updated.product_stock_quantity ?? 0;
-      changes.push({ product_id: updated._id, qty_before: after - quantity, qty_after: after });
     }
   }
 
-  await stockHistory.record(changes, log.type ?? "sale_return", log);
   return { ok: true, restocked };
 }
 
@@ -1051,7 +1003,6 @@ const productService = {
   // Stock
   getStock,
   setStock,
-  setStockDetailed,
   adjustStock,
   increaseStock,
   decreaseStock,

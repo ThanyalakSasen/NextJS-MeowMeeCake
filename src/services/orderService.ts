@@ -30,7 +30,6 @@ import {
   assertCustomerCancelAllowed,
   setEntityPaymentStatus,
   applyEntityDeliveryUpdate,
-  assertDeliveryReadyToComplete,
   softDeleteEntityWithItems,
 } from "../lib/orderLifecycle";
 import orderModel from "../models/orderModel";
@@ -60,7 +59,6 @@ import { isPreorderProduct } from "../lib/productCode";
 import { nextDailyDocNo } from "./docNoService";
 import type { z } from "zod";
 import type { updateDeliveryBody } from "../schemas/order";
-import type { DiscountResult } from "../lib/discountEngine";
 import { adminLinks } from "../lib/adminLinks";
 
 type UpdateDeliveryInput = z.infer<typeof updateDeliveryBody>;
@@ -381,7 +379,7 @@ async function persistOrder(
 
   if (promoRefs.length) {
     // ซ้อนโปร: ทุกตัวคิดจากรายการเดียวกัน (ไม่คิดทบจากยอดหลังหัก) แล้วรวมกัน — ตรวจเพดานยอดด้านล่าง
-    const results: DiscountResult[] = [];
+    const results = [];
     for (const ref of promoRefs) {
       results.push(
         await promotionService.validateForOrder({
@@ -398,13 +396,6 @@ async function persistOrder(
       const single = results.find((r) => !r.stackable);
       if (single) {
         throw unprocessable(`โปรโมชัน ${single.promotion_code} ใช้ร่วมกับโปรอื่นไม่ได้`);
-      }
-      // stackable_with: ซ้อนได้เมื่อทั้งสองฝั่งยอมกัน (ว่าง = ยอมทุกโปรที่ stackable)
-      const allows = (a: DiscountResult, b: DiscountResult) =>
-        a.stackable_with.length === 0 || a.stackable_with.includes(b.promotion_id);
-      for (const [i, a] of results.entries()) {
-        const b = results.slice(i + 1).find((x) => !allows(a, x) || !allows(x, a));
-        if (b) throw unprocessable(`โปรโมชัน ${a.promotion_code} ใช้ร่วมกับ ${b.promotion_code} ไม่ได้`);
       }
       if (results.filter((r) => r.free_shipping).length > 1) {
         throw unprocessable("ใช้โปรส่งฟรีได้บิลละ 1 โปร");
@@ -478,11 +469,8 @@ async function persistOrder(
     total_amount = toSatang(subtotal - discount_amount + delivery_fee);
 
     // 1) ตัดสต็อก (productService ข้าม preorder ให้เอง, คืนสต็อกอัตโนมัติถ้ารายการใดไม่พอ)
-    const stockRef = { ref_type: "order" as const, ref_id: orderId };
-    await productService.deductStockForOrder(stockItems, stockRef);
-    saga.onRollback("restock", () =>
-      productService.restockForOrder(stockItems, { ...stockRef, note: "สร้างออเดอร์ไม่สำเร็จ" })
-    );
+    await productService.deductStockForOrder(stockItems);
+    saga.onRollback("restock", () => productService.restockForOrder(stockItems));
 
     // 2) สร้างออเดอร์ (retry เมื่อเลขออเดอร์ชนกัน)
     for (let attempt = 0; attempt < 5 && !order; attempt++) {
@@ -551,7 +539,6 @@ async function persistOrder(
   // แจ้งเตือนออเดอร์ใหม่ (DB + LINE) — best-effort ไม่ทำให้สร้างออเดอร์ล้มเหลวถ้าแจ้งเตือนพัง
   // ออเดอร์หน้าร้าน (POS-) บันทึกในหน้าแจ้งเตือนเสมอ แต่ push LINE เฉพาะเมื่อตั้ง LINE_NOTIFY_POS_ORDERS=true
   // (พนักงานคีย์เองอยู่หน้าร้าน ร้านขายเยอะ LINE เจ้าของจะเด้งทุกบิล — docs/LINE.md §9.5)
-  // ออเดอร์เว็บก็ไม่ push LINE เว้นแต่ตั้ง LINE_NOTIFY_NEW_ORDERS=true — ประหยัดโควตา ร้านได้ LINE ตอนสลิปเข้าแทน (§9.15)
   const isPos = orderNoPrefix(opts.channel) === "POS";
   notificationService
     .notify({
@@ -560,14 +547,17 @@ async function persistOrder(
       module: "order",
       type: "info",
       link: adminLinks.order(order._id),
-      line: process.env.LINE_NOTIFY_NEW_ORDERS === "true" && (!isPos || process.env.LINE_NOTIFY_POS_ORDERS === "true"),
+      line: !isPos || process.env.LINE_NOTIFY_POS_ORDERS === "true",
     })
     .catch((err) => log.error("order.notify_failed", { order_id: String(order._id), err }));
 
-  // แจ้งลูกค้า — กระดิ่งในเว็บอย่างเดียว (ไม่ส่ง LINE "ได้รับออเดอร์" — ลูกค้าเห็นในหน้าเว็บทันทีอยู่แล้ว §9.15)
-  // เฉพาะออเดอร์จากเว็บ หน้าร้าน (POS) ลูกค้ายืนอยู่ตรงนั้นแล้ว
+  // แจ้งลูกค้าทาง LINE (ถ้าผูกบัญชีไว้) — เฉพาะออเดอร์จากเว็บ หน้าร้าน (POS) ลูกค้ายืนอยู่ตรงนั้นแล้ว
   if (!isPos) {
-    notifyCustomerLater(userId, null, customerWeb.created("order", order._id, order.order_no, total_amount));
+    notifyCustomerLater(
+      userId,
+      customerMessages.created("order", order.order_no, total_amount),
+      customerWeb.created("order", order._id, order.order_no, total_amount)
+    );
   }
 
   return presentOrderWithItems(
@@ -724,7 +714,8 @@ export async function listOrders(query: ListOrderQuery) {
       // ไม่งั้นคำสั้น ๆ สแกนรายการสินค้าของทุกคน แล้วได้ id เป็นหมื่นใส่ $in
       const own = query.user_id ? { order_id: { $in: await orderModel.distinct("_id", { user_id: query.user_id, deleted_at: null }) } } : {};
       const ids = await orderItemModel.distinct("order_id", { ...own, deleted_at: null, $or: [{ "product_snapshot.product_name_th": re }, { "product_snapshot.product_name_eng": re }] });
-      filter.$or = [{ order_no: re }, { _id: { $in: ids } }];
+      // เลขบิล = ตรงกับ "ท้าย" เลข (รหัส 6 ตัวท้าย เช่น MMC004 · หรือพิมพ์เลขเต็ม) — ไม่ใช่ทุกส่วนของเลข (เดิมพิมพ์ "2026" ได้ทุกบิล)
+      filter.$or = [{ order_no: new RegExp(`${escapeRegExp(query.search.trim())}$`, "i") }, { _id: { $in: ids } }];
     } else {
       filter.order_no = re;
     }
@@ -839,10 +830,6 @@ export async function updateOrderStatus(
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
   if (next === "cancelled" && opts.cancelled_by) assertObjectId(opts.cancelled_by, "cancelled_by");
-  // ออเดอร์หน้าร้าน (POS) ปิดงานที่เคาน์เตอร์ในคำขอเดียว (posCheckoutService) — ไม่มีขั้นจัดส่ง
-  if (next === "completed" && !String(existing.order_no ?? "").startsWith(`${orderNoPrefix("instore")}-`)) {
-    assertDeliveryReadyToComplete(existing, "ออเดอร์");
-  }
 
   // จองการเปลี่ยนสถานะแบบ atomic ก่อนทำ side effect (คืนสต็อก/สิทธิ์โปร/คืนเงิน) — เดิมอ่าน → คืนสต็อก → save
   // ทำให้คำขอยกเลิกที่มาพร้อมกัน (cron หมดเวลาชำระ + หน้าเว็บที่ยกเลิกแบบ lazy หลาย endpoint + ลูกค้ากดเอง)
@@ -878,14 +865,7 @@ export async function updateOrderStatus(
       quantity: it.quantity,
     }));
     if (stockItems.length) {
-      cleanup.onRollback("restock", () =>
-        productService.restockForOrder(stockItems, {
-          ref_type: "order",
-          ref_id: order._id,
-          performed_by: opts.cancelled_by ?? null,
-          note: opts.cancelled_reason ? `ยกเลิกออเดอร์: ${opts.cancelled_reason}` : "ยกเลิกออเดอร์",
-        })
-      );
+      cleanup.onRollback("restock", () => productService.restockForOrder(stockItems));
     }
     cleanup.onRollback("revoke-promo-usage", () =>
       promotionUsageService.revokeUsage({ order_id: String(order._id) })
@@ -1182,9 +1162,8 @@ export async function reopenExpiredOrder(id: string): Promise<void> {
     .select("product_id quantity")
     .lean<Array<{ product_id: unknown; quantity: number }>>();
   const stockItems = items.map((it) => ({ product_id: String(it.product_id), quantity: it.quantity }));
-  const stockRef = { ref_type: "order" as const, ref_id: id };
   try {
-    await productService.deductStockForOrder(stockItems, { ...stockRef, note: "เปิดออเดอร์กลับ (แนบสลิปหลังหมดเวลา)" });
+    await productService.deductStockForOrder(stockItems);
   } catch (err) {
     if ((err as { status?: number })?.status === 409) {
       throw conflict("สินค้าบางรายการหมดแล้ว เปิดคำสั่งซื้อกลับไม่ได้ — กรุณาติดต่อร้านเพื่อขอคืนเงิน");
@@ -1207,7 +1186,7 @@ export async function reopenExpiredOrder(id: string): Promise<void> {
   if (!reopened) {
     // มีคนเปลี่ยนสถานะแทรกเข้ามา → คืนสต็อกที่เพิ่งตัด
     await productService
-      .restockForOrder(stockItems, { ...stockRef, note: "เปิดออเดอร์กลับไม่สำเร็จ" })
+      .restockForOrder(stockItems)
       .catch((err) => log.error("order.reopen_restock_failed", { order_id: id, err }));
     throw conflict("สถานะคำสั่งซื้อเปลี่ยนไปแล้ว กรุณาโหลดหน้าใหม่");
   }

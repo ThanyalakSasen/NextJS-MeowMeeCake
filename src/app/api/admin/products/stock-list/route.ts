@@ -5,14 +5,14 @@
  *   ชุดข้อมูลเดียวกับ GET /api/admin/pos/products (productService.getPosProducts)
  *
  *   สิทธิ์: stock.view — เดิมหน้าสต็อกใช้ /admin/products (products.view) ทำให้คนที่มีแค่สิทธิ์สต็อกเปิดหน้าได้แต่ 403
- *   (frontend Final-Backlog P12) · stock_history.view ก็อ่านได้ (ตัวเลือกสินค้าของหน้าประวัติสต็อก) · ปรับยอดยังใช้ PUT /api/admin/products/:id/stock (stock.update) เหมือนเดิม
+ *   (frontend Final-Backlog P12) · ปรับยอดยังใช้ PUT /api/admin/products/:id/stock (stock.update) เหมือนเดิม
  */
 import { okList } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { parsePagination } from "@/lib/queryParams";
 import * as productService from "@/services/productService";
 
-export const GET = withPermission(["stock", "stock_history"], "view", async (_s, req) => {
+export const GET = withPermission("stock", "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await productService.getPosProducts({
     pagination: parsePagination(sp),

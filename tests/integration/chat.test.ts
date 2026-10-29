@@ -137,3 +137,107 @@ describe("รายการแชทหลังร้าน — เฉพา�
     expect(await chatService.staffUnreadSummary()).toEqual({ conversations: 1, messages: 1 });
   });
 });
+
+describe("แก้ไข / ลบข้อความแชท", () => {
+  it("ร้านลบแชท = ซ่อนจากหลังร้าน (ประวัติไม่หาย) · ลูกค้ายังเห็นแชทเดิม · ทักใหม่ = กลับมาพร้อมประวัติเก่า", async () => {
+    const user = await makeUser();
+    const uid = String(user._id);
+    await chatService.sendCustomerMessage(uid, { body: "สวัสดีค่ะ" });
+    await chatService.sendCustomerMessage(uid, { body: "ขอถามหน่อย" });
+    const { items } = await chatService.listConversations({ pagination: pg });
+    const convId = items[0]._id;
+
+    expect(await chatService.deleteConversation(convId)).toMatchObject({ _id: convId, hidden: true });
+    expect(await chatMessageModel.countDocuments({ conversation_id: convId })).toBe(2);
+    expect((await chatService.listConversations({ pagination: pg })).items).toHaveLength(0);
+    expect(await chatService.staffUnreadSummary()).toEqual({ conversations: 0, messages: 0 });
+    expect((await chatService.getMyChat(uid, {})).messages.map((m) => m.body)).toEqual(["สวัสดีค่ะ", "ขอถามหน่อย"]);
+    await expect(chatService.deleteConversation(convId)).rejects.toMatchObject({ status: 404 });
+
+    await chatService.sendCustomerMessage(uid, { body: "มาใหม่" });
+    const again = await chatService.listConversations({ pagination: pg });
+    expect(again.items.map((c) => c._id)).toEqual([convId]);
+    const staffView = await chatService.getConversationForStaff(convId, {});
+    expect(staffView.messages.map((m) => m.body)).toEqual(["สวัสดีค่ะ", "ขอถามหน่อย", "มาใหม่"]);
+  });
+
+  it("แก้ข้อความ = เปลี่ยนพรีออเดอร์ที่แนบได้ · ของคนอื่น = 404 · ร้านแนบไม่ได้ = 400", async () => {
+    const user = await makeUser();
+    const other = await makeUser();
+    const uid = String(user._id);
+    const pre1 = await makePreorder(uid, { total_amount: 100 });
+    const pre2 = await makePreorder(uid, { total_amount: 250 });
+    const otherPre = await makePreorder(String(other._id));
+    const m = await chatService.sendCustomerMessage(uid, { body: "ถามเรื่องนี้ค่ะ", preorder_id: String(pre1._id) });
+
+    const edited = await chatService.editCustomerMessage(uid, m._id, { body: "ถามเรื่องนี้ค่ะ", preorder_id: String(pre2._id) });
+    expect(edited.attachment).toMatchObject({ kind: "preorder", doc_no: pre2.preorder_no, total_amount: 250 });
+    expect(edited.edited_at).not.toBeNull();
+    const conv = await chatConversationModel.findOne({ customer_id: user._id }).lean<{ _id: unknown; last_message_preview: string }>();
+    expect(conv!.last_message_preview).toBe(`[แนบพรีออเดอร์ ${pre2.preorder_no}] ถามเรื่องนี้ค่ะ`);
+
+    await expect(
+      chatService.editCustomerMessage(uid, m._id, { body: "x", preorder_id: String(otherPre._id) })
+    ).rejects.toMatchObject({ status: 404 });
+    const staffMsg = await chatService.sendStaffMessage(String(other._id), String(conv!._id), { body: "ได้ค่ะ" });
+    await expect(
+      chatService.editStaffMessage(String(conv!._id), staffMsg._id, { body: "ได้ค่ะ", preorder_id: String(pre1._id) })
+    ).rejects.toMatchObject({ status: 400 });
+  });
+
+  it("ลูกค้าแก้/ลบข้อความตัวเองได้ · ข้อความของร้านแก้ไม่ได้ (404) · ลบแล้วไม่ส่งเนื้อหาออกไป · ร้านแก้/ลบของร้านได้", async () => {
+    const user = await makeUser();
+    const staff = await makeUser();
+    const uid = String(user._id);
+    const m1 = await chatService.sendCustomerMessage(uid, { body: "ขอเค้ก 1 ปอนด์" });
+    const { items } = await chatService.listConversations({ pagination: pg });
+    const convId = items[0]._id;
+    const reply = await chatService.sendStaffMessage(String(staff._id), convId, { body: "ได้ค่ะ" });
+
+    const edited = await chatService.editCustomerMessage(uid, m1._id, { body: "ขอเค้ก 2 ปอนด์" });
+    expect(edited).toMatchObject({ body: "ขอเค้ก 2 ปอนด์", deleted: false });
+    expect(edited.edited_at).not.toBeNull();
+    await expect(chatService.editCustomerMessage(uid, m1._id, { body: "  " })).rejects.toMatchObject({ status: 400 });
+    await expect(chatService.editCustomerMessage(uid, reply._id, { body: "แอบแก้" })).rejects.toMatchObject({ status: 404 });
+    await expect(chatService.deleteCustomerMessage(uid, reply._id)).rejects.toMatchObject({ status: 404 });
+    // ลูกค้าคนอื่นแก้ข้อความของคนนี้ไม่ได้
+    const other = await makeUser();
+    await chatService.sendCustomerMessage(String(other._id), { body: "hi" });
+    await expect(chatService.editCustomerMessage(String(other._id), m1._id, { body: "x" })).rejects.toMatchObject({ status: 404 });
+
+    const deleted = await chatService.deleteCustomerMessage(uid, m1._id);
+    expect(deleted).toMatchObject({ body: "", deleted: true, attachment: null, edited_at: null });
+    await expect(chatService.deleteCustomerMessage(uid, m1._id)).rejects.toMatchObject({ status: 404 });
+    await expect(chatService.editCustomerMessage(uid, m1._id, { body: "กลับมา" })).rejects.toMatchObject({ status: 404 });
+
+    const staffView = await chatService.getConversationForStaff(convId, {});
+    expect(staffView.messages.map((m) => [m.body, m.deleted])).toEqual([["", true], ["ได้ค่ะ", false]]);
+
+    expect(await chatService.editStaffMessage(convId, reply._id, { body: "ได้เลยค่ะ" })).toMatchObject({ body: "ได้เลยค่ะ" });
+    await expect(chatService.editStaffMessage(convId, m1._id, { body: "x" })).rejects.toMatchObject({ status: 404 });
+    expect(await chatService.deleteStaffMessage(convId, reply._id)).toMatchObject({ deleted: true });
+    const conv = await chatConversationModel.findById(convId).lean<{ last_message_preview: string; customer_unread: number }>();
+    expect(conv).toMatchObject({ last_message_preview: "ข้อความถูกลบ", customer_unread: 0 });
+  });
+
+  it("polling ?after= ได้ข้อความเก่าที่ถูกแก้/ลบหลังจากนั้นด้วย · ลบข้อความที่ยังไม่อ่าน = ตัวนับยังไม่อ่านลด", async () => {
+    const user = await makeUser();
+    const uid = String(user._id);
+    const m1 = await chatService.sendCustomerMessage(uid, { body: "ข้อความแรก" });
+    await new Promise((r) => setTimeout(r, 20));
+    const m2 = await chatService.sendCustomerMessage(uid, { body: "ข้อความสอง" });
+    expect(await chatService.staffUnreadSummary()).toEqual({ conversations: 1, messages: 2 });
+    const { items } = await chatService.listConversations({ pagination: pg });
+    const convId = items[0]._id;
+    const after = new Date(m2.created_at).toISOString();
+
+    await chatService.editCustomerMessage(uid, m1._id, { body: "ข้อความแรก (แก้)" });
+    const poll = await chatService.getConversationForStaff(convId, { after });
+    expect(poll.messages.map((m) => m.body)).toEqual(["ข้อความแรก (แก้)", "ข้อความสอง"]);
+
+    await chatService.deleteCustomerMessage(uid, m2._id);
+    expect(await chatService.staffUnreadSummary()).toEqual({ conversations: 1, messages: 1 });
+    const poll2 = await chatService.getConversationForStaff(convId, { after });
+    expect(poll2.messages.find((m) => m._id === m2._id)).toMatchObject({ deleted: true, body: "" });
+  });
+});

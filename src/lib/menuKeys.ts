@@ -19,7 +19,6 @@ export const MENU_KEYS = [
   // สินค้า
   "products",
   "stock",
-  "stock_history",
   "search_synonyms",
   // คำสั่งซื้อ
   "orders",
@@ -58,11 +57,9 @@ export const LEGACY_MENU_KEYS: readonly MenuKey[] = ["reports"];
  * key ที่เพิ่มทีหลัง → key เดิมที่จะคัดลอกสิทธิ์ให้ (ครั้งเดียวต่อ migration id · permissionService.ensureSubmenuPermissions)
  * แยกจาก SUBMENU_PARENT เพราะ migration ชุดแรกบันทึกว่าทำแล้ว — เพิ่ม key ใน SUBMENU_PARENT จะไม่ถูกคัดลอกให้ DB ที่ย้ายไปแล้ว
  *   chats ← orders : คนที่ดูแลคำสั่งซื้อได้ตอบแชทลูกค้าได้ทันทีหลัง deploy (เจ้าของร้านแก้แยกทีหลังได้)
- *   stock_history ← stock : คนที่จัดการสต็อกสินค้าได้ดูประวัติสต็อกสินค้าได้ทันทีหลัง deploy
  */
 export const LATER_SUBMENU_MIGRATIONS: readonly { id: string; parents: Partial<Record<MenuKey, MenuKey>> }[] = [
   { id: "chat-permissions-v1", parents: { chats: "orders" } },
-  { id: "stock-history-permissions-v1", parents: { stock_history: "stock" } },
 ];
 
 /** key ใหม่ → key เดิมที่เคยคุมหน้านั้น (ใช้คัดลอกสิทธิ์ตอนย้ายระบบครั้งแรก) */

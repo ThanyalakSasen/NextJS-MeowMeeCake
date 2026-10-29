@@ -39,8 +39,6 @@ export interface DiscountResult {
   eligible_amount: number;
   /** ใช้ร่วมกับโปรอื่นในบิลเดียวได้ (orderService ตรวจตอนส่ง promotion_ids มากกว่า 1 ตัว) */
   stackable: boolean;
-  /** ร่วมได้เฉพาะโปรเหล่านี้ (id) — ว่าง = ร่วมกับโปรที่ stackable ได้ทุกตัว */
-  stackable_with: string[];
 }
 
 /** field ที่ใช้จริงจาก promotion doc — lean() คืน object ดิบ ไม่ใช่ Mongoose document ที่ type ชัดเจน */
@@ -56,7 +54,6 @@ export interface PromotionLike {
   min_quantity?: number | null;
   max_discount_amount?: number | null;
   stackable?: boolean | null;
-  stackable_with?: unknown[] | null;
 }
 
 function idIn(list: unknown[] | undefined, id: string | null | undefined): boolean {
@@ -150,6 +147,5 @@ export function computeDiscount(promo: PromotionLike, ctx: DiscountContext): Dis
     free_shipping: freeShipping,
     eligible_amount: eligibleAmount,
     stackable: promo.stackable === true,
-    stackable_with: (promo.stackable_with ?? []).map(String),
   };
 }

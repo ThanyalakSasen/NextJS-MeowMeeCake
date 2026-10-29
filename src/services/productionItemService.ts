@@ -67,97 +67,6 @@ async function ingredientDemandPerBatch(recipe: any): Promise<Map<string, { qty:
   return demand;
 }
 
-// ── เช็ควัตถุดิบก่อนสร้างใบสั่งผลิต (ฟอร์มสร้างแผนการผลิต — ยังไม่บันทึกอะไร) ──
-export interface StockCheckInput {
-  recipe_id: string;
-  planned_qty: number;
-}
-export interface IngredientShortage {
-  ingredient_id: string;
-  ingredient_name: string;
-  unit_abbr: string | null;
-  /** ต้องใช้ทั้งหมด (ของแถวนั้น หรือรวมทุกแถวใน total_shortages) */
-  required: number;
-  in_stock: number;
-  /** ขาดอีกเท่าไหร่ = required − in_stock */
-  missing: number;
-}
-
-const round3 = (n: number) => Math.round(n * 1000) / 1000;
-
-/**
- * คิดวัตถุดิบที่ต้องใช้แบบเดียวกับ consumeStock (สูตร + ส่วนประกอบ ÷ yield_qty × จำนวน) เทียบ current_stock ตอนนี้
- *   items[i]        — แถวนั้นแถวเดียว: วัตถุดิบที่ไม่พอ + ผลิตได้สูงสุดกี่หน่วย (max_qty · null = สูตรไม่ใช้วัตถุดิบ ไม่จำกัด)
- *   total_shortages — รวมทุกแถว (หลายสินค้าใช้วัตถุดิบเดียวกัน แต่ละแถวพอ แต่รวมกันอาจไม่พอ)
- * ไม่หักยอดที่ใบสั่งผลิตอื่นที่ยังไม่ผลิตจะใช้ — เทียบสต็อกจริง ณ ตอนนี้เท่านั้น · ไม่แปลงหน่วย (ดู lib/bom.ts)
- */
-export async function checkIngredientStock(inputs: StockCheckInput[]) {
-  await dbConnect();
-  const recipeIds = [...new Set(inputs.map((i) => i.recipe_id))];
-  const recipes = await recipeModel.find({ _id: { $in: recipeIds }, deleted_at: null }).lean<any[]>();
-  const recipeById = new Map(recipes.map((r) => [String(r._id), r]));
-
-  // ความต้องการวัตถุดิบต่อสินค้า 1 หน่วย ของแต่ละสูตร
-  const perUnit = new Map<string, Map<string, number>>();
-  for (const r of recipes) {
-    const m = new Map<string, number>();
-    if (r.yield_qty) {
-      for (const [ing, v] of await ingredientDemandPerBatch(r)) m.set(ing, v.qty / r.yield_qty);
-    }
-    perUnit.set(String(r._id), m);
-  }
-
-  const ingredientIds = [...new Set([...perUnit.values()].flatMap((m) => [...m.keys()]))];
-  const ingredients = await ingredientModel
-    .find({ _id: { $in: ingredientIds } })
-    .select("ingredient_name current_stock unit_id")
-    .populate("unit_id", "unit_abbr")
-    .lean<any[]>();
-  const ingById = new Map(ingredients.map((g) => [String(g._id), g]));
-  const stockOf = (id: string) => Number(ingById.get(id)?.current_stock ?? 0);
-
-  const shortage = (ingredientId: string, required: number): IngredientShortage | null => {
-    const need = round3(required);
-    const inStock = stockOf(ingredientId);
-    if (inStock >= need) return null;
-    const g = ingById.get(ingredientId);
-    return {
-      ingredient_id: ingredientId,
-      ingredient_name: g?.ingredient_name ?? "(วัตถุดิบถูกลบ)",
-      unit_abbr: g?.unit_id?.unit_abbr ?? null,
-      required: need,
-      in_stock: inStock,
-      missing: round3(need - inStock),
-    };
-  };
-
-  const total = new Map<string, number>();
-  const items = inputs.map((input) => {
-    const recipe = recipeById.get(String(input.recipe_id));
-    // ไม่พบสูตร / yield_qty = 0 → คิดไม่ได้ (consumeStock ก็ปฏิเสธเหมือนกัน)
-    if (!recipe || !recipe.yield_qty) {
-      return { recipe_id: input.recipe_id, recipe_invalid: true, can_produce: false, max_qty: 0, shortages: [] as IngredientShortage[] };
-    }
-    const shortages: IngredientShortage[] = [];
-    let maxQty: number | null = null;
-    for (const [ing, q] of perUnit.get(String(recipe._id))!) {
-      total.set(ing, (total.get(ing) ?? 0) + q * input.planned_qty);
-      const s = shortage(ing, q * input.planned_qty);
-      if (s) shortages.push(s);
-      if (q > 0) {
-        const fit = Math.max(0, Math.floor(stockOf(ing) / q + 1e-9));
-        maxQty = maxQty == null ? fit : Math.min(maxQty, fit);
-      }
-    }
-    return { recipe_id: input.recipe_id, recipe_invalid: false, can_produce: shortages.length === 0, max_qty: maxQty, shortages };
-  });
-
-  const total_shortages = [...total.entries()]
-    .map(([ing, q]) => shortage(ing, q))
-    .filter((s): s is IngredientShortage => s != null);
-  return { items, total_shortages, can_produce_all: total_shortages.length === 0 && items.every((i) => i.can_produce) };
-}
-
 // ── CREATE ──────────────────────────────────────────────────
 export async function addItem(orderId: string, input: AddItemInput) {
   await dbConnect();
@@ -265,8 +174,7 @@ export async function listByOrder(orderId: string) {
   assertObjectId(orderId, "production_order_id");
   return productionItemModel
     .find({ production_order_id: orderId, deleted_at: null })
-    // shelf_life_days — หน้าปิดงานคำนวณวันหมดอายุเริ่มต้นของล็อต
-    .populate("product_id", "product_name_th product_name_eng shelf_life_days")
+    .populate("product_id", "product_name_th product_name_eng")
     .populate("recipe_id", "recipe_name yield_qty")
     .sort({ created_at: 1 })
     .lean();
@@ -279,7 +187,7 @@ export async function listByOrders(orderIds: string[]) {
   if (orderIds.length === 0) return byOrder;
   const items = await productionItemModel
     .find({ production_order_id: { $in: orderIds }, deleted_at: null })
-    .populate("product_id", "product_name_th product_name_eng shelf_life_days")
+    .populate("product_id", "product_name_th product_name_eng")
     .populate("recipe_id", "recipe_name yield_qty")
     .sort({ created_at: 1 })
     .lean<any[]>();

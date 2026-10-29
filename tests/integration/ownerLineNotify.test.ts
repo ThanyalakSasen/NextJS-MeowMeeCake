@@ -160,14 +160,12 @@ describe("เกณฑ์สินค้าใกล้หมดรายสิ�
   });
 });
 
-/**
- * docs/LINE.md §9.5 ข้อ 4 — ออเดอร์หน้าร้าน (POS) ไม่ push LINE เจ้าของร้าน (ยังบันทึกในเว็บ)
- * §9.15 — "ออเดอร์ใหม่" ทุกช่องทาง push LINE เฉพาะเมื่อ LINE_NOTIFY_NEW_ORDERS=true (POS ต้องเปิด LINE_NOTIFY_POS_ORDERS ด้วย)
- */
-describe("ออเดอร์ใหม่ (เว็บ/POS) กับ LINE เจ้าของร้าน", () => {
+/** docs/LINE.md §9.5 ข้อ 4 — ออเดอร์หน้าร้าน (POS) ไม่ push LINE เจ้าของร้าน (ยังบันทึกในเว็บ) */
+describe("ออเดอร์ POS กับ LINE เจ้าของร้าน", () => {
+  const ORIGINAL = process.env.LINE_NOTIFY_POS_ORDERS;
   afterEach(() => {
-    delete process.env.LINE_NOTIFY_POS_ORDERS;
-    delete process.env.LINE_NOTIFY_NEW_ORDERS;
+    if (ORIGINAL === undefined) delete process.env.LINE_NOTIFY_POS_ORDERS;
+    else process.env.LINE_NOTIFY_POS_ORDERS = ORIGINAL;
     delete process.env.LINE_CHANNEL_ACCESS_TOKEN;
     delete process.env.LINE_TARGET_ID;
     vi.unstubAllGlobals();
@@ -194,36 +192,21 @@ describe("ออเดอร์ใหม่ (เว็บ/POS) กับ LINE �
     return { note: await notificationModel.findOne({ title }).lean<{ line_sent: boolean }>(), pushedToOwner };
   }
 
-  it("ออเดอร์เว็บ (ORD-) ค่าเริ่มต้น → บันทึกในเว็บ แต่ไม่ push LINE", async () => {
-    const { note, pushedToOwner } = await placeOrder("online");
-    expect(note).toBeTruthy();
-    expect(pushedToOwner).toBe(false);
-    expect(note?.line_sent).toBe(false);
-  });
-
-  it("ออเดอร์เว็บ (ORD-) + LINE_NOTIFY_NEW_ORDERS=true → บันทึก + push LINE", async () => {
-    process.env.LINE_NOTIFY_NEW_ORDERS = "true";
+  it("ออเดอร์เว็บ (ORD-) → บันทึก + push LINE เหมือนเดิม", async () => {
     const { note, pushedToOwner } = await placeOrder("online");
     expect(pushedToOwner).toBe(true);
     expect(note?.line_sent).toBe(true);
   });
 
-  it("ออเดอร์ POS + LINE_NOTIFY_NEW_ORDERS=true อย่างเดียว → บันทึกในเว็บ แต่ไม่ push LINE", async () => {
-    process.env.LINE_NOTIFY_NEW_ORDERS = "true";
+  it("ออเดอร์ POS (ค่าเริ่มต้น) → บันทึกในเว็บ แต่ไม่ push LINE", async () => {
+    delete process.env.LINE_NOTIFY_POS_ORDERS;
     const { note, pushedToOwner } = await placeOrder("instore");
     expect(note).toBeTruthy();
     expect(pushedToOwner).toBe(false);
     expect(note?.line_sent).toBe(false);
   });
 
-  it("ออเดอร์ POS + LINE_NOTIFY_POS_ORDERS=true อย่างเดียว → ไม่ push LINE", async () => {
-    process.env.LINE_NOTIFY_POS_ORDERS = "true";
-    const { pushedToOwner } = await placeOrder("instore");
-    expect(pushedToOwner).toBe(false);
-  });
-
-  it("ออเดอร์ POS + เปิดทั้งสองค่า → push LINE", async () => {
-    process.env.LINE_NOTIFY_NEW_ORDERS = "true";
+  it("ออเดอร์ POS + LINE_NOTIFY_POS_ORDERS=true → push LINE", async () => {
     process.env.LINE_NOTIFY_POS_ORDERS = "true";
     const { pushedToOwner } = await placeOrder("instore");
     expect(pushedToOwner).toBe(true);

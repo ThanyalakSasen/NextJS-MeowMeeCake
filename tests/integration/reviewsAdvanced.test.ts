@@ -234,9 +234,12 @@ describe("จัดการรีวิวหลังร้าน", () => {
     expect(preList.items[0].preorder_order_item_id.preorder_id.preorder_no).toMatch(/^PRE-TEST/);
     expect((await list("sort=needs_reply")).items.map((r) => String(r._id)).slice(0, 2)).toEqual([String(badOpen._id), String(preR._id)]);
     expect((await list("q=อร่อย")).items).toHaveLength(1);
+    await moderation.moderateReview(String(good._id), { internal_note_text: "ลูกค้าประจำ" }, staff);
+    expect((await list("has_note=1")).items.map((r) => String(r._id))).toEqual([String(good._id)]);
+    expect((await list("has_note=0")).items).toHaveLength(3);
     const summary = (await list("summary=1&sentiment_group=negative")).summary!;
     expect(summary).toMatchObject({ count: 2, negative_rate: 1, unreplied_negative: 1 });
-    for (const q of ["status=x", "rating=6", "sort=x", "replied=maybe", "order_kind=x", "since=nope"]) {
+    for (const q of ["status=x", "rating=6", "sort=x", "replied=maybe", "order_kind=x", "since=nope", "has_note=x"]) {
       await expect(list(q)).rejects.toMatchObject({ status: 400 });
     }
 

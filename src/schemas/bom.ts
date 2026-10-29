@@ -54,11 +54,3 @@ export const recipeCreate = z.object({
 });
 // update: ห้ามย้ายสินค้า (ตรงกับ updateFields ใน recipeService)
 export const recipeUpdate = recipeCreate.omit({ product_id: true }).partial();
-
-// ── เช็ควัตถุดิบก่อนสร้างใบสั่งผลิต (POST /api/admin/production-orders/stock-check) ──
-export const productionStockCheckBody = z.object({
-  items: z
-    .array(z.object({ recipe_id: objectId, planned_qty: z.coerce.number().positive().max(1_000_000) }))
-    .min(1)
-    .max(100),
-});

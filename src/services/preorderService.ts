@@ -22,7 +22,6 @@ import {
   assertCustomerCancelAllowed,
   setEntityPaymentStatus,
   applyEntityDeliveryUpdate,
-  assertDeliveryReadyToComplete,
   softDeleteEntityWithItems,
 } from "../lib/orderLifecycle";
 import preorderModel from "../models/preorderModel";
@@ -500,8 +499,7 @@ export async function createPreorder(
     // ทุกขั้นสำเร็จ → ทิ้ง undo ก่อนอ่านผลลัพธ์ (getPreorderById อาจ throw โดยไม่ต้อง rollback)
     saga.commit();
 
-    // แจ้งเจ้าของร้าน — คู่กับ orderService.persistOrder · best-effort ไม่ทำให้สร้างพรีออเดอร์ล้มเหลว
-    // push LINE เฉพาะเมื่อตั้ง LINE_NOTIFY_NEW_ORDERS=true (ประหยัดโควตา ร้านได้ LINE ตอนสลิปเข้าแทน — docs/LINE.md §9.15)
+    // แจ้งเจ้าของร้าน (DB + LINE) — คู่กับ orderService.persistOrder · best-effort ไม่ทำให้สร้างพรีออเดอร์ล้มเหลว
     // link → หน้าพรีออเดอร์ (เปิด drawer ด้วย ?id= — frontend PR #16)
     notificationService
       .notify({
@@ -510,11 +508,13 @@ export async function createPreorder(
         module: "order",
         type: "info",
         link: adminLinks.preorder(preorder._id),
-        line: process.env.LINE_NOTIFY_NEW_ORDERS === "true",
       })
       .catch((err) => log.error("preorder.notify_failed", { preorder_id: String(preorder._id), err }));
-    // ลูกค้า — กระดิ่งในเว็บอย่างเดียว (ไม่ส่ง LINE "ได้รับพรีออเดอร์" §9.15)
-    notifyCustomerLater(userId, null, customerWeb.created("preorder", preorder._id, preorder.preorder_no, total_amount));
+    notifyCustomerLater(
+      userId,
+      customerMessages.created("preorder", preorder.preorder_no, total_amount),
+      customerWeb.created("preorder", preorder._id, preorder.preorder_no, total_amount)
+    );
     return getPreorderById(String(preorder._id));
   } catch (err) {
     await saga.rollback();
@@ -570,7 +570,8 @@ export async function listPreorders(query: ListPreorderQuery) {
       // ค้นรายการสินค้าเฉพาะพรีออเดอร์ของลูกค้าคนนี้ (index preorder_id) — เหมือน orderService.listOrders
       const own = query.user_id ? { preorder_id: { $in: await preorderModel.distinct("_id", { user_id: query.user_id, deleted_at: null }) } } : {};
       const ids = await preorderItemModel.distinct("preorder_id", { ...own, deleted_at: null, $or: [{ "product_snapshot.product_name_th": re }, { "product_snapshot.product_name_eng": re }] });
-      filter.$or = [{ preorder_no: re }, { _id: { $in: ids } }];
+      // เลขบิล = ตรงกับ "ท้าย" เลข (รหัส 6 ตัวท้าย เช่น MMC004 · หรือพิมพ์เลขเต็ม) — เหมือน orderService.listOrders
+      filter.$or = [{ preorder_no: new RegExp(`${escapeRegExp(query.search.trim())}$`, "i") }, { _id: { $in: ids } }];
     } else {
       filter.preorder_no = re;
     }
@@ -663,7 +664,6 @@ export async function updatePreorderStatus(
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
   if (next === "cancelled" && opts.cancelled_by) assertObjectId(opts.cancelled_by, "cancelled_by");
-  if (next === "completed") assertDeliveryReadyToComplete(existing, "พรีออเดอร์");
 
   // จองการเปลี่ยนสถานะแบบ atomic ก่อนคืนโควตา/คืนเงิน — กันยกเลิกพร้อมกัน (cron ไม่จ่ายตามกำหนด + ปิดรอบ +
   // ลูกค้ากดเอง) แล้วต่างคนต่างคืนโควตารอบ → รับจองเกินโควตา (เทียบ orderService.updateOrderStatus)
