@@ -92,9 +92,18 @@ export function hashPassword(pw: string): Promise<string> {
 
 // ── CREATE ───────────────────────────────────────────────────
 // required field / auth_provider enum validate ที่ route ผ่าน schemas/user.ts createUserBody แล้ว
+/** วันสุดท้ายที่ทำงานต้องไม่ก่อนวันเริ่มงาน (เดิมไม่ตรวจทั้งหน้าเว็บและ API) */
+function assertWorkingDates(start: unknown, last: unknown): void {
+  if (start == null || last == null) return;
+  if (new Date(last as string).getTime() < new Date(start as string).getTime()) {
+    throw badRequest("last_working_date ต้องไม่ก่อน start_working_date");
+  }
+}
+
 export async function createUser(input: CreateUserBody) {
   await dbConnect();
   await assertRefExists(roleModel, input.role_id, "บทบาท", "role_id");
+  assertWorkingDates(input.start_working_date, input.last_working_date);
 
   const payload: Record<string, any> = {
     ...input,
@@ -231,6 +240,16 @@ export async function updateUser(id: string, input: UpdateUserBody) {
 
   if (input.role_id) {
     await assertRefExists(roleModel, input.role_id, "บทบาท", "role_id");
+  }
+  if (input.start_working_date !== undefined || input.last_working_date !== undefined) {
+    const existing = await userModel
+      .findOne({ _id: id, deleted_at: null })
+      .select("start_working_date last_working_date")
+      .lean<{ start_working_date?: Date | null; last_working_date?: Date | null } | null>();
+    assertWorkingDates(
+      input.start_working_date !== undefined ? input.start_working_date : existing?.start_working_date,
+      input.last_working_date !== undefined ? input.last_working_date : existing?.last_working_date
+    );
   }
 
   const payload = { ...input };
