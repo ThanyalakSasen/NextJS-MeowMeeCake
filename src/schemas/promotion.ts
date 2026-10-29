@@ -19,6 +19,8 @@ const base = z.object({
   applicable_channels: z.array(z.enum(CHANNELS)).min(1).optional(),
   audience: z.enum(AUDIENCES).optional(),
   stackable: z.boolean().optional(),
+  // ใช้ร่วมได้เฉพาะโปรเหล่านี้ — ว่าง = ร่วมกับโปรที่ stackable ได้ทุกตัว
+  stackable_with: z.array(objectId).max(100).optional(),
   min_order_amount: z.number().nonnegative().nullish(),
   min_quantity: z.number().int().nonnegative().nullish(),
   applicable_products: z.array(objectId).optional(),
