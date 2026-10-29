@@ -2,13 +2,13 @@
  * schemas/preorderRound — validation ของ /api/admin/preorder-rounds* (custom routes)
  */
 import { z } from "zod";
-import { objectId } from "./common";
+import { objectId, WHOLE_BAHT } from "./common";
 
 const ROUND_STATUSES = ["scheduled", "open", "closed", "cancelled"] as const;
 
 const roundItem = z.object({
   product_id: objectId,
-  price_override: z.coerce.number().min(0).nullish(),
+  price_override: z.coerce.number().int(WHOLE_BAHT).min(0).nullish(),
   min_order_qty: z.coerce.number().int().min(1).optional(),
   max_qty_total: z.coerce.number().int().min(1),
   is_active: z.boolean().optional(),
@@ -45,7 +45,7 @@ export type AddRoundItemBody = z.infer<typeof addRoundItemBody>;
 /** PATCH /api/admin/preorder-round-items/[id] — ต้องส่งมาอย่างน้อย 1 ฟิลด์ */
 export const updateRoundItemBody = z
   .object({
-    price_override: z.coerce.number().min(0).nullish(),
+    price_override: z.coerce.number().int(WHOLE_BAHT).min(0).nullish(),
     min_order_qty: z.coerce.number().int().min(1).optional(),
     max_qty_total: z.coerce.number().int().min(1).optional(),
     is_active: z.boolean().optional(),

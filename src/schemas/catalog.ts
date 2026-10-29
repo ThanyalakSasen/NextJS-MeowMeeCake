@@ -4,7 +4,7 @@
  * ใช้กับ crudRoutes option `validate: { create, update }`
  */
 import { z } from "zod";
-import { objectId } from "./common";
+import { objectId, WHOLE_BAHT } from "./common";
 
 const UNIT_TYPES = [
   "IngredientWeight",
@@ -68,7 +68,7 @@ export const productOptionCreate = z.object({
   option_name: z.string().trim().min(1).max(120),
   is_text_input: z.boolean().optional(),
   max_text_length: z.coerce.number().int().min(1).max(500).nullable().optional(),
-  extra_price: z.coerce.number().min(0).optional(),
+  extra_price: z.coerce.number().int(WHOLE_BAHT).min(0).optional(),
   is_required: z.boolean().optional(),
 });
 // update: ห้ามย้าย product_id (ตรงกับ updateFields ใน service)
@@ -78,7 +78,7 @@ export const productOptionUpdate = productOptionCreate.omit({ product_id: true }
 export const productVariantCreate = z.object({
   product_id: objectId,
   variant_name: z.string().trim().min(1).max(120),
-  variant_price: z.coerce.number().min(0).optional(),
+  variant_price: z.coerce.number().int(WHOLE_BAHT).min(0).optional(),
   group_id: objectId.nullish(),
   unit_id: objectId.optional(),
 });

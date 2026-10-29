@@ -297,7 +297,8 @@ function cleanName(v: unknown): string {
 
 function cleanPrice(v: unknown): number | null {
   const n = v === "" || v === null || v === undefined ? 0 : Number(v);
-  return Number.isFinite(n) && n >= 0 && n <= MAX_PRICE ? round2(n) : null;
+  // บาทเต็ม (หน้าเว็บล็อกไว้แล้ว) — ทศนิยม = ราคาไม่ถูกต้อง
+  return Number.isInteger(n) && n >= 0 && n <= MAX_PRICE ? round2(n) : null;
 }
 
 const idOrNull = (v: unknown) => (v && isObjectId(String(v)) ? String(v) : null);

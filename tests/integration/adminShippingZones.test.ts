@@ -83,11 +83,13 @@ describe("GET /api/admin/shipping-zones", () => {
 describe("PATCH /api/admin/shipping-zones/:zone_code", () => {
   it("แก้ค่าส่ง + จังหวัด + ชื่อ → ค่าส่งออเดอร์เว็บเปลี่ยนตาม", async () => {
     const owner = await sessionFor("owner");
-    const res = await patch(owner, "B", { fee: 55.555, provinces: ["อุดรธานี", "เลย", "เลย"], zone_label: "Zone B — ใกล้ร้าน" });
+    // ค่าส่ง = บาทเต็ม — ทศนิยม → 400
+    expect((await patch(owner, "B", { fee: 55.5 })).status).toBe(400);
+    const res = await patch(owner, "B", { fee: 55, provinces: ["อุดรธานี", "เลย", "เลย"], zone_label: "Zone B — ใกล้ร้าน" });
     expect(res.status).toBe(200);
-    expect(res.body.data).toMatchObject({ zone_code: "B", fee: 55.56, provinces: ["อุดรธานี", "เลย"], zone_label: "Zone B — ใกล้ร้าน" });
+    expect(res.body.data).toMatchObject({ zone_code: "B", fee: 55, provinces: ["อุดรธานี", "เลย"], zone_label: "Zone B — ใกล้ร้าน" });
 
-    expect((await shippingService.quoteStorefrontDelivery({ province: "เลย", productIds: [] })).fee).toBe(55.56);
+    expect((await shippingService.quoteStorefrontDelivery({ province: "เลย", productIds: [] })).fee).toBe(55);
     // บึงกาฬถูกเอาออกจาก B → ตกไปโซน D
     expect((await shippingService.quoteStorefrontDelivery({ province: "บึงกาฬ", productIds: [] })).zone_code).toBe("D");
   });
@@ -135,15 +137,15 @@ describe("PATCH /api/admin/shipping-zones/:zone_code", () => {
 describe("POST /api/admin/shipping-zones (เพิ่มโซน)", () => {
   it("ได้รหัสถัดไป (E) · ค่าส่งของจังหวัดในโซนใหม่เปลี่ยนตาม", async () => {
     const owner = await sessionFor("owner");
-    const res = await post(owner, { zone_label: "Zone E — กรุงเทพฯ", fee: 90.555, provinces: ["กรุงเทพมหานคร"] });
+    const res = await post(owner, { zone_label: "Zone E — กรุงเทพฯ", fee: 90, provinces: ["กรุงเทพมหานคร"] });
     expect(res.status).toBe(201);
-    expect(res.body.data).toMatchObject({ zone_code: "E", zone_label: "Zone E — กรุงเทพฯ", fee: 90.56, provinces: ["กรุงเทพมหานคร"] });
+    expect(res.body.data).toMatchObject({ zone_code: "E", zone_label: "Zone E — กรุงเทพฯ", fee: 90, provinces: ["กรุงเทพมหานคร"] });
 
     // โซน D (จังหวัดอื่นทั้งหมด) อยู่ท้ายรายการเสมอ
     expect((await list(owner)).body.data.items.map((z: { zone_code: string }) => z.zone_code)).toEqual(["A", "B", "C", "E", "D"]);
 
     const quote = await shippingService.quoteStorefrontDelivery({ province: "กรุงเทพมหานคร", productIds: [] });
-    expect(quote).toMatchObject({ zone_code: "E", fee: 90.56 });
+    expect(quote).toMatchObject({ zone_code: "E", fee: 90 });
     expect((await post(owner, { zone_label: "อีกโซน", fee: 10, provinces: ["ภูเก็ต"] })).body.data.zone_code).toBe("F");
   });
 

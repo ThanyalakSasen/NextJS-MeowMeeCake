@@ -3,7 +3,7 @@
  * CRUD ผู้ใช้ฝั่งแอดมิน (/api/admin/users)
  */
 import { z } from "zod";
-import { phone, objectId } from "./common";
+import { phone, objectId, WHOLE_BAHT } from "./common";
 
 /** เลขพร้อมเพย์รับเงินคืน: เบอร์มือถือ 10 หลัก (ขึ้นต้น 0) หรือเลขบัตรประชาชน 13 หลัก · ตัดขีด/ช่องว่างให้ */
 const refundPromptpayId = z
@@ -35,7 +35,7 @@ const employeeShape = {
   is_active: z.boolean().optional(),
   start_working_date: z.coerce.date().nullish(),
   employment_type: z.enum(EMPLOYMENT_TYPES).nullish(),
-  emp_salary: z.coerce.number().nonnegative().nullish(),
+  emp_salary: z.coerce.number().int(WHOLE_BAHT).nonnegative().nullish(),
   part_time_hours: z.coerce.number().nonnegative().nullish(),
   emp_status: z.boolean().nullish(),
 };
