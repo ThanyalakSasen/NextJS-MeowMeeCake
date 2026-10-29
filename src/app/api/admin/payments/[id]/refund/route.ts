@@ -14,7 +14,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const POST = withPermission("payments", "delete", async (session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const before = await paymentService.getPaymentById(id).catch(() => undefined);
-  const result = await paymentService.refundPayment(id, { verified_by: session.user_id });
+  const result = await paymentService.refundPayment(id, { verified_by: session.user_id, requireCancelled: true });
   auditChange(req, {
     op: "update",
     verb: "คืนเงิน",

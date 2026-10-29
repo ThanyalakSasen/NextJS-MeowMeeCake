@@ -412,11 +412,32 @@ export async function verifyPayment(
 }
 
 // ── คืนเงิน ─────────────────────────────────────────────────
-export async function refundPayment(id: string, input: { verified_by: string }) {
+/**
+ * requireCancelled — คืนเงินด้วยมือ (POST /admin/payments/:id/refund) ทำได้เฉพาะเอกสารที่ยกเลิกแล้ว
+ * เดิมคืนเงินรายการ paid ของออเดอร์ที่ยังดำเนินอยู่ได้ → ออเดอร์เดินต่อจนส่งของ ทั้งที่สถานะชำระเป็น "คืนเงินแล้ว"
+ * (หน้าเว็บโชว์ปุ่มเฉพาะ "ยกเลิก + ชำระแล้ว" อยู่แล้ว) · คืนอัตโนมัติตอนยกเลิก (orderLifecycle) ไม่ส่ง flag นี้
+ */
+export async function refundPayment(id: string, input: { verified_by: string; requireCancelled?: boolean }) {
   await dbConnect();
   assertObjectId(id);
   if (!isObjectId(input.verified_by)) throw badRequest("verified_by ต้องเป็น ObjectId");
   await assertRefExists(userModel, input.verified_by, "ผู้ดำเนินการ", "verified_by");
+
+  if (input.requireCancelled) {
+    const current = await paymentModel
+      .findOne({ _id: id, deleted_at: null })
+      .select("order_id preorder_id")
+      .lean<{ order_id?: unknown; preorder_id?: unknown } | null>();
+    if (!current) throw notFound("ไม่พบรายการชำระเงินที่ระบุ");
+    const owner = current.order_id
+      ? await orderModel.findById(current.order_id).select("order_status").lean<{ order_status?: string } | null>()
+      : current.preorder_id
+        ? await preorderModel.findById(current.preorder_id).select("order_status").lean<{ order_status?: string } | null>()
+        : null;
+    if (owner && owner.order_status !== "cancelled") {
+      throw conflict("คืนเงินได้เฉพาะออเดอร์/พรีออเดอร์ที่ยกเลิกแล้ว — ยกเลิกก่อนแล้วจึงคืนเงิน");
+    }
+  }
 
   // atomic เหมือน verifyPayment — คืนเงินซ้ำพร้อมกันได้ผลครั้งเดียว
   const payment = await paymentModel.findOneAndUpdate(

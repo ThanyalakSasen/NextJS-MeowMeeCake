@@ -105,8 +105,23 @@ describe("นโยบายยกเลิกของลูกค้า", () =
     }
     expect(await notificationModel.exists({ title: new RegExp(`${a.order.order_no} — รอโอนเงินคืน`) })).toBeTruthy();
 
-    await paymentService.refundPayment(String(pay._id), { verified_by: String(admin._id) });
+    await paymentService.refundPayment(String(pay._id), { verified_by: String(admin._id), requireCancelled: true });
     expect((await orderModel.findById(a.order._id).lean<{ payment_status: string }>())!.payment_status).toBe("refunded");
+  });
+
+  it("คืนเงินด้วยมือ (requireCancelled): ออเดอร์ยังไม่ยกเลิก → 409 · payment ยัง paid", async () => {
+    const a = await webOrder();
+    const admin = await makeUser();
+    const pay = (await paymentService.createPayment({
+      user_id: a.uid, order_id: a.oid, amount: a.order.total_amount, slip_image_url: "/api/files/slips/r.jpg",
+    })) as { _id: unknown };
+    await paymentService.verifyPayment(String(pay._id), { verified_by: String(admin._id), approved: true });
+
+    await expect(
+      paymentService.refundPayment(String(pay._id), { verified_by: String(admin._id), requireCancelled: true })
+    ).rejects.toMatchObject({ status: 409 });
+    expect((await paymentModel.findById(pay._id).lean<{ status: string }>())!.status).toBe("paid");
+    expect((await orderModel.findById(a.order._id).lean<{ payment_status: string }>())!.payment_status).toBe("paid");
   });
 
   it("สินค้าพร้อมแล้ว (ready) / ออเดอร์หน้าร้าน → 409", async () => {
