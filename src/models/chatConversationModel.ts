@@ -14,6 +14,11 @@ const chatConversationSchema = new mongoose.Schema(
     customer_unread: { type: Number, default: 0, min: 0 },
     /** ข้อความจากลูกค้าที่ร้านยังไม่อ่าน */
     staff_unread: { type: Number, default: 0, min: 0 },
+    /**
+     * ร้านกด "ลบแชท" เมื่อไร (null = แสดงในรายการห้องหลังร้าน) — ซ่อนจากหลังร้านเท่านั้น ข้อความ/ประวัติไม่ถูกลบ
+     * ลูกค้าส่งข้อความใหม่ = กลับมาแสดง (ล้างเป็น null) พร้อมประวัติเดิมทั้งหมด
+     */
+    staff_hidden_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" }, collection: "chatconversations" }
 );
