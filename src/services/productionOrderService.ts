@@ -79,6 +79,7 @@ export async function createProductionOrder(input: CreateProductionOrderInput) {
   await dbConnect();
 
   if (!input.production_date) throw badRequest("กรุณาระบุ production_date");
+  assertNoteLength(input.production_note);
   if (input.source_type && input.source_type !== "manual") {
     throw badRequest('เฟสนี้รองรับ source_type = "manual" เท่านั้น (preorder อยู่ในเฟสถัดไป)');
   }
@@ -266,6 +267,7 @@ export async function createProductionFromRound(input: CreateProductionFromRound
   await dbConnect();
   assertObjectId(input.round_id, "round_id");
   if (!input.production_date) throw badRequest("กรุณาระบุ production_date");
+  assertNoteLength(input.production_note);
 
   const round = await preorderRoundModel.findOne({ _id: input.round_id, deleted_at: null }).lean<any>();
   if (!round) throw notFound("ไม่พบรอบพรีออเดอร์ที่ระบุ");
@@ -407,6 +409,7 @@ export async function updateProductionOrder(id: string, input: Record<string, an
   if (input.assigned_to) {
     await assertRefExists(userModel, input.assigned_to, "ผู้รับผิดชอบ", "assigned_to");
   }
+  assertNoteLength(input.production_note);
   for (const f of ["production_date", "assigned_to", "production_note"] as const) {
     if (input[f] !== undefined) {
       (order as any)[f] = f === "production_date" ? new Date(input[f]) : input[f];
@@ -414,6 +417,14 @@ export async function updateProductionOrder(id: string, input: Record<string, an
   }
   await order.save();
   return getProductionOrderById(id);
+}
+
+/** หมายเหตุใบสั่งผลิต — เดิมไม่จำกัดความยาว (หน้าเว็บตั้ง maxLength เท่ากัน) */
+const MAX_NOTE_LENGTH = 1000;
+function assertNoteLength(note: unknown): void {
+  if (typeof note === "string" && note.length > MAX_NOTE_LENGTH) {
+    throw badRequest(`production_note ยาวได้ไม่เกิน ${MAX_NOTE_LENGTH} ตัวอักษร`);
+  }
 }
 
 // ── STATUS ─────────────────────────────────────────────────
