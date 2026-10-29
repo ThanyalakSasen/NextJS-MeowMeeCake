@@ -10,7 +10,7 @@
  * LINE OA · ไม่ได้ผูก / ไม่ได้ตั้ง LINE_CHANNEL_ACCESS_TOKEN / LINE ล้มเหลว = ข้ามเงียบ ๆ (log warn)
  * ไม่ throw — ทุกจุดที่เรียกเป็น fire-and-forget ห้ามทำให้ธุรกรรมหลักล้มตาม
  *
- * จุดที่เรียก: orderService.persistOrder / preorderService.createPreorder (สร้างใหม่),
+ * จุดที่เรียก: orderService.persistOrder / preorderService.createPreorder (สร้างใหม่ — กระดิ่งอย่างเดียว),
  * updateOrderStatus / updatePreorderStatus (สถานะ), lib/orderLifecycle (ชำระเงิน + จัดส่ง — ใช้ร่วม order/preorder),
  * preorderReminderService (เตือนวันรับ) · preorderRoundService (เลื่อนวันรับ)
  *
@@ -43,7 +43,7 @@ const KIND_LABEL: Record<CustomerDocKind, string> = { order: "ออเดอร
 
 /**
  * สถานะที่แจ้งลูกค้า — ประหยัดโควตา LINE OA (ฟรี 300 ข้อความ/เดือน — docs/LINE.md §9.6 ข้อ ก)
- * ไม่แจ้ง: pending (ได้ข้อความ "ได้รับออเดอร์" แล้ว) · confirmed (ไม่ผ่านแล้ว — จ่ายแล้วเลื่อนเป็น preparing อัตโนมัติ ได้แค่ "ชำระเงินสำเร็จ" ข้อความเดียว)
+ * ไม่แจ้ง: pending (เห็นในเว็บทันทีหลังสั่ง) · confirmed (ไม่ผ่านแล้ว — จ่ายแล้วเลื่อนเป็น preparing อัตโนมัติ ได้แค่ "ชำระเงินสำเร็จ" ข้อความเดียว)
  * · preparing / completed (ไม่ต้องทำอะไรต่อ ดูในเว็บได้) · ready ของออเดอร์จัดส่ง (ได้ "กำลังจัดส่ง" แทน)
  */
 const ORDER_STATUS_TEXT: Record<string, string> = {
@@ -57,9 +57,9 @@ const PAYMENT_STATUS_TEXT: Record<string, string> = {
   refunded: "คืนเงินเรียบร้อยแล้ว",
 };
 
+/** ไม่แจ้ง delivered ทาง LINE — ลูกค้าได้รับของเองอยู่แล้ว ยังมีในกระดิ่งเว็บ (docs/LINE.md §9.15) */
 const DELIVERY_STATUS_TEXT: Record<string, string> = {
   shipping: "กำลังจัดส่ง 🚚",
-  delivered: "จัดส่งสำเร็จแล้ว",
   failed: "จัดส่งไม่สำเร็จ ร้านจะติดต่อกลับค่ะ",
 };
 
@@ -74,10 +74,8 @@ function shippingLines(trackingNo?: string | null, carrier?: string | null): str
 }
 
 // ── ข้อความ (export ให้เทสตรวจได้) ─────────────────────────
+// ไม่มีข้อความ "ได้รับออเดอร์" — สร้างใหม่แจ้งแค่กระดิ่งในเว็บ (customerWeb.created · docs/LINE.md §9.15)
 export const customerMessages = {
-  created(kind: CustomerDocKind, docNo: string, total: number): string {
-    return `${header(kind, docNo)}\nได้รับ${KIND_LABEL[kind]}แล้ว ยอดรวม ${toBaht(total).toLocaleString("th-TH")} บาท`;
-  },
   orderStatus(
     kind: CustomerDocKind,
     docNo: string,

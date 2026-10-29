@@ -25,8 +25,8 @@
 
 | เหตุการณ์ | เงื่อนไข | จุดเรียก |
 |---|---|---|
-| ออเดอร์ใหม่ | ออเดอร์เว็บ `ORD-` → หน้าแจ้งเตือนเว็บ + LINE · ออเดอร์หน้าร้าน `POS-` → หน้าแจ้งเตือนเว็บ**อย่างเดียว** (ตั้ง `LINE_NOTIFY_POS_ORDERS=true` ถ้าอยากได้ LINE ด้วย — §9.5) | `orderService.persistOrder` |
-| พรีออเดอร์ใหม่ | ทุกพรีออเดอร์ — ข้อความมีชื่อรอบ + ยอดรวม (เพิ่ม 2026-09-30, §9) | `preorderService.createPreorder` |
+| ออเดอร์ใหม่ | หน้าแจ้งเตือนเว็บ**อย่างเดียว** ทุกช่องทาง — ตั้ง `LINE_NOTIFY_NEW_ORDERS=true` ถ้าอยากได้ LINE ด้วย (§9.15) · ออเดอร์หน้าร้าน `POS-` ต้องตั้ง `LINE_NOTIFY_POS_ORDERS=true` เพิ่มอีกตัว (§9.5) | `orderService.persistOrder` |
+| พรีออเดอร์ใหม่ | ข้อความมีชื่อรอบ + ยอดรวม (เพิ่ม 2026-09-30, §9) — หน้าแจ้งเตือนเว็บอย่างเดียว เว้นแต่ตั้ง `LINE_NOTIFY_NEW_ORDERS=true` (§9.15) | `preorderService.createPreorder` |
 | สลิปรอตรวจ | ลูกค้าแนบ/แก้สลิป | `paymentService.submitSlip` |
 | สินค้าใกล้หมด | สต็อกเพิ่งข้ามลงมา ≤ **เกณฑ์ของสินค้านั้น** (`products.low_stock_threshold` · ไม่ตั้ง = 5 — §9.5) — ทั้งตอนขาย **และ** ปรับสต็อกเอง (นับสต็อก/ตัดของเสีย — §9.2) | `productService.notifyIfLowStockCrossed()` ← `deductStockForOrder` / `setStock` / `adjustStock` (+ `increaseStock`/`decreaseStock`) |
 | วัตถุดิบใกล้หมด | สต็อกเพิ่งข้ามลงมา ≤ `reorder_point` ของวัตถุดิบนั้น | `ingredientTransactionService.createTransaction` |
@@ -38,10 +38,10 @@
 
 | เหตุการณ์ | ออเดอร์ | พรีออเดอร์ | จุดเรียก |
 |---|---|---|---|
-| ได้รับออเดอร์ + ยอดรวม | ✅ (เฉพาะเว็บ ไม่ส่งสำหรับ POS) | ✅ | `orderService.persistOrder` / `preorderService.createPreorder` |
+| ได้รับออเดอร์ + ยอดรวม — **กระดิ่งเว็บอย่างเดียว ไม่ส่ง LINE** (§9.15) | ❌ | ❌ | `orderService.persistOrder` / `preorderService.createPreorder` |
 | สถานะเปลี่ยน — **เฉพาะ** `ready` (รับเองที่ร้าน) และ `cancelled` + เหตุผล · ไม่แจ้ง confirmed / preparing / completed และ ready ของออเดอร์จัดส่ง (ประหยัดโควตา — §9.6) | ✅ | ✅ | `updateOrderStatus` / `updatePreorderStatus` |
 | ชำระเงิน (paid / failed / refunded) | ✅ | ✅ | `lib/orderLifecycle.setEntityPaymentStatus` |
-| จัดส่ง (shipping + เลขพัสดุ / delivered / failed) | ✅ | ✅ | `lib/orderLifecycle.applyEntityDeliveryUpdate` |
+| จัดส่ง (shipping + เลขพัสดุ / failed) · delivered ไม่ส่ง LINE — กระดิ่งเว็บอย่างเดียว (§9.15) | ✅ | ✅ | `lib/orderLifecycle.applyEntityDeliveryUpdate` |
 | ⏰ เตือนก่อนวันรับ (รับเอง: "มารับได้ที่ร้าน…" / จัดส่ง: "จะเริ่มจัดส่ง…" · ยังไม่จ่ายเตือนชำระด้วย) — วันละครั้งจากตัวตั้งเวลา (§9.7) | — | ✅ | `preorderReminderService.sendPickupReminders` |
 
 จัดส่ง: แจ้งเฉพาะตอน `delivery_status` เปลี่ยนจริง — แก้แค่ `tracking_no`/note ไม่แจ้งซ้ำ
@@ -56,6 +56,8 @@ LINE_CHANNEL_ACCESS_TOKEN=
 LINE_TARGET_ID=
 # true = ออเดอร์หน้าร้าน (POS) ส่ง LINE หาเจ้าของร้านด้วย (ไม่ตั้ง = ไม่ส่ง)
 LINE_NOTIFY_POS_ORDERS=
+# true = ส่ง LINE "ออเดอร์ใหม่/พรีออเดอร์ใหม่" หาเจ้าของร้าน · ไม่ตั้ง = บันทึกในหน้าแจ้งเตือนเว็บอย่างเดียว (ร้านยังได้ LINE ตอนสลิปเข้า) — ประหยัดโควตา
+LINE_NOTIFY_NEW_ORDERS=
 # จำนวนข้อความที่กันไว้ให้เจ้าของร้านต่อเดือน — โควตาเหลือเท่านี้แล้วหยุดส่งหาลูกค้า (ไม่ตั้ง = 30)
 LINE_OWNER_QUOTA_RESERVE=
 
@@ -76,6 +78,7 @@ LINE_LINK_RETURN_URL=http://localhost:3001/profile
 | `LINE_TARGET_ID` | userId (ขึ้นต้น `U`) ของเจ้าของร้าน หรือ groupId (ขึ้นต้น `C`) — ต้องเป็นเพื่อน/อยู่ในกลุ่มกับ OA |
 | `ADMIN_APP_URL` | ไม่บังคับ — URL เว็บหลังร้าน · ตั้งแล้วข้อความ LINE ถึงเจ้าของร้านแนบลิงก์ `🔗` ไปหน้าที่เกี่ยวข้อง (§9.12) |
 | `LINE_NOTIFY_POS_ORDERS` | ไม่บังคับ — `true` = ออเดอร์ POS ส่ง LINE หาเจ้าของร้านด้วย · ไม่ตั้ง = บันทึกในหน้าแจ้งเตือนเว็บอย่างเดียว (§9.5) |
+| `LINE_NOTIFY_NEW_ORDERS` | ไม่บังคับ — `true` = "ออเดอร์ใหม่/พรีออเดอร์ใหม่" ส่ง LINE หาเจ้าของร้าน · ไม่ตั้ง = หน้าแจ้งเตือนเว็บอย่างเดียว (§9.15) |
 | `LINE_OWNER_QUOTA_RESERVE` | ไม่บังคับ — จำนวนเต็ม ≥ 0 (ค่าเริ่มต้น 30) · โควตาเดือนนี้เหลือ ≤ ค่านี้ → หยุดส่งหาลูกค้า เก็บไว้ให้แจ้งเตือนร้าน (§9.6) |
 | `CRON_SECRET` | ต้องตั้งถ้าจะเรียก `/api/cron/preorder-reminders` — ตัวตั้งเวลาส่ง `Authorization: Bearer <ค่านี้>` · ไม่ตั้ง = ปิด endpoint (สคริปต์ `npm run remind:preorders` ไม่ต้องใช้) (§9.7) |
 | `PREORDER_REMINDER_DAYS_BEFORE` | ไม่บังคับ — เตือนก่อนวันรับกี่วัน (ค่าเริ่มต้น 1 · 0 = วันรับ) (§9.7) |
@@ -837,3 +840,17 @@ frontend PR #16 (merge `49cae44`) ทำหน้าออเดอร์ / พ�
 | โควตา LINE ใกล้หมด/หมด (เว็บอย่างเดียว) | — |
 
 เทส `notificationLinks.test.ts` 5 เคส (path · พรีออเดอร์ใหม่ + สลิป · ปิดรอบสร้างใบผลิต/ไม่ได้ · สินค้าใกล้หมด) · เทสรวม 511 ผ่าน
+
+### 9.15 ลดข้อความ LINE ต่อออเดอร์ — แพ็กเกจฟรีโควตาหมด (2026-10-27)
+
+ก่อนแก้ ออเดอร์เว็บ 1 ใบ (ลูกค้าผูก LINE) ใช้ประมาณ 5–6 ข้อความ: ร้าน 2 (ออเดอร์ใหม่ + สลิป) · ลูกค้า 3–4 (ได้รับ · ชำระสำเร็จ · พร้อมรับ หรือ กำลังจัดส่ง + ส่งถึง)
+โควตาฟรี 300 ข้อความ/เดือน จึงพอแค่ประมาณ 50–60 ออเดอร์ หลังแก้เหลือประมาณ 3–4 ข้อความ
+
+| เหตุการณ์ | ก่อน | หลัง |
+|---|---|---|
+| ลูกค้า: ได้รับออเดอร์/พรีออเดอร์ + ยอดรวม | กระดิ่ง + LINE | กระดิ่งอย่างเดียว — ลูกค้าเห็นในหน้าเว็บทันทีหลังสั่ง (`customerMessages.created` ถูกลบ) |
+| ลูกค้า: จัดส่งสำเร็จ (`delivered`) | กระดิ่ง + LINE | กระดิ่งอย่างเดียว — ลูกค้าได้รับของเองอยู่แล้ว |
+| ร้าน: ออเดอร์ใหม่ (`ORD-`) / พรีออเดอร์ใหม่ | หน้าแจ้งเตือน + LINE | หน้าแจ้งเตือนอย่างเดียว — ร้านได้ LINE ตอน "สลิปรอตรวจ" แทน (จ่ายได้ทางสลิปทางเดียว) · ตั้ง `LINE_NOTIFY_NEW_ORDERS=true` เพื่อเปิดกลับ |
+| ร้าน: ออเดอร์ใหม่ `POS-` | ต้องตั้ง `LINE_NOTIFY_POS_ORDERS=true` | ต้องตั้งทั้ง `LINE_NOTIFY_NEW_ORDERS=true` และ `LINE_NOTIFY_POS_ORDERS=true` |
+
+เทส: `lineEventScenarios.test.ts` (ปรับจำนวนข้อความตามข้างบน + เคส `LINE_NOTIFY_NEW_ORDERS`) · `ownerLineNotify.test.ts` (5 เคส: เว็บค่าเริ่มต้น / เว็บ+NEW · POS+NEW · POS+POS · POS+ทั้งสอง)
