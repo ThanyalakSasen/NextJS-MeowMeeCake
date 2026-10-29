@@ -11,6 +11,7 @@ import roleModel from "../models/roleModel";
 import userModel from "../models/userModel";
 import { createCrudService } from "../lib/crudService";
 import { badRequest, conflict } from "../lib/httpError";
+import { assertRoleKeepsOwner } from "./ownerProtection";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -30,6 +31,7 @@ export const roleService = {
         throw badRequest("เปลี่ยนประเภทของบทบาทไม่ได้ — สร้างบทบาทใหม่ตามประเภทที่ต้องการแทน");
       }
     }
+    await assertRoleKeepsOwner(id, input);
     return base.update(id, input);
   },
 
