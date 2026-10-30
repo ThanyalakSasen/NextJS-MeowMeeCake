@@ -838,6 +838,12 @@ export async function updateOrderStatus(
   if (!NEXT_STATUS[current].includes(next)) {
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
+  // ยังไม่ชำระ = เดินหน้าไม่ได้ (ยกเลิกได้อย่างเดียว) — แบบเดียวกับพรีออเดอร์ (preorderService.updatePreorderStatus)
+  // ยืนยันสลิปแล้วระบบเลื่อนให้เอง · POS รับเงินก่อนแล้วค่อยเลื่อน (posCheckoutService) · หน้าจอหลังร้านกันไว้แล้ว
+  // ที่นี่กันการเรียก API ตรง/หน้าจอรุ่นเก่า — เดิมเลื่อนออเดอร์ที่ยังไม่จ่ายไปจน "สำเร็จ" ได้ (ส่งของโดยไม่ได้เงิน)
+  if (next !== "cancelled" && existing.payment_status !== "paid") {
+    throw conflict("ออเดอร์นี้ยังไม่ชำระเงิน — ยืนยันการชำระเงินก่อนจึงเลื่อนสถานะได้");
+  }
   if (next === "cancelled" && opts.cancelled_by) assertObjectId(opts.cancelled_by, "cancelled_by");
   // ออเดอร์หน้าร้าน (POS) ปิดงานที่เคาน์เตอร์ในคำขอเดียว (posCheckoutService) — ไม่มีขั้นจัดส่ง
   if (next === "completed" && !String(existing.order_no ?? "").startsWith(`${orderNoPrefix("instore")}-`)) {

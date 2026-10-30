@@ -77,6 +77,7 @@ describe("ใช้แต้มตอนสั่งซื้อ + ยกเล�
     expect(await pointsService.getBalance(uid)).toBe(500);
 
     const done = await webOrder(uid, String(p._id), { points_to_redeem: 100 });
+    await orderModel.updateOne({ _id: done._id }, { $set: { payment_status: "paid" } }); // ยังไม่ชำระ = เลื่อนสถานะไม่ได้
     for (const st of ["confirmed", "preparing", "ready", "completed"] as const) {
       await orderService.updateOrderStatus(String(done._id), st);
     }

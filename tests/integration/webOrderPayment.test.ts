@@ -126,6 +126,7 @@ describe("นโยบายยกเลิกของลูกค้า", () =
 
   it("สินค้าพร้อมแล้ว (ready) / ออเดอร์หน้าร้าน → 409", async () => {
     const a = await webOrder();
+    await orderModel.updateOne({ _id: a.oid }, { $set: { payment_status: "paid" } }); // ยังไม่ชำระ = เลื่อนสถานะไม่ได้
     await orderService.updateOrderStatus(a.oid, "confirmed");
     await orderService.updateOrderStatus(a.oid, "preparing");
     await orderService.updateOrderStatus(a.oid, "ready");

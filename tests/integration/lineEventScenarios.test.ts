@@ -101,6 +101,7 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
   it("รับเองที่ร้าน: ไล่ confirmed → preparing → ready → completed → LINE แค่ 'พร้อมรับ' (รวมทั้งหมด 1 ข้อความ)", async () => {
     const c = await customer();
     const { id } = await placeOrder(c.uid);
+    await orderModel.updateOne({ _id: id }, { $set: { payment_status: "paid" } }); // ยังไม่ชำระ = เลื่อนสถานะไม่ได้
     for (const s of ["confirmed", "preparing", "ready", "completed"] as const) {
       await orderService.updateOrderStatus(id, s);
     }
@@ -113,6 +114,7 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
   it("จัดส่ง: ready ไม่แจ้ง · เริ่มส่งแจ้งพร้อมขนส่ง+เลขพัสดุ · แก้เลขพัสดุไม่แจ้งซ้ำ · ส่งถึงไม่แจ้งทาง LINE (กระดิ่งเว็บแทน — §9.15)", async () => {
     const c = await customer();
     const { id } = await placeDeliveryOrder(c.uid);
+    await orderModel.updateOne({ _id: id }, { $set: { payment_status: "paid" } }); // ยังไม่ชำระ = เลื่อนสถานะไม่ได้
     for (const s of ["confirmed", "preparing", "ready"] as const) {
       await orderService.updateOrderStatus(id, s);
     }
@@ -184,6 +186,7 @@ describe("ลูกค้า — ออเดอร์หน้าเว็บ (
     process.env.LINE_NOTIFY_NEW_ORDERS = "true";
     const user = await makeUser();
     const { order, id } = await placeOrder(String(user._id));
+    await orderModel.updateOne({ _id: id }, { $set: { payment_status: "paid" } }); // ยังไม่ชำระ = เลื่อนสถานะไม่ได้
     await orderService.updateOrderStatus(id, "confirmed");
     await orderService.updateOrderStatus(id, "preparing");
     await orderService.updateOrderStatus(id, "ready");
@@ -200,6 +203,7 @@ describe("ลูกค้า — บิลหน้าร้าน (POS-)", () =
     const c = await customer();
     const { order, id } = await placeOrder(c.uid, "instore");
     expect(order.order_no.startsWith("POS-")).toBe(true);
+    await orderModel.updateOne({ _id: id }, { $set: { payment_status: "paid" } }); // ยังไม่ชำระ = เลื่อนสถานะไม่ได้
     for (const s of ["confirmed", "preparing", "ready"] as const) {
       await orderService.updateOrderStatus(id, s);
     }

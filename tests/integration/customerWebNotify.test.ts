@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import customerNotificationModel from "@/models/customerNotificationModel";
+import orderModel from "@/models/orderModel";
 import * as orderService from "@/services/orderService";
 import * as customerNotifyService from "@/services/customerNotifyService";
 import { flushBackground } from "@/lib/backgroundTasks";
@@ -34,6 +35,7 @@ async function webOrder(channel: "online" | "instore" = "online") {
 describe("กระดิ่งในเว็บของลูกค้า", () => {
   it("แจ้งทุกสถานะของออเดอร์เว็บ (รวมกำลังเตรียม/สำเร็จที่ไม่ส่ง LINE) · ลิงก์ไปหน้ารายละเอียด", async () => {
     const { user, order, oid } = await webOrder();
+    await orderModel.updateOne({ _id: oid }, { $set: { payment_status: "paid" } }); // ยังไม่ชำระ = เลื่อนสถานะไม่ได้
     for (const st of ["confirmed", "preparing", "ready", "completed"] as const) {
       await orderService.updateOrderStatus(oid, st);
     }
@@ -63,6 +65,7 @@ describe("กระดิ่งในเว็บของลูกค้า", (
     expect(await customerNotificationModel.countDocuments({ user_id: b.user._id })).toBe(1);
 
     const pos = await webOrder("instore");
+    await orderModel.updateOne({ _id: pos.oid }, { $set: { payment_status: "paid" } }); // ยังไม่ชำระ = เลื่อนสถานะไม่ได้
     await orderService.updateOrderStatus(pos.oid, "confirmed");
     await flushBackground(); // รองานแจ้งเตือนเบื้องหลังจบจริง (แทนรอ 150ms)
     expect(await customerNotificationModel.countDocuments({ user_id: pos.user._id })).toBe(0);
@@ -70,6 +73,7 @@ describe("กระดิ่งในเว็บของลูกค้า", (
 
   it("รายการของฉัน + ยังไม่อ่าน · อ่านรายการเดียว / อ่านทั้งหมด · คนอื่นอ่านแทนไม่ได้ · ที่บันทึกล่วงหน้ายังไม่แสดง", async () => {
     const { user, oid } = await webOrder();
+    await orderModel.updateOne({ _id: oid }, { $set: { payment_status: "paid" } }); // ยังไม่ชำระ = เลื่อนสถานะไม่ได้
     await orderService.updateOrderStatus(oid, "confirmed");
     await waitNotices(user._id, 2);
     await customerNotificationModel.create({
