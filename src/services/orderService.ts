@@ -1076,6 +1076,7 @@ async function hasSubmittedSlip(orderId: unknown): Promise<boolean> {
 /**
  * ยกเลิกออเดอร์เว็บที่เลยกำหนดชำระ (payment_due_at) แล้วยังไม่ส่งสลิป → คืนสต็อก + สิทธิ์โปรโมชัน + แจ้งลูกค้า
  * เรียกจาก cron (npm run cron:order-expiry ทุก 5 นาที) และแบบ lazy ก่อนลูกค้าเปิดรายการ/หน้าชำระเงิน (scope)
+ * + ก่อนแอดมินเปิดรายการออเดอร์ (expireUnpaidOrdersForAdmin)
  * ออเดอร์ที่ไม่มี payment_due_at (POS / แอดมินสร้าง / ออเดอร์เก่า) ไม่ถูกแตะ
  */
 export async function expireUnpaidOrders(
@@ -1110,6 +1111,27 @@ export async function expireUnpaidOrders(
   }
   if (expired.length) log.info("order.expired_unpaid", { count: expired.length, orders: expired });
   return { expired };
+}
+
+/**
+ * expireUnpaidOrders แบบ lazy ก่อนแอดมินดูรายการออเดอร์ (GET /api/admin/orders) — ไม่ต้องรอ cron
+ * หน้าจัดการคำสั่งซื้อยิง list หลายคำขอพร้อมกัน → คำขอที่มาพร้อมกันรอรอบเดียวกัน + เว้น 30 วิต่อรอบ (ต่อ instance)
+ * ยกเลิกไม่สำเร็จไม่ทำให้รายการพัง (log แล้วไปต่อ)
+ */
+const ADMIN_EXPIRE_THROTTLE_MS = 30_000;
+let adminExpireInFlight: Promise<void> | null = null;
+let adminExpireLastRunAt = 0;
+
+export async function expireUnpaidOrdersForAdmin(): Promise<void> {
+  if (!adminExpireInFlight && Date.now() - adminExpireLastRunAt < ADMIN_EXPIRE_THROTTLE_MS) return;
+  adminExpireInFlight ??= expireUnpaidOrders()
+    .then(() => undefined)
+    .catch((err) => log.error("order.admin_expire_failed", { err }))
+    .finally(() => {
+      adminExpireLastRunAt = Date.now();
+      adminExpireInFlight = null;
+    });
+  await adminExpireInFlight;
 }
 
 /**
