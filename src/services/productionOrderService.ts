@@ -91,7 +91,7 @@ export async function createProductionOrder(input: CreateProductionOrderInput) {
   for (let attempt = 0; attempt < 5 && !order; attempt++) {
     try {
       order = await productionOrderModel.create({
-        production_no: generateDocNo("PRD", 5),
+        production_no: generateDocNo("PO", 5),
         production_date: new Date(input.production_date),
         source_type: "manual",
         production_status: "planned",
@@ -300,7 +300,7 @@ export async function createProductionFromRound(input: CreateProductionFromRound
   for (let attempt = 0; attempt < 5 && !order; attempt++) {
     try {
       order = await productionOrderModel.create({
-        production_no: generateDocNo("PRD", 5),
+        production_no: generateDocNo("PO", 5),
         production_date: new Date(input.production_date),
         source_type: "preorder",
         round_id: round._id,

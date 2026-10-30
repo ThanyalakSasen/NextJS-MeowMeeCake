@@ -96,7 +96,7 @@ describe("isProductCode", () => {
 describe("generateDocNo (BACKLOG3 — ตัวสร้างเลขที่เอกสารกลาง แทน randomOrderNo/randomPreorderNo/randomProductionNo เดิมที่ซ้ำกัน 3 จุด)", () => {
   it("รูปแบบ <prefix>-YYYYMMDD-<random ตัวพิมพ์ใหญ่> ความยาวสุ่มตามที่ระบุ (default 6)", () => {
     expect(generateDocNo("OP")).toMatch(/^OP-\d{8}-[A-Z0-9]{6}$/);
-    expect(generateDocNo("PRD", 5)).toMatch(/^PRD-\d{8}-[A-Z0-9]{5}$/);
+    expect(generateDocNo("PO", 5)).toMatch(/^PO-\d{8}-[A-Z0-9]{5}$/);
   });
 
   it("YYYYMMDD มาจากวันที่ที่ส่งเข้า (5 ม.ค. 2026 → 20260105)", () => {
