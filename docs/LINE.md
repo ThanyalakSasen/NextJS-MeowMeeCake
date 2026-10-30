@@ -854,3 +854,16 @@ frontend PR #16 (merge `49cae44`) ทำหน้าออเดอร์ / พ�
 | ร้าน: ออเดอร์ใหม่ `POS-` | ต้องตั้ง `LINE_NOTIFY_POS_ORDERS=true` | ต้องตั้งทั้ง `LINE_NOTIFY_NEW_ORDERS=true` และ `LINE_NOTIFY_POS_ORDERS=true` |
 
 เทส: `lineEventScenarios.test.ts` (ปรับจำนวนข้อความตามข้างบน + เคส `LINE_NOTIFY_NEW_ORDERS`) · `ownerLineNotify.test.ts` (5 เคส: เว็บค่าเริ่มต้น / เว็บ+NEW · POS+NEW · POS+POS · POS+ทั้งสอง)
+
+### 9.16 สั่งซื้อผ่าน LINE ด้วย LIFF — ล็อกอินอัตโนมัติ (2026-10-29)
+
+ลูกค้ากด Rich Menu ใน OA → เปิดหน้าร้าน (frontend) เป็น LIFF app ในแอป LINE → frontend ส่ง `liff.getIDToken()` มาที่
+`POST /api/auth/line/liff` → `verifyLineIdToken` (ให้ LINE ตรวจ, `client_id` = `LINE_LOGIN_CHANNEL_ID`) → `authService.loginWithLine`
+→ บัญชีเดียวกับปุ่ม "เข้าสู่ระบบด้วย LINE" + เซ็ต cookie `session` · ตะกร้า/checkout/ชำระเงินใช้ของเดิมทั้งหมด
+
+- ไม่มี env ใหม่ฝั่ง backend — LIFF app ต้องสร้างใต้ LINE Login channel ตัวเดียวกับ `LINE_LOGIN_CHANNEL_ID` (aud ของ id_token ต้องตรง)
+- `verifyLineIdToken` แยกออกจาก `exchangeCodeForLineProfile` ใน `src/lib/lineLogin.ts` (ใช้ร่วมกัน)
+- ตอบ: 200 `{ user }` · id_token ปลอม/หมดอายุ 401 · ไม่ส่ง idToken / บัญชีปิด-ลบ-ล็อก 400 · rate-limit 10/นาที/IP (`auth:line-liff`)
+- ไม่กินโควตา push — สรุปออเดอร์เข้าแชทใช้ `liff.sendMessages()` ฝั่ง frontend (ข้อความในนามลูกค้า)
+
+เทส: `tests/integration/authLineLiffRoute.test.ts` (4 เคส)
