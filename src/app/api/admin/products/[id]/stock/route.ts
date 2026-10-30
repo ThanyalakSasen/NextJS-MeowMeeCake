@@ -4,6 +4,8 @@
  *   PUT   — ตั้งค่าสต็อกเป็นจำนวนที่ระบุ (stock.update)   body: { quantity, note? }
  *   PATCH — ปรับสต็อกด้วยส่วนต่าง (stock.update)          body: { delta, note? } หรือ { action, quantity, note? }
  *   note — หมายเหตุ (เหตุผลที่รับเข้า/เบิกใช้/ปรับยอด) → ประวัติสต็อกสินค้า (ProductStockTransactions) + บันทึกการทำงาน
+ *   request_key? (PUT/PATCH) — รหัสต่อการกด 1 ครั้ง: ส่งซ้ำ (ลองใหม่หลัง timeout) = คืนผลเดิม ไม่ปรับซ้ำ (lib/stockRequestOnce.ts)
+ *   expected? (PUT) — ยอดที่เห็นตอนเปิดฟอร์ม: ยอดจริงเปลี่ยนไปแล้ว (เช่น POS ขายแทรก) = 409 reason STOCK_CHANGED + current
  *   ผู้ทำรายการ = session ผู้เรียก (performed_by ในประวัติสต็อก)
  */
 import { ok } from "@/lib/apiResponse";
@@ -11,6 +13,7 @@ import { withPermission } from "@/lib/authGuard";
 import { audit } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
 import * as productService from "@/services/productService";
+import { parseRequestKey, stockRequestOnce } from "@/lib/stockRequestOnce";
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -57,13 +60,14 @@ export const PUT = withPermission("stock", "update", async (session, req, ctx: C
   const body = await req.json();
   const quantity = Number(body.quantity);
   const note = noteOf(body);
+  const expected = body.expected == null ? undefined : Number(body.expected);
   // ยอดก่อนตั้งอ่านแบบ atomic ในคำสั่งเดียวกับที่ตั้ง — เดิมอ่าน getStock() แยกก่อน ขายแทรกแล้ว log คลาด
-  const { product, before } = await productService.setStockDetailed(id, quantity, {
-    note,
-    performed_by: session.user_id,
-  });
-  auditStock(req, id, product, "ตั้งยอด", before, quantity, { set: quantity }, note);
-  return ok(product);
+  const { result, replay } = await stockRequestOnce(parseRequestKey(body.request_key), id, () =>
+    productService.setStockDetailed(id, quantity, { note, performed_by: session.user_id }, { expected })
+  );
+  // คำขอซ้ำ = ทำไปแล้วรอบก่อน (log ไปแล้ว) — คืนผลเดิมเฉย ๆ
+  if (!replay) auditStock(req, id, result.product, "ตั้งยอด", result.before, quantity, { set: quantity }, note);
+  return ok(result.product);
 });
 
 export const PATCH = withPermission("stock", "update", async (session, req, ctx: Ctx) => {
@@ -72,26 +76,31 @@ export const PATCH = withPermission("stock", "update", async (session, req, ctx:
   const note = noteOf(body);
   const log = { note, performed_by: session.user_id };
 
-  let result;
+  let run: () => Promise<unknown>;
   let detail: Record<string, unknown>;
   if (body.action === "increase") {
-    result = await productService.increaseStock(id, Number(body.quantity), log);
+    run = () => productService.increaseStock(id, Number(body.quantity), log);
     detail = { action: "increase", quantity: Number(body.quantity) };
   } else if (body.action === "decrease") {
-    result = await productService.decreaseStock(id, Number(body.quantity), {
-      allowNegative: Boolean(body.allowNegative),
-      log,
-    });
+    run = () =>
+      productService.decreaseStock(id, Number(body.quantity), {
+        allowNegative: Boolean(body.allowNegative),
+        log,
+      });
     detail = { action: "decrease", quantity: Number(body.quantity) };
   } else if (body.delta !== undefined) {
-    result = await productService.adjustStock(id, Number(body.delta), {
-      allowNegative: Boolean(body.allowNegative),
-      log,
-    });
+    run = () =>
+      productService.adjustStock(id, Number(body.delta), {
+        allowNegative: Boolean(body.allowNegative),
+        log,
+      });
     detail = { delta: Number(body.delta) };
   } else {
     throw badRequest('ต้องระบุ { delta } หรือ { action: "increase"|"decrease", quantity }');
   }
+  // รับเข้าแล้ว timeout ทั้งที่ทำสำเร็จ → กดใหม่ด้วย request_key เดิม = คืนผลเดิม ไม่บวกซ้ำ
+  const { result, replay } = await stockRequestOnce(parseRequestKey(body.request_key), id, run);
+  if (replay) return ok(result);
 
   const product = result as { product_name_th?: string; product_stock_quantity?: number };
   const after = product.product_stock_quantity ?? 0;
