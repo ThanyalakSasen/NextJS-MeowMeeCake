@@ -21,6 +21,7 @@ import { assertRefExists } from "../lib/refs";
 import { Saga } from "../lib/compensation";
 import { generateDocNo, isPreorderProduct } from "../lib/productCode";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { rangeDate } from "../lib/datetime";
 import productionOrderModel from "../models/productionOrderModel";
 import productionItemModel from "../models/productionItemModel";
 import userModel from "../models/userModel";
@@ -57,13 +58,16 @@ export interface CreateProductionOrderInput {
 
 export interface ListProductionOrderQuery {
   pagination: Pagination;
-  production_status?: ProductionStatus;
+  production_status?: ProductionStatus | ProductionStatus[];
   source_type?: "manual" | "preorder";
   round_id?: string;
   assigned_to?: string;
   search?: string;
   date_from?: string;
   date_to?: string;
+  /** ช่วงของแท็บประวัติการผลิต — ใบที่เสร็จแล้วนับตาม completed_at · ใบอื่นตาม production_date (ตรงกับหน้าจอ) */
+  history_from?: string;
+  history_to?: string;
   includeDeleted?: boolean;
 }
 
@@ -339,7 +343,9 @@ export async function listProductionOrders(query: ListProductionOrderQuery) {
 
   const filter: Record<string, any> = {};
   if (!query.includeDeleted) filter.deleted_at = null;
-  if (query.production_status) filter.production_status = query.production_status;
+  if (query.production_status) {
+    filter.production_status = Array.isArray(query.production_status) ? { $in: query.production_status } : query.production_status;
+  }
   if (query.source_type) filter.source_type = query.source_type;
   if (query.round_id) {
     assertObjectId(query.round_id, "round_id");
@@ -354,6 +360,16 @@ export async function listProductionOrders(query: ListProductionOrderQuery) {
     filter.production_date = {};
     if (query.date_from) filter.production_date.$gte = new Date(query.date_from);
     if (query.date_to) filter.production_date.$lte = new Date(query.date_to);
+  }
+  if (query.history_from || query.history_to) {
+    const range: Record<string, Date> = {};
+    if (query.history_from) range.$gte = rangeDate(query.history_from, "history_from")!;
+    if (query.history_to) range.$lte = rangeDate(query.history_to, "history_to")!;
+    filter.$or = [
+      { production_status: "done", completed_at: range },
+      { production_status: "done", completed_at: null, production_date: range },
+      { production_status: { $ne: "done" }, production_date: range },
+    ];
   }
 
   const [items, total] = await Promise.all([

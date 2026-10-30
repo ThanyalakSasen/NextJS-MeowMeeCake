@@ -3,6 +3,7 @@ import {
   parsePagination,
   parseSort,
   parseBool,
+  parseList,
   parseNumber,
   buildMeta,
   escapeRegExp,
@@ -78,5 +79,15 @@ describe("buildMeta", () => {
 describe("escapeRegExp", () => {
   it("escape อักขระพิเศษ", () => {
     expect(escapeRegExp("a.b*c?(d)")).toBe("a\\.b\\*c\\?\\(d\\)");
+  });
+});
+
+describe("parseList", () => {
+  it("คั่นด้วย , = array · ค่าเดียว = string · ว่าง = undefined", () => {
+    expect(parseList("pending,confirmed, ready")).toEqual(["pending", "confirmed", "ready"]);
+    expect(parseList("pending")).toBe("pending");
+    expect(parseList("pending,")).toBe("pending");
+    expect(parseList("")).toBeUndefined();
+    expect(parseList(null)).toBeUndefined();
   });
 });

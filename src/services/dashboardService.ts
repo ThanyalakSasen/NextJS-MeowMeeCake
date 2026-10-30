@@ -17,6 +17,8 @@ import preorderItemModel from "../models/preorderItemModel";
 import productModel from "../models/productModel";
 import ingredientModel from "../models/ingredientModel";
 import * as expenseService from "./expenseService";
+import expenseModel from "../models/expenseModel";
+import { badRequest } from "../lib/httpError";
 import { toBaht, round2 } from "../lib/money";
 import { LOW_STOCK_EXPR } from "../lib/lowStock";
 
@@ -339,5 +341,52 @@ export async function revenueByChannel(opts: { date_from?: string; date_to?: str
     counts,
     orders: orders.length + preorders.length,
     recipe_cogs: round2(toBaht(recipeCogs)),
+  };
+}
+
+// ── ตารางเปรียบเทียบของหน้าสรุปกำไร-ขาดทุน (รายรับ/รายจ่ายต่อช่วง) ─────────────
+/** จำนวนช่วงสูงสุดต่อคำขอ — รายวัน 31 · รายปีนับจากปีแรกที่มีค่าใช้จ่าย */
+export const FINANCE_TREND_MAX_RANGES = 60;
+
+/**
+ * รายรับ + รายจ่ายรวมของหลายช่วงในคำขอเดียว — เดิม frontend ยิง revenue-by-channel + expenses/summary ช่วงละ 2 คำขอ
+ * (รายวัน 31 วัน = 62 คำขอ) · ที่นี่ใช้ $bucket แหล่งละ 1 aggregate (ออเดอร์ · พรีออเดอร์ · ค่าใช้จ่าย)
+ * ranges = ช่วงต่อเนื่องเรียงเก่า→ใหม่ (to ของช่วงก่อน ห่างจาก from ของช่วงถัดไปไม่เกิน 1 วินาที เช่น 23:59:59.999 → 00:00)
+ * income = ชุดเดียวกับ revenueByChannel().total (ชำระแล้ว ไม่ยกเลิก ตาม created_at) · expense = ชุดเดียวกับ expenseService.summary().total (ตาม date)
+ */
+export async function financeTrend(ranges: Array<{ from: string; to: string }>) {
+  if (ranges.length === 0) throw badRequest("ranges ต้องมีอย่างน้อย 1 ช่วง");
+  if (ranges.length > FINANCE_TREND_MAX_RANGES) throw badRequest(`ranges ได้ไม่เกิน ${FINANCE_TREND_MAX_RANGES} ช่วง`);
+  const parsed = ranges.map((r) => ({ from: rangeDate(r.from, "from")!, to: rangeDate(r.to, "to")! }));
+  parsed.forEach((r, i) => {
+    if (!r.from || !r.to || r.from > r.to) throw badRequest("ช่วงวันที่ไม่ถูกต้อง");
+    const gap = i > 0 ? r.from.getTime() - parsed[i - 1].to.getTime() : 1;
+    if (gap < 0 || gap > 1000) throw badRequest("ranges ต้องเป็นช่วงต่อเนื่องเรียงจากเก่าไปใหม่");
+  });
+  const first = parsed[0].from;
+  const last = parsed[parsed.length - 1].to;
+  // ขอบของ $bucket = จุดเริ่มทุกช่วง + ปลายช่วงสุดท้าย (ไม่รวม — จึง +1ms)
+  const boundaries = [...parsed.map((r) => r.from), new Date(last.getTime() + 1)];
+  const bucketed = (field: string, amount: string) => ({
+    $bucket: { groupBy: field, boundaries, default: "out", output: { sum: { $sum: amount } } },
+  });
+
+  await dbConnect();
+  const sold = { ...SOLD, deleted_at: null, created_at: { $gte: first, $lte: last } };
+  const [orderRows, preorderRows, expenseRows] = await Promise.all([
+    orderModel.aggregate([{ $match: sold }, bucketed("$created_at", "$total_amount")]),
+    preorderModel.aggregate([{ $match: sold }, bucketed("$created_at", "$total_amount")]),
+    expenseModel.aggregate([{ $match: { deleted_at: null, date: { $gte: first, $lte: last } } }, bucketed("$date", "$amount")]),
+  ]);
+  const sumAt = (rows: Array<{ _id: unknown; sum: number }>, at: Date) =>
+    rows.find((x) => x._id instanceof Date && x._id.getTime() === at.getTime())?.sum ?? 0;
+
+  return {
+    buckets: parsed.map((r, i) => ({
+      from: ranges[i].from,
+      to: ranges[i].to,
+      income: round2(toBaht(sumAt(orderRows, r.from) + sumAt(preorderRows, r.from))),
+      expense: round2(toBaht(sumAt(expenseRows, r.from))),
+    })),
   };
 }
