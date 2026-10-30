@@ -662,6 +662,11 @@ export async function updatePreorderStatus(
   if (!NEXT_STATUS[current].includes(next)) {
     throw conflict(`เปลี่ยนสถานะจาก "${current}" เป็น "${next}" ไม่ได้`);
   }
+  // ยังไม่ชำระ = เดินหน้าไม่ได้ (ยกเลิกได้อย่างเดียว) — ยืนยันสลิปแล้วระบบเลื่อนเป็น preparing ให้เอง
+  // เดิมแอดมินกดเลื่อนพรีออเดอร์ที่ยังไม่จ่ายไปจนสำเร็จได้ → หลุดการยกเลิกอัตโนมัติ ไม่นับรายรับ ไม่เข้าใบผลิต
+  if (next !== "cancelled" && existing.payment_status !== "paid") {
+    throw conflict("พรีออเดอร์นี้ยังไม่ชำระเงิน — ยืนยันการชำระเงินก่อนจึงเลื่อนสถานะได้");
+  }
   if (next === "cancelled" && opts.cancelled_by) assertObjectId(opts.cancelled_by, "cancelled_by");
   if (next === "completed") assertDeliveryReadyToComplete(existing, "พรีออเดอร์");
 

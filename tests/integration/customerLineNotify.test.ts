@@ -92,7 +92,8 @@ describe("customerNotifyService.notifyCustomer", () => {
 describe("hook เข้า lifecycle ของพรีออเดอร์", () => {
   it("ไล่สถานะ pending→completed (รับเอง) → แจ้งแค่ ready ครั้งเดียว (ประหยัดโควตา — LINE.md §9.6 ข้อ ก)", async () => {
     const u = await makeUser({ line_user_id: "U_B" });
-    const pre = await makePreorder(String(u._id));
+    // ชำระแล้ว — พรีออเดอร์ที่ยังไม่จ่ายเลื่อนสถานะไม่ได้
+    const pre = await makePreorder(String(u._id), { payment_status: "paid" });
 
     for (const s of ["confirmed", "preparing", "ready", "completed"] as const) {
       await preorderService.updatePreorderStatus(String(pre._id), s);
