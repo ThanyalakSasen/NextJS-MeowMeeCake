@@ -170,12 +170,19 @@ export async function exchangeCodeForLineProfile(config: LineLoginConfig, code: 
   }
   const { id_token } = (await tokenRes.json()) as { id_token?: string };
   if (!id_token) throw new Error("LINE ไม่คืน id_token (ต้องขอ scope openid)");
+  return verifyLineIdToken(config.channelId, id_token);
+}
 
-  // ให้ LINE ตรวจ signature/aud/exp ของ id_token เอง — ไม่ต้องดูแล key เอง
+/**
+ * ให้ LINE ตรวจ signature/aud/exp ของ id_token เอง (ไม่ต้องดูแล key เอง) แล้วคืนโปรไฟล์
+ * ใช้ทั้ง flow แลก code ข้างบน และ LIFF (/api/auth/line/liff — id_token จาก liff.getIDToken())
+ * channelId = LINE Login channel ที่ออก id_token (LIFF app ต้องอยู่ใต้ channel นี้) · aud ไม่ตรง/หมดอายุ → LINE ตอบ 400
+ */
+export async function verifyLineIdToken(channelId: string, idToken: string): Promise<LineProfile> {
   const verifyRes = await fetch(VERIFY_URL, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ id_token, client_id: config.channelId }),
+    body: new URLSearchParams({ id_token: idToken, client_id: channelId }),
   });
   if (!verifyRes.ok) {
     const body = await verifyRes.text().catch(() => "");
