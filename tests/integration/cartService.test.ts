@@ -132,7 +132,7 @@ describe("cartService — ตรวจสต็อกตอนเพิ่มล
       })
     ).rejects.toMatchObject({
       status: 409,
-      message: "เค้ก เหลือ 5 ชิ้น — ในตะกร้ามีแล้ว 3 ชิ้น เพิ่มได้อีก 2 ชิ้น",
+      message: "ตอนนี้มีเค้กอยู่ในตะกร้าแล้ว 3 ชิ้น เพิ่มได้อีกแค่ 2 ชิ้น",
       details: { available: 5, in_cart: 3 },
     });
 
@@ -140,7 +140,7 @@ describe("cartService — ตรวจสต็อกตอนเพิ่มล
     await cartService.addItem(uid, { product_id: String(p._id), quantity: 2 });
     await expect(
       cartService.addItem(uid, { product_id: String(p._id), quantity: 1 })
-    ).rejects.toThrow(/ในตะกร้ามีครบจำนวนแล้ว/);
+    ).rejects.toThrow(/ครบจำนวนที่เหลือแล้ว/);
   });
 
   it("updateItemQuantity: เพิ่มเกินสต็อก → 409 · ลดจำนวนได้เสมอแม้สต็อกลดลงต่ำกว่าในตะกร้า", async () => {

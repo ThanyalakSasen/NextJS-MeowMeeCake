@@ -136,4 +136,43 @@ describe("รายการแชทหลังร้าน — เฉพา�
     expect(meta.total).toBe(1);
     expect(await chatService.staffUnreadSummary()).toEqual({ conversations: 1, messages: 1 });
   });
+  it("แก้/ลบข้อความของฝั่งตัวเอง · เปลี่ยนพรีออเดอร์ที่แนบ · polling ?after= ส่งข้อความที่เปลี่ยนมาด้วย · ร้านลบแชทได้ (ซ่อน — ประวัติไม่หาย)", async () => {
+    const user = await makeUser();
+    const staff = await makeUser();
+    const uid = String(user._id);
+    const p1 = await makePreorder(uid);
+    const p2 = await makePreorder(uid);
+    const m = await chatService.sendCustomerMessage(uid, { body: "ถามหน่อย", preorder_id: String(p1._id) });
+    const { items } = await chatService.listConversations({ pagination: pg });
+    const convId = items[0]._id;
+    const cursor = new Date().toISOString();
+    await new Promise((r) => setTimeout(r, 20));
+
+    const edited = await chatService.editCustomerMessage(uid, m._id, { body: "ถามใหม่", preorder_id: String(p2._id) });
+    expect(edited).toMatchObject({ body: "ถามใหม่", attachment: { doc_no: p2.preorder_no } });
+    expect(edited.edited_at).not.toBeNull();
+    const polled = await chatService.getConversationForStaff(convId, { after: cursor });
+    expect(polled.messages.map((x) => x.body)).toContain("ถามใหม่");
+
+    // ร้านแก้ข้อความลูกค้าไม่ได้ · ลูกค้าแก้ข้อความร้านไม่ได้
+    await expect(chatService.editStaffMessage(convId, m._id, { body: "x" })).rejects.toMatchObject({ status: 404 });
+    const s1 = await chatService.sendStaffMessage(String(staff._id), convId, { body: "ตอบ" });
+    await expect(chatService.deleteCustomerMessage(uid, s1._id)).rejects.toMatchObject({ status: 404 });
+    expect(await chatService.editStaffMessage(convId, s1._id, { body: "ตอบใหม่" })).toMatchObject({ body: "ตอบใหม่" });
+    expect(await chatService.myUnread(uid)).toEqual({ unread: 1 });
+
+    // ลบข้อความที่ยังไม่อ่าน = ตัวเลขยังไม่อ่านลดตาม · ไม่แสดงในห้องอีก
+    await chatService.deleteStaffMessage(convId, s1._id);
+    expect(await chatService.myUnread(uid)).toEqual({ unread: 0 });
+    expect((await chatService.getMyChat(uid, {})).messages.map((x) => x._id)).toEqual([m._id]);
+
+    // ร้านลบแชท = ซ่อนจากรายการ ประวัติยังอยู่ · ลูกค้าส่งใหม่ = กลับมาพร้อมประวัติเก่า
+    await chatService.deleteConversation(convId);
+    expect((await chatService.listConversations({ pagination: pg })).items).toHaveLength(0);
+    expect((await chatService.getMyChat(uid, {})).messages.map((x) => x._id)).toEqual([m._id]);
+    const again = await chatService.sendCustomerMessage(uid, { body: "กลับมาแล้ว" });
+    const back = await chatService.listConversations({ pagination: pg });
+    expect(back.items.map((c) => c._id)).toEqual([convId]);
+    expect((await chatService.getConversationForStaff(convId, {})).messages.map((x) => x._id)).toEqual([m._id, again._id]);
+  });
 });

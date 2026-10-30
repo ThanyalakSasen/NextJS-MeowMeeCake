@@ -98,8 +98,8 @@ async function assertCartStock(
   const canAdd = Math.max(0, available - inCart);
   throw conflict(
     canAdd > 0
-      ? `${name} เหลือ ${available} ชิ้น — ในตะกร้ามีแล้ว ${inCart} ชิ้น เพิ่มได้อีก ${canAdd} ชิ้น`
-      : `${name} เหลือ ${available} ชิ้น — ในตะกร้ามีครบจำนวนแล้ว`,
+      ? `ตอนนี้มี${name}อยู่ในตะกร้าแล้ว ${inCart} ชิ้น เพิ่มได้อีกแค่ ${canAdd} ชิ้น`
+      : `ตอนนี้มี${name}อยู่ในตะกร้าแล้ว ${inCart} ชิ้น ครบจำนวนที่เหลือแล้ว`,
     details
   );
 }

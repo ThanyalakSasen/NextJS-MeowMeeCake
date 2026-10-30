@@ -17,6 +17,7 @@ import { Saga } from "../lib/compensation";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
+import { docNoSearchRegExp } from "../lib/docNoSearch";
 import {
   registerAutoRefundOnCancel,
   assertCustomerCancelAllowed,
@@ -570,7 +571,7 @@ export async function listPreorders(query: ListPreorderQuery) {
       // ค้นรายการสินค้าเฉพาะพรีออเดอร์ของลูกค้าคนนี้ (index preorder_id) — เหมือน orderService.listOrders
       const own = query.user_id ? { preorder_id: { $in: await preorderModel.distinct("_id", { user_id: query.user_id, deleted_at: null }) } } : {};
       const ids = await preorderItemModel.distinct("preorder_id", { ...own, deleted_at: null, $or: [{ "product_snapshot.product_name_th": re }, { "product_snapshot.product_name_eng": re }] });
-      filter.$or = [{ preorder_no: re }, { _id: { $in: ids } }];
+      filter.$or = [{ preorder_no: docNoSearchRegExp(query.search) }, { _id: { $in: ids } }];
     } else {
       filter.preorder_no = re;
     }

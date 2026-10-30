@@ -56,6 +56,10 @@ export interface ItemStat {
 
 export interface CategoryStat extends ItemStat {
   negative: number;
+  /** รีวิวดี (4–5 ดาว) */
+  positive: number;
+  /** แง่มุมที่ถูกชมมากสุดของหมวด (สูงสุด 3 · เฉพาะที่ถูกชม) */
+  liked_aspects: AspectCount[];
   /** แง่มุมของหมวดนี้ เรียงที่ถูกติมากสุดก่อน (สูงสุด 3) */
   aspects: AspectCount[];
 }
@@ -65,6 +69,8 @@ export interface ProductAnalysis extends ItemStat {
   category_name: string;
   /** รีวิว 1–2 ดาว */
   negative: number;
+  /** รีวิว 4–5 ดาว */
+  positive: number;
   /** ช่วงก่อนหน้า · ส่ง prev_since/prev_until ไม่ครบ หรือไม่มีรีวิว = 0 / null */
   prev_count: number;
   prev_avg: number | null;
@@ -202,8 +208,8 @@ export async function getReviewStats(q: {
   const ratingCounts = [0, 0, 0, 0, 0];
   const buckets = new Map<string, { count: number; sum: number }>();
   const aspectMap = new Map<string, AspectCount>();
-  const productStats = new Map<string, { count: number; sum: number; negative: number; aspects: Map<string, AspectCount> }>();
-  const categoryStats = new Map<string, { count: number; sum: number; negative: number; aspects: Map<string, AspectCount> }>();
+  const productStats = new Map<string, { count: number; sum: number; negative: number; positive: number; aspects: Map<string, AspectCount> }>();
+  const categoryStats = new Map<string, { count: number; sum: number; negative: number; positive: number; aspects: Map<string, AspectCount> }>();
 
   for (const r of rows) {
     const rating = Math.min(5, Math.max(1, Math.round(Number(r.rating) || 1)));
@@ -221,19 +227,21 @@ export async function getReviewStats(q: {
 
     const pid = String(r.product_id ?? "");
     if (pid) {
-      const ps = productStats.get(pid) ?? { count: 0, sum: 0, negative: 0, aspects: new Map<string, AspectCount>() };
+      const ps = productStats.get(pid) ?? { count: 0, sum: 0, negative: 0, positive: 0, aspects: new Map<string, AspectCount>() };
       ps.count++;
       ps.sum += Number(r.rating) || 0;
       if (isNegative(r)) ps.negative++;
+      if (Number(r.rating) >= 4) ps.positive++;
       for (const tp of topics) addAspect(ps.aspects, tp.name, tp.sentiment);
       productStats.set(pid, ps);
 
       const cid = String(productById.get(pid)?.category_id ?? "");
       if (cid) {
-        const cs = categoryStats.get(cid) ?? { count: 0, sum: 0, negative: 0, aspects: new Map<string, AspectCount>() };
+        const cs = categoryStats.get(cid) ?? { count: 0, sum: 0, negative: 0, positive: 0, aspects: new Map<string, AspectCount>() };
         cs.count++;
         cs.sum += Number(r.rating) || 0;
         if (isNegative(r)) cs.negative++;
+        if (Number(r.rating) >= 4) cs.positive++;
         for (const tp of topics) addAspect(cs.aspects, tp.name, tp.sentiment);
         categoryStats.set(cid, cs);
       }
@@ -269,6 +277,7 @@ export async function getReviewStats(q: {
         count: s.count,
         avg: round2(s.sum / s.count),
         negative: s.negative,
+        positive: s.positive,
         prev_count: prev?.count ?? 0,
         prev_avg: prev ? round2(prev.sum / prev.count) : null,
         top_issue: issue ? { name: issue.name, count: issue.negative } : null,
@@ -307,8 +316,13 @@ export async function getReviewStats(q: {
         count: s.count,
         avg: round2(s.sum / s.count),
         negative: s.negative,
+        positive: s.positive,
         aspects: [...s.aspects.values()]
           .sort((a, b) => b.negative - a.negative || byVolume(a, b))
+          .slice(0, CATEGORY_ASPECTS_N),
+        liked_aspects: [...s.aspects.values()]
+          .filter((a) => a.positive > 0)
+          .sort((a, b) => b.positive - a.positive || byVolume(a, b))
           .slice(0, CATEGORY_ASPECTS_N),
       }))
       .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name, "th")),
