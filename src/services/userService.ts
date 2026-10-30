@@ -78,12 +78,16 @@ export function stripSecrets<T extends Record<string, any>>(doc: T): Partial<T> 
   return clone as Partial<T>;
 }
 
+const MAX_PASSWORD_LENGTH = 72;
+
 export function assertPasswordStrength(pw: string): void {
   if (typeof pw !== "string" || pw.length < MIN_PASSWORD_LENGTH) {
     throw badRequest(`รหัสผ่านต้องยาวอย่างน้อย ${MIN_PASSWORD_LENGTH} ตัวอักษร`);
   }
   // ช่องว่างล้วน (เช่น กด Spacebar 8 ครั้ง) — ความยาวผ่านแต่ไม่ใช่รหัสผ่านจริง · หน้าเว็บกันแล้ว backend กันซ้ำกันยิง API ตรง
   if (pw.trim() === "") throw badRequest("รหัสผ่านต้องไม่เป็นช่องว่างล้วน");
+  // bcrypt ใช้แค่ 72 ไบต์แรก — ส่วนที่เกินไม่มีผล (เดิมเปลี่ยน/รีเซ็ตรหัสผ่านไม่จำกัด · สมัครสมาชิกจำกัด 72 แล้ว)
+  if (pw.length > MAX_PASSWORD_LENGTH) throw badRequest(`รหัสผ่านต้องไม่เกิน ${MAX_PASSWORD_LENGTH} ตัวอักษร`);
 }
 
 export function hashPassword(pw: string): Promise<string> {
