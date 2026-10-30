@@ -72,6 +72,23 @@ async function assertUnitChangeAllowed(id: string, unitId: string): Promise<void
   }
 }
 
+/** ลบวัตถุดิบที่สูตร/ส่วนประกอบยังใช้อยู่ไม่ได้ — เดิมลบได้ แล้วปิดงานผลิตของสูตรนั้นล้มทุกใบด้วย "ไม่พบวัตถุดิบที่ระบุ"
+ *  (เจอจริง 2026-10-30: ลบ "เนยจืด" ที่ 14 สูตรใช้) · ต้องเอาออกจากสูตรก่อน */
+async function assertNotUsed(id: string): Promise<void> {
+  assertObjectId(id);
+  await dbConnect();
+  const match = { "ingredients.ingredient_id": id, deleted_at: null };
+  const [recipes, components] = await Promise.all([
+    recipeModel.find(match).select("recipe_name").sort({ recipe_name: 1 }).limit(21).lean<Array<{ recipe_name?: string }>>(),
+    componentModel.find(match).select("component_name").sort({ component_name: 1 }).limit(21).lean<Array<{ component_name?: string }>>(),
+  ]);
+  const names = [...recipes.map((r) => r.recipe_name), ...components.map((c) => c.component_name)].filter(Boolean);
+  if (names.length === 0) return;
+  // หน้าจอแสดงข้อความนี้ตรง ๆ (เตือน "ยังมีสูตรที่ใช้วัตถุดิบนี้อยู่ ลบยังไม่ได้") — บอกชื่อสูตรให้ไปแก้ได้ทันที
+  const shown = names.slice(0, 20).join(", ") + (names.length > 20 ? " และอื่น ๆ" : "");
+  throw conflict(`ยังมีสูตรที่ใช้วัตถุดิบนี้อยู่ (${shown}) — เอาวัตถุดิบออกจากสูตรเหล่านี้ก่อนจึงลบได้`);
+}
+
 async function assertRefs(input: Record<string, any>): Promise<void> {
   if (input.ingredient_category_id) {
     await assertRefExists(
@@ -115,6 +132,11 @@ export const ingredientService = {
         ? { ...input, cost_per_unit: toSatang(Number(input.cost_per_unit)) }
         : input;
     return base.update(id, payload);
+  },
+
+  async remove(id: string) {
+    await assertNotUsed(id);
+    return base.remove(id);
   },
 
   /** วัตถุดิบที่ current_stock <= reorder_point (เรียงจากขาดหนักสุด) */
