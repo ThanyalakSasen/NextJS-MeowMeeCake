@@ -11,10 +11,17 @@ const refundPromptpayId = z
   .transform((v) => v.replace(/[\s-]/g, ""))
   .pipe(z.string().regex(/^(0\d{9}|\d{13})$/, "เลขพร้อมเพย์ต้องเป็นเบอร์มือถือ 10 หลัก หรือเลขบัตรประชาชน 13 หลัก"));
 
+/** เผื่อ 1 วัน — "วันนี้" ตามเวลาไทยเป็นเที่ยงคืน UTC ซึ่งอาจยังไม่ถึงตามนาฬิกา UTC */
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** วันเกิด: ไม่อยู่ในอนาคต · ไม่ก่อนปี 1900 (เดิมรับวันไหนก็ได้ — หน้าเว็บกันไว้ แต่ยิง API ตรงผ่าน) */
+const birthdate = z.coerce
+  .date()
+  .refine((d) => d.getTime() <= Date.now() + DAY_MS && d.getUTCFullYear() >= 1900, "วันเกิดต้องไม่อยู่ในอนาคตและไม่ก่อนปี 1900");
+
 export const updateProfileBody = z
   .object({
     user_fullname: z.string().trim().min(1).max(120),
-    user_birthdate: z.coerce.date().nullable(),
+    user_birthdate: birthdate.nullable(),
     user_phone: phone.nullable(),
     user_img: z.string().trim().max(1000).nullable(),
     user_allergies: z.array(z.string().trim().min(1).max(100)),
@@ -28,7 +35,7 @@ const EMPLOYMENT_TYPES = ["full_time", "part_time"] as const;
 
 /** field โปรไฟล์ + การจ้างงานที่ทั้ง create/update ใช้ร่วมกัน (ไม่รวม auth/identity field) */
 const employeeShape = {
-  user_birthdate: z.coerce.date().nullish(),
+  user_birthdate: birthdate.nullish(),
   user_phone: phone.nullish(),
   user_img: z.string().trim().max(1000).nullish(),
   user_allergies: z.array(z.string().trim().min(1).max(100)).optional(),

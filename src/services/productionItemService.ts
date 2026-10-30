@@ -317,6 +317,12 @@ export async function updateItem(id: string, input: Record<string, any>) {
     }
   }
 
+  // หักวัตถุดิบไปแล้ว = จำนวน/สถานะผูกกับ stock_impact ที่บันทึกไว้ — แก้ตอนนี้ตัวเลขในใบไม่ตรงกับที่หักจริง
+  // (เหมือน deleteItem — ต้อง reverse-stock ก่อน) · หมายเหตุแก้ได้เสมอ
+  if (item.stock_updated_at && (["planned_qty", "actual_qty", "item_status"] as const).some((f) => input[f] !== undefined)) {
+    throw conflict("รายการนี้หักสต็อกไปแล้ว แก้จำนวน/สถานะไม่ได้ ให้ทำ reverse-stock ก่อน");
+  }
+
   for (const f of ["planned_qty", "actual_qty", "notes", "item_status"] as const) {
     if (input[f] !== undefined) (item as any)[f] = input[f];
   }
