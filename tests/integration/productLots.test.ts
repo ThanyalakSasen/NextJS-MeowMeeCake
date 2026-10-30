@@ -108,7 +108,7 @@ describe("ปิดงานผลิต → สร้างล็อตสิ�
 
     const found = await productLotService.getLotByNo(` ${lot.lot_no.toLowerCase()} `);
     expect(found).toMatchObject({ lot_no: lot.lot_no, product_name_th: a.product_name_th, expiry_date: "2026-10-30" });
-    expect(found.production_no).toMatch(/^PRD-/);
+    expect(found.production_no).toMatch(/^PO-/);
     await expect(productLotService.getLotByNo("L0000000000")).rejects.toMatchObject({ status: 404 });
   });
 

@@ -31,6 +31,7 @@
     "cleanup:review-media": "tsx scripts/cleanup-review-media.ts",
     "backfill:payment-due": "tsx scripts/backfill-payment-due.ts",
     "backfill:production-lots": "tsx scripts/backfill-production-lots.ts",
+    "migrate:production-no-po": "tsx scripts/migrate-production-no-po.ts",
     "fix:satang-money": "tsx scripts/fix-satang-money.ts",
     "check:data-integrity": "tsx scripts/check-data-integrity.ts",
     "summary:monthly": "tsx scripts/send-monthly-summary.ts",

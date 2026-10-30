@@ -57,7 +57,7 @@ export function isProductCode(value: unknown): value is string {
 }
 
 /**
- * generateDocNo — เลขที่เอกสารรูปแบบ `<prefix>-YYYYMMDD-<random>` (ตัวพิมพ์ใหญ่, base36) — ตอนนี้ใช้เฉพาะใบสั่งผลิต (`PRD-`)
+ * generateDocNo — เลขที่เอกสารรูปแบบ `<prefix>-YYYYMMDD-<random>` (ตัวพิมพ์ใหญ่, base36) — ตอนนี้ใช้เฉพาะใบสั่งผลิต (`PO-` · เดิม `PRD-` เปลี่ยน 2026-10-30)
  * (ออเดอร์ ORD-/POS- และพรีออเดอร์ PRE- ย้ายไปใช้ formatDailyDocNo + docNoService แล้ว) — ชนกันได้ (เลขสุ่ม ไม่การันตี unique)
  * ผู้เรียกต้องมี retry-on-duplicate-key ของตัวเองเสมอ (ดู `productionOrderService`)
  */
