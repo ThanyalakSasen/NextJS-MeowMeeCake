@@ -51,4 +51,18 @@ describe("หน้าร้านหลัก", () => {
     });
     expect(res2.weekly_markets.map((x: { name: string; is_main: boolean }) => [x.name, x.is_main])).toEqual([["ตลาดเช้า", true], ["หน้าร้านใหญ่", false]]);
   });
+  it("ทุกแห่งเก็บที่อยู่แบบแยกช่อง + พิกัดได้ · ว่างทั้งหมด = null · รหัสไปรษณีย์ผิด = 400", async () => {
+    const session = await owner();
+    await storeProfileModel.create({ business_hours_migrated: true, weekly_markets: [m("หน้าร้านใหญ่", { is_main: true })] });
+    const addr = { house_no: "9/1", sub_district: "ในเมือง", district: "เมืองหนองคาย", province: "หนองคาย", zip_code: "43000", latitude: 17.87, longitude: 102.74 };
+    const res = await storeService.updateWeeklyMarkets(session, {
+      weekly_markets: [m("หน้าร้านใหญ่", { is_main: true, address: addr }), m("ตลาดเช้า", { address: { house_no: "", zip_code: "" } })],
+    });
+    const [main, other] = res.weekly_markets as { address: Record<string, unknown> | null }[];
+    expect(main.address).toMatchObject(addr);
+    expect(other.address).toBeNull();
+    await expect(
+      storeService.updateWeeklyMarkets(session, { weekly_markets: [m("หน้าร้านใหญ่", { is_main: true, address: { ...addr, zip_code: "43" } })] })
+    ).rejects.toMatchObject({ status: 400 });
+  });
 });

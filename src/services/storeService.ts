@@ -112,6 +112,7 @@ export function normalizeWeeklyMarkets(raw: unknown, previous: AnyDoc[] = []): A
     if (openTime >= closeTime) throw badRequest(`${label}: เวลาปิดต้องหลังเวลาเปิด`);
     const mapUrl = String(m.map_url ?? "").trim();
     if (mapUrl && !URL_RE.test(mapUrl)) throw badRequest(`${label}: รูปแบบลิงก์แผนที่ไม่ถูกต้อง`);
+    const address = normalizeMarketAddress(m.address, label);
     // _id ซ้ำในรายการเดียวกัน (client ก๊อปรายการ) → รายการหลังได้ _id ใหม่
     const keep = typeof m._id === "string" && mongoose.isValidObjectId(m._id) && !seen.has(m._id);
     const id = keep ? new mongoose.Types.ObjectId(m._id as string) : new mongoose.Types.ObjectId();
@@ -124,6 +125,7 @@ export function normalizeWeeklyMarkets(raw: unknown, previous: AnyDoc[] = []): A
       open_time: openTime,
       close_time: closeTime,
       map_url: mapUrl,
+      address,
       is_active: m.is_active !== false,
       // ไม่ส่งมา (client รุ่นเก่า) = ใช้ค่าเดิมของรายการนั้น — ไม่ให้หน้าร้านหลักหายเพราะบันทึกจากหน้าที่ไม่รู้จัก field นี้
       is_main: typeof m.is_main === "boolean" ? m.is_main : previous.some((p) => String(p._id) === String(id) && p.is_main === true),
@@ -133,6 +135,35 @@ export function normalizeWeeklyMarkets(raw: unknown, previous: AnyDoc[] = []): A
     throw badRequest("ต้องมีหน้าร้านประจำสัปดาห์ที่เปิดแสดงอย่างน้อย 1 แห่ง (ใช้เป็นเวลาเปิดร้านและจุดรับสินค้า)");
   }
   return withMainFirst(value);
+}
+
+/**
+ * ที่อยู่แบบแยกช่องของหน้าร้าน 1 แห่ง (ไม่บังคับ — ไม่ส่ง/ว่างทั้งหมด = null) · รหัสไปรษณีย์ 5 หลัก · พิกัดอยู่ในช่วงที่ถูกต้อง
+ * ครบหรือไม่ครบ หน้า "ข้อมูลร้าน" ตรวจเอง (หน้าร้านหลักต้องครบ = ที่อยู่ร้าน)
+ */
+function normalizeMarketAddress(raw: unknown, label: string): AnyDoc | null {
+  if (!isPlainObject(raw)) return null;
+  const text = (k: string, max: number) => String(raw[k] ?? "").trim().slice(0, max);
+  const num = (k: string, min: number, max: number) => {
+    const v = raw[k];
+    if (v === null || v === undefined || v === "") return null;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < min || n > max) throw badRequest(`${label}: พิกัดไม่ถูกต้อง`);
+    return n;
+  };
+  const a = {
+    house_no: text("house_no", 200),
+    sub_district: text("sub_district", 120),
+    district: text("district", 120),
+    province: text("province", 120),
+    zip_code: text("zip_code", 5),
+    latitude: num("latitude", -90, 90),
+    longitude: num("longitude", -180, 180),
+  };
+  if (a.zip_code && !/^\d{5}$/.test(a.zip_code)) throw badRequest(`${label}: รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก`);
+  if ((a.latitude === null) !== (a.longitude === null)) throw badRequest(`${label}: พิกัดไม่ครบ`);
+  const empty = !a.house_no && !a.sub_district && !a.district && !a.province && !a.zip_code && a.latitude === null;
+  return empty ? null : a;
 }
 
 /**
@@ -148,9 +179,9 @@ export function withMainFirst<T extends AnyDoc>(markets: T[]): T[] {
   return [main, ...rest];
 }
 
-const MARKET_COMPARE_FIELDS = ["name", "location", "days", "open_time", "close_time", "map_url", "is_active", "is_main"] as const;
+const MARKET_COMPARE_FIELDS = ["name", "location", "days", "open_time", "close_time", "map_url", "address", "is_active", "is_main"] as const;
 // เอกสารเก่าบางรายการไม่มี field เหล่านี้ (ไม่งั้นจะนับว่า "ถูกแก้" ทั้งที่ไม่ได้แตะ)
-const MARKET_DEFAULTS: AnyDoc = { location: "", days: [], map_url: "", is_active: true, is_main: false };
+const MARKET_DEFAULTS: AnyDoc = { location: "", days: [], map_url: "", address: null, is_active: true, is_main: false };
 const marketChanged = (before: AnyDoc, after: AnyDoc) =>
   MARKET_COMPARE_FIELDS.some(
     (f) => JSON.stringify(before[f] ?? MARKET_DEFAULTS[f] ?? null) !== JSON.stringify(after[f] ?? MARKET_DEFAULTS[f] ?? null)

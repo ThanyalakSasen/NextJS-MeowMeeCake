@@ -6,6 +6,10 @@
  * - หน้าเว็บดึงข้อความใหม่แบบ polling: ?after=<ISO เวลาของข้อความล่าสุดที่มี> → คืนข้อความตั้งแต่เวลานั้น (รวมเวลาเท่ากัน —
  *   หลาย instance สร้างข้อความเวลาเดียวกันได้ client ตัดตัวซ้ำด้วย _id) · ไม่ส่ง after = ข้อความล่าสุด N รายการ ·
  *   ?before= = ย้อนดูข้อความเก่ากว่า
+ * - แก้ไข/ลบข้อความ: แต่ละฝั่งแก้/ลบได้เฉพาะข้อความของฝั่งตัวเอง (ลูกค้าเปลี่ยนคำสั่งซื้อที่แนบได้) · ลบ = soft delete
+ *   polling ?after= คืนทั้งข้อความใหม่และข้อความที่ "เปลี่ยน" ตั้งแต่เวลานั้น (updated_at — แก้ไข/ลบ/อ่านแล้ว) — client ใช้ updated_at ล่าสุดเป็น cursor
+ * - ร้าน "ลบแชท" ได้ (chats.delete) = ซ่อนห้องจากรายการหลังร้าน (hidden_at) — ประวัติไม่ถูกลบ
+ *   ลูกค้าส่งข้อความใหม่ = ห้องกลับมาในรายการพร้อมประวัติเก่าทั้งหมด
  * - แจ้งเตือน: ลูกค้าส่งข้อความตอนร้านอ่านครบแล้ว (staff_unread = 0) → แจ้งเตือนหลังร้าน หมวด "ลูกค้า" (+ LINE เจ้าของร้าน)
  *   ครั้งเดียวต่อรอบ ไม่ยิงทุกข้อความ (กันโควตา LINE หมด) · ร้านตอบ → กระดิ่งในเว็บของลูกค้า (ไม่ส่ง LINE ลูกค้า) เฉพาะข้อความแรกที่ยังไม่อ่าน
  */
@@ -54,12 +58,13 @@ export interface MessageQuery {
 
 // ── presenter ────────────────────────────────────────────────
 function presentMessage(m: any) {
+  const deleted = !!m.deleted_at;
   return {
     _id: String(m._id),
     conversation_id: String(m.conversation_id),
     sender_type: m.sender_type as SenderType,
-    body: m.body ?? "",
-    attachment: m.attachment
+    body: deleted ? "" : m.body ?? "",
+    attachment: !deleted && m.attachment
       ? {
           kind: m.attachment.kind as AttachmentKind,
           ref_id: String(m.attachment.ref_id),
@@ -74,7 +79,11 @@ function presentMessage(m: any) {
         }
       : null,
     read_at: m.read_at ?? null,
+    edited_at: m.edited_at ?? null,
+    /** true = ถูกลบแล้ว (polling ส่งมาให้ client เอาออกจากจอ) */
+    deleted,
     created_at: m.created_at,
+    updated_at: m.updated_at ?? m.created_at,
   };
 }
 export type ChatMessageDto = ReturnType<typeof presentMessage>;
@@ -122,11 +131,13 @@ async function loadMessages(conversationId: unknown, q: MessageQuery) {
   const before = parseDate(q.before, "before");
   const filter: Record<string, unknown> = { conversation_id: conversationId };
   if (after) {
-    // ข้อความใหม่ตั้งแต่ after (รวมเวลาเท่ากัน — client ตัดซ้ำด้วย _id) · เรียงเก่า→ใหม่ ตัดที่ limit
-    filter.created_at = { $gte: after };
-    const rows = await chatMessageModel.find(filter).sort({ created_at: 1, _id: 1 }).limit(limit).lean<any[]>();
+    // ข้อความใหม่ + ข้อความที่แก้ไข/ลบ/อ่านแล้ว ตั้งแต่ after (รวมเวลาเท่ากัน — client ตัดซ้ำด้วย _id)
+    // ข้อความใหม่ updated_at = created_at → ใช้ updated_at อย่างเดียวพอ · รวมที่ถูกลบ (deleted: true) ให้อีกฝั่งเอาออก
+    filter.updated_at = { $gte: after };
+    const rows = await chatMessageModel.find(filter).sort({ updated_at: 1, _id: 1 }).limit(limit).lean<any[]>();
     return { items: rows.map(presentMessage), has_more: false };
   }
+  filter.deleted_at = null;
   if (before) filter.created_at = { $lt: before };
   const rows = await chatMessageModel.find(filter).sort({ created_at: -1, _id: -1 }).limit(limit + 1).lean<any[]>();
   const has_more = rows.length > limit;
@@ -238,7 +249,12 @@ export async function sendCustomerMessage(customerId: string, input: SendInput |
   await rateLimit(customerId, "shop:chat", SEND_LIMIT);
 
   const conv = await chatConversationModel
-    .findOneAndUpdate({ customer_id: customerId }, { $setOnInsert: { customer_id: customerId } }, { upsert: true, returnDocument: "after" })
+    // ห้องที่ร้านเคยลบ (ซ่อน) กลับมาแสดงในรายการ — พร้อมประวัติเดิม
+    .findOneAndUpdate(
+      { customer_id: customerId },
+      { $setOnInsert: { customer_id: customerId }, $set: { hidden_at: null } },
+      { upsert: true, returnDocument: "after" }
+    )
     .lean<any>();
   const { msg, wasUnread } = await saveMessage(conv._id, "customer", customerId, body, attachment);
 
@@ -280,7 +296,7 @@ async function customerRoomFilter(): Promise<Record<string, unknown>> {
 export async function listConversations(opts: { pagination: Pagination; search?: string; unreadOnly?: boolean }) {
   await dbConnect();
   const customerFilter = await customerRoomFilter();
-  const filter: Record<string, unknown> = { last_message_at: { $ne: null }, customer_id: customerFilter };
+  const filter: Record<string, unknown> = { last_message_at: { $ne: null }, hidden_at: null, customer_id: customerFilter };
   if (opts.unreadOnly) filter.staff_unread = { $gt: 0 };
   const search = opts.search?.trim();
   if (search) {
@@ -309,7 +325,7 @@ export async function listConversations(opts: { pagination: Pagination; search?:
 export async function staffUnreadSummary() {
   await dbConnect();
   // นับเฉพาะห้องที่แสดงในรายการ (ห้องของบัญชีลูกค้า — customerRoomFilter)
-  const match = { staff_unread: { $gt: 0 }, customer_id: await customerRoomFilter() };
+  const match = { staff_unread: { $gt: 0 }, hidden_at: null, customer_id: await customerRoomFilter() };
   const [conversations, agg] = await Promise.all([
     chatConversationModel.countDocuments(match),
     chatConversationModel.aggregate([{ $match: match }, { $group: { _id: null, n: { $sum: "$staff_unread" } } }]),
@@ -370,7 +386,7 @@ export async function markReadByStaff(conversationId: string) {
  * นับจากข้อความจริงแทนการตั้ง 0 — ข้อความที่เข้ามาระหว่าง updateMany กับ updateOne จะไม่หายจากตัวนับ
  */
 async function markRead(conversationId: unknown, senderOfMessages: SenderType): Promise<number> {
-  const unreadFilter = { conversation_id: conversationId, sender_type: senderOfMessages, read_at: null };
+  const unreadFilter = { conversation_id: conversationId, sender_type: senderOfMessages, read_at: null, deleted_at: null };
   await chatMessageModel.updateMany(unreadFilter, { $set: { read_at: new Date() } });
   const remaining = await chatMessageModel.countDocuments(unreadFilter);
   await chatConversationModel.updateOne(
@@ -380,3 +396,119 @@ async function markRead(conversationId: unknown, senderOfMessages: SenderType): 
   return remaining;
 }
 
+
+// ── แก้ไข / ลบข้อความ (ทั้งสองฝั่ง — เฉพาะข้อความของฝั่งตัวเอง) ─────────────
+export interface EditInput {
+  body?: unknown;
+  /** เปลี่ยนคำสั่งซื้อที่แนบ (ลูกค้าเท่านั้น) */
+  order_id?: unknown;
+  preorder_id?: unknown;
+  /** true = เอาคำสั่งซื้อที่แนบออก (ลูกค้าเท่านั้น) */
+  remove_attachment?: unknown;
+}
+
+/** ข้อความล่าสุดที่ยังไม่ถูกลบ → สรุปของห้อง (รายการห้องหลังร้าน) + นับยังไม่อ่านใหม่ทั้งสองฝั่ง */
+async function refreshConversationSummary(conversationId: unknown) {
+  const last = await chatMessageModel
+    .findOne({ conversation_id: conversationId, deleted_at: null })
+    .sort({ created_at: -1, _id: -1 })
+    .lean<any>();
+  const [staffUnread, customerUnread] = await Promise.all([
+    chatMessageModel.countDocuments({ conversation_id: conversationId, sender_type: "customer", read_at: null, deleted_at: null }),
+    chatMessageModel.countDocuments({ conversation_id: conversationId, sender_type: "staff", read_at: null, deleted_at: null }),
+  ]);
+  await chatConversationModel.updateOne(
+    { _id: conversationId },
+    {
+      $set: {
+        last_message_preview: last ? previewOf(last.body ?? "", last.attachment ?? null) : "",
+        last_sender_type: last?.sender_type ?? null,
+        staff_unread: staffUnread,
+        customer_unread: customerUnread,
+      },
+    }
+  );
+}
+
+/** ข้อความของฝั่งนี้ในห้องนี้ที่ยังไม่ถูกลบ — ไม่ใช่ = 404 (ไม่บอกว่ามีอยู่จริงไหม) */
+async function findOwnMessage(conversationId: unknown, senderType: SenderType, messageId: string) {
+  if (!isObjectId(messageId)) throw badRequest("รูปแบบ id ข้อความไม่ถูกต้อง");
+  const msg = await chatMessageModel
+    .findOne({ _id: messageId, conversation_id: conversationId, sender_type: senderType, deleted_at: null })
+    .lean<any>();
+  if (!msg) throw notFound("ไม่พบข้อความ");
+  return msg;
+}
+
+async function applyEdit(conversationId: unknown, msg: any, body: string, attachment: any) {
+  if (!body && !attachment) throw badRequest("ข้อความว่างไม่ได้ — ถ้าไม่ต้องการแล้วให้ลบข้อความแทน");
+  const updated = await chatMessageModel
+    .findOneAndUpdate({ _id: msg._id, deleted_at: null }, { $set: { body, attachment, edited_at: new Date() } }, { returnDocument: "after" })
+    .lean<any>();
+  if (!updated) throw notFound("ไม่พบข้อความ");
+  await refreshConversationSummary(conversationId);
+  return presentMessage(updated);
+}
+
+async function softDelete(conversationId: unknown, msg: any) {
+  await chatMessageModel.updateOne({ _id: msg._id }, { $set: { deleted_at: new Date(), body: "", attachment: null } });
+  await refreshConversationSummary(conversationId);
+  return { _id: String(msg._id), deleted: true };
+}
+
+async function myConversationId(customerId: string) {
+  const conv = await chatConversationModel.findOne({ customer_id: customerId }).select("_id").lean<any>();
+  if (!conv) throw notFound("ไม่พบข้อความ");
+  return conv._id;
+}
+
+/** ลูกค้าแก้ข้อความของตัวเอง — แก้ข้อความ และ/หรือ เปลี่ยน/เอาออก คำสั่งซื้อที่แนบ (ต้องเป็นของตัวเอง) */
+export async function editCustomerMessage(customerId: string, messageId: string, input: EditInput | null) {
+  if (!input || typeof input !== "object") throw badRequest("รูปแบบข้อมูลไม่ถูกต้อง");
+  await dbConnect();
+  const convId = await myConversationId(customerId);
+  const msg = await findOwnMessage(convId, "customer", messageId);
+  const body = input.body === undefined ? msg.body ?? "" : cleanBody(input.body);
+  const replace = input.order_id != null || input.preorder_id != null;
+  const attachment = replace
+    ? await buildAttachment(customerId, { order_id: input.order_id, preorder_id: input.preorder_id })
+    : input.remove_attachment === true
+      ? null
+      : msg.attachment ?? null;
+  return applyEdit(convId, msg, body, attachment);
+}
+
+export async function deleteCustomerMessage(customerId: string, messageId: string) {
+  await dbConnect();
+  const convId = await myConversationId(customerId);
+  return softDelete(convId, await findOwnMessage(convId, "customer", messageId));
+}
+
+/** ร้านแก้ข้อความของร้าน (ข้อความเท่านั้น — ร้านแนบคำสั่งซื้อไม่ได้) */
+export async function editStaffMessage(conversationId: string, messageId: string, input: EditInput | null) {
+  if (!input || typeof input !== "object") throw badRequest("รูปแบบข้อมูลไม่ถูกต้อง");
+  if (input.order_id != null || input.preorder_id != null) throw badRequest("ร้านแนบคำสั่งซื้อในแชทไม่ได้");
+  const body = cleanBody(input.body);
+  await dbConnect();
+  const conv = await findConversation(conversationId);
+  const msg = await findOwnMessage(conv._id, "staff", messageId);
+  return applyEdit(conv._id, msg, body, null);
+}
+
+export async function deleteStaffMessage(conversationId: string, messageId: string) {
+  await dbConnect();
+  const conv = await findConversation(conversationId);
+  return softDelete(conv._id, await findOwnMessage(conv._id, "staff", messageId));
+}
+
+/**
+ * ร้าน "ลบแชท" ของลูกค้า = ซ่อนห้องจากรายการหลังร้าน — ไม่ลบข้อความ (ประวัติยังอยู่ ลูกค้ายังเห็นแชทของตัวเองครบ)
+ * ข้อความที่ค้างอ่านถือว่าอ่านแล้ว (ตัวเลขเมนูไม่ค้าง) · ลูกค้าส่งข้อความใหม่ = กลับมาแสดงพร้อมประวัติเก่า (sendCustomerMessage)
+ */
+export async function deleteConversation(conversationId: string) {
+  await dbConnect();
+  const conv = await findConversation(conversationId);
+  await markRead(conv._id, "customer");
+  await chatConversationModel.updateOne({ _id: conv._id }, { $set: { hidden_at: new Date() } });
+  return { _id: String(conv._id), hidden: true };
+}

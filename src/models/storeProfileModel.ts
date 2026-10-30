@@ -22,6 +22,21 @@ const businessHourDaySchema = new mongoose.Schema(
 // มี _id ประจำรายการ — ออเดอร์/พรีออเดอร์อ้างอิงจุดรับด้วย _id นี้ (ดู src/lib/pickupLocationsServer.ts)
 export const WEEK_DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 
+// ที่อยู่ของหน้าร้านแต่ละแห่ง — ช่องเดียวกับที่อยู่ร้าน (storeSettings) ทุกแห่ง
+// หน้าร้านหลัก: ที่อยู่นี้ = ที่อยู่ร้าน (หน้า "ข้อมูลร้าน" บันทึกที่อยู่ของหน้าร้านหลักไปที่ storeSettings ด้วย)
+const marketAddressSchema = new mongoose.Schema(
+  {
+    house_no: { type: String, default: "", trim: true, maxlength: 200 },
+    sub_district: { type: String, default: "", trim: true, maxlength: 120 },
+    district: { type: String, default: "", trim: true, maxlength: 120 },
+    province: { type: String, default: "", trim: true, maxlength: 120 },
+    zip_code: { type: String, default: "", trim: true, maxlength: 5 },
+    latitude: { type: Number, default: null, min: -90, max: 90 },
+    longitude: { type: Number, default: null, min: -180, max: 180 },
+  },
+  { _id: false }
+);
+
 const weeklyMarketSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true, maxlength: 100 }, // เช่น "ถนนคนเดินตลาดแคมของ"
@@ -30,6 +45,8 @@ const weeklyMarketSchema = new mongoose.Schema(
     open_time: { type: String, default: "17:00", match: /^([01]\d|2[0-3]):[0-5]\d$/ }, // "HH:mm"
     close_time: { type: String, default: "22:00", match: /^([01]\d|2[0-3]):[0-5]\d$/ },
     map_url: { type: String, default: "", trim: true }, // ลิงก์ Google Maps (ไม่บังคับ)
+    // ที่อยู่แบบแยกช่อง + พิกัด (null = รายการเก่าที่มีแค่ location ข้อความ)
+    address: { type: marketAddressSchema, default: null },
     is_active: { type: Boolean, default: true }, // ปิดไว้ = ไม่แสดงให้ลูกค้าเห็น (เช่น งดออกร้านชั่วคราว)
     // หน้าร้านหลัก (มีได้ 1 แห่ง · อยู่ลำดับแรกเสมอ) — เดิม schema ไม่มี field นี้ บันทึกทีไรค่าที่ระบบเดิม (FrontOffice)
     // เขียนไว้หาย หน้าร้านหลักจึงตกไปลำดับ 2 และระบบที่อ่านเวลาเปิดจากหน้าร้านหลักไปใช้เวลาเก่า (ตั้งวัน-เวลาไม่ติด)
@@ -78,6 +95,14 @@ const storeProfileSchema = new mongoose.Schema(
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }
 );
+
+// dev server (hot reload) เก็บ model ที่ compile ไว้ก่อนเพิ่ม field ใหม่ — schema เก่าตัด field ใหม่ทิ้งเงียบ ๆ (strict)
+// เช่น "weekly_markets.address" ไม่ถูกบันทึก → ลบ model เก่าทิ้งแล้วสร้างใหม่จาก schema ปัจจุบัน
+{
+  // ที่อยู่ของหน้าร้าน (weekly_markets[].address) อยู่ใน schema ย่อยของ array
+  const markets = mongoose.models.StoreProfile?.schema.path("weekly_markets") as unknown as { schema?: mongoose.Schema } | undefined;
+  if (mongoose.models.StoreProfile && !markets?.schema?.path("address")) mongoose.deleteModel("StoreProfile");
+}
 
 const StoreProfileModel = mongoose.models.StoreProfile || mongoose.model("StoreProfile", storeProfileSchema);
 

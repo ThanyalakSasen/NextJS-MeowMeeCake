@@ -18,14 +18,17 @@ export interface FavoriteItem {
   name: string;
   nameeg: string;
   category: string;
+  /** id หมวด — ป้าย "ส่งเฉพาะ จ.…" ของบัตรสินค้าคิดจากหมวด · ไม่มีหมวด = null */
+  category_id: string | null;
   /** ราคาขายจริง (ราคาลดถ้ามี) */
   price: number;
   /** ราคาปกติไว้แสดงขีดฆ่า — null ถ้าไม่มีราคาลด */
   originalPrice: number | null;
   image: string;
-  /** ยังเปิดขายอยู่ (ไม่ถูกซ่อน) */
+  /** ซื้อได้ตอนนี้: เปิดขาย (ไม่ถูกซ่อน) และสต็อก > 0 (พรีออเดอร์ไม่ดูสต็อก) — เดิมดูแค่ไม่ถูกซ่อน สินค้าหมดจึงไม่ขึ้นป้าย */
   inStock: boolean;
   rating: string;
+  review_count: number;
   is_preorder: boolean;
 }
 
@@ -53,11 +56,13 @@ export async function listFavorites(userId: string): Promise<{ items: FavoriteIt
       name: String(p.product_name_th ?? ""),
       nameeg: String(p.product_name_eng ?? ""),
       category: String(p.category_id?.product_category_name ?? ""),
+      category_id: p.category_id?._id ? String(p.category_id._id) : p.category_id ? String(p.category_id) : null,
       price: Number(onSale ? p.sale_price : p.product_price ?? 0),
       originalPrice: onSale ? Number(p.product_price) : null,
       image: (p.product_img as string[] | undefined)?.[0] ?? "",
-      inStock: p.is_visible !== false,
+      inStock: p.is_visible !== false && (p.is_preorder === true || Number(p.product_stock_quantity ?? 0) > 0),
       rating: p.avg_rating != null ? String(p.avg_rating) : "-",
+      review_count: Number(p.review_count ?? 0),
       is_preorder: p.is_preorder === true,
     });
   }
