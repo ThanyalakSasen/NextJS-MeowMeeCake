@@ -124,7 +124,8 @@ function presentExpandedRecipe(doc: Record<string, any>): Record<string, any> {
 
 /** สูตรที่ยังอยู่ในใบสั่งผลิตที่ยังไม่จบ (รอดำเนินการ/กำลังผลิต) ลบไม่ได้ — ลบแล้วปิดงานผลิตใบนั้นไม่ได้
  *  (หักวัตถุดิบหาสูตรไม่เจอ) · ใบที่เสร็จ/ยกเลิกแล้วไม่นับ (ผู้ใช้ขอ 2026-10-30) */
-/** สูตรที่ยังผูกกับสินค้าที่ยังไม่ถูกลบลบไม่ได้ (ผู้ใช้ขอ 2026-10-30) — ลบสินค้าก่อน หรือแก้สูตรให้ผูกกับสินค้าอื่น */
+/** สูตรสุดท้ายของสินค้าที่ยังไม่ถูกลบลบไม่ได้ (ผู้ใช้ขอ 2026-10-30) — ลบสินค้าก่อน หรือแก้สูตรให้ผูกกับสินค้าอื่น
+ *  สินค้ายังมีสูตรอื่นอยู่ = ลบสูตรเก่าได้ (สินค้ายังผลิตได้ด้วยสูตรที่เหลือ) */
 async function assertNotLinkedToProduct(id: string): Promise<void> {
   assertObjectId(id);
   await dbConnect();
@@ -134,8 +135,10 @@ async function assertNotLinkedToProduct(id: string): Promise<void> {
     .findOne({ _id: recipe.product_id, deleted_at: null })
     .select("product_name_th")
     .lean<{ product_name_th?: string } | null>();
-  if (product) {
-    throw conflict(`สูตรนี้ยังผูกกับสินค้า "${product.product_name_th ?? ""}" อยู่ ลบยังไม่ได้ — ลบสินค้าก่อน หรือแก้สูตรให้ผูกกับสินค้าอื่น`);
+  if (!product) return;
+  const others = await recipeModel.countDocuments({ product_id: recipe.product_id, deleted_at: null, _id: { $ne: id } });
+  if (others === 0) {
+    throw conflict(`สูตรนี้ยังผูกกับสินค้า "${product.product_name_th ?? ""}" อยู่ ลบยังไม่ได้ (เป็นสูตรเดียวของสินค้านี้) — ลบสินค้าก่อน หรือแก้สูตรให้ผูกกับสินค้าอื่น`);
   }
 }
 

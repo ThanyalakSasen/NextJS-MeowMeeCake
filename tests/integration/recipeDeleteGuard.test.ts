@@ -63,4 +63,13 @@ describe("ลบสูตร — ผูกกับสินค้า", () => {
     await recipeService.remove(String(recipe._id));
     expect(await deletedAt(recipe._id)).not.toBeNull();
   });
+
+  it("สินค้ามีหลายสูตร → ลบสูตรเก่าได้ · เหลือสูตรสุดท้าย → 409", async () => {
+    const product = await makeProduct();
+    const older = await makeRecipe(String(product._id));
+    const newer = await makeRecipe(String(product._id));
+    await recipeService.remove(String(older._id));
+    expect(await deletedAt(older._id)).not.toBeNull();
+    await expect(recipeService.remove(String(newer._id))).rejects.toMatchObject({ status: 409 });
+  });
 });
