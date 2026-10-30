@@ -3,6 +3,7 @@
  * CRUD ผ่าน crudService + สรุปยอดตามหมวด
  */
 import dbConnect from "../lib/dbConnect";
+import { rangeDate } from "../lib/datetime";
 import { badRequest } from "../lib/httpError";
 import { createCrudService } from "../lib/crudService";
 import expenseModel from "../models/expenseModel";
@@ -89,10 +90,12 @@ export const expenseService = {
 export async function summary(opts: { date_from?: string; date_to?: string } = {}) {
   await dbConnect();
   const match: Record<string, any> = { deleted_at: null };
-  if (opts.date_from || opts.date_to) {
+  const from = rangeDate(opts.date_from, "date_from");
+  const to = rangeDate(opts.date_to, "date_to");
+  if (from || to) {
     match.date = {};
-    if (opts.date_from) match.date.$gte = new Date(opts.date_from);
-    if (opts.date_to) match.date.$lte = new Date(opts.date_to);
+    if (from) match.date.$gte = from;
+    if (to) match.date.$lte = to;
   }
 
   // $sum ได้ผลรวมเป็นบาท — ปัด 2 ตำแหน่งก่อนคืน (กัน float สะสม)

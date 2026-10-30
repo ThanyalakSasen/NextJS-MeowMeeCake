@@ -9,7 +9,7 @@
  *  - ช่วงวันที่อ้างอิง created_at ของออเดอร์
  */
 import dbConnect from "../lib/dbConnect";
-import { bangkokDateString } from "../lib/datetime";
+import { bangkokDateString, rangeDate } from "../lib/datetime";
 import orderModel from "../models/orderModel";
 import orderItemModel from "../models/orderItemModel";
 import preorderModel from "../models/preorderModel";
@@ -28,10 +28,12 @@ const SOLD = { payment_status: "paid", order_status: { $ne: "cancelled" } };
 
 function rangeMatch(dateFrom?: string, dateTo?: string): Record<string, any> {
   const m: Record<string, any> = { deleted_at: null };
-  if (dateFrom || dateTo) {
+  const from = rangeDate(dateFrom, "date_from");
+  const to = rangeDate(dateTo, "date_to");
+  if (from || to) {
     m.created_at = {};
-    if (dateFrom) m.created_at.$gte = new Date(dateFrom);
-    if (dateTo) m.created_at.$lte = new Date(dateTo);
+    if (from) m.created_at.$gte = from;
+    if (to) m.created_at.$lte = to;
   }
   return m;
 }
@@ -107,10 +109,7 @@ export async function overview(opts: { date_from?: string; date_to?: string } = 
       deleted_at: null,
       $expr: { $lte: ["$current_stock", "$reorder_point"] },
     }),
-    expenseService.totalsInRange(
-      opts.date_from ? new Date(opts.date_from) : undefined,
-      opts.date_to ? new Date(opts.date_to) : undefined
-    ),
+    expenseService.totalsInRange(rangeDate(opts.date_from, "date_from"), rangeDate(opts.date_to, "date_to")),
   ]);
 
   // total_amount/discount_amount/cost_per_unit/expenseTotals เป็นบาททั้งหมด — รวมค่าดิบก่อนแล้วปัด 2 ตำแหน่งครั้งเดียว
@@ -220,20 +219,19 @@ export async function salesByDay(opts: { days?: number } = {}) {
 }
 
 // ── สินค้าขายดี ────────────────────────────────────────────
+// sort = เกณฑ์จัดอันดับก่อนตัด limit — "revenue" ให้รายงานยอดขายโหมดยอดเงิน (เดิมตัด N อันดับตามจำนวนเสมอ
+// สินค้าราคาสูงที่ขายได้ไม่กี่ชิ้นหลุดรายงานทั้งที่ยอดเงินติดอันดับ)
 export async function topProducts(opts: {
   limit?: number;
   date_from?: string;
   date_to?: string;
+  sort?: "qty" | "revenue";
 } = {}) {
   await dbConnect();
   const limit = Math.min(50, Math.max(1, Number(opts.limit) || 10));
+  const by = opts.sort === "revenue" ? "revenue" : "qty";
 
-  const parentMatch: Record<string, any> = { deleted_at: null, ...SOLD };
-  if (opts.date_from || opts.date_to) {
-    parentMatch.created_at = {};
-    if (opts.date_from) parentMatch.created_at.$gte = new Date(opts.date_from);
-    if (opts.date_to) parentMatch.created_at.$lte = new Date(opts.date_to);
-  }
+  const parentMatch: Record<string, any> = { ...rangeMatch(opts.date_from, opts.date_to), ...SOLD };
 
   // รวมต่อสินค้าจากทั้งสองแหล่ง แล้วค่อยเรียง/ตัด limit (สินค้าหนึ่งขายได้ทั้งแบบปกติและพรีออเดอร์ไม่ได้ แต่ไม่ต้องสมมติ)
   const perSource = await Promise.all(
@@ -266,7 +264,7 @@ export async function topProducts(opts: {
 
   return {
     items: [...byProduct.entries()]
-      .sort(([, a], [, b]) => b.qty - a.qty)
+      .sort(([, a], [, b]) => b[by] - a[by] || b.qty - a.qty)
       .slice(0, limit)
       .map(([id, v]) => ({
         product_id: id,

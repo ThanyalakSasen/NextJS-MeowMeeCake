@@ -1,4 +1,4 @@
-/** GET /api/admin/dashboard/top-products — สินค้าขายดี (dashboard.view) ?limit=10 ?date_from= ?date_to= */
+/** GET /api/admin/dashboard/top-products — สินค้าขายดี (dashboard.view) ?limit=10 ?date_from= ?date_to= ?sort=qty|revenue */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { parseNumber } from "@/lib/queryParams";
@@ -11,6 +11,7 @@ export const GET = withPermission(["dashboard", "reports_sales"], "view", async 
       limit: parseNumber(sp.get("limit")),
       date_from: sp.get("date_from") ?? undefined,
       date_to: sp.get("date_to") ?? undefined,
+      sort: sp.get("sort") === "revenue" ? "revenue" : "qty",
     })
   );
 });
