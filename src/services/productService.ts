@@ -874,22 +874,50 @@ export async function setStock(id: string, quantity: number, log?: StockLogConte
 }
 
 /** setStock + ยอดก่อนตั้ง (อ่านแบบ atomic จาก findOneAndUpdate) — route ใช้ทำ log ก่อน → หลังให้ตรงกับประวัติ */
-export async function setStockDetailed(id: string, quantity: number, log: StockLogContext = {}) {
+/** expected = ยอดที่ผู้ใช้เห็นตอนเปิดฟอร์ม — ส่งมา = ตั้งได้เฉพาะเมื่อยอดยังเท่าเดิม ไม่งั้น 409 STOCK_CHANGED
+ *  (เดิมเปิดฟอร์มค้างไว้ระหว่าง POS ขาย แล้วตั้งยอด = เขียนทับยอดที่ขายไป) · ไม่ส่ง = ตั้งทับเหมือนเดิม */
+export async function setStockDetailed(
+  id: string,
+  quantity: number,
+  log: StockLogContext = {},
+  opts: { expected?: number } = {}
+) {
   await dbConnect();
   if (typeof quantity !== "number" || !Number.isInteger(quantity) || quantity < 0) {
     throw new ProductError("quantity ต้องเป็นจำนวนเต็มไม่ติดลบ", 400);
+  }
+  const { expected } = opts;
+  if (expected !== undefined && (typeof expected !== "number" || !Number.isInteger(expected))) {
+    throw new ProductError("expected ต้องเป็นจำนวนเต็ม", 400);
   }
   await loadStockableProduct(id);
 
   // findOneAndUpdate คืนค่า "ก่อน" อัปเดต (ไม่ส่ง new) — ได้ before ที่แม่นแบบ atomic ไว้เช็คข้ามเกณฑ์
   const previous = await productModel
     .findOneAndUpdate(
-      { _id: id, deleted_at: null, ...STOCKABLE_MATCH },
+      {
+        _id: id,
+        deleted_at: null,
+        ...STOCKABLE_MATCH,
+        // ยอด null นับเป็น 0 (สินค้าเก่าที่ยังไม่เคยตั้งสต็อก)
+        ...(expected !== undefined
+          ? { product_stock_quantity: expected === 0 ? { $in: [0, null] } : expected }
+          : {}),
+      },
       { $set: { product_stock_quantity: quantity } }
     )
     .lean<{ _id: unknown; product_name_th?: string; product_stock_quantity?: number } | null>();
 
   if (!previous) {
+    if (expected !== undefined) {
+      const current = await getStock(id);
+      if (current !== expected) {
+        throw new HttpError(`ยอดสต็อกเปลี่ยนไประหว่างนี้ (ตอนนี้ ${current} ชิ้น)`, 409, "CONFLICT", {
+          reason: "STOCK_CHANGED",
+          current,
+        });
+      }
+    }
     throw new ProductError("ไม่พบสินค้าที่ระบุ", 404);
   }
   const before = previous.product_stock_quantity ?? 0;
