@@ -6,6 +6,7 @@
  *   ใช้ระบบ Preorders แยก
  * - ราคาต่อหน่วย (price_snapshot) คำนวณ ณ ตอนหยิบใส่ตะกร้า = ราคาสินค้า (sale_price ถ้ามี)
  *   + ราคาเพิ่มของตัวเลือก (ทุกกลุ่ม) + ออปชันที่เลือก (productCustomizationService — ตัวเลือกไม่มีสต็อกแยก)
+ *   getCartDetail คิดใหม่จากราคาปัจจุบันทุกครั้ง (สูตรเดียวกับ orderService.resolveLines ตอนสั่งจริง)
  * - soft delete ทั้ง cart และ cart item ผ่าน deleted_at
  * - ตรวจสต็อกตอนเพิ่มลงตะกร้า / เพิ่มจำนวน (assertCartStock) — รวมทุกบรรทัดของสินค้าเดียวกันในตะกร้า
  *   (ตัวเลือกไม่มีสต็อกแยก) เกิน product_stock_quantity → 409 · ลดจำนวนได้เสมอ · ไม่จองสต็อก —
@@ -23,7 +24,7 @@ import productModel from "../models/productModel";
 import userModel from "../models/userModel";
 import { toBaht, toBahtFields, toSatang } from "../lib/money";
 import { isPreorderProduct } from "../lib/productCode";
-import { assertCustomizationIds, getProductCustomization, resolveCustomization } from "./productCustomizationService";
+import { assertCustomizationIds, getCustomizations, getProductCustomization, resolveCustomization } from "./productCustomizationService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -118,13 +119,40 @@ export async function getCartDetail(userId: string) {
   const items = await cartItemModel
     .find({ cart_id: cart._id, deleted_at: null })
     .sort({ added_at: 1 })
-    .populate("product_id", "product_name_th product_name_eng product_img is_preorder is_visible deleted_at")
+    .populate("product_id", "product_name_th product_name_eng product_img is_preorder is_visible deleted_at product_price sale_price")
     .populate("variant_id", "variant_name variant_price")
     .lean();
 
+  // ราคาปัจจุบันต่อบรรทัด — ตอนสั่ง orderService re-price จากราคาปัจจุบันเสมอ (resolveLines) แต่เดิมตะกร้า/หน้ายืนยัน/
+  // ตรวจโค้ดส่วนลดใช้ price_snapshot ตอนหยิบ → ร้านเปลี่ยนราคาระหว่างนั้น ยอดที่ลูกค้ายืนยันไม่ตรงกับบิลที่ต้องจ่าย
+  // ตัวเลือกที่ใช้ไม่ได้แล้ว (ร้านลบ/เปลี่ยนเงื่อนไข) = คงราคาเดิมไว้แสดง — ตอนสั่งจริง resolveLines แจ้ง error เอง
+  const productIds = [...new Set((items as any[]).map((it) => it.product_id?._id).filter(Boolean).map(String))];
+  const customizations = await getCustomizations(productIds);
+  const priceOf = (it: any): number => {
+    const product = it.product_id;
+    if (!product || typeof product !== "object" || product.deleted_at) return it.price_snapshot ?? 0;
+    try {
+      const custom = resolveCustomization(
+        customizations.get(String(product._id)) ?? { groups: [], options: [] },
+        {
+          variant_ids: (it.selected_variants ?? []).map((v: any) => v?.variant_id).filter(Boolean).map(String),
+          variant_id: it.variant_id?._id ? String(it.variant_id._id) : null,
+          selected_options: (it.selected_options ?? [])
+            .filter((o: any) => o?.option_id != null)
+            .map((o: any) => ({ option_id: String(o.option_id), text_value: o.text_value ?? null })),
+        },
+        product.product_name_th
+      );
+      return toSatang((product.sale_price ?? product.product_price) + custom.extra_price);
+    } catch {
+      return it.price_snapshot ?? 0;
+    }
+  };
+  const priced = (items as any[]).map((it) => ({ ...it, price_snapshot: priceOf(it) }));
+
   // line_total / subtotal: คูณ/รวมจากค่าดิบใน DB (บาท) แล้วปัด 2 ตำแหน่งครั้งเดียวตอนท้าย (กัน float สะสม)
   // .populate("variant_id", "... variant_price") ไม่ผ่าน presenter — ปัดซ้อนอีกชั้นตรงนี้
-  const line = (items as any[]).map((it) => {
+  const line = priced.map((it) => {
     const lineTotal = (it.price_snapshot ?? 0) * (it.quantity ?? 0);
     const presented = presentCartItem(it);
     const unavailable_reason = cartItemUnavailableReason(it.product_id);
@@ -140,7 +168,7 @@ export async function getCartDetail(userId: string) {
       line_total: toBaht(lineTotal),
     };
   });
-  const subtotalRaw = (items as any[]).reduce(
+  const subtotalRaw = priced.reduce(
     (s, it) => s + (it.price_snapshot ?? 0) * (it.quantity ?? 0),
     0
   );
