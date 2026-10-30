@@ -54,6 +54,10 @@ export interface ListTransactionQuery {
   includeDeleted?: boolean;
 }
 
+/** เท่าช่องหมายเหตุของหน้าเว็บ (StockActionModal) */
+const NOTE_MAX = 200;
+const PO_REF_MAX = 100;
+
 // ── CREATE (+ ปรับ current_stock) ───────────────────────────
 export async function createTransaction(input: CreateTransactionInput) {
   await dbConnect();
@@ -67,6 +71,19 @@ export async function createTransaction(input: CreateTransactionInput) {
   if (!Number.isFinite(qty) || qty < 0) throw badRequest("qty ต้องเป็นตัวเลขไม่ติดลบ");
   if ((input.type === "use" || input.type === "receive") && qty <= 0) {
     throw badRequest('type "use"/"receive" ต้องมี qty มากกว่า 0');
+  }
+
+  // วันที่ที่แปลงไม่ได้ (เช่น "abc") เดิมหลุดไปถึง mongoose → 500 · หมายเหตุ/เลขใบสั่งซื้อเดิมไม่จำกัดความยาว
+  for (const f of ["transaction_date", "expiry_date"] as const) {
+    if (input[f] != null && input[f] !== "" && Number.isNaN(new Date(input[f] as string | Date).getTime())) {
+      throw badRequest(`${f} ไม่ใช่วันที่ที่ถูกต้อง`);
+    }
+  }
+  if (input.note != null && (typeof input.note !== "string" || input.note.length > NOTE_MAX)) {
+    throw badRequest(`note ต้องเป็นข้อความไม่เกิน ${NOTE_MAX} ตัวอักษร`);
+  }
+  if (input.po_ref != null && (typeof input.po_ref !== "string" || input.po_ref.length > PO_REF_MAX)) {
+    throw badRequest(`po_ref ต้องเป็นข้อความไม่เกิน ${PO_REF_MAX} ตัวอักษร`);
   }
 
   assertObjectId(input.ingredient_id, "ingredient_id");
