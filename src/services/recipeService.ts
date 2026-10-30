@@ -124,6 +124,21 @@ function presentExpandedRecipe(doc: Record<string, any>): Record<string, any> {
 
 /** สูตรที่ยังอยู่ในใบสั่งผลิตที่ยังไม่จบ (รอดำเนินการ/กำลังผลิต) ลบไม่ได้ — ลบแล้วปิดงานผลิตใบนั้นไม่ได้
  *  (หักวัตถุดิบหาสูตรไม่เจอ) · ใบที่เสร็จ/ยกเลิกแล้วไม่นับ (ผู้ใช้ขอ 2026-10-30) */
+/** สูตรที่ยังผูกกับสินค้าที่ยังไม่ถูกลบลบไม่ได้ (ผู้ใช้ขอ 2026-10-30) — ลบสินค้าก่อน หรือแก้สูตรให้ผูกกับสินค้าอื่น */
+async function assertNotLinkedToProduct(id: string): Promise<void> {
+  assertObjectId(id);
+  await dbConnect();
+  const recipe = await recipeModel.findById(id).select("product_id").lean<{ product_id?: unknown } | null>();
+  if (!recipe?.product_id) return;
+  const product = await productModel
+    .findOne({ _id: recipe.product_id, deleted_at: null })
+    .select("product_name_th")
+    .lean<{ product_name_th?: string } | null>();
+  if (product) {
+    throw conflict(`สูตรนี้ยังผูกกับสินค้า "${product.product_name_th ?? ""}" อยู่ ลบยังไม่ได้ — ลบสินค้าก่อน หรือแก้สูตรให้ผูกกับสินค้าอื่น`);
+  }
+}
+
 async function assertNotInProduction(id: string): Promise<void> {
   assertObjectId(id);
   await dbConnect();
@@ -153,6 +168,7 @@ export const recipeService = {
 
   async remove(id: string) {
     await assertNotInProduction(id);
+    await assertNotLinkedToProduct(id);
     return base.remove(id);
   },
 
