@@ -18,6 +18,12 @@ import productVariantModel from "../models/productVariantModel";
 import { getProductCustomization, productIdsWithCustomization } from "./productCustomizationService";
 import * as searchSynonymService from "./searchSynonymService";
 import unitModel from "../models/unitModel";
+import preorderRoundModel from "../models/preorderRoundModel";
+import preorderRoundItemModel from "../models/preorderRoundItemModel";
+import preorderItemModel from "../models/preorderItemModel";
+import preorderModel from "../models/preorderModel";
+import productionItemModel from "../models/productionItemModel";
+import productionOrderModel from "../models/productionOrderModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
 import { deleteImages } from "../lib/upload";
@@ -697,9 +703,70 @@ async function assertNoStock(id: string): Promise<void> {
   }
 }
 
+/** สินค้าที่ยังอยู่ในรอบพรีออเดอร์/การผลิตที่ยังไม่จบลบไม่ได้ (ผู้ใช้ขอ 2026-10-30) — ลบได้เมื่อผลิตเสร็จแล้ว:
+ *  1) อยู่ในรอบที่ตั้งเวลาไว้/เปิดรับอยู่ (เอาออกจากรอบหรือรอปิดรอบก่อน)
+ *  2) อยู่ในรอบที่ปิดแล้ว แต่ยังมีพรีออเดอร์ของสินค้านี้ที่ยังไม่ได้ผลิต (รอดำเนินการ/ยืนยันแล้ว/กำลังเตรียม)
+ *  3) อยู่ในใบสั่งผลิตที่ยังไม่จบ (รอดำเนินการ/กำลังผลิต) */
+async function assertNotInOpenRound(id: string): Promise<void> {
+  await dbConnect();
+  assertObjectId(id);
+  const roundIds = await preorderRoundItemModel.distinct("round_id", { product_id: id, deleted_at: null });
+  const rounds = roundIds.length
+    ? await preorderRoundModel
+        .find({ _id: { $in: roundIds }, deleted_at: null, round_status: { $ne: "cancelled" } })
+        .select("round_name round_status")
+        .sort({ open_date: 1 })
+        .lean<Array<{ _id: Types.ObjectId; round_name: string; round_status: string }>>()
+    : [];
+  const blocked = rounds.filter((r) => r.round_status === "scheduled" || r.round_status === "open").map((r) => r.round_name);
+
+  const closed = rounds.filter((r) => r.round_status === "closed");
+  if (closed.length) {
+    const preorderIds = await preorderItemModel.distinct("preorder_id", { product_id: id, deleted_at: null });
+    const pendingRounds = preorderIds.length
+      ? await preorderModel.distinct("round_id", {
+          _id: { $in: preorderIds },
+          round_id: { $in: closed.map((r) => r._id) },
+          deleted_at: null,
+          order_status: { $in: ["pending", "confirmed", "preparing"] },
+        })
+      : [];
+    const pendingSet = new Set(pendingRounds.map(String));
+    blocked.push(...closed.filter((r) => pendingSet.has(String(r._id))).map((r) => r.round_name));
+  }
+  if (blocked.length) {
+    const shown = blocked.slice(0, 5).join(", ") + (blocked.length > 5 ? " และอื่น ๆ" : "");
+    throw new ProductError(
+      `สินค้านี้ยังอยู่ในรอบพรีออเดอร์ที่ยังไม่จบ (${shown}) ลบยังไม่ได้ — ลบได้เมื่อปิดรอบและผลิตเสร็จแล้ว`,
+      409
+    );
+  }
+
+  const orderIds = await productionItemModel.distinct("production_order_id", {
+    product_id: id,
+    deleted_at: null,
+    item_status: { $ne: "cancelled" },
+  });
+  if (orderIds.length === 0) return;
+  const open = await productionOrderModel
+    .find({ _id: { $in: orderIds }, deleted_at: null, production_status: { $in: ["planned", "in_progress"] } })
+    .select("production_no")
+    .sort({ production_date: 1 })
+    .limit(6)
+    .lean<Array<{ production_no: string }>>();
+  if (open.length) {
+    const shown = open.slice(0, 5).map((o) => o.production_no).join(", ") + (open.length > 5 ? " และอื่น ๆ" : "");
+    throw new ProductError(
+      `สินค้านี้ยังอยู่ในใบสั่งผลิตที่ยังไม่เสร็จ (${shown}) ลบยังไม่ได้ — ปิดงานหรือยกเลิกใบสั่งผลิตก่อน`,
+      409
+    );
+  }
+}
+
 // ── DELETE (soft) ─────────────────────────────────────────────
 export async function deleteProduct(id: string) {
   await assertNoStock(id);
+  await assertNotInOpenRound(id);
   const product = await softDeleteDoc(productModel, id, {
     notFoundMsg: "ไม่พบสินค้าที่ระบุ หรือถูกลบไปแล้ว",
   });
@@ -717,6 +784,7 @@ export async function hardDeleteProduct(id: string) {
   await dbConnect();
   assertObjectId(id);
   await assertNoStock(id);
+  await assertNotInOpenRound(id);
 
   const product = await productModel
     .findByIdAndDelete(id)
