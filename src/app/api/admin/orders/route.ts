@@ -1,6 +1,6 @@
 /**
  * /api/admin/orders
- *   GET  — รายการออเดอร์ทั้งหมด (orders.view) — กรอง ?user_id= ?order_status= ?payment_status= ?order_type= ?search= ?date_from= ?date_to=
+ *   GET  — รายการออเดอร์ทั้งหมด (orders.view) — กรอง ?user_id= ?order_status= (คั่นด้วย , ได้หลายสถานะ) ?payment_status= ?order_type= ?search= ?date_from= ?date_to=
  *          ?with_items=true แนบ items[] ของแต่ละออเดอร์ (แดชบอร์ด — ออเดอร์ล่าสุด)
  *   POST — สร้างออเดอร์แทนลูกค้า (orders.create) — validate ด้วย schemas/order.adminCreateOrderBody
  *          body: { user_id, source?: "cart"|"items", order_type,
@@ -12,7 +12,7 @@ import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { auditChange } from "@/lib/audit";
 import { parseBody } from "@/lib/validate";
-import { parseBool, parsePagination, parseSort } from "@/lib/queryParams";
+import { parseBool, parseList, parsePagination, parseSort } from "@/lib/queryParams";
 import { adminCreateOrderBody } from "@/schemas/order";
 import * as orderService from "@/services/orderService";
 import * as addressService from "@/services/addressService";
@@ -25,7 +25,7 @@ export const GET = withPermission("orders", "view", async (_s, req) => {
   const result = await orderService.listOrders({
     pagination: parsePagination(sp),
     user_id: sp.get("user_id") ?? undefined,
-    order_status: (sp.get("order_status") as OrderStatus | null) ?? undefined,
+    order_status: parseList<OrderStatus>(sp.get("order_status")),
     payment_status: (sp.get("payment_status") as PaymentStatus | null) ?? undefined,
     order_type: (sp.get("order_type") as "delivery" | "takeaway" | null) ?? undefined,
     search: sp.get("search") ?? undefined,

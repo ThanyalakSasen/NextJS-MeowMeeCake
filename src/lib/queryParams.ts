@@ -53,6 +53,14 @@ export function parseBool(value: string | null): boolean | undefined {
   return undefined;
 }
 
+/** "a,b,c" → ["a","b","c"] (ตัวเดียว = string เดิม · ไม่ส่งมา = undefined) — กรองหลายค่าในคำขอเดียว เช่น ?order_status=pending,confirmed */
+export function parseList<T extends string>(value: string | null): T | T[] | undefined {
+  if (value === null || value === "") return undefined;
+  if (!value.includes(",")) return value as T;
+  const parts = value.split(",").map((s) => s.trim()).filter(Boolean) as T[];
+  return parts.length === 1 ? parts[0] : parts;
+}
+
 export function parseNumber(value: string | null): number | undefined {
   if (value === null || value === "") return undefined;
   const n = Number(value);

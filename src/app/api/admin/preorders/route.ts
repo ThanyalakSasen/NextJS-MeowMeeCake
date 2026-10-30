@@ -1,7 +1,7 @@
 /**
  * /api/admin/preorders
  *   GET  — รายการพรีออเดอร์ทั้งหมด (preorder.view)
- *          ?user_id= ?round_id= ?order_status= ?payment_status= ?order_type= ?search= ?date_from= ?date_to= ?includeDeleted=
+ *          ?user_id= ?round_id= ?order_status= (คั่นด้วย , ได้หลายสถานะ) ?payment_status= ?order_type= ?search= ?date_from= ?date_to= ?includeDeleted=
  *   POST — สร้างพรีออเดอร์แทนลูกค้า (preorder.create) — body ต้องมี user_id ; รองรับ discount_amount กรอกมือ
  *          body: { user_id, round_id, order_type, delivery_address?, discount_amount?,
  *                  items: [{ round_item_id, quantity, special_request? }] }
@@ -10,7 +10,7 @@ import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
 import { auditChange } from "@/lib/audit";
 import { badRequest } from "@/lib/httpError";
-import { parseBool, parsePagination, parseSort } from "@/lib/queryParams";
+import { parseBool, parseList, parsePagination, parseSort } from "@/lib/queryParams";
 import * as preorderService from "@/services/preorderService";
 import type { PreorderStatus, PaymentStatus } from "@/services/preorderService";
 
@@ -20,7 +20,7 @@ export const GET = withPermission("preorder", "view", async (_s, req) => {
     pagination: parsePagination(sp),
     user_id: sp.get("user_id") ?? undefined,
     round_id: sp.get("round_id") ?? undefined,
-    order_status: (sp.get("order_status") as PreorderStatus | null) ?? undefined,
+    order_status: parseList<PreorderStatus>(sp.get("order_status")),
     payment_status: (sp.get("payment_status") as PaymentStatus | null) ?? undefined,
     order_type: (sp.get("order_type") as "delivery" | "takeaway" | null) ?? undefined,
     search: sp.get("search") ?? undefined,

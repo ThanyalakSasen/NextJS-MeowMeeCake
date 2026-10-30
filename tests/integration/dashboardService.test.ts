@@ -143,3 +143,38 @@ describe("dashboardService — รวมพรีออเดอร์ (BACKLOG4
     expect(r.recipe_cogs).toBe(20 + 120);
   });
 });
+
+/** หน้าสรุปกำไร-ขาดทุน — ตารางเปรียบเทียบรายวันในคำขอเดียว (เดิมช่วงละ 2 คำขอ) · ปี 2033 กันข้อมูลเทสอื่นปน */
+describe("dashboardService.financeTrend", () => {
+  const day = (d: number) => {
+    const from = new Date(Date.UTC(2033, 0, d));
+    return { from: from.toISOString(), to: new Date(from.getTime() + 86_400_000 - 1).toISOString() };
+  };
+
+  it("รายรับ/รายจ่ายแยกตามช่วง — ชุดเดียวกับ revenueByChannel / expenses summary", async () => {
+    const user = await makeUser();
+    const base = { user_id: user._id, order_type: "takeaway", discount_amount: 0 };
+    await orderModel.create({ ...base, order_no: `ORD-FT1-${Date.now()}`, payment_status: "paid", order_status: "completed",
+      subtotal: 100, total_amount: 100, created_at: new Date(Date.UTC(2033, 0, 1, 23, 59)) });
+    await orderModel.create({ ...base, order_no: `ORD-FT2-${Date.now()}`, payment_status: "paid", order_status: "cancelled",
+      subtotal: 70, total_amount: 70, created_at: new Date(Date.UTC(2033, 0, 2, 3)) }); // ยกเลิก — ไม่นับ
+    await preorderModel.create({ ...base, preorder_no: `PRE-FT-${Date.now()}`, round_id: oid(), payment_status: "paid",
+      order_status: "confirmed", subtotal: 250, total_amount: 250, created_at: new Date(Date.UTC(2033, 0, 3, 0, 0)) });
+    await expenseService.create({ date: new Date(Date.UTC(2033, 0, 2, 12)), description: "ไข่", category: "ค่าสาธารณูปโภค", amount: 40, payment_method: "โอนเงิน" });
+
+    const ranges = [day(1), day(2), day(3)];
+    const r = await dashboardService.financeTrend(ranges);
+    expect(r.buckets.map((b) => [b.income, b.expense])).toEqual([[100, 0], [0, 40], [250, 0]]);
+    expect(r.buckets[0]).toMatchObject(ranges[0]);
+    const byChannel = await dashboardService.revenueByChannel({ date_from: ranges[2].from, date_to: ranges[2].to });
+    expect(r.buckets[2].income).toBe(byChannel.total);
+  });
+
+  it("ช่วงไม่ต่อเนื่อง / เกินจำนวน / ว่าง → 400", async () => {
+    await expect(dashboardService.financeTrend([day(1), day(3)])).rejects.toMatchObject({ status: 400 });
+    await expect(dashboardService.financeTrend([day(2), day(1)])).rejects.toMatchObject({ status: 400 });
+    await expect(dashboardService.financeTrend([])).rejects.toMatchObject({ status: 400 });
+    const many = Array.from({ length: dashboardService.FINANCE_TREND_MAX_RANGES + 1 }, (_, i) => day(i + 1));
+    await expect(dashboardService.financeTrend(many)).rejects.toMatchObject({ status: 400 });
+  });
+});

@@ -1,13 +1,14 @@
 /**
  * /api/admin/production-orders
  *   GET  — รายการใบสั่งผลิต (production.view) — ?round_id= กรองเฉพาะใบที่มาจากรอบพรีออเดอร์นั้น
+ *          ?production_status= (คั่นด้วย , ได้หลายสถานะ) · ?history_from= ?history_to= ช่วงของแท็บประวัติ (เสร็จแล้ว = completed_at · อื่น ๆ = production_date)
  *   POST — สร้างใบสั่งผลิตเอง (production.create ; source_type บังคับเป็น "manual" เสมอ)
  *          body: { production_date, assigned_to?, production_note?, items?: [{ product_id, recipe_id, planned_qty, notes? }] }
  *          สร้างจากรอบพรีออเดอร์ให้ใช้ POST /admin/production-orders/from-preorder-round แทน
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
-import { parseBool, parsePagination } from "@/lib/queryParams";
+import { parseBool, parseList, parsePagination } from "@/lib/queryParams";
 import * as productionOrderService from "@/services/productionOrderService";
 import { auditChange } from "@/lib/audit";
 import { orderForAudit } from "@/services/productionAudit";
@@ -17,13 +18,15 @@ export const GET = withPermission("production", "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await productionOrderService.listProductionOrders({
     pagination: parsePagination(sp),
-    production_status: (sp.get("production_status") as ProductionStatus | null) ?? undefined,
+    production_status: parseList<ProductionStatus>(sp.get("production_status")),
     source_type: (sp.get("source_type") as "manual" | "preorder" | null) ?? undefined,
     round_id: sp.get("round_id") ?? undefined,
     assigned_to: sp.get("assigned_to") ?? undefined,
     search: sp.get("search") ?? undefined,
     date_from: sp.get("date_from") ?? undefined,
     date_to: sp.get("date_to") ?? undefined,
+    history_from: sp.get("history_from") ?? undefined,
+    history_to: sp.get("history_to") ?? undefined,
     includeDeleted: parseBool(sp.get("includeDeleted")) ?? false,
   });
   return ok(result);
