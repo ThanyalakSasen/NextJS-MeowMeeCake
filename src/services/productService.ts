@@ -679,8 +679,27 @@ export async function updateProduct(id: string, input: UpdateProductInput) {
 // BACKLOG3 §9 — soft-delete/restore เป็น pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน
 // (notFound() ของ primitive กับ ProductError(msg,404) เดิม คืน response shape เดียวกันเป๊ะ —
 // {status:404, code:"NOT_FOUND"} ทั้งคู่ — ยืนยันแล้วว่าไม่มี instanceof ProductError check ที่ไหนเลย)
+/** สินค้าที่ยังมีของในสต็อกลบไม่ได้ (ทั้งลบปกติ/ลบถาวร) — ต้องขายหมดหรือปรับสต็อกเป็น 0 ก่อน (ผู้ใช้ขอ 2026-10-30)
+ *  พรีออเดอร์ไม่มีสต็อก (null) ลบได้ตามปกติ */
+async function assertNoStock(id: string): Promise<void> {
+  await dbConnect();
+  assertObjectId(id);
+  const p = await productModel
+    .findById(id)
+    .select("product_stock_quantity")
+    .lean<{ product_stock_quantity?: number | null } | null>();
+  const qty = Number(p?.product_stock_quantity ?? 0);
+  if (qty > 0) {
+    throw new ProductError(
+      `สินค้านี้ยังมีของในสต็อก ${qty.toLocaleString("th-TH")} ชิ้น ลบยังไม่ได้ — ขายให้หมดหรือปรับสต็อกเป็น 0 ก่อน`,
+      409
+    );
+  }
+}
+
 // ── DELETE (soft) ─────────────────────────────────────────────
 export async function deleteProduct(id: string) {
+  await assertNoStock(id);
   const product = await softDeleteDoc(productModel, id, {
     notFoundMsg: "ไม่พบสินค้าที่ระบุ หรือถูกลบไปแล้ว",
   });
@@ -697,6 +716,7 @@ export async function restoreProduct(id: string) {
 export async function hardDeleteProduct(id: string) {
   await dbConnect();
   assertObjectId(id);
+  await assertNoStock(id);
 
   const product = await productModel
     .findByIdAndDelete(id)

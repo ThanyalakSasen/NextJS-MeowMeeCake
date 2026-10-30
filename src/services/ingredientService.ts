@@ -72,6 +72,22 @@ async function assertUnitChangeAllowed(id: string, unitId: string): Promise<void
   }
 }
 
+/** วัตถุดิบที่ยังมียอดคงเหลือลบไม่ได้ — ต้องใช้หมดหรือปรับยอดเป็น 0 ก่อน (ผู้ใช้ขอ 2026-10-30) */
+async function assertNoStock(id: string): Promise<void> {
+  assertObjectId(id);
+  await dbConnect();
+  const ing = await ingredientModel
+    .findById(id)
+    .select("current_stock unit_id")
+    .populate("unit_id", "unit_abbr")
+    .lean<{ current_stock?: number; unit_id?: { unit_abbr?: string } | null } | null>();
+  const qty = Number(ing?.current_stock ?? 0);
+  if (qty > 0) {
+    const unit = ing?.unit_id?.unit_abbr ? ` ${ing.unit_id.unit_abbr}` : "";
+    throw conflict(`วัตถุดิบนี้ยังมียอดคงเหลือ ${qty.toLocaleString("th-TH")}${unit} ลบยังไม่ได้ — ใช้ให้หมดหรือปรับยอดเป็น 0 ก่อน`);
+  }
+}
+
 /** ลบวัตถุดิบที่สูตร/ส่วนประกอบยังใช้อยู่ไม่ได้ — เดิมลบได้ แล้วปิดงานผลิตของสูตรนั้นล้มทุกใบด้วย "ไม่พบวัตถุดิบที่ระบุ"
  *  (เจอจริง 2026-10-30: ลบ "เนยจืด" ที่ 14 สูตรใช้) · ต้องเอาออกจากสูตรก่อน */
 async function assertNotUsed(id: string): Promise<void> {
@@ -135,6 +151,7 @@ export const ingredientService = {
   },
 
   async remove(id: string) {
+    await assertNoStock(id);
     await assertNotUsed(id);
     return base.remove(id);
   },
