@@ -19,6 +19,8 @@ import * as addressService from "@/services/addressService";
 import type { OrderStatus, PaymentStatus } from "@/services/orderService";
 
 export const GET = withPermission("orders", "view", async (_s, req) => {
+  // หมดเวลาชำระ 30 นาทีแล้วยังไม่ส่งสลิป — ยกเลิกก่อนแสดงรายการ ไม่ต้องรอ cron (docs/customer-backend-merge.md §8.8)
+  await orderService.expireUnpaidOrdersForAdmin();
   const sp = req.nextUrl.searchParams;
   const result = await orderService.listOrders({
     pagination: parsePagination(sp),

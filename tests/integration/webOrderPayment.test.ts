@@ -55,6 +55,23 @@ describe("หมดเวลาชำระ 30 นาที", () => {
     expect((await orderModel.findById(b.order._id).lean<{ order_status: string }>())!.order_status).toBe("pending");
   });
 
+  it("แอดมินเปิดรายการ (expireUnpaidOrdersForAdmin): ยกเลิกที่เลยกำหนด · เรียกพร้อมกันคืนสต็อกครั้งเดียว · ส่งสลิปแล้วไม่ถูกยกเลิก", async () => {
+    const a = await webOrder();
+    const b = await webOrder();
+    await paymentService.createPayment({
+      user_id: b.uid, order_id: b.oid, amount: b.order.total_amount, slip_image_url: "/api/files/slips/b.jpg",
+    });
+    await orderModel.updateMany({ _id: { $in: [a.order._id, b.order._id] } }, { $set: { payment_due_at: later(-MIN) } });
+
+    await Promise.all([1, 2, 3].map(() => orderService.expireUnpaidOrdersForAdmin()));
+
+    const after = await orderModel.findById(a.order._id).lean<{ order_status: string; cancelled_reason: string }>();
+    expect(after!.order_status).toBe("cancelled");
+    expect(after!.cancelled_reason).toBe(orderService.PAYMENT_EXPIRED_REASON);
+    expect(await stock(a.p._id)).toBe(10);
+    expect((await orderModel.findById(b.order._id).lean<{ order_status: string }>())!.order_status).toBe("pending");
+  });
+
   it("แนบสลิปย้อนหลัง → ตัดสต็อกใหม่ + กลับเป็น pending · ไม่แนบสลิป = 400 · ของหมด = 409", async () => {
     const a = await webOrder(2, 10);
     await orderService.expireUnpaidOrders({ now: later(31 * MIN) });
