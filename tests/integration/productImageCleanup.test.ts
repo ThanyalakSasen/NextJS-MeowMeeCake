@@ -80,7 +80,7 @@ describe("productService.hardDeleteProduct — ลบไฟล์รูปทั
   it("ลบสินค้าถาวร → ไฟล์รูปทุกไฟล์ถูกลบตามไปด้วย", async () => {
     const dir = testDir();
     const [img1, img2] = await saveImages([makeFile("p.png"), makeFile("q.png")], dir);
-    const product = await makeProduct({ product_img: [img1.url, img2.url] });
+    const product = await makeProduct({ product_img: [img1.url, img2.url], product_stock_quantity: 0 });
 
     await productService.hardDeleteProduct(String(product._id));
 
@@ -89,7 +89,7 @@ describe("productService.hardDeleteProduct — ลบไฟล์รูปทั
   });
 
   it("ลบสินค้าที่ไม่มีรูปเลย (product_img: []) → ไม่ error", async () => {
-    const product = await makeProduct({ product_img: [] });
+    const product = await makeProduct({ product_img: [], product_stock_quantity: 0 });
     await expect(productService.hardDeleteProduct(String(product._id))).resolves.toBeTruthy();
   });
 });
