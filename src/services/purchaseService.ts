@@ -9,6 +9,8 @@
  *                       — สูตรเดิมไม่คิดใหม่เอง เพราะแอดมินกรอกต้นทุนต่อแบทช์เองได้)
  *   listStockItems()  → รายการรับเข้าที่ผูกกับค่าใช้จ่ายใบนั้น
  *   linkStockItems()  → ผูกรายการรับเข้าเดิม (บันทึกก่อนมีฟีเจอร์นี้) กับค่าใช้จ่ายย้อนหลัง
+ *                       update_cost (ค่าเริ่มต้น) → ตั้งต้นทุนวัตถุดิบเหมือน createPurchase แต่เฉพาะเมื่อรายการที่ผูก
+ *                       เป็นราคาซื้อล่าสุดของวัตถุดิบนั้น (ผูกบิลเก่าย้อนหลังไม่ทับราคาที่ใหม่กว่า)
  *   unlinkStockItem() → ยกเลิกการผูก (สต็อกไม่เปลี่ยน)
  *
  * ความจริงอยู่ที่รายการรับเข้า (IngredientTransactions.expense_id/line_total) ที่เดียว — ค่าใช้จ่ายไม่เก็บรายการซ้ำ
@@ -172,7 +174,11 @@ export async function listStockItems(expenseId: string) {
 }
 
 // ── LINK / UNLINK (ผูกย้อนหลัง) ────────────────────────────
-export async function linkStockItems(expenseId: string, links: { transaction_id: string; line_total: number }[]) {
+export async function linkStockItems(
+  expenseId: string,
+  links: { transaction_id: string; line_total: number }[],
+  opts: { update_cost?: boolean } = {}
+) {
   await dbConnect();
   const expense = await activeExpense(expenseId);
 
@@ -180,7 +186,7 @@ export async function linkStockItems(expenseId: string, links: { transaction_id:
   if (new Set(ids).size !== ids.length) throw badRequest("มีรายการรับเข้าซ้ำกัน");
   const txns = await ingredientTransactionModel
     .find({ _id: { $in: ids }, deleted_at: null })
-    .select("type expense_id")
+    .select("type expense_id ingredient_id")
     .lean<any[]>();
   if (txns.length !== ids.length) throw notFound("ไม่พบรายการรับเข้าบางรายการ (อาจถูกยกเลิกไปแล้ว)");
   if (txns.some((t) => t.type !== "receive")) throw badRequest("ผูกกับค่าใช้จ่ายได้เฉพาะรายการรับเข้า");
@@ -202,7 +208,42 @@ export async function linkStockItems(expenseId: string, links: { transaction_id:
     );
     linked += res.modifiedCount;
   }
-  return { linked };
+  const cost_updated =
+    opts.update_cost === false || linked === 0
+      ? 0
+      : await costFromLatestPurchase([...new Set(txns.map((t) => String(t.ingredient_id)))], new Set(ids));
+  return { linked, cost_updated };
+}
+
+/** วันที่รับเข้าจริง (ข้อมูลเก่าไม่มี transaction_date → ใช้เวลาที่บันทึก) */
+const receivedAt = (t: any) => new Date(t.transaction_date ?? t.created_at).getTime();
+
+/**
+ * ต้นทุนวัตถุดิบ = ราคาต่อหน่วยของรายการรับเข้าที่มีราคา (ผูกบิลแล้ว) ล่าสุด — ตั้งเฉพาะวัตถุดิบที่รายการล่าสุดคือรายการที่เพิ่งผูก
+ * คืนจำนวนวัตถุดิบที่ตั้งต้นทุน
+ */
+async function costFromLatestPurchase(ingredientIds: string[], justLinked: Set<string>): Promise<number> {
+  const priced = await ingredientTransactionModel
+    .find({ ingredient_id: { $in: ingredientIds }, type: "receive", deleted_at: null, line_total: { $gt: 0 }, qty: { $gt: 0 } })
+    .select("ingredient_id qty line_total transaction_date created_at")
+    .lean<any[]>();
+  const latest = new Map<string, any>();
+  for (const t of priced) {
+    const key = String(t.ingredient_id);
+    const cur = latest.get(key);
+    const newer = !cur || receivedAt(t) > receivedAt(cur) || (receivedAt(t) === receivedAt(cur) && new Date(t.created_at) > new Date(cur.created_at));
+    if (newer) latest.set(key, t);
+  }
+  let updated = 0;
+  for (const [ingredientId, t] of latest) {
+    if (!justLinked.has(String(t._id))) continue;
+    const res = await ingredientModel.updateOne(
+      { _id: ingredientId, deleted_at: null },
+      { $set: { cost_per_unit: round2(t.line_total / t.qty) } }
+    );
+    updated += res.matchedCount;
+  }
+  return updated;
 }
 
 export async function unlinkStockItem(expenseId: string, transactionId: string) {
