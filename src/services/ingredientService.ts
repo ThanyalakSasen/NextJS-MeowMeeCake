@@ -18,6 +18,7 @@ import unitModel from "../models/unitModel";
 import recipeModel from "../models/recipeModel";
 import componentModel from "../models/componentModel";
 import { toSatang, toBahtFields } from "../lib/money";
+import { assertNoBlockers, ingredientDeleteBlockers } from "./deleteBlockers";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -72,39 +73,6 @@ async function assertUnitChangeAllowed(id: string, unitId: string): Promise<void
   }
 }
 
-/** วัตถุดิบที่ยังมียอดคงเหลือลบไม่ได้ — ต้องใช้หมดหรือปรับยอดเป็น 0 ก่อน (ผู้ใช้ขอ 2026-10-30) */
-async function assertNoStock(id: string): Promise<void> {
-  assertObjectId(id);
-  await dbConnect();
-  const ing = await ingredientModel
-    .findById(id)
-    .select("current_stock unit_id")
-    .populate("unit_id", "unit_abbr")
-    .lean<{ current_stock?: number; unit_id?: { unit_abbr?: string } | null } | null>();
-  const qty = Number(ing?.current_stock ?? 0);
-  if (qty > 0) {
-    const unit = ing?.unit_id?.unit_abbr ? ` ${ing.unit_id.unit_abbr}` : "";
-    throw conflict(`วัตถุดิบนี้ยังมียอดคงเหลือ ${qty.toLocaleString("th-TH")}${unit} ลบยังไม่ได้ — ใช้ให้หมดหรือปรับยอดเป็น 0 ก่อน`);
-  }
-}
-
-/** ลบวัตถุดิบที่สูตร/ส่วนประกอบยังใช้อยู่ไม่ได้ — เดิมลบได้ แล้วปิดงานผลิตของสูตรนั้นล้มทุกใบด้วย "ไม่พบวัตถุดิบที่ระบุ"
- *  (เจอจริง 2026-10-30: ลบ "เนยจืด" ที่ 14 สูตรใช้) · ต้องเอาออกจากสูตรก่อน */
-async function assertNotUsed(id: string): Promise<void> {
-  assertObjectId(id);
-  await dbConnect();
-  const match = { "ingredients.ingredient_id": id, deleted_at: null };
-  const [recipes, components] = await Promise.all([
-    recipeModel.find(match).select("recipe_name").sort({ recipe_name: 1 }).limit(21).lean<Array<{ recipe_name?: string }>>(),
-    componentModel.find(match).select("component_name").sort({ component_name: 1 }).limit(21).lean<Array<{ component_name?: string }>>(),
-  ]);
-  const names = [...recipes.map((r) => r.recipe_name), ...components.map((c) => c.component_name)].filter(Boolean);
-  if (names.length === 0) return;
-  // หน้าจอแสดงข้อความนี้ตรง ๆ (เตือน "ยังมีสูตรที่ใช้วัตถุดิบนี้อยู่ ลบยังไม่ได้") — บอกชื่อสูตรให้ไปแก้ได้ทันที
-  const shown = names.slice(0, 20).join(", ") + (names.length > 20 ? " และอื่น ๆ" : "");
-  throw conflict(`ยังมีสูตรที่ใช้วัตถุดิบนี้อยู่ (${shown}) — เอาวัตถุดิบออกจากสูตรเหล่านี้ก่อนจึงลบได้`);
-}
-
 async function assertRefs(input: Record<string, any>): Promise<void> {
   if (input.ingredient_category_id) {
     await assertRefExists(
@@ -129,6 +97,8 @@ async function assertRefs(input: Record<string, any>): Promise<void> {
 export const ingredientService = {
   ...base,
 
+  getDeleteBlockers: ingredientDeleteBlockers,
+
   async create(input: Record<string, any>) {
     if (!input.ingredient_name) throw badRequest("กรุณาระบุ ingredient_name");
     if (!input.ingredient_category_id) throw badRequest("กรุณาระบุ ingredient_category_id");
@@ -151,8 +121,8 @@ export const ingredientService = {
   },
 
   async remove(id: string) {
-    await assertNoStock(id);
-    await assertNotUsed(id);
+    // ยังมียอดคงเหลือ / สูตร-ส่วนประกอบใช้อยู่ (ผู้ใช้ขอ 2026-10-30) — services/deleteBlockers.ts
+    assertNoBlockers("วัตถุดิบ", await ingredientDeleteBlockers(id));
     return base.remove(id);
   },
 
