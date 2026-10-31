@@ -44,3 +44,11 @@ export const permissionUpdate = z
     message: "ไม่มีฟิลด์ที่อนุญาตให้แก้ไข (can_view/can_create/.../expires_at)",
   });
 export type PermissionUpdateBody = z.infer<typeof permissionUpdate>;
+
+/** PUT /api/admin/permissions/role/[roleId] — สิทธิ์ทั้งบทบาทในคำขอเดียว (ส่งเฉพาะเมนูที่จะตั้ง · flag ที่ไม่ส่ง = คงเดิม) */
+export const rolePermissionsBody = z.object({
+  rows: z
+    .array(z.object({ menu_key: z.enum(MENU_KEYS), ...permissionFlags }))
+    .min(1)
+    .max(MENU_KEYS.length),
+});

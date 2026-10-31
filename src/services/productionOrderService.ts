@@ -19,6 +19,7 @@ import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { Saga } from "../lib/compensation";
+import { runAtomic } from "../lib/transaction";
 import { generateDocNo, isPreorderProduct } from "../lib/productCode";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import { rangeDate } from "../lib/datetime";
@@ -432,6 +433,87 @@ export async function updateProductionOrder(id: string, input: Record<string, an
     }
   }
   await order.save();
+  return getProductionOrderById(id);
+}
+
+export interface ProductionOrderEditInput {
+  production_date?: string;
+  assigned_to?: string | null;
+  production_note?: string | null;
+  items?: {
+    remove: string[];
+    update: { item_id: string; planned_qty: number; notes?: string | null }[];
+    add: AddItemInput[];
+  };
+}
+
+/**
+ * บันทึกใบสั่งผลิตทั้งใบ (หัวใบ + ลบ/แก้/เพิ่มรายการ) ในคำขอเดียว — เอกสารบั๊กข้อ 12
+ * เดิมหน้าเว็บยิง PATCH หัวใบ แล้ว DELETE/PATCH/POST ทีละรายการ ล้มกลางทาง = ใบเหลือครึ่ง ๆ กลาง ๆ
+ * ตรวจทุกอย่างก่อน (กติกาเดียวกับ updateProductionOrder / updateItem / deleteItem / addItems) แล้วค่อยเขียนใน runAtomic
+ */
+export async function saveProductionOrderEdit(id: string, input: ProductionOrderEditInput) {
+  await dbConnect();
+  assertObjectId(id);
+
+  const order = await productionOrderModel.findOne({ _id: id, deleted_at: null }).lean<any>();
+  if (!order) throw notFound("ไม่พบใบสั่งผลิตที่ระบุ");
+  if (["done", "cancelled"].includes(order.production_status)) {
+    throw conflict("ใบสั่งผลิตที่ปิดแล้วแก้ไขไม่ได้");
+  }
+  if (input.assigned_to) {
+    await assertRefExists(userModel, input.assigned_to, "ผู้รับผิดชอบ", "assigned_to");
+  }
+  assertNoteLength(input.production_note);
+  if (input.production_date !== undefined && Number.isNaN(new Date(input.production_date).getTime())) {
+    throw badRequest("production_date ไม่ถูกต้อง");
+  }
+
+  const items = input.items ?? { remove: [], update: [], add: [] };
+  const touched = [...items.remove, ...items.update.map((u) => u.item_id)];
+  if (new Set(touched).size !== touched.length) throw badRequest("รายการผลิตซ้ำกันในคำขอ");
+  if (items.add.length && !["planned", "in_progress"].includes(order.production_status)) {
+    throw conflict("เพิ่มรายการได้เฉพาะใบสั่งผลิตที่ยัง planned หรือ in_progress");
+  }
+  if (touched.length) {
+    const existing = await productionItemModel
+      .find({ _id: { $in: touched }, production_order_id: id, deleted_at: null })
+      .select("_id stock_updated_at")
+      .lean<any[]>();
+    const byId = new Map(existing.map((it) => [String(it._id), it]));
+    for (const itemId of touched) {
+      const it = byId.get(String(itemId));
+      if (!it) throw notFound("ไม่พบรายการผลิตที่ระบุในใบสั่งผลิตนี้");
+      if (it.stock_updated_at) {
+        throw conflict("รายการนี้หักสต็อกไปแล้ว แก้จำนวนหรือลบไม่ได้ ให้ทำ reverse-stock ก่อน");
+      }
+    }
+  }
+  const newDocs = items.add.length ? await productionItemService.prepareNewItems(id, items.add) : [];
+
+  const header: Record<string, unknown> = {};
+  if (input.production_date !== undefined) header.production_date = new Date(input.production_date);
+  if (input.assigned_to !== undefined) header.assigned_to = input.assigned_to;
+  if (input.production_note !== undefined) header.production_note = input.production_note;
+
+  await runAtomic(async (session) => {
+    if (Object.keys(header).length) {
+      await productionOrderModel.updateOne({ _id: id }, { $set: header }, { session });
+    }
+    const ops: any[] = [
+      ...items.remove.map((itemId) => ({
+        updateOne: { filter: { _id: itemId, deleted_at: null }, update: { $set: { deleted_at: new Date() } } },
+      })),
+      ...items.update.map((u) => ({
+        updateOne: {
+          filter: { _id: u.item_id, deleted_at: null },
+          update: { $set: { planned_qty: u.planned_qty, notes: u.notes ?? null } },
+        },
+      })),
+      ...newDocs.map((doc) => ({ insertOne: { document: doc } })),
+    ];
+    if (ops.length) await productionItemModel.bulkWrite(ops, { session, ordered: true });
+  });
   return getProductionOrderById(id);
 }
 

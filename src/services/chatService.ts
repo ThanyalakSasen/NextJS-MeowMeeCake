@@ -15,6 +15,7 @@
  */
 import dbConnect from "../lib/dbConnect";
 import { badRequest, notFound } from "../lib/httpError";
+import { Types } from "mongoose";
 import { isObjectId } from "../lib/objectId";
 import { rateLimit } from "../lib/rateLimit";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
@@ -52,6 +53,8 @@ export interface SendInput {
 
 export interface MessageQuery {
   after?: string | null;
+  /** cursor คู่กับ after: _id ของข้อความสุดท้ายที่ได้รับ (updated_at = after) — ส่งมา = คืนเฉพาะที่ "หลัง" คู่ (updated_at, _id) นั้น */
+  after_id?: string | null;
   before?: string | null;
   limit?: unknown;
 }
@@ -131,11 +134,24 @@ async function loadMessages(conversationId: unknown, q: MessageQuery) {
   const before = parseDate(q.before, "before");
   const filter: Record<string, unknown> = { conversation_id: conversationId };
   if (after) {
-    // ข้อความใหม่ + ข้อความที่แก้ไข/ลบ/อ่านแล้ว ตั้งแต่ after (รวมเวลาเท่ากัน — client ตัดซ้ำด้วย _id)
-    // ข้อความใหม่ updated_at = created_at → ใช้ updated_at อย่างเดียวพอ · รวมที่ถูกลบ (deleted: true) ให้อีกฝั่งเอาออก
-    filter.updated_at = { $gte: after };
-    const rows = await chatMessageModel.find(filter).sort({ updated_at: 1, _id: 1 }).limit(limit).lean<any[]>();
-    return { items: rows.map(presentMessage), has_more: false };
+    // ข้อความใหม่ + ข้อความที่แก้ไข/ลบ/อ่านแล้ว ตั้งแต่ after · ข้อความใหม่ updated_at = created_at → ใช้ updated_at อย่างเดียวพอ
+    // รวมที่ถูกลบ (deleted: true) ให้อีกฝั่งเอาออก
+    // after_id (เอกสารบั๊กข้อ 17): cursor คู่ (updated_at, _id) — เดิมใช้เวลาอย่างเดียวแบบ $gte: ข้อความที่ updated_at
+    // เท่ากันเกิน limit (เช่น กดอ่านแล้วทีเดียว 30+ ข้อความ) → ทุกรอบได้ 30 ตัวแรกชุดเดิม cursor ไม่ขยับ = แชทค้าง
+    // ไม่ส่ง after_id = แบบเดิม (รวมเวลาเท่ากัน — client รุ่นเก่าตัดซ้ำด้วย _id)
+    const afterId = q.after_id ? String(q.after_id) : null;
+    if (afterId && !isObjectId(afterId)) throw badRequest("รูปแบบ after_id ไม่ถูกต้อง");
+    if (afterId) {
+      filter.$or = [
+        { updated_at: { $gt: after } },
+        { updated_at: after, _id: { $gt: new Types.ObjectId(afterId) } },
+      ];
+    } else {
+      filter.updated_at = { $gte: after };
+    }
+    const rows = await chatMessageModel.find(filter).sort({ updated_at: 1, _id: 1 }).limit(limit + 1).lean<any[]>();
+    // has_more = ยังมีที่เปลี่ยนอีก (เกิน limit) — client ขอต่อทันทีด้วย cursor ตัวสุดท้าย ไม่ต้องรอรอบ poll
+    return { items: rows.slice(0, limit).map(presentMessage), has_more: rows.length > limit };
   }
   filter.deleted_at = null;
   if (before) filter.created_at = { $lt: before };
