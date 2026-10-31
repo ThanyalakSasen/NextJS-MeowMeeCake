@@ -85,6 +85,19 @@ describe("ประวัติสต็อกสินค้า — ออเ�
     expect(listed.items.every((t) => t.ref_customer?.user_fullname === user.user_fullname && t.ref_no === order.order_no)).toBe(true);
   });
 
+  it("แอดมิน/POS สร้างบิลแทนลูกค้า → sale มีผู้ทำ = พนักงาน", async () => {
+    const [customer, staff] = [await makeUser(), await makeUser()];
+    const p = await makeProduct({ product_price: 100, product_stock_quantity: 10 });
+    await orderService.createOrder(String(customer._id), {
+      order_type: "takeaway",
+      channel: "instore",
+      performed_by: String(staff._id),
+      items: [{ product_id: String(p._id), quantity: 1 }],
+    });
+    const h = await historyOf(p._id);
+    expect(h.map((t) => [t.type, String(t.performed_by)])).toEqual([["sale", String(staff._id)]]);
+  });
+
   it("สต็อกไม่พอบางรายการ → ตัดไม่สำเร็จทั้งออเดอร์ ไม่มีประวัติ sale ค้าง", async () => {
     const enough = await makeProduct({ product_stock_quantity: 10 });
     const short = await makeProduct({ product_stock_quantity: 1 });
