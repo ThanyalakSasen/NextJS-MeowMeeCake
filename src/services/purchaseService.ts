@@ -5,6 +5,8 @@
  *                       แต่ละแถวเก็บ expense_id + line_total → ดูได้ว่าบิลนี้ซื้ออะไร กี่หน่วย ราคาเท่าไร
  *                       เขียนเป็นชุดเดียว (runAtomic — production = MongoDB transaction: ล้มกลางทาง = ไม่มีอะไรถูกเขียน)
  *                       รับเข้าอย่างเดียว (สต็อกเพิ่ม) จึงไม่มีแจ้งเตือนใกล้หมด — ไม่ต้องผ่าน createTransaction
+ *                       update_cost (ค่าเริ่มต้น) → ต้นทุนวัตถุดิบ = ราคาซื้อล่าสุดต่อหน่วย (มูลค่าสต็อก · ต้นทุนสูตรตอนบันทึกสูตรครั้งถัดไป
+ *                       — สูตรเดิมไม่คิดใหม่เอง เพราะแอดมินกรอกต้นทุนต่อแบทช์เองได้)
  *   listStockItems()  → รายการรับเข้าที่ผูกกับค่าใช้จ่ายใบนั้น
  *   linkStockItems()  → ผูกรายการรับเข้าเดิม (บันทึกก่อนมีฟีเจอร์นี้) กับค่าใช้จ่ายย้อนหลัง
  *   unlinkStockItem() → ยกเลิกการผูก (สต็อกไม่เปลี่ยน)
@@ -47,7 +49,7 @@ export async function createPurchase(input: PurchaseCreate, performedBy: string)
   const ids = [...new Set(input.items.map((i) => i.ingredient_id))];
   const ingredients = await ingredientModel
     .find({ _id: { $in: ids }, deleted_at: null })
-    .select("ingredient_name unit_id")
+    .select("ingredient_name unit_id cost_per_unit")
     .lean<any[]>();
   const byId = new Map(ingredients.map((g) => [String(g._id), g]));
   const missing = ids.filter((id) => !byId.has(id));
@@ -76,6 +78,7 @@ export async function createPurchase(input: PurchaseCreate, performedBy: string)
 
   assertReceiptUrl(input.receipt_url);
   const note = `บิลซื้อ: ${description}`.slice(0, NOTE_MAX);
+  const updateCost = input.update_cost !== false;
 
   const { expenseId, transactions } = await runAtomic(async (session) => {
     const opts = session ? { session } : {};
@@ -103,9 +106,19 @@ export async function createPurchase(input: PurchaseCreate, performedBy: string)
       const txns: any[] = [];
       for (const item of input.items) {
         const g = byId.get(item.ingredient_id);
-        const res = await ingredientModel.updateOne({ _id: g._id, deleted_at: null }, { $inc: { current_stock: item.qty } }, opts);
+        const setCost = updateCost && item.line_total > 0;
+        const res = await ingredientModel.updateOne(
+          { _id: g._id, deleted_at: null },
+          { $inc: { current_stock: item.qty }, ...(setCost ? { $set: { cost_per_unit: round2(item.line_total / item.qty) } } : {}) },
+          opts
+        );
         if (res.modifiedCount === 0) throw notFound(`วัตถุดิบ "${g.ingredient_name}" ถูกลบไปแล้ว — โหลดหน้าใหม่แล้วลองอีกครั้ง`);
-        undo.push(() => ingredientModel.updateOne({ _id: g._id }, { $inc: { current_stock: -item.qty } }));
+        undo.push(() =>
+          ingredientModel.updateOne(
+            { _id: g._id },
+            { $inc: { current_stock: -item.qty }, ...(setCost ? { $set: { cost_per_unit: g.cost_per_unit } } : {}) }
+          )
+        );
         const [txn] = await ingredientTransactionModel.create(
           [
             {

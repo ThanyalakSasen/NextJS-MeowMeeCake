@@ -26,6 +26,8 @@ export const purchaseCreate = z.object({
   receipt_url: z.string().trim().max(1000).nullish(),
   /** เลขที่บิล/ใบสั่งซื้อ — เก็บที่รายการรับเข้าทุกแถว (po_ref) */
   po_ref: z.string().trim().max(100).optional(),
+  /** ตั้งต้นทุนวัตถุดิบ (cost_per_unit) = ราคาต่อหน่วยของบิลนี้ (line_total / qty · ข้ามรายการราคา 0) — ไม่ส่ง = true */
+  update_cost: z.boolean().optional(),
   items: z
     .array(
       z.object({

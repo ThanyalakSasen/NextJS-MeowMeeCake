@@ -79,6 +79,10 @@ describe("ประวัติสต็อกสินค้า — ออเ�
     expect(h[0].performed_by).toBeNull();
     expect(String(h[1].performed_by)).toBe(String(user._id));
     expect(h[1].note).toBe("ยกเลิกออเดอร์: เปลี่ยนใจ");
+
+    // หน้าประวัติแสดงชื่อลูกค้าของออเดอร์ได้ แม้แถวขายไม่มีผู้ทำ (performed_by null)
+    const listed = await productStockHistoryService.listHistory({ product_id: String(p._id), pagination: { page: 1, limit: 10, skip: 0 } });
+    expect(listed.items.every((t) => t.ref_customer?.user_fullname === user.user_fullname && t.ref_no === order.order_no)).toBe(true);
   });
 
   it("สต็อกไม่พอบางรายการ → ตัดไม่สำเร็จทั้งออเดอร์ ไม่มีประวัติ sale ค้าง", async () => {
