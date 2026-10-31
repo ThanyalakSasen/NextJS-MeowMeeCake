@@ -4,7 +4,8 @@
 //   remove()/deleteProduct() เรียก assertDeletable() — เหลือข้อไหน = 409 (ข้อความรวมทุกข้อ + details.blockers)
 //
 //   สินค้า:  stock (ปรับสต็อกเอง) · round (อยู่ในรอบตั้งเวลา/เปิดรับ — action เอาออก/ปิดการขายในรอบ)
-//           · preorders (พรีออเดอร์ที่ยังไม่ผลิต — รอผลิตให้เสร็จ ไม่ยกเลิกให้) · production (ใบสั่งผลิตค้าง)
+//           · preorders (พรีออเดอร์ที่ยังไม่ผลิต — action ยกเลิกสินค้าในรอบ: ออเดอร์ + ใบสั่งผลิตของรอบยังอยู่ ผลิตต่อได้
+//             แล้วลบสินค้าได้เลย · ผู้ใช้เลือก 2026-10-31) · production (ใบสั่งผลิตค้าง — ยกเว้นของรอบที่ยกเลิกสินค้าแล้ว)
 //   วัตถุดิบ: stock · recipe / component (ใช้อยู่ — action เอาวัตถุดิบออกจากสูตร/ส่วนประกอบ)
 //   สูตร:    production (ใบสั่งผลิตค้าง) · product (สูตรสุดท้ายของสินค้า — action ยกเลิกการผูกแล้วลบ)
 //   ส่วนประกอบ: parent_recipe (สูตรหลักที่ใช้อยู่ — action ยกเลิกการผูกกับสูตรหลัก)
@@ -29,6 +30,7 @@ export type BlockerKind = "stock" | "round" | "preorders" | "production" | "reci
 export type BlockerAction =
   | "remove_from_round" // รายการในรอบยังไม่มีคนจอง → เอาออกจากรอบ
   | "close_round_item" // มีคนจองแล้ว → ปิดการขายในรอบ (ออเดอร์เดิมยังอยู่ ผลิตตามเดิม)
+  | "release_preorders" // มีออเดอร์ค้าง → ยกเลิกสินค้าในรอบ (ออเดอร์/การผลิตของรอบยังอยู่) แล้วลบสินค้าได้
   | "unlink_recipe" // เอาวัตถุดิบออกจากสูตร
   | "unlink_component" // เอาวัตถุดิบออกจากส่วนประกอบ
   | "unlink_product" // ยกเลิกการผูกสินค้าแล้วลบสูตร
@@ -79,7 +81,8 @@ export function assertNoBlockers(noun: string, blockers: DeleteBlocker[]): void 
   throw conflict(`ลบ${noun}นี้ยังไม่ได้ — ${blockers.map(describeBlocker).join(" · ")}`, { blockers });
 }
 
-async function openProductionBlockers(match: Record<string, unknown>): Promise<DeleteBlocker[]> {
+/** excludeRounds = รอบที่ยกเลิกสินค้าไปแล้ว — ใบสั่งผลิตของรอบนั้นผลิตต่อได้ ไม่กันลบสินค้า */
+async function openProductionBlockers(match: Record<string, unknown>, excludeRounds: Types.ObjectId[] = []): Promise<DeleteBlocker[]> {
   const orderIds = await productionItemModel.distinct("production_order_id", {
     ...match,
     deleted_at: null,
@@ -87,7 +90,12 @@ async function openProductionBlockers(match: Record<string, unknown>): Promise<D
   });
   if (orderIds.length === 0) return [];
   const open = await productionOrderModel
-    .find({ _id: { $in: orderIds }, deleted_at: null, production_status: { $in: ["planned", "in_progress"] } })
+    .find({
+      _id: { $in: orderIds },
+      deleted_at: null,
+      production_status: { $in: ["planned", "in_progress"] },
+      ...(excludeRounds.length ? { round_id: { $nin: excludeRounds } } : {}),
+    })
     .select("production_no")
     .sort({ production_date: 1 })
     .lean<Array<{ _id: Types.ObjectId; production_no: string }>>();
@@ -106,8 +114,9 @@ export async function productDeleteBlockers(id: string): Promise<DeleteBlocker[]
 
   const items = await preorderRoundItemModel
     .find({ product_id: id, deleted_at: null })
-    .select("round_id current_qty is_active")
-    .lean<Array<{ _id: Types.ObjectId; round_id: Types.ObjectId; current_qty?: number; is_active?: boolean }>>();
+    .select("round_id current_qty is_active released_at")
+    .lean<Array<{ _id: Types.ObjectId; round_id: Types.ObjectId; current_qty?: number; is_active?: boolean; released_at?: Date | null }>>();
+  const releasedRounds = items.filter((i) => i.released_at).map((i) => i.round_id);
   if (items.length) {
     const rounds = await preorderRoundModel
       .find({ _id: { $in: items.map((i) => i.round_id) }, deleted_at: null, round_status: { $ne: "cancelled" } })
@@ -126,7 +135,7 @@ export async function productDeleteBlockers(id: string): Promise<DeleteBlocker[]
 
     for (const r of rounds) {
       const item = items.find((i) => String(i.round_id) === String(r._id));
-      if (!item) continue;
+      if (!item || item.released_at) continue;
       const live = r.round_status === "scheduled" || r.round_status === "open";
       if (live && item.is_active !== false) {
         const booked = Number(item.current_qty ?? 0);
@@ -140,11 +149,11 @@ export async function productDeleteBlockers(id: string): Promise<DeleteBlocker[]
         });
       }
       const n = pendingByRound.get(String(r._id)) ?? 0;
-      if (n > 0) out.push({ kind: "preorders", ref_id: String(r._id), label: r.round_name, qty: n, unit: "ออเดอร์", action: null });
+      if (n > 0) out.push({ kind: "preorders", ref_id: String(item._id), label: r.round_name, qty: n, unit: "ออเดอร์", action: "release_preorders" });
     }
   }
 
-  out.push(...(await openProductionBlockers({ product_id: id })));
+  out.push(...(await openProductionBlockers({ product_id: id }, releasedRounds)));
   return out;
 }
 

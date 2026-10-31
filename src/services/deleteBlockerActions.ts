@@ -5,6 +5,8 @@
 //   unlinkComponent     — เอาส่วนประกอบออกจากสูตรหลัก (หักต้นทุนเฉพาะส่วนประกอบนั้น แบบเดียวกัน)
 //   releaseFromRound    — เอาสินค้าออกจากรอบที่ตั้งเวลา/เปิดรับ: ยังไม่มีคนจอง = ลบออกจากรอบ ·
 //                         จองแล้ว = ปิดการขายในรอบ (is_active=false) — ออเดอร์เดิม + รายการผลิตยังอยู่ครบ
+//   releasePreorders    — ยกเลิกสินค้าในรอบที่มีออเดอร์ค้าง: ปิดรับจอง + released_at → ลบสินค้าได้ทันที
+//                         ออเดอร์ค้าง + ใบสั่งผลิตของรอบยังอยู่ครบ ผลิต/ส่งได้ตามเดิม (ผู้ใช้เลือก 2026-10-31)
 // ─────────────────────────────────────────────────────────────
 import type { Types } from "mongoose";
 import dbConnect from "../lib/dbConnect";
@@ -71,6 +73,22 @@ export async function unlinkComponent(componentId: string, recipeId: string) {
     { $pull: { components: { component_id: componentId } }, $set: { estimated_cost_per_batch: cost } },
   );
   return { recipe_id: recipeId, label: recipe.recipe_name ?? "", estimated_cost_per_batch: cost };
+}
+
+export async function releasePreorders(productId: string, roundItemId: string) {
+  await dbConnect();
+  assertObjectId(productId);
+  assertObjectId(roundItemId, "round_item_id");
+  const item = await preorderRoundItemModel
+    .findOneAndUpdate(
+      { _id: roundItemId, product_id: productId, deleted_at: null },
+      { $set: { is_active: false, released_at: new Date() } },
+      { returnDocument: "after" },
+    )
+    .lean<{ round_id: Types.ObjectId } | null>();
+  if (!item) throw notFound("ไม่พบสินค้านี้ในรอบที่ระบุ");
+  const round = await preorderRoundModel.findById(item.round_id).select("round_name").lean<{ round_name: string } | null>();
+  return { round_item_id: roundItemId, round_name: round?.round_name ?? "", result: "released" as const };
 }
 
 export async function releaseFromRound(productId: string, roundItemId: string) {

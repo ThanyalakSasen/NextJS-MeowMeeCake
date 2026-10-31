@@ -8,7 +8,9 @@ import preorderModel from "@/models/preorderModel";
 import * as productService from "@/services/productService";
 import { ingredientService } from "@/services/ingredientService";
 import { recipeService } from "@/services/recipeService";
-import { releaseFromRound, unlinkComponent, unlinkIngredient } from "@/services/deleteBlockerActions";
+import { releaseFromRound, releasePreorders, unlinkComponent, unlinkIngredient } from "@/services/deleteBlockerActions";
+import productionOrderModel from "@/models/productionOrderModel";
+import * as productionItemService from "@/services/productionItemService";
 import { componentService } from "@/services/componentService";
 import componentModel from "@/models/componentModel";
 import { makeUser, makeProduct, makePreorder, makeRecipe, makeIngredient, oid } from "./helpers";
@@ -62,7 +64,7 @@ describe("สินค้า", () => {
     });
 
     const before = await productService.getDeleteBlockers(String(p._id));
-    expect(before.map((b) => [b.kind, b.action])).toEqual([["round", "close_round_item"], ["preorders", null]]);
+    expect(before.map((b) => [b.kind, b.action])).toEqual([["round", "close_round_item"], ["preorders", "release_preorders"]]);
 
     await expect(releaseFromRound(String(p._id), String(item._id))).resolves.toMatchObject({ result: "closed" });
     const ri = await preorderRoundItemModel.findById(item._id).lean<{ is_active: boolean; deleted_at: Date | null }>();
@@ -70,10 +72,61 @@ describe("สินค้า", () => {
     expect(await preorderModel.findById(po._id).lean()).toMatchObject({ order_status: "confirmed" });
 
     const after = await productService.getDeleteBlockers(String(p._id));
-    expect(after).toEqual([expect.objectContaining({ kind: "preorders", qty: 1, action: null })]);
+    expect(after).toEqual([expect.objectContaining({ kind: "preorders", qty: 1, action: "release_preorders" })]);
 
     await preorderModel.updateOne({ _id: po._id }, { $set: { order_status: "ready" } });
     await expect(productService.deleteProduct(String(p._id))).resolves.toBeTruthy();
+  });
+
+  it("มีออเดอร์ค้าง → release_preorders ยกเลิกสินค้าในรอบ ลบสินค้าได้ · ออเดอร์/ใบผลิตของรอบยังอยู่และผลิตต่อได้", async () => {
+    const p = await makeProduct({ is_preorder: true, product_stock_quantity: null });
+    const { round, item } = await openRoundWith(p._id, 2);
+    await preorderRoundModel.updateOne({ _id: round._id }, { $set: { round_status: "closed" } });
+    const user = await makeUser();
+    const po = await makePreorder(String(user._id), { round_id: round._id, order_status: "confirmed" });
+    await preorderItemModel.create({
+      preorder_id: po._id,
+      round_item_id: item._id,
+      product_id: p._id,
+      product_snapshot: { product_name_th: "เค้ก", product_name_eng: "Cake" },
+      pickup_date: new Date(),
+      quantity: 2,
+      unit_price: 50,
+      total_price: 100,
+    });
+    const recipe = await makeRecipe(String(p._id));
+    const order = await productionOrderModel.create({
+      production_no: `PO-T-${Date.now()}`,
+      production_date: new Date(),
+      source_type: "preorder",
+      round_id: round._id,
+      production_status: "planned",
+    });
+    await productionItemService.addItems(String(order._id), [
+      { product_id: String(p._id), recipe_id: String(recipe._id), planned_qty: 2, round_item_id: String(item._id) },
+    ]);
+
+    const before = await productService.getDeleteBlockers(String(p._id));
+    expect(before.map((b) => [b.kind, b.action])).toEqual([
+      ["preorders", "release_preorders"],
+      ["production", null],
+    ]);
+    expect(before[0].ref_id).toBe(String(item._id));
+
+    await expect(releasePreorders(String(p._id), String(item._id))).resolves.toMatchObject({ result: "released" });
+    expect(await productService.getDeleteBlockers(String(p._id))).toEqual([]);
+    await expect(productService.deleteProduct(String(p._id))).resolves.toBeTruthy();
+
+    expect(await preorderModel.findById(po._id).lean()).toMatchObject({ order_status: "confirmed" });
+    expect(await preorderRoundItemModel.findById(item._id).lean()).toMatchObject({ is_active: false, deleted_at: null });
+    // สินค้าถูกลบแล้วยังเพิ่มรายการผลิตจากรอบได้ (ใบผลิตทั่วไปไม่ได้)
+    const order2 = await productionOrderModel.create({ production_no: `PO-T2-${Date.now()}`, production_date: new Date(), source_type: "manual", production_status: "planned" });
+    await expect(
+      productionItemService.addItems(String(order2._id), [{ product_id: String(p._id), recipe_id: String(recipe._id), planned_qty: 1, round_item_id: String(item._id) }]),
+    ).resolves.toBeTruthy();
+    await expect(
+      productionItemService.addItems(String(order2._id), [{ product_id: String(p._id), recipe_id: String(recipe._id), planned_qty: 1 }]),
+    ).rejects.toThrow(/ไม่พบสินค้า/);
   });
 
   it("สต็อกเหลือ → blocker stock ไม่มีปุ่ม", async () => {
