@@ -15,7 +15,8 @@ import { ingredientService } from "@/services/ingredientService";
 
 const TXN_VERB: Record<TransactionType, string> = { receive: "รับ", use: "เบิก", adjust: "ปรับยอด" };
 
-export const GET = withPermission(["ingredient_history", "ingredient_stock"], "view", async (_s, req) => {
+// finance_expenses — หน้าค่าใช้จ่ายเลือกรายการรับเข้าที่ยังไม่ผูกบิล (?type=receive&expense_id=none) มาผูกย้อนหลัง
+export const GET = withPermission(["ingredient_history", "ingredient_stock", "finance_expenses"], "view", async (_s, req) => {
   const sp = req.nextUrl.searchParams;
   const result = await txnService.listTransactions({
     pagination: parsePagination(sp),
@@ -24,6 +25,7 @@ export const GET = withPermission(["ingredient_history", "ingredient_stock"], "v
     performed_by: sp.get("performed_by") ?? undefined,
     date_from: sp.get("date_from") ?? undefined,
     date_to: sp.get("date_to") ?? undefined,
+    expense_id: sp.get("expense_id") ?? undefined,
     includeDeleted: parseBool(sp.get("includeDeleted")) ?? false,
   });
   return ok(result);
@@ -33,6 +35,9 @@ export const POST = withPermission("ingredient_stock", "update", async (session,
   const body = await req.json();
   const result: any = await txnService.createTransaction({
     ...body,
+    // ผูกบิลซื้อทำได้ผ่าน /admin/purchases เท่านั้น (ตรวจยอดเงิน/สิทธิ์ค่าใช้จ่ายที่นั่น)
+    expense_id: null,
+    line_total: null,
     performed_by: session.user_id,
   });
   // ชื่อวัตถุดิบ + หน่วย ไว้ใส่ข้อความ log — อ่านไม่ได้ก็ยัง log ได้ (ไม่มีชื่อ)

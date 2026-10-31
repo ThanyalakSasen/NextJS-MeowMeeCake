@@ -2,11 +2,13 @@
  * expenseService — ค่าใช้จ่ายของร้าน (Expenses)
  * CRUD ผ่าน crudService + สรุปยอดตามหมวด
  */
+import mongoose from "mongoose";
 import dbConnect from "../lib/dbConnect";
 import { rangeDate } from "../lib/datetime";
-import { badRequest } from "../lib/httpError";
+import { badRequest, conflict } from "../lib/httpError";
 import { createCrudService } from "../lib/crudService";
 import expenseModel from "../models/expenseModel";
+import ingredientTransactionModel from "../models/ingredientTransactionModel";
 import { toSatang, toBaht, toBahtFields, round2 } from "../lib/money";
 import { UPLOAD_DIRS } from "../lib/upload";
 import { isPrivateFileUrl } from "../lib/privateFiles";
@@ -65,8 +67,40 @@ function assertReceiptUrl(url: unknown, existing?: unknown): void {
   }
 }
 
+/**
+ * จำนวน + ราคารวมของรายการรับเข้าสต็อกที่ผูกกับค่าใช้จ่ายแต่ละใบ (services/purchaseService)
+ * ความจริงอยู่ที่ IngredientTransactions.expense_id/line_total — ค่าใช้จ่ายไม่เก็บรายการซ้ำ
+ */
+export async function linkedStockTotals(expenseIds: string[]): Promise<Map<string, { count: number; total: number }>> {
+  if (expenseIds.length === 0) return new Map();
+  const rows = await ingredientTransactionModel.aggregate([
+    { $match: { expense_id: { $in: expenseIds.map((id) => new mongoose.Types.ObjectId(id)) }, deleted_at: null } },
+    { $group: { _id: "$expense_id", count: { $sum: 1 }, total: { $sum: { $ifNull: ["$line_total", 0] } } } },
+  ]);
+  return new Map(rows.map((r) => [String(r._id), { count: r.count, total: round2(r.total) }]));
+}
+
+/** แนบ linked_count/linked_total ให้หน้าค่าใช้จ่ายโชว์ว่าบิลไหนมีรายการรับเข้าสต็อก */
+async function withLinked<T extends Record<string, any>>(docs: T[]): Promise<T[]> {
+  const totals = await linkedStockTotals(docs.map((d) => String(d._id)));
+  return docs.map((d) => {
+    const l = totals.get(String(d._id));
+    return { ...d, linked_count: l?.count ?? 0, linked_total: l?.total ?? 0 };
+  });
+}
+
 export const expenseService = {
   ...base,
+
+  async list(args: Parameters<typeof base.list>[0]) {
+    const res = await base.list(args);
+    return { ...res, items: await withLinked(res.items) };
+  },
+
+  async getById(id: string, includeDeleted?: boolean) {
+    const [doc] = await withLinked([await base.getById(id, includeDeleted)]);
+    return doc;
+  },
 
   async create(input: Record<string, unknown>) {
     assertReceiptUrl(input.receipt_url);
@@ -76,13 +110,29 @@ export const expenseService = {
   },
 
   async update(id: string, input: Record<string, unknown>) {
+    // ยอดเงินต้องไม่น้อยกว่าราคารวมของรายการรับเข้าที่ผูกไว้ — ไม่งั้นบิลกับของที่รับเข้าไม่ตรงกัน
+    if (input.amount != null) {
+      const linked = (await linkedStockTotals([id])).get(id);
+      if (linked && Number(input.amount) < linked.total) {
+        throw badRequest(`จำนวนเงินต้องไม่น้อยกว่าราคารวมของรายการรับเข้าที่ผูกไว้ (${linked.total} บาท)`);
+      }
+    }
     if (input.receipt_url !== undefined) {
       const current = (await base.getById(id)) as { receipt_url?: unknown };
       assertReceiptUrl(input.receipt_url, current.receipt_url);
     }
     const payload =
       input.amount != null ? { ...input, amount: toSatang(Number(input.amount)) } : input;
-    return base.update(id, payload);
+    await base.update(id, payload);
+    return expenseService.getById(id);
+  },
+
+  async remove(id: string) {
+    const linked = (await linkedStockTotals([id])).get(id);
+    if (linked) {
+      throw conflict(`ค่าใช้จ่ายนี้ผูกกับการรับวัตถุดิบเข้าสต็อก ${linked.count} รายการ — ยกเลิกการผูกก่อนจึงจะลบได้`);
+    }
+    return base.remove(id);
   },
 };
 
