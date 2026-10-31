@@ -38,7 +38,7 @@ export const GET = withPermission("orders", "view", async (_s, req) => {
   return ok(result);
 });
 
-export const POST = withPermission(["orders", "pos"], "create", async (_s, req) => {
+export const POST = withPermission(["orders", "pos"], "create", async (session, req) => {
   const body = await parseBody(req, adminCreateOrderBody);
   const delivery_address = await addressService.resolveDeliverySnapshot(body.user_id, body);
   const common = {
@@ -52,6 +52,7 @@ export const POST = withPermission(["orders", "pos"], "create", async (_s, req) 
     delivery_fee: body.delivery_fee ?? undefined,
     delivery_fee_override: body.delivery_fee != null,
     channel: body.channel,
+    performed_by: session.user_id,
   };
   const order =
     body.source === "items"

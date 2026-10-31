@@ -143,6 +143,11 @@ export interface CreateOrderCommon {
    * ยังตรวจว่าส่งถึงจังหวัดนี้ได้ตามปกติ · ตั้งจากฝั่ง server เท่านั้น (ไม่อยู่ใน schema ของ request)
    */
   waive_delivery_fee?: boolean;
+  /**
+   * ผู้สร้างบิลแทนลูกค้า (แอดมิน/พนักงาน POS — ตั้งจาก session ฝั่ง server) → ผู้ทำรายการในประวัติสต็อก (ขาย)
+   * ไม่ระบุ = ลูกค้าสั่งเอง (หน้าประวัติแสดงเป็นลูกค้าของออเดอร์)
+   */
+  performed_by?: string | null;
   /** takeaway: จุดรับ (_id ของหน้าร้านประจำสัปดาห์) + วันรับ "YYYY-MM-DD" — ไม่ส่ง = รับที่ร้านแบบเดิม */
   pickup_location_id?: string | null;
   pickup_date?: string | null;
@@ -479,7 +484,7 @@ async function persistOrder(
     total_amount = toSatang(subtotal - discount_amount + delivery_fee);
 
     // 1) ตัดสต็อก (productService ข้าม preorder ให้เอง, คืนสต็อกอัตโนมัติถ้ารายการใดไม่พอ)
-    const stockRef = { ref_type: "order" as const, ref_id: orderId };
+    const stockRef = { ref_type: "order" as const, ref_id: orderId, performed_by: opts.performed_by ?? null };
     await productService.deductStockForOrder(stockItems, stockRef);
     saga.onRollback("restock", () =>
       productService.restockForOrder(stockItems, { ...stockRef, note: "สร้างออเดอร์ไม่สำเร็จ" })
