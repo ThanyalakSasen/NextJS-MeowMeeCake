@@ -42,6 +42,9 @@ export interface CreateTransactionInput {
   /** BACKLOG §2c.3 — internal only: productionItemService ใส่ให้เพื่อผูกธุรกรรมกับรายการผลิต
    *  ที่สร้างมัน กัน voidTransaction() ย้อนรายการนี้แบบไม่รู้ตัว (ต้องยกเลิกผ่าน reverse-stock แทน) */
   production_item_id?: string | null;
+  /** internal only (purchaseService): บิลซื้อที่รายการรับเข้านี้มาจาก + ราคารวมของรายการ (บาทเต็ม) */
+  expense_id?: string | null;
+  line_total?: number | null;
 }
 
 export interface ListTransactionQuery {
@@ -51,6 +54,8 @@ export interface ListTransactionQuery {
   performed_by?: string;
   date_from?: string;
   date_to?: string;
+  /** "none" = เฉพาะรายการที่ยังไม่ผูกบิลซื้อ (ใช้ตอนเลือกผูกย้อนหลัง) · id = เฉพาะของบิลนั้น */
+  expense_id?: string;
   includeDeleted?: boolean;
 }
 
@@ -154,6 +159,8 @@ export async function createTransaction(input: CreateTransactionInput) {
       expiry_date: input.expiry_date ? new Date(input.expiry_date) : null,
       performed_by: input.performed_by,
       production_item_id: input.production_item_id ?? null,
+      expense_id: input.expense_id ?? null,
+      line_total: input.line_total ?? null,
     });
 
     // แจ้งเตือนตอนสต็อกเพิ่งข้ามจุดสั่งซื้อลงมา (before > reorder_point, after <= reorder_point)
@@ -199,6 +206,11 @@ export async function listTransactions(query: ListTransactionQuery) {
     filter.ingredient_id = query.ingredient_id;
   }
   if (query.type) filter.type = query.type;
+  if (query.expense_id === "none") filter.expense_id = null;
+  else if (query.expense_id) {
+    assertObjectId(query.expense_id, "expense_id");
+    filter.expense_id = query.expense_id;
+  }
   if (query.performed_by) {
     assertObjectId(query.performed_by, "performed_by");
     filter.performed_by = query.performed_by;
@@ -218,6 +230,7 @@ export async function listTransactions(query: ListTransactionQuery) {
       .populate("ingredient_id", "ingredient_name")
       .populate("unit_id", "unit_name unit_abbr")
       .populate("performed_by", "user_fullname email")
+      .populate("expense_id", "description date vendor amount")
       .lean(),
     ingredientTransactionModel.countDocuments(filter),
   ]);
@@ -257,6 +270,11 @@ export async function voidTransaction(id: string) {
       "รายการนี้เกิดจากการผลิต — ยกเลิกผ่านทางนี้ไม่ได้ (จะทำให้เครดิตสต็อกซ้ำถ้ามีคนกดคืนสต็อกที่หน้า" +
         "รายการผลิตอีกที) ให้ไปที่รายการผลิตนี้แล้วกด \"คืนสต็อกวัตถุดิบ\" (reverse-stock) แทน"
     );
+  }
+
+  // ผูกบิลซื้ออยู่ = ยอดเงินในบิลอ้างถึงของชุดนี้ — ย้อนสต็อกเงียบ ๆ แล้วบิลยังนับว่าซื้อมาแล้วจะไม่ตรงกัน
+  if (txn.expense_id) {
+    throw conflict("รายการรับเข้านี้ผูกกับบิลซื้อ (ค่าใช้จ่าย) อยู่ — ยกเลิกการผูกที่หน้าค่าใช้จ่ายก่อน แล้วจึงยกเลิกรายการนี้");
   }
 
   const inc = txn.type === "receive" ? -txn.qty : txn.qty; // receive→ลบออก, use→คืนกลับ

@@ -55,6 +55,18 @@ const ingredientTransactionSchema = new mongoose.Schema(
       ref: "ProductionItems",
       default: null,
     },
+    // บิลซื้อ (Expenses) ที่รายการรับเข้านี้มาจาก — null = ยังไม่ผูก · ผูกได้เฉพาะ type "receive"
+    // (services/purchaseService — บันทึกการซื้อ = รับเข้าสต็อก + ค่าใช้จ่าย 1 ใบ หรือผูกย้อนหลัง)
+    expense_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Expenses",
+      default: null,
+    },
+    // ราคารวมของรายการนี้ในบิล (บาทเต็ม) — มีค่าเมื่อผูกบิลแล้ว · ราคาต่อหน่วย = line_total / qty
+    line_total: {
+      type: Number,
+      default: null,
+    },
     deleted_at: {
       type: Date,
       default: null,
@@ -69,6 +81,7 @@ ingredientTransactionSchema.index({ ingredient_id: 1, created_at: -1 });
 ingredientTransactionSchema.index({ type: 1 });
 ingredientTransactionSchema.index({ deleted_at: 1 });
 ingredientTransactionSchema.index({ production_item_id: 1 });
+ingredientTransactionSchema.index({ expense_id: 1 });
 
 const IngredientTransaction =
   mongoose.models.IngredientTransactions ||
