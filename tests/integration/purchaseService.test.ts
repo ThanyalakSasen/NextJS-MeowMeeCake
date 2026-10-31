@@ -159,11 +159,40 @@ describe("ผูก/ยกเลิกการผูก + กติกาที
 
     await expect(linkStockItems(eid, [{ transaction_id: String(rcv._id), line_total: 150 }])).rejects.toThrow(/เกินยอด/);
     await expect(linkStockItems(eid, [{ transaction_id: String(use._id), line_total: 10 }])).rejects.toThrow(/เฉพาะรายการรับเข้า/);
-    expect(await linkStockItems(eid, [{ transaction_id: String(rcv._id), line_total: 90 }])).toEqual({ linked: 1 });
+    expect(await linkStockItems(eid, [{ transaction_id: String(rcv._id), line_total: 90 }])).toEqual({ linked: 1, cost_updated: 1 });
     await expect(linkStockItems(eid, [{ transaction_id: String(rcv._id), line_total: 5 }])).rejects.toThrow(/ผูกกับค่าใช้จ่ายอื่น/);
 
     const raw = await ingredientTransactionModel.findById(rcv._id).lean<{ expense_id: unknown; line_total: number }>();
     expect(String(raw!.expense_id)).toBe(eid);
     expect(raw!.line_total).toBe(90);
+    expect((await ingredientModel.findById(sugar._id).lean<{ cost_per_unit: number }>())!.cost_per_unit).toBe(30);
+  });
+
+  it("ผูกย้อนหลัง: ตั้งต้นทุนเฉพาะเมื่อเป็นราคาซื้อล่าสุด · update_cost=false ไม่แตะ", async () => {
+    const user = await makeUser();
+    const flour = await makeIngredient({ cost_per_unit: 10 });
+    const costOf = async () => (await ingredientModel.findById(flour._id).lean<{ cost_per_unit: number }>())!.cost_per_unit;
+    // บิลใหม่ (บันทึกการซื้อ 30 ต.ค.) → ต้นทุน 20
+    await createPurchase({ ...base, items: [{ ingredient_id: String(flour._id), qty: 5, line_total: 100 }] }, String(user._id));
+    expect(await costOf()).toBe(20);
+
+    // รับเข้าเก่ากว่า (1 ต.ค.) มาผูกทีหลัง → ไม่ทับราคาล่าสุด
+    const old = (await expenseService.create({ ...base, date: new Date("2026-10-01"), description: "บิลเก่า", amount: 500 })) as { _id: unknown };
+    const { transaction: oldRcv } = await createTransaction({
+      ingredient_id: String(flour._id), type: "receive", qty: 2, performed_by: String(user._id), transaction_date: new Date("2026-10-01"),
+    });
+    expect(await linkStockItems(String(old._id), [{ transaction_id: String(oldRcv._id), line_total: 30 }])).toEqual({ linked: 1, cost_updated: 0 });
+    expect(await costOf()).toBe(20);
+
+    // รับเข้าใหม่กว่า (31 ต.ค.) แต่ไม่ให้อัปเดต → ไม่แตะ · ให้อัปเดต → ต้นทุน 25
+    const later = async () =>
+      (await createTransaction({
+        ingredient_id: String(flour._id), type: "receive", qty: 4, performed_by: String(user._id), transaction_date: new Date("2026-10-31"),
+      })).transaction;
+    const [r1, r2] = [await later(), await later()];
+    expect(await linkStockItems(String(old._id), [{ transaction_id: String(r1._id), line_total: 100 }], { update_cost: false })).toEqual({ linked: 1, cost_updated: 0 });
+    expect(await costOf()).toBe(20);
+    expect(await linkStockItems(String(old._id), [{ transaction_id: String(r2._id), line_total: 100 }])).toEqual({ linked: 1, cost_updated: 1 });
+    expect(await costOf()).toBe(25);
   });
 });

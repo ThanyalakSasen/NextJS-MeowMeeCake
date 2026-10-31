@@ -47,4 +47,6 @@ export const expenseLinkBody = z.object({
     .array(z.object({ transaction_id: objectId, line_total: lineTotal }))
     .min(1)
     .max(PURCHASE_ITEMS_MAX),
+  /** ตั้งต้นทุนวัตถุดิบจากราคาที่ผูก — เฉพาะเมื่อเป็นราคาซื้อล่าสุดของวัตถุดิบนั้น (ดู purchaseService.linkStockItems) · ไม่ส่ง = true */
+  update_cost: z.boolean().optional(),
 });

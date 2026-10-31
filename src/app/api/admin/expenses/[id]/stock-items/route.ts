@@ -1,7 +1,7 @@
 /**
  * /api/admin/expenses/[id]/stock-items — รายการรับเข้าสต็อกวัตถุดิบที่ผูกกับค่าใช้จ่ายใบนี้ (services/purchaseService)
  *   GET  — รายการที่ผูกอยู่ (finance_expenses/finance_summary.view)
- *   POST — ผูกรายการรับเข้าเดิมย้อนหลัง (finance_expenses.update) body: { links: [{ transaction_id, line_total }] }
+ *   POST — ผูกรายการรับเข้าเดิมย้อนหลัง (finance_expenses.update) body: { links: [{ transaction_id, line_total }], update_cost? }
  */
 import { ok } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
@@ -21,7 +21,7 @@ export const GET = withPermission(["finance_expenses", "finance_summary"], "view
 export const POST = withPermission("finance_expenses", "update", async (_s, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const body = await parseBody(req, expenseLinkBody);
-  const result = await linkStockItems(id, body.links);
+  const result = await linkStockItems(id, body.links, { update_cost: body.update_cost });
   const expense = (await expenseService.getById(id).catch(() => undefined)) as { description?: string } | undefined;
   auditChange(req, {
     op: "update",
