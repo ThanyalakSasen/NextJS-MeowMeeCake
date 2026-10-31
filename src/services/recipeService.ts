@@ -7,7 +7,7 @@
  */
 import type { Model } from "mongoose";
 import dbConnect from "../lib/dbConnect";
-import { badRequest, conflict, notFound } from "../lib/httpError";
+import { badRequest, notFound } from "../lib/httpError";
 import { assertObjectId, isObjectId } from "../lib/objectId";
 import { assertRefExists } from "../lib/refs";
 import { createCrudService } from "../lib/crudService";
@@ -23,8 +23,7 @@ import ingredientModel from "../models/ingredientModel";
 import componentModel from "../models/componentModel";
 import unitModel from "../models/unitModel";
 import userModel from "../models/userModel";
-import productionItemModel from "../models/productionItemModel";
-import productionOrderModel from "../models/productionOrderModel";
+import { assertNoBlockers, recipeDeleteBlockers } from "./deleteBlockers";
 import { toSatang, toBahtFields } from "../lib/money";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -124,44 +123,6 @@ function presentExpandedRecipe(doc: Record<string, any>): Record<string, any> {
 
 /** สูตรที่ยังอยู่ในใบสั่งผลิตที่ยังไม่จบ (รอดำเนินการ/กำลังผลิต) ลบไม่ได้ — ลบแล้วปิดงานผลิตใบนั้นไม่ได้
  *  (หักวัตถุดิบหาสูตรไม่เจอ) · ใบที่เสร็จ/ยกเลิกแล้วไม่นับ (ผู้ใช้ขอ 2026-10-30) */
-/** สูตรสุดท้ายของสินค้าที่ยังไม่ถูกลบลบไม่ได้ (ผู้ใช้ขอ 2026-10-30) — ลบสินค้าก่อน หรือแก้สูตรให้ผูกกับสินค้าอื่น
- *  สินค้ายังมีสูตรอื่นอยู่ = ลบสูตรเก่าได้ (สินค้ายังผลิตได้ด้วยสูตรที่เหลือ) */
-async function assertNotLinkedToProduct(id: string): Promise<void> {
-  assertObjectId(id);
-  await dbConnect();
-  const recipe = await recipeModel.findById(id).select("product_id").lean<{ product_id?: unknown } | null>();
-  if (!recipe?.product_id) return;
-  const product = await productModel
-    .findOne({ _id: recipe.product_id, deleted_at: null })
-    .select("product_name_th")
-    .lean<{ product_name_th?: string } | null>();
-  if (!product) return;
-  const others = await recipeModel.countDocuments({ product_id: recipe.product_id, deleted_at: null, _id: { $ne: id } });
-  if (others === 0) {
-    throw conflict(`สูตรนี้ยังผูกกับสินค้า "${product.product_name_th ?? ""}" อยู่ ลบยังไม่ได้ (เป็นสูตรเดียวของสินค้านี้) — ลบสินค้าก่อน หรือแก้สูตรให้ผูกกับสินค้าอื่น`);
-  }
-}
-
-async function assertNotInProduction(id: string): Promise<void> {
-  assertObjectId(id);
-  await dbConnect();
-  const orderIds = await productionItemModel.distinct("production_order_id", {
-    recipe_id: id,
-    deleted_at: null,
-    item_status: { $ne: "cancelled" },
-  });
-  if (orderIds.length === 0) return;
-  const open = await productionOrderModel
-    .find({ _id: { $in: orderIds }, deleted_at: null, production_status: { $in: ["planned", "in_progress"] } })
-    .select("production_no")
-    .sort({ production_date: 1 })
-    .limit(11)
-    .lean<Array<{ production_no: string }>>();
-  if (open.length === 0) return;
-  const shown = open.slice(0, 10).map((o) => o.production_no).join(", ") + (open.length > 10 ? " และอื่น ๆ" : "");
-  throw conflict(`สูตรนี้ยังอยู่ในใบสั่งผลิตที่ยังไม่เสร็จ (${shown}) ลบยังไม่ได้ — ปิดงานหรือยกเลิกใบสั่งผลิตก่อน`);
-}
-
 // BACKLOG3 §8 — list/getById/remove/restore ไม่ต้อง override เองแล้ว เหลือแค่ create/update ที่ยังต้อง
 // override เพราะมี validation เพิ่มเติม (create() เรียก recipeModel.create() ตรง ๆ ไม่ผ่าน
 // base.create() ตั้งใจตั้งแต่เดิม เพื่อ inject created_by เอง ไม่ผ่าน createFields whitelist — ยังต้อง
@@ -169,11 +130,14 @@ async function assertNotInProduction(id: string): Promise<void> {
 export const recipeService = {
   ...base,
 
-  async remove(id: string) {
-    await assertNotInProduction(id);
-    await assertNotLinkedToProduct(id);
+  /** ลบไม่ได้ถ้ายังอยู่ในใบสั่งผลิตค้าง / เป็นสูตรสุดท้ายของสินค้า (ผู้ใช้ขอ 2026-10-30) — services/deleteBlockers.ts
+   *  allowLastRecipe = ผู้ใช้กด "ยกเลิกการผูกสินค้า" ใน modal แล้ว (POST /admin/recipes/:id/unlink-product) */
+  async remove(id: string, opts: { allowLastRecipe?: boolean } = {}) {
+    assertNoBlockers("สูตร", await recipeDeleteBlockers(id, opts));
     return base.remove(id);
   },
+
+  getDeleteBlockers: (id: string) => recipeDeleteBlockers(id),
 
   async create(input: Record<string, any>) {
     for (const f of ["recipe_name", "product_id", "yield_qty", "yield_unit_id", "created_by"] as const) {

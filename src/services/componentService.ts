@@ -20,6 +20,7 @@ import ingredientModel from "../models/ingredientModel";
 import unitModel from "../models/unitModel";
 import userModel from "../models/userModel";
 import { toSatang, toBahtFields } from "../lib/money";
+import { assertNoBlockers, componentDeleteBlockers } from "./deleteBlockers";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -116,6 +117,14 @@ function presentExpandedComponent(doc: Record<string, any>): Record<string, any>
 // ยังต้อง presentComponent() เองที่นี่เพราะไม่ได้ผ่าน base)
 export const componentService = {
   ...base,
+
+  /** สูตรหลักยังใช้อยู่ = ลบไม่ได้ (ผู้ใช้ขอ 2026-10-31) — modal มีปุ่มยกเลิกการผูกกับสูตรหลัก (services/deleteBlockers.ts) */
+  async remove(id: string) {
+    assertNoBlockers("ส่วนประกอบ", await componentDeleteBlockers(id));
+    return base.remove(id);
+  },
+
+  getDeleteBlockers: componentDeleteBlockers,
 
   async create(input: Record<string, any>) {
     for (const f of ["component_name", "componentcategory_id", "yield_qty", "yield_unit_id", "created_by"] as const) {
