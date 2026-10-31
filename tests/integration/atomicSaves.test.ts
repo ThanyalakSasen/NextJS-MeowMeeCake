@@ -18,6 +18,7 @@ import { makeUser, makeProduct, makeRecipe } from "./helpers";
 
 const FULL = { can_view: true, can_create: true, can_update: true, can_delete: true, can_approve: true };
 let seq = 0;
+type Row = Record<string, unknown> & { _id: unknown };
 const name = (p: string) => `${p}-${++seq}-${Math.random()}`;
 
 async function owner(): Promise<SessionUser> {
@@ -61,7 +62,7 @@ describe("PUT /admin/permissions/role/[roleId] — สิทธิ์ทั้�
     });
     expect(res.status).toBe(200);
     expect(res.json.data).toMatchObject({ created: 1, updated: 1 });
-    const rows = await permissionModel.find({ role_id: target._id, deleted_at: null }).lean<any[]>();
+    const rows = await permissionModel.find({ role_id: target._id, deleted_at: null }).lean<Row[]>();
     expect(rows.map((r) => r.menu_key).sort()).toEqual(["orders", "products"]);
     expect(rows.find((r) => r.menu_key === "products")).toMatchObject({ can_view: true, can_update: true });
   });
@@ -101,7 +102,7 @@ async function orderWithItems() {
     production_date: new Date(),
     items: [await line(2), await line(3)],
   })) as { _id: unknown };
-  const items = await productionItemModel.find({ production_order_id: order._id }).sort({ _id: 1 }).lean<any[]>();
+  const items = await productionItemModel.find({ production_order_id: order._id }).sort({ _id: 1 }).lean<Row[]>();
   return { id: String(order._id), a: String(items[0]._id), b: String(items[1]._id) };
 }
 
@@ -115,8 +116,8 @@ describe("PUT /admin/production-orders/[id]/edit — ใบสั่งผลิ
       items: { remove: [a], update: [{ item_id: b, planned_qty: 5, notes: "เพิ่มจำนวน" }], add: [add] },
     });
     expect(res.status).toBe(200);
-    expect((await productionOrderModel.findById(id).lean<any>()).production_note).toBe("แก้ทั้งใบ");
-    const live = await productionItemModel.find({ production_order_id: id, deleted_at: null }).lean<any[]>();
+    expect((await productionOrderModel.findById(id).lean<Row>())?.production_note).toBe("แก้ทั้งใบ");
+    const live = await productionItemModel.find({ production_order_id: id, deleted_at: null }).lean<Row[]>();
     expect(live.map((it) => it.planned_qty).sort()).toEqual([5, 7]);
     expect(live.find((it) => String(it._id) === b)?.notes).toBe("เพิ่มจำนวน");
   });
@@ -131,8 +132,8 @@ describe("PUT /admin/production-orders/[id]/edit — ใบสั่งผลิ
       items: { remove: [a], update: [{ item_id: b, planned_qty: 9 }], add: [{ ...x, recipe_id: y.recipe_id }] },
     });
     expect(res.status).toBe(400);
-    expect((await productionOrderModel.findById(id).lean<any>()).production_note ?? null).toBeNull();
-    const live = await productionItemModel.find({ production_order_id: id, deleted_at: null }).lean<any[]>();
+    expect((await productionOrderModel.findById(id).lean<Row>())?.production_note ?? null).toBeNull();
+    const live = await productionItemModel.find({ production_order_id: id, deleted_at: null }).lean<Row[]>();
     expect(live.map((it) => it.planned_qty).sort()).toEqual([2, 3]);
   });
 
