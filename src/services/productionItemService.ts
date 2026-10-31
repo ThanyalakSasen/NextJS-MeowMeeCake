@@ -243,14 +243,17 @@ export async function prepareNewItems(orderId: string, inputs: AddItemInput[]) {
   const productIds = [...new Set(inputs.map((i) => String(i.product_id)))];
   const recipeIds = [...new Set(inputs.map((i) => String(i.recipe_id)))];
   const [products, recipes] = await Promise.all([
-    productModel.find({ _id: { $in: productIds }, deleted_at: null }).select("_id").lean<any[]>(),
+    productModel.find({ _id: { $in: productIds } }).select("_id deleted_at").lean<any[]>(),
     recipeModel.find({ _id: { $in: recipeIds }, deleted_at: null }).lean<any[]>(),
   ]);
-  const productIdSet = new Set(products.map((p) => String(p._id)));
+  // สินค้าที่ถูกลบผลิตได้เฉพาะรายการจากรอบพรีออเดอร์ (round_item_id) — ออเดอร์ค้างของรอบที่ "ยกเลิกสินค้าในรอบ"
+  // แล้วลบสินค้า (deleteBlockerActions.releasePreorders) ยังต้องผลิตส่งลูกค้า · ใบผลิตทั่วไปใช้ได้เฉพาะสินค้าที่ยังอยู่
+  const productById = new Map(products.map((p) => [String(p._id), p]));
   const recipeById = new Map(recipes.map((r) => [String(r._id), r]));
 
   return inputs.map((input) => {
-    if (!productIdSet.has(String(input.product_id))) throw notFound("ไม่พบสินค้าที่ระบุ");
+    const product = productById.get(String(input.product_id));
+    if (!product || (product.deleted_at && !input.round_item_id)) throw notFound("ไม่พบสินค้าที่ระบุ");
     const recipe = recipeById.get(String(input.recipe_id));
     if (!recipe) throw notFound("ไม่พบสูตรการผลิตที่ระบุ");
     if (String(recipe.product_id) !== String(input.product_id)) {

@@ -9,6 +9,8 @@ export const ingredientUnlinkBody = z.object({
 
 export const releaseRoundBody = z.object({
   round_item_id: objectId,
+  /** true = มีออเดอร์ค้าง — ยกเลิกสินค้าในรอบ (ออเดอร์/การผลิตยังอยู่) แล้วลบสินค้าได้ (releasePreorders) */
+  keep_orders: z.boolean().optional(),
 });
 
 export const componentUnlinkBody = z.object({

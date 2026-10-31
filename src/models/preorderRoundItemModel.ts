@@ -11,6 +11,9 @@ const preorderRoundItemSchema = new mongoose.Schema(
     max_qty_total: { type: Number, required: true, min: 1 },
     current_qty: { type: Number, default: 0, min: 0 },
     is_active: { type: Boolean, default: true },
+    // ผู้ใช้กด "ยกเลิกสินค้าในรอบพรีออเดอร์" ใน modal ลบยังไม่ได้ (2026-10-31) — ปิดรับจองแล้ว ลบสินค้าได้ทันที
+    // ออเดอร์ค้าง + ใบสั่งผลิตของรอบนี้ยังอยู่ครบ ผลิต/ส่งลูกค้าได้ตามเดิม (services/deleteBlockerActions.releasePreorders)
+    released_at: { type: Date, default: null },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }
