@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import ingredientModel from "@/models/ingredientModel";
 import ingredientTransactionModel from "@/models/ingredientTransactionModel";
 import expenseModel from "@/models/expenseModel";
@@ -58,6 +58,34 @@ describe("purchaseService.createPurchase", () => {
 
     expect(await expenseModel.countDocuments()).toBe(before);
     expect(await stockOf(flour._id)).toBe(0);
+  });
+
+  it("ล้มกลางบิล (รายการที่ 2) → ไม่เหลืออะไรเลย: ค่าใช้จ่าย/รายการรับเข้า/สต็อกกลับเป็นเดิม", async () => {
+    const user = await makeUser();
+    const flour = await makeIngredient({ current_stock: 5 });
+    const butter = await makeIngredient({ current_stock: 1 });
+    const expensesBefore = await expenseModel.countDocuments();
+    const txnsBefore = await ingredientTransactionModel.countDocuments();
+    const real = ingredientTransactionModel.create.bind(ingredientTransactionModel);
+    let n = 0;
+    const spy = vi.spyOn(ingredientTransactionModel, "create").mockImplementation(((...args: Parameters<typeof real>) => {
+      if (++n === 2) throw new Error("boom");
+      return real(...args);
+    }) as typeof real);
+    try {
+      await expect(
+        createPurchase({ ...base, items: [
+          { ingredient_id: String(flour._id), qty: 10, line_total: 100 },
+          { ingredient_id: String(butter._id), qty: 2, line_total: 200 },
+        ] }, String(user._id))
+      ).rejects.toThrow("boom");
+    } finally {
+      spy.mockRestore();
+    }
+    expect(await expenseModel.countDocuments()).toBe(expensesBefore);
+    expect(await ingredientTransactionModel.countDocuments()).toBe(txnsBefore);
+    expect(await stockOf(flour._id)).toBe(5);
+    expect(await stockOf(butter._id)).toBe(1);
   });
 
   it("ยอดรวม 0 บาท / วัตถุดิบถูกลบ → ปฏิเสธ", async () => {

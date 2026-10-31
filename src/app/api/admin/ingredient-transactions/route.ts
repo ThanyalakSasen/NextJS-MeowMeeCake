@@ -3,7 +3,7 @@
  *   GET  — รายการเคลื่อนไหวสต็อกวัตถุดิบ (ingredients.view)
  *   POST — บันทึกการเคลื่อนไหว + ปรับ current_stock (ingredients.update) — performed_by = ผู้ทำรายการ
  *          body: { ingredient_id, type: "use"|"receive"|"adjust", qty,
- *                  unit_id?, note?, po_ref?, transaction_date?, expiry_date?, allowNegative? }
+ *                  unit_id?, note?, po_ref?, transaction_date?, expiry_date? }
  */
 import { ok, created } from "@/lib/apiResponse";
 import { withPermission } from "@/lib/authGuard";
@@ -35,9 +35,12 @@ export const POST = withPermission("ingredient_stock", "update", async (session,
   const body = await req.json();
   const result: any = await txnService.createTransaction({
     ...body,
-    // ผูกบิลซื้อทำได้ผ่าน /admin/purchases เท่านั้น (ตรวจยอดเงิน/สิทธิ์ค่าใช้จ่ายที่นั่น)
+    // ค่าภายในของระบบ — ไม่รับจากคำขอ: ผูกบิลซื้อทำผ่าน /admin/purchases เท่านั้น ·
+    // production_item_id ใส่ได้เฉพาะงานผลิต (ผูกแล้วยกเลิกรายการไม่ได้) · allowNegative = เบิกจนสต็อกติดลบ
     expense_id: null,
     line_total: null,
+    production_item_id: null,
+    allowNegative: false,
     performed_by: session.user_id,
   });
   // ชื่อวัตถุดิบ + หน่วย ไว้ใส่ข้อความ log — อ่านไม่ได้ก็ยัง log ได้ (ไม่มีชื่อ)

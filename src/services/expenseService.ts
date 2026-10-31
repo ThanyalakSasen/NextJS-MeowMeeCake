@@ -59,7 +59,7 @@ const base = createCrudService(expenseModel as any, {
  * ค่าเดิมรุ่นเก่า (ชื่อไฟล์ลอย ๆ / `/uploads/receipts/…` ก่อนย้ายเป็นไฟล์ส่วนตัว) ยังส่งกลับมาซ้ำตอนแก้ฟิลด์อื่นได้
  * (`existing`) — แต่ตั้งค่าใหม่ต้องเป็นไฟล์ส่วนตัวของระบบ · ย้ายของเดิม: npm run migrate:upload-files
  */
-function assertReceiptUrl(url: unknown, existing?: unknown): void {
+export function assertReceiptUrl(url: unknown, existing?: unknown): void {
   if (url === undefined || url === null || url === "") return;
   if (url === existing) return;
   if (!isPrivateFileUrl(url, UPLOAD_DIRS.receipts)) {

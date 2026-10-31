@@ -3,6 +3,8 @@
  *
  *   createPurchase()  → ค่าใช้จ่าย 1 ใบ (ยอด = ผลรวมราคาทุกรายการ) + รายการรับเข้าสต็อก 1 แถวต่อวัตถุดิบ
  *                       แต่ละแถวเก็บ expense_id + line_total → ดูได้ว่าบิลนี้ซื้ออะไร กี่หน่วย ราคาเท่าไร
+ *                       เขียนเป็นชุดเดียว (runAtomic — production = MongoDB transaction: ล้มกลางทาง = ไม่มีอะไรถูกเขียน)
+ *                       รับเข้าอย่างเดียว (สต็อกเพิ่ม) จึงไม่มีแจ้งเตือนใกล้หมด — ไม่ต้องผ่าน createTransaction
  *   listStockItems()  → รายการรับเข้าที่ผูกกับค่าใช้จ่ายใบนั้น
  *   linkStockItems()  → ผูกรายการรับเข้าเดิม (บันทึกก่อนมีฟีเจอร์นี้) กับค่าใช้จ่ายย้อนหลัง
  *   unlinkStockItem() → ยกเลิกการผูก (สต็อกไม่เปลี่ยน)
@@ -15,14 +17,15 @@ import { badRequest, conflict, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { isIntegerOnlyUnit } from "../lib/unitRules";
 import { log } from "../lib/logger";
+import { round2 } from "../lib/money";
+import { runAtomic } from "../lib/transaction";
 import ingredientModel from "../models/ingredientModel";
 import ingredientTransactionModel from "../models/ingredientTransactionModel";
 import expenseModel from "../models/expenseModel";
 import unitModel from "../models/unitModel";
 import { EXPENSE_MAX } from "../schemas/expense";
 import type { PurchaseCreate } from "../schemas/purchase";
-import { createTransaction } from "./ingredientTransactionService";
-import { expenseService, linkedStockTotals } from "./expenseService";
+import { assertReceiptUrl, expenseService, linkedStockTotals } from "./expenseService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -71,48 +74,69 @@ export async function createPurchase(input: PurchaseCreate, performedBy: string)
     input.description?.trim() ||
     defaultDescription(input.category, input.items.map((i) => byId.get(i.ingredient_id).ingredient_name));
 
-  const expense: any = await expenseService.create({
-    date: input.date,
-    description,
-    category: input.category,
-    amount,
-    payment_method: input.payment_method,
-    vendor: input.vendor ?? "",
-    note: input.note ?? "",
-    receipt_url: input.receipt_url ?? null,
-    is_recurring: false,
+  assertReceiptUrl(input.receipt_url);
+  const note = `บิลซื้อ: ${description}`.slice(0, NOTE_MAX);
+
+  const { expenseId, transactions } = await runAtomic(async (session) => {
+    const opts = session ? { session } : {};
+    // ไม่มี transaction (dev เครื่องเดียว / เทส) — ย้อนเองถ้าล้มกลางทาง · มี transaction = MongoDB abort ให้เอง
+    const undo: Array<() => Promise<unknown>> = [];
+    try {
+      const [exp] = await expenseModel.create(
+        [
+          {
+            date: input.date,
+            description,
+            category: input.category,
+            amount: round2(amount),
+            payment_method: input.payment_method,
+            vendor: input.vendor ?? "",
+            note: input.note ?? "",
+            receipt_url: input.receipt_url ?? null,
+            is_recurring: false,
+          },
+        ],
+        opts
+      );
+      undo.push(() => expenseModel.deleteOne({ _id: exp._id }));
+
+      const txns: any[] = [];
+      for (const item of input.items) {
+        const g = byId.get(item.ingredient_id);
+        const res = await ingredientModel.updateOne({ _id: g._id, deleted_at: null }, { $inc: { current_stock: item.qty } }, opts);
+        if (res.modifiedCount === 0) throw notFound(`วัตถุดิบ "${g.ingredient_name}" ถูกลบไปแล้ว — โหลดหน้าใหม่แล้วลองอีกครั้ง`);
+        undo.push(() => ingredientModel.updateOne({ _id: g._id }, { $inc: { current_stock: -item.qty } }));
+        const [txn] = await ingredientTransactionModel.create(
+          [
+            {
+              ingredient_id: g._id,
+              type: "receive",
+              qty: item.qty,
+              unit_id: g.unit_id,
+              note,
+              po_ref: input.po_ref || null,
+              transaction_date: input.date,
+              expiry_date: item.expiry_date ?? null,
+              performed_by: performedBy,
+              expense_id: exp._id,
+              line_total: item.line_total,
+            },
+          ],
+          opts
+        );
+        undo.push(() => ingredientTransactionModel.deleteOne({ _id: txn._id }));
+        txns.push(txn.toObject());
+      }
+      return { expenseId: String(exp._id), transactions: txns };
+    } catch (err) {
+      if (!session) {
+        for (const u of undo.reverse()) await u().catch((e: unknown) => log.error("purchase.rollback_failed", { err: e }));
+      }
+      throw err;
+    }
   });
 
-  const created: { _id: unknown; ingredient_id: unknown; qty: number }[] = [];
-  try {
-    for (const item of input.items) {
-      const g = byId.get(item.ingredient_id);
-      const { transaction } = await createTransaction({
-        ingredient_id: item.ingredient_id,
-        type: "receive",
-        qty: item.qty,
-        unit_id: String(g.unit_id),
-        note: `บิลซื้อ: ${description}`.slice(0, NOTE_MAX),
-        po_ref: input.po_ref || null,
-        transaction_date: input.date,
-        expiry_date: item.expiry_date ?? null,
-        performed_by: performedBy,
-        expense_id: String(expense._id),
-        line_total: item.line_total,
-      });
-      created.push(transaction as any);
-    }
-  } catch (err) {
-    // ย้อนสิ่งที่เขียนไปแล้ว (best-effort) — สต็อกที่บวกเข้า + รายการรับเข้า + ค่าใช้จ่าย
-    for (const t of created) {
-      await ingredientModel.updateOne({ _id: t.ingredient_id }, { $inc: { current_stock: -t.qty } }).catch(() => undefined);
-      await ingredientTransactionModel.deleteOne({ _id: t._id }).catch(() => undefined);
-    }
-    await expenseModel.deleteOne({ _id: expense._id }).catch((e: unknown) => log.error("purchase.rollback_failed", { expense_id: String(expense._id), err: e }));
-    throw err;
-  }
-
-  return { expense: { ...expense, linked_count: created.length, linked_total: amount }, transactions: created };
+  return { expense: (await expenseService.getById(expenseId)) as any, transactions };
 }
 
 // ── READ ────────────────────────────────────────────────────
