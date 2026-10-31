@@ -10,5 +10,5 @@ import * as chatService from "@/services/chatService";
 
 export const GET = withAuth(async (session, req) => {
   const sp = req.nextUrl.searchParams;
-  return ok(await chatService.getMyChat(session.user_id, { after: sp.get("after"), before: sp.get("before"), limit: sp.get("limit") }));
+  return ok(await chatService.getMyChat(session.user_id, { after: sp.get("after"), after_id: sp.get("after_id"), before: sp.get("before"), limit: sp.get("limit") }));
 });

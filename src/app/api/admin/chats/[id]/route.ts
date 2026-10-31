@@ -13,7 +13,7 @@ type Ctx = { params: Promise<{ id: string }> };
 export const GET = withPermission("chats", "view", async (_session, req, ctx: Ctx) => {
   const { id } = await ctx.params;
   const sp = req.nextUrl.searchParams;
-  return ok(await chatService.getConversationForStaff(id, { after: sp.get("after"), before: sp.get("before"), limit: sp.get("limit") }));
+  return ok(await chatService.getConversationForStaff(id, { after: sp.get("after"), after_id: sp.get("after_id"), before: sp.get("before"), limit: sp.get("limit") }));
 });
 
 export const DELETE = withPermission("chats", "delete", async (_session, req, ctx: Ctx) => {

@@ -222,6 +222,14 @@ export async function addItems(orderId: string, inputs: AddItemInput[]) {
     throw conflict("เพิ่มรายการได้เฉพาะใบสั่งผลิตที่ยัง planned หรือ in_progress");
   }
 
+  const docs = await prepareNewItems(orderId, inputs);
+  const created = await productionItemModel.insertMany(docs);
+  return created.map((doc) => doc.toObject());
+}
+
+/** ตรวจรายการใหม่ทั้งชุด (จำนวน / สินค้า / สูตรตรงสินค้า) แล้วคืนเอกสารที่พร้อม insert — ยังไม่เขียนอะไร
+ *  ใช้ร่วม addItems กับการบันทึกใบสั่งผลิตทั้งใบ (productionOrderService.saveProductionOrderEdit) */
+export async function prepareNewItems(orderId: string, inputs: AddItemInput[]) {
   for (const input of inputs) {
     if (!input.product_id || !input.recipe_id) throw badRequest("ต้องระบุ product_id และ recipe_id");
     // จำนวนชิ้น = จำนวนเต็มเท่านั้น (หน้าเว็บล็อกแล้ว — กันยิง API ตรงแล้วได้สต็อกสินค้า 1.5 ชิ้น)
@@ -241,7 +249,7 @@ export async function addItems(orderId: string, inputs: AddItemInput[]) {
   const productIdSet = new Set(products.map((p) => String(p._id)));
   const recipeById = new Map(recipes.map((r) => [String(r._id), r]));
 
-  const docs = inputs.map((input) => {
+  return inputs.map((input) => {
     if (!productIdSet.has(String(input.product_id))) throw notFound("ไม่พบสินค้าที่ระบุ");
     const recipe = recipeById.get(String(input.recipe_id));
     if (!recipe) throw notFound("ไม่พบสูตรการผลิตที่ระบุ");
@@ -257,9 +265,6 @@ export async function addItems(orderId: string, inputs: AddItemInput[]) {
       notes: input.notes ?? null,
     };
   });
-
-  const created = await productionItemModel.insertMany(docs);
-  return created.map((doc) => doc.toObject());
 }
 
 export async function listByOrder(orderId: string) {

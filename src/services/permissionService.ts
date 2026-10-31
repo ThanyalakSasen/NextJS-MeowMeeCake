@@ -18,6 +18,7 @@ import roleModel from "../models/roleModel";
 import userModel from "../models/userModel";
 import migrationModel from "../models/migrationModel";
 import { log } from "../lib/logger";
+import { runAtomic } from "../lib/transaction";
 import type { z } from "zod";
 import type { permissionUpdate } from "../schemas/rbac";
 
@@ -187,6 +188,78 @@ export async function updatePermission(id: string, input: UpdatePermissionInput)
   if (!doc) throw notFound("ไม่พบสิทธิ์ที่ระบุ");
   await invalidatePermissionCache();
   return doc;
+}
+
+// ── บันทึกสิทธิ์ทั้งบทบาทในคำขอเดียว (เอกสารบั๊กข้อ 12) ─────────
+// เดิมหน้าสิทธิ์ยิง POST/PATCH ทีละเมนู — ล้มกลางทาง = บทบาทได้สิทธิ์ไปบางเมนู · ตอนนี้ตรวจทุกแถวก่อน แล้วเขียนรวด
+// (transaction บน replica set — lib/transaction.ts) · ตรวจเพดานสิทธิ์ของผู้ทำ (permissionCeiling) ทำที่ route ก่อนเรียก
+export const PERMISSION_FLAGS = ["can_view", "can_create", "can_update", "can_delete", "can_approve"] as const;
+export type PermissionFlag = (typeof PERMISSION_FLAGS)[number];
+export type RolePermissionRow = { menu_key: MenuKey } & Partial<Record<PermissionFlag, boolean>>;
+
+/** แผนการเขียนของแต่ละแถว — route ใช้ตรวจเพดานสิทธิ์ (create = แถวใหม่ · update = แถวเดิม + flag ที่เปลี่ยน) */
+export async function planRolePermissions(roleId: string, rows: RolePermissionRow[]) {
+  await dbConnect();
+  assertObjectId(roleId, "role_id");
+  const role = await roleModel.findOne({ _id: roleId, deleted_at: null }).lean<{ role_type?: string }>();
+  if (!role) throw notFound("ไม่พบบทบาทที่ระบุ");
+  if (role.role_type === "customer") throw badRequest('กำหนดสิทธิ์เมนูให้บทบาทประเภท "customer" ไม่ได้');
+  const seen = new Set<string>();
+  for (const r of rows) {
+    if (!MENU_KEYS.includes(r.menu_key)) throw badRequest(`menu_key ต้องเป็นหนึ่งใน: ${MENU_KEYS.join(", ")}`);
+    if (seen.has(r.menu_key)) throw badRequest(`menu_key "${r.menu_key}" ซ้ำในคำขอ`);
+    seen.add(r.menu_key);
+  }
+  const existing = await permissionModel
+    .find({ role_id: roleId, deleted_at: null, menu_key: { $in: rows.map((r) => r.menu_key) } })
+    .lean<({ _id: unknown; menu_key: MenuKey } & Partial<Record<PermissionFlag, boolean>>)[]>();
+  const byMenu = new Map(existing.map((p) => [p.menu_key, p]));
+  const creates: RolePermissionRow[] = [];
+  const updates: { id: string; menu_key: MenuKey; changed: Partial<Record<PermissionFlag, boolean>> }[] = [];
+  for (const r of rows) {
+    const cur = byMenu.get(r.menu_key);
+    const flags = Object.fromEntries(PERMISSION_FLAGS.filter((f) => r[f] !== undefined).map((f) => [f, !!r[f]]));
+    if (cur) {
+      const changed = Object.fromEntries(Object.entries(flags).filter(([f, v]) => !!cur[f as PermissionFlag] !== v));
+      if (Object.keys(changed).length) updates.push({ id: String(cur._id), menu_key: r.menu_key, changed });
+    } else if (Object.values(flags).some(Boolean)) {
+      creates.push({ menu_key: r.menu_key, ...flags });
+    }
+  }
+  return { creates, updates };
+}
+
+export async function saveRolePermissions(
+  roleId: string,
+  plan: Awaited<ReturnType<typeof planRolePermissions>>,
+  grantedBy: string
+) {
+  if (!plan.creates.length && !plan.updates.length) return { created: 0, updated: 0 };
+  await assertRefExists(userModel, grantedBy, "ผู้ให้สิทธิ์", "granted_by");
+  await runAtomic(async (session) => {
+    await permissionModel.bulkWrite(
+      [
+        ...plan.updates.map((u) => ({
+          updateOne: { filter: { _id: u.id, deleted_at: null }, update: { $set: { ...u.changed, updated_at: new Date() } } },
+        })),
+        ...plan.creates.map((c) => ({
+          insertOne: {
+            document: {
+              role_id: roleId,
+              granted_by: grantedBy,
+              expires_at: null,
+              deleted_at: null,
+              ...Object.fromEntries(PERMISSION_FLAGS.map((f) => [f, !!c[f]])),
+              menu_key: c.menu_key,
+            },
+          },
+        })),
+      ],
+      { ordered: true, session }
+    );
+  });
+  await invalidatePermissionCache();
+  return { created: plan.creates.length, updated: plan.updates.length };
 }
 
 // BACKLOG3 §9 — soft-delete/restore เป็น pattern เดียวกับ service อื่นทุกจุด ใช้ primitive กลางแทน
