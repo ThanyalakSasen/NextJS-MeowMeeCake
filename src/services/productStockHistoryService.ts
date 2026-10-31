@@ -92,23 +92,36 @@ function parseDate(value: string, endOfDay: boolean, field: string): Date {
   return d;
 }
 
-/** เลขเอกสารต้นทาง (order_no / production_no) ต่อ ref_id — อ่านทีเดียวต่อชนิด */
-async function refNumbers(items: any[]): Promise<Map<string, string>> {
+interface RefInfo {
+  no: string;
+  /** ลูกค้าเจ้าของออเดอร์ (ref_type "order") — ให้หน้าประวัติบอกได้ว่าแถวขาย/คืนสต็อกเป็นของลูกค้าคนไหน */
+  customer: { _id: unknown; user_fullname: string } | null;
+}
+
+/** เลขเอกสารต้นทาง (order_no / production_no) + ลูกค้าของออเดอร์ ต่อ ref_id — อ่านทีเดียวต่อชนิด */
+async function refInfos(items: any[]): Promise<Map<string, RefInfo>> {
   const idsOf = (t: ProductStockRefType) =>
     [...new Set(items.filter((i) => i.ref_type === t && i.ref_id).map((i) => String(i.ref_id)))];
   const orderIds = idsOf("order");
   const productionIds = idsOf("production_order");
   const [orders, productions] = await Promise.all([
     orderIds.length
-      ? orderModel.find({ _id: { $in: orderIds } }).select("order_no").lean<any[]>()
+      ? orderModel
+          .find({ _id: { $in: orderIds } })
+          .select("order_no user_id")
+          .populate("user_id", "user_fullname")
+          .lean<any[]>()
       : [],
     productionIds.length
       ? productionOrderModel.find({ _id: { $in: productionIds } }).select("production_no").lean<any[]>()
       : [],
   ]);
-  const byId = new Map<string, string>();
-  for (const o of orders) byId.set(String(o._id), o.order_no);
-  for (const p of productions) byId.set(String(p._id), p.production_no);
+  const byId = new Map<string, RefInfo>();
+  for (const o of orders) {
+    const u = o.user_id;
+    byId.set(String(o._id), { no: o.order_no, customer: u?._id ? { _id: u._id, user_fullname: u.user_fullname } : null });
+  }
+  for (const p of productions) byId.set(String(p._id), { no: p.production_no, customer: null });
   return byId;
 }
 
@@ -157,9 +170,12 @@ export async function listHistory(query: ListStockHistoryQuery) {
     productStockTransactionModel.countDocuments(filter),
   ]);
 
-  const refNo = await refNumbers(items);
+  const refs = await refInfos(items);
   return {
-    items: items.map((i) => ({ ...i, ref_no: i.ref_id ? (refNo.get(String(i.ref_id)) ?? null) : null })),
+    items: items.map((i) => {
+      const ref = i.ref_id ? refs.get(String(i.ref_id)) : undefined;
+      return { ...i, ref_no: ref?.no ?? null, ref_customer: ref?.customer ?? null };
+    }),
     meta: buildMeta(total, query.pagination),
   };
 }

@@ -42,6 +42,23 @@ describe("purchaseService.createPurchase", () => {
     expect(row).toMatchObject({ linked_count: 2, linked_total: 650 });
   });
 
+  it("update_cost: ต้นทุนวัตถุดิบ = ราคาต่อหน่วยของบิล (ข้ามราคา 0) · update_cost=false ไม่แตะ", async () => {
+    const user = await makeUser();
+    const flour = await makeIngredient({ cost_per_unit: 10 });
+    const gift = await makeIngredient({ cost_per_unit: 7 });
+    const costOf = async (id: unknown) => (await ingredientModel.findById(id).lean<{ cost_per_unit: number }>())!.cost_per_unit;
+
+    await createPurchase({ ...base, items: [
+      { ingredient_id: String(flour._id), qty: 3, line_total: 100 },
+      { ingredient_id: String(gift._id), qty: 1, line_total: 0 },
+    ] }, String(user._id));
+    expect(await costOf(flour._id)).toBe(33.33);
+    expect(await costOf(gift._id)).toBe(7);
+
+    await createPurchase({ ...base, update_cost: false, items: [{ ingredient_id: String(flour._id), qty: 1, line_total: 50 }] }, String(user._id));
+    expect(await costOf(flour._id)).toBe(33.33);
+  });
+
   it("วัตถุดิบหน่วยนับเป็นชิ้นกรอกทศนิยม → ไม่มีอะไรถูกเขียนเลย", async () => {
     const user = await makeUser();
     const flour = await makeIngredient({ current_stock: 0 });
@@ -62,7 +79,7 @@ describe("purchaseService.createPurchase", () => {
 
   it("ล้มกลางบิล (รายการที่ 2) → ไม่เหลืออะไรเลย: ค่าใช้จ่าย/รายการรับเข้า/สต็อกกลับเป็นเดิม", async () => {
     const user = await makeUser();
-    const flour = await makeIngredient({ current_stock: 5 });
+    const flour = await makeIngredient({ current_stock: 5, cost_per_unit: 10 });
     const butter = await makeIngredient({ current_stock: 1 });
     const expensesBefore = await expenseModel.countDocuments();
     const txnsBefore = await ingredientTransactionModel.countDocuments();
@@ -86,6 +103,7 @@ describe("purchaseService.createPurchase", () => {
     expect(await ingredientTransactionModel.countDocuments()).toBe(txnsBefore);
     expect(await stockOf(flour._id)).toBe(5);
     expect(await stockOf(butter._id)).toBe(1);
+    expect((await ingredientModel.findById(flour._id).lean<{ cost_per_unit: number }>())!.cost_per_unit).toBe(10);
   });
 
   it("ยอดรวม 0 บาท / วัตถุดิบถูกลบ → ปฏิเสธ", async () => {
