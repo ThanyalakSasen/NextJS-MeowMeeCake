@@ -11,6 +11,7 @@ export const adminLinks = {
   preorder: (preorderId: unknown) => `/owner/orders/preOrderRound?tab=orders&id=${id(preorderId)}`,
   /** แท็บรายการรอบ — ไม่ระบุ ?tab= frontend เปิดแท็บสรุปรอบ (frontend PR #186) */
   preorderRounds: "/owner/orders/preOrderRound?tab=rounds",
+  preorderOrders: "/owner/orders/preOrderRound?tab=orders",
   production: (productionOrderId: unknown) => `/owner/production?id=${id(productionOrderId)}`,
   product: (productId: unknown) => `/owner/products/${id(productId)}/edit`,
   products: "/owner/products",

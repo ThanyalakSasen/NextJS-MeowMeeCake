@@ -76,6 +76,17 @@ function shippingLines(trackingNo?: string | null, carrier?: string | null): str
 // ── ข้อความ (export ให้เทสตรวจได้) ─────────────────────────
 // ไม่มีข้อความ "ได้รับออเดอร์" — สร้างใหม่แจ้งแค่กระดิ่งในเว็บ (customerWeb.created · docs/LINE.md §9.15)
 export const customerMessages = {
+  /** ร้านยกเลิกบางสินค้าในพรีออเดอร์ — ใบยังเดินต่อด้วยสินค้าที่เหลือ */
+  preorderItemCancelled(docNo: string, items: string, total: number, refund: number, reason: string): string {
+    const money = (n: number) => `${toBaht(n).toLocaleString("th-TH")} บาท`;
+    return [
+      header("preorder", docNo),
+      `ร้านยกเลิกสินค้า: ${items}`,
+      `เหตุผล: ${reason}`,
+      `ยอดใหม่: ${money(total)}`,
+      ...(refund > 0 ? [`ร้านจะโอนคืน ${money(refund)}`] : []),
+    ].join("\n");
+  },
   orderStatus(
     kind: CustomerDocKind,
     docNo: string,
@@ -187,6 +198,10 @@ function web(kind: CustomerDocKind, id: unknown, docNo: string, message: string,
 
 /** ข้อความกระดิ่งของแต่ละเหตุการณ์ (ข้อความแบบฝั่งลูกค้า) — null = ไม่แจ้ง */
 export const customerWeb = {
+  /** ร้านโอนเงินคืนบางส่วนแล้ว (ยกเลิกบางสินค้าในพรีออเดอร์) */
+  partialRefundDone(id: unknown, docNo: string, amount: number): WebNotice {
+    return web("preorder", id, docNo, `💸 ร้านโอนคืน ${toBaht(amount).toLocaleString("th-TH")} บาท เรียบร้อยแล้ว`, "success");
+  },
   created(kind: CustomerDocKind, id: unknown, docNo: string, total: number): WebNotice {
     return web(kind, id, docNo, `🧾 ได้รับ${KIND_LABEL[kind]}แล้ว ยอดรวม ${toBaht(total).toLocaleString("th-TH")} บาท`, "info");
   },
