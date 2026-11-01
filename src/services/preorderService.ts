@@ -525,7 +525,7 @@ export async function createPreorder(
 
 // ── READ ─────────────────────────────────────────────────────
 // เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) — ปัดก่อนส่งออก (เหมือน orderService)
-const PREORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount"] as const;
+const PREORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount", "refund_due_amount", "refund_done_amount"] as const;
 // cost_per_unit (บาท) — เหตุผลเดียวกับ orderService (ORDER_ITEM_MONEY_FIELDS)
 const PREORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price", "cost_per_unit"] as const;
 
@@ -646,7 +646,8 @@ export async function getPreorderByNo(preorderNo: string) {
 export async function updatePreorderStatus(
   id: string,
   next: PreorderStatus,
-  opts: { cancelled_by?: string; cancelled_reason?: string } = {}
+  /** skipAutoRefund = ยกเลิกแล้วคงสถานะ "ชำระแล้ว" (รอโอนคืน) แทนการตั้ง refunded ทันที — ร้านโอนจริงแล้วกดยืนยันเอง */
+  opts: { cancelled_by?: string; cancelled_reason?: string; skipAutoRefund?: boolean } = {}
 ) {
   await dbConnect();
   assertObjectId(id);
@@ -713,14 +714,16 @@ export async function updatePreorderStatus(
     // (BACKLOG 2b.3 — คู่ขนานกับ orderService.updateOrderStatus §2.8) — BACKLOG3 §10: ย้ายไปใช้ร่วม
     // กับ orderService ที่ lib/orderLifecycle.ts แล้ว (คืนโควตาต่อรายการด้านบนยังคงแยกเขียนเอง เพราะ
     // เป็นคนละกลไกกับที่ order คืนสต็อก+ส่วนลด)
-    await registerAutoRefundOnCancel({
-      saga: cleanup,
-      entityKind: "preorder",
-      paymentFilter: { preorder_id: preorder._id },
-      currentPaymentStatus: preorder.payment_status,
-      cancelledBy: opts.cancelled_by,
-      entityId: preorder._id,
-    });
+    if (!opts.skipAutoRefund) {
+      await registerAutoRefundOnCancel({
+        saga: cleanup,
+        entityKind: "preorder",
+        paymentFilter: { preorder_id: preorder._id },
+        currentPaymentStatus: preorder.payment_status,
+        cancelledBy: opts.cancelled_by,
+        entityId: preorder._id,
+      });
+    }
 
     await cleanup.rollback();
   }
@@ -772,6 +775,7 @@ export async function cancelPreorder(
   opts: {
     cancelled_by?: string;
     cancelled_reason?: string;
+    skipAutoRefund?: boolean;
     /** ถ้าระบุ: ยกเลิกได้เฉพาะเมื่อสถานะปัจจุบันอยู่ในลิสต์นี้ (ใช้จำกัดสิทธิ์ฝั่งลูกค้า — แอดมินไม่ส่ง = ยกเลิกได้ทุกสถานะที่ยังไม่ completed) */
     allowedFrom?: readonly PreorderStatus[];
   } = {}

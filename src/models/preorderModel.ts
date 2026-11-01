@@ -73,6 +73,11 @@ const preorderSchema = new mongoose.Schema(
     added_to_production_at: { type: Date, default: null },
     // เวลาที่ถูกหักออกจากใบสั่งผลิตหลังถูกยกเลิก (docs/BACKLOG4.md Y1) — กันหักซ้ำ
     removed_from_production_at: { type: Date, default: null },
+    // ยอดที่ต้องโอนคืนจากการยกเลิกบางสินค้า (ใบยังไม่ถูกยกเลิก) — ร้านโอนนอกระบบแล้วกดยืนยัน (preorderItemCancelService)
+    // total_amount ถูกลดแล้ว ส่วน payment.amount คงยอดที่รับจริง · เงินเป็นบาท ทศนิยมไม่เกิน 2 ตำแหน่ง (docs/money-units.md)
+    refund_due_amount: { type: Number, default: 0, min: 0 },
+    refund_due_note: { type: String, default: null },
+    refund_done_amount: { type: Number, default: 0, min: 0 },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }

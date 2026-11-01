@@ -146,6 +146,7 @@ async function roundDemand(
   paid: boolean
 ): Promise<Array<{ _id: unknown; round_item_id: unknown; qty: number; preorder_ids: unknown[] }>> {
   return preorderItemModel.aggregate([
+    { $match: { deleted_at: null } }, // สินค้าที่ร้านยกเลิกออกจากรอบ (cancelRoundItem) ต้องไม่เข้าใบสั่งผลิต
     {
       $lookup: {
         from: preorderModel.collection.name,

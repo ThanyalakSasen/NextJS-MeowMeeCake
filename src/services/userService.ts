@@ -304,10 +304,11 @@ export interface RefundAccount {
  * (ยกเลิกแล้วแต่ยังชำระแล้ว — ลูกค้ายกเลิกเอง backend ไม่คืนอัตโนมัติ · customer-backend-merge.md §8.8)
  * สถานะอื่น / ลูกค้ายังไม่ตั้งบัญชี = null · ใช้ใน GET /admin/orders/:id และ /admin/preorders/:id (frontend Q-BE12)
  */
-export async function withRefundAccount<T extends { order_status?: unknown; payment_status?: unknown; user_id?: unknown }>(
+export async function withRefundAccount<T extends { order_status?: unknown; payment_status?: unknown; user_id?: unknown; refund_due_amount?: unknown }>(
   doc: T
 ): Promise<T & { refund_account: RefundAccount | null }> {
-  const awaitingRefund = doc.order_status === "cancelled" && doc.payment_status === "paid";
+  // refund_due_amount > 0 = ใบยังเดินต่อ แต่มีสินค้าที่ร้านยกเลิกแล้วต้องโอนคืนบางส่วน
+  const awaitingRefund = (doc.order_status === "cancelled" && doc.payment_status === "paid") || Number(doc.refund_due_amount ?? 0) > 0;
   const ref = doc.user_id as { _id?: unknown } | string | null | undefined;
   const userId = ref && typeof ref === "object" ? ref._id : ref;
   if (!awaitingRefund || !userId) return { ...doc, refund_account: null };

@@ -54,3 +54,6 @@ export const updateRoundItemBody = z
     message: "ไม่มีฟิลด์ที่อนุญาตให้แก้ไข (price_override/min_order_qty/max_qty_total/is_active)",
   });
 export type UpdateRoundItemBody = z.infer<typeof updateRoundItemBody>;
+
+
+export const cancelRoundItemBody = z.object({ reason: z.string().trim().max(500).optional() });

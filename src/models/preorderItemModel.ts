@@ -47,6 +47,9 @@ const preorderItemSchema = new mongoose.Schema(
     unit_price: { type: Number, required: true, min: 0 },
     total_price: { type: Number, required: true, min: 0 },
     cost_per_unit: { type: Number, default: null },
+    // ร้านยกเลิกเฉพาะสินค้านี้ออกจากรอบที่เปิดอยู่ (preorderItemCancelService) — ตั้ง deleted_at คู่กัน ทุก query จึงไม่นับรายการนี้
+    cancelled_at: { type: Date, default: null },
+    cancelled_reason: { type: String, default: null },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }
