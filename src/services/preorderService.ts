@@ -497,6 +497,7 @@ export async function createPreorder(
             user_id: userId,
             preorder_id: String(preorder._id),
             discount_applied: applied.discount_amount,
+            channel: "online",
           });
         }
       } catch (e) {

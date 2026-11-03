@@ -129,3 +129,39 @@ describe("POS ซ้อนโปร (promotion_ids) + โปรเฉพาะ�
     expect(order.discount_amount).toBe(20);
   });
 });
+
+describe("สิทธิ์ต่อคนตามช่องทาง (ร้านไม่ตั้ง max_user_per_user)", () => {
+  const webOrder = (userId: string, productId: string, extra: Record<string, unknown>) =>
+    orderService.createOrder(userId, {
+      order_type: "takeaway",
+      items: [{ product_id: productId, quantity: 2 }],
+      storefront: true,
+      ...extra,
+    });
+
+  it("POS: สมาชิกใช้โปรเดิมซ้ำได้ไม่จำกัด", async () => {
+    const member = await makeUser();
+    const p = await makeProduct({ product_price: 100, product_stock_quantity: 50 });
+    const promo = await makePromo({ applicable_channels: ["instore"] });
+
+    for (let i = 0; i < 3; i++) {
+      const order = await posOrder(String(member._id), String(p._id), { promotion_id: String(promo._id) });
+      expect(order.discount_amount).toBe(20);
+    }
+    expect(await promotionUsagesModel.countDocuments({ promotion_id: promo._id, user_id: member._id })).toBe(3);
+  });
+
+  it("หน้าเว็บ: โค้ดใช้ได้ 1 ครั้งต่อคน · ร้านตั้งสิทธิ์ต่อคน 2 = ใช้ได้ 2 ครั้ง", async () => {
+    const user = await makeUser();
+    const p = await makeProduct({ product_price: 100, product_stock_quantity: 50 });
+    const once = await makePromo({ applicable_channels: ["online"] });
+    const twice = await makePromo({ applicable_channels: ["online"], max_user_per_user: 2 });
+
+    await webOrder(String(user._id), String(p._id), { promotion_code: once.promotion_code });
+    await expect(webOrder(String(user._id), String(p._id), { promotion_code: once.promotion_code })).rejects.toSatisfy(is422);
+
+    await webOrder(String(user._id), String(p._id), { promotion_code: twice.promotion_code });
+    await webOrder(String(user._id), String(p._id), { promotion_code: twice.promotion_code });
+    await expect(webOrder(String(user._id), String(p._id), { promotion_code: twice.promotion_code })).rejects.toSatisfy(is422);
+  });
+});

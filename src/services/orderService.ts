@@ -423,9 +423,11 @@ async function persistOrder(
     if (results.filter((r) => r.free_shipping).length > 1) {
       throw unprocessable("ใช้โปรส่งฟรีได้บิลละ 1 โปร");
     }
-    // ส่วนลดรวมไม่เกินยอดบิล (สินค้า + ค่าส่ง) — ตัวหลังลดเท่าที่เหลือ · เหลือ 0 = ไม่ใช้โค้ดนั้น (ไม่เสียสิทธิ์)
+    // หน้าเว็บ: ส่วนลดรวมไม่เกินยอดบิล (สินค้า + ค่าส่ง) — ตัวหลังลดเท่าที่เหลือ · เหลือ 0 = ไม่ใช้โค้ดนั้น (ไม่เสียสิทธิ์)
+    // POS ซ้อนโปร: คิดเต็มทุกตัว — รวมเกินยอดบิล = 400 ด้านล่าง ให้พนักงานเอาโปรออกเอง (ไม่กินสิทธิ์โปร)
     for (const r of results) {
-      const amount = Math.min(toSatang(r.discount_amount), toSatang(subtotal + delivery_fee - discount_amount));
+      const full = toSatang(r.discount_amount);
+      const amount = webStack ? Math.min(full, toSatang(subtotal + delivery_fee - discount_amount)) : full;
       if (amount <= 0) continue;
       discount_amount = toSatang(discount_amount + amount);
       if (r.free_shipping) shippingDiscount = amount;
@@ -553,6 +555,7 @@ async function persistOrder(
           user_id: userId,
           order_id: String(order._id),
           discount_applied: applied.discount_amount,
+          channel: opts.channel ?? "online",
         });
       } catch (e) {
         log.error("order.record_usage_failed", { order_id: String(order._id), err: e });

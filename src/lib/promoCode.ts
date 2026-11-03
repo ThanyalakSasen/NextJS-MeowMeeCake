@@ -34,6 +34,14 @@ export function perUserLimit(v: unknown): number {
   return positiveLimit(v) ?? 1;
 }
 
+/**
+ * สิทธิ์ต่อลูกค้าตามช่องทาง — กฎ "ไม่ตั้ง = 1 ครั้งต่อคน" ใช้กับโค้ดที่ลูกค้าใช้หน้าเว็บ (online) เท่านั้น
+ * หน้าร้าน (instore · POS ใช้โปรให้สมาชิก เช่น ซื้อ 3 ลด 100) ใช้กติกาเดิม: ไม่ตั้ง = ไม่จำกัด (null)
+ */
+export function perUserLimitFor(v: unknown, channel: "online" | "instore" | null | undefined): number | null {
+  return channel === "instore" ? positiveLimit(v) : perUserLimit(v);
+}
+
 /** หน้าเว็บ: ใช้โค้ดส่วนลด + คูปองของฉัน รวมกันได้สูงสุดเท่านี้ต่อการสั่งซื้อ 1 ครั้ง */
 export const MAX_DISCOUNTS_PER_ORDER = 2;
 export const TOO_MANY_DISCOUNTS_MESSAGE = `ใช้โค้ดหรือส่วนลดได้สูงสุด ${MAX_DISCOUNTS_PER_ORDER} รายการต่อการสั่งซื้อ`;

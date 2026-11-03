@@ -112,7 +112,7 @@ describe("สั่งซื้อรวม (checkoutService.checkout)", () => {
     expect(pre!.order_status).toBe("cancelled");
   });
 
-  it("schema: คูปอง/โค้ดได้บิลเดียว · รอบซ้ำ · ไม่มีบิล → ไม่ผ่าน", () => {
+  it("schema: ส่วนลดรวมไม่เกิน 2 รายการต่อการสั่งซื้อ · รอบซ้ำ · ไม่มีบิล → ไม่ผ่าน", () => {
     const pre = (round_id: string, extra: object = {}) => ({
       round_id,
       order_type: "takeaway",
@@ -123,10 +123,17 @@ describe("สั่งซื้อรวม (checkoutService.checkout)", () => {
     const R2 = "6a0000000000000000000012";
     expect(checkoutBody.safeParse({}).success).toBe(false);
     expect(checkoutBody.safeParse({ preorders: [pre(R1), pre(R1)] }).success).toBe(false);
+    // โค้ด 1 + คูปอง 1 (คนละบิล) = 2 รายการ → ผ่าน · เพิ่มอีกโค้ด = 3 รายการ → ไม่ผ่าน
     expect(
       checkoutBody.safeParse({
         order: { order_type: "takeaway", promotion_code: "SAVE" },
         preorders: [pre(R1, { user_coupon_id: "6a0000000000000000000099" })],
+      }).success
+    ).toBe(true);
+    expect(
+      checkoutBody.safeParse({
+        order: { order_type: "takeaway", promotion_code: "SAVE" },
+        preorders: [pre(R1, { user_coupon_id: "6a0000000000000000000099" }), pre(R2, { promotion_code: "MORE" })],
       }).success
     ).toBe(false);
     expect(checkoutBody.safeParse({ order: { order_type: "takeaway", promotion_code: "SAVE" }, preorders: [pre(R1), pre(R2)] }).success).toBe(true);
