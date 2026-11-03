@@ -18,8 +18,11 @@ const customerNotificationSchema = new mongoose.Schema(
     // profile_setup = ชวนกรอกข้อมูลบัญชี (สมัครด้วย Google/LINE) — หน้าเว็บเด้งเป็นป๊อปอัปจนกว่าจะกรอกครบ/อ่านแล้ว
     ref_type: { type: String, enum: ["order", "preorder", "coupon", "promotion", "bundle", "preorder_round", "review", "profile_setup", null], default: null },
     ref_id: { type: mongoose.Schema.Types.ObjectId, default: null },
-    // รหัสโค้ด/คูปอง — หน้าเว็บแสดงพร้อมปุ่มคัดลอก (แจ้งเตือนคูปอง)
+    // รหัสโค้ด/คูปอง (แจ้งเตือนคูปอง) — แสดงในข้อความ
     coupon_code: { type: String, default: null },
+    // true = ลงห้องแชทของลูกค้าด้วย (โค้ดส่วนลดใหม่) — ลงตอนลูกค้าเปิดแชทหลังถึง visible_at (chatService.postDueCouponNotices)
+    post_to_chat: { type: Boolean, default: false },
+    chat_posted_at: { type: Date, default: null },
     // เวลาที่เริ่มแสดงให้ลูกค้าเห็น — ปกติ = ตอนสร้าง · รอบพรีออเดอร์ที่ยังไม่เปิดรับ = วันเวลาเปิดรับ (บันทึกล่วงหน้า)
     // เอกสารเก่าที่ไม่มี field นี้ถือว่าแสดงตั้งแต่ created_at
     visible_at: { type: Date, default: () => new Date() },
@@ -33,7 +36,13 @@ customerNotificationSchema.index({ user_id: 1, created_at: -1 });
 customerNotificationSchema.index({ user_id: 1, read_at: 1 });
 customerNotificationSchema.index({ user_id: 1, visible_at: -1 });
 customerNotificationSchema.index({ ref_type: 1, ref_id: 1 });
+customerNotificationSchema.index({ user_id: 1, post_to_chat: 1, chat_posted_at: 1 });
 
+
+// dev server (hot reload) เก็บ schema เก่าที่ยังไม่มี post_to_chat — ลบทิ้งแล้วสร้างใหม่
+if (mongoose.models.CustomerNotifications && !mongoose.models.CustomerNotifications.schema.path("post_to_chat")) {
+  mongoose.deleteModel("CustomerNotifications");
+}
 
 const CustomerNotification =
   mongoose.models.CustomerNotifications ||

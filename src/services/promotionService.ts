@@ -24,7 +24,7 @@ import * as promotionUsageService from "./promotionUsageService";
 import * as cartService from "./cartService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { GUEST_CUSTOMER_EMAIL } from "../lib/posGuest";
-import { channelMismatchMessage, channelsOf, normalizePromoCode, positiveLimit } from "../lib/promoCode";
+import { channelMismatchMessage, channelsOf, normalizePromoCode, perUserLimitFor, positiveLimit } from "../lib/promoCode";
 import { isObjectId } from "../lib/objectId";
 import { notifyCustomersOfNewCode, hidePromotionNotices, restorePromotionNotices } from "./couponNoticeService";
 import type { z } from "zod";
@@ -278,14 +278,16 @@ export async function validateForOrder(input: ValidateForOrderInput): Promise<Di
   if (promo.audience === "members" && (await isPosGuest(input.user_id))) {
     throw unprocessable("โปรโมชันนี้สำหรับสมาชิกเท่านั้น — ผูกบิลกับสมาชิกก่อนใช้");
   }
-  const perUser = positiveLimit(promo.max_user_per_user);
-  if (perUser != null) {
+  // หน้าเว็บ: ไม่ตั้งสิทธิ์ต่อคน = 1 ครั้ง (ใช้โค้ดซ้ำไม่ได้) · หน้าร้าน: ไม่ตั้ง = ไม่จำกัด (lib/promoCode.perUserLimitFor)
+  // ลูกค้าทั่วไปของ POS ไม่นับ
+  const perUser = perUserLimitFor(promo.max_user_per_user, channel);
+  if (perUser != null && !(await isPosGuest(input.user_id))) {
     const used = await promotionUsageService.getUserUsageCount(
       String(promo._id),
       input.user_id
     );
     if (used >= perUser) {
-      throw unprocessable("คุณใช้สิทธิ์โปรโมชันนี้ครบจำนวนแล้ว");
+      throw unprocessable(perUser === 1 ? "คุณใช้โค้ดนี้ไปแล้ว ใช้ซ้ำไม่ได้" : "คุณใช้สิทธิ์โปรโมชันนี้ครบจำนวนแล้ว");
     }
   }
 

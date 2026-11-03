@@ -23,7 +23,7 @@ import dbConnect from "./dbConnect";
 import { log } from "./logger";
 import paymentModel from "../models/paymentModel";
 import { carrierNeedsTracking, type ShippingCarrier } from "./shippingCarrier";
-import { customerMessages, customerWeb, notifyCustomerLater, type CustomerDocKind } from "../services/customerNotifyService";
+import { chatEvent, customerMessages, customerWeb, notifyCustomerLater, postChatEventLater, type CustomerDocKind } from "../services/customerNotifyService";
 
 type AnyModel = Model<unknown>;
 type Doc = Record<string, unknown>;
@@ -139,6 +139,7 @@ export async function setEntityPaymentStatus(opts: {
     customerMessages.paymentStatus(kind, docNo, opts.status),
     customerWeb.paymentStatus(kind, doc._id, docNo, opts.status)
   );
+  postChatEventLater(doc.user_id, kind, doc._id, docNo, chatEvent.paymentStatus(kind, doc._id, docNo, opts.status));
   return doc;
 }
 
@@ -194,6 +195,13 @@ export async function applyEntityDeliveryUpdate(opts: {
       updated.user_id,
       customerMessages.deliveryStatus(kind, docNo, String(updated.delivery_status), updated.tracking_no as string | null, updated.shipping_carrier as string | null),
       customerWeb.deliveryStatus(kind, updated._id, docNo, String(updated.delivery_status), updated.tracking_no as string | null, updated.shipping_carrier as string | null)
+    );
+    postChatEventLater(
+      updated.user_id,
+      kind,
+      updated._id,
+      docNo,
+      chatEvent.deliveryStatus(kind, updated._id, docNo, String(updated.delivery_status), updated.tracking_no as string | null, updated.shipping_carrier as string | null)
     );
   }
   return updated;

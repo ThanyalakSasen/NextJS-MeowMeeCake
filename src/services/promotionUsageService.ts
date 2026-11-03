@@ -13,7 +13,8 @@ import { buildMeta, type Pagination } from "../lib/queryParams";
 import promotionUsagesModel from "../models/promotionUsagesModel";
 import promotionModel from "../models/promotionModel";
 import { toBahtFields } from "../lib/money";
-import { positiveLimit } from "../lib/promoCode";
+import { perUserLimitFor } from "../lib/promoCode";
+import { isPosGuestUser } from "../lib/posGuest";
 
 // discount_applied — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentUsage<T extends Record<string, unknown>>(usage: T): T {
@@ -28,6 +29,8 @@ export interface RecordUsageInput {
   discount_applied: number;
   order_id?: string | null;
   preorder_id?: string | null;
+  /** ช่องทางของบิล — instore (POS) ไม่ตั้งสิทธิ์ต่อคน = ไม่จำกัด · อื่น ๆ (หน้าเว็บ) = 1 ครั้ง · ไม่ส่ง = online */
+  channel?: "online" | "instore" | null;
 }
 
 export async function recordUsage(input: RecordUsageInput) {
@@ -74,8 +77,9 @@ export async function recordUsage(input: RecordUsageInput) {
       discount_applied: input.discount_applied,
     });
 
-    const perUser = positiveLimit(claimed.max_user_per_user);
-    if (perUser != null) {
+    // หน้าเว็บ: ไม่ตั้งสิทธิ์ต่อคน = 1 ครั้ง · หน้าร้าน: ไม่ตั้ง = ไม่จำกัด · ลูกค้าทั่วไปของ POS ไม่นับ (ใช้บัญชีเดียวกันทุกบิล)
+    const perUser = perUserLimitFor(claimed.max_user_per_user, input.channel);
+    if (perUser != null && !(await isPosGuestUser(input.user_id))) {
       // นับหลังสร้าง (optimistic — ผู้ยิงคำขอพร้อมกันคนหลังจะเป็นฝ่ายแพ้ แล้วถูก rollback)
       const userCount = await promotionUsagesModel.countDocuments({
         promotion_id: input.promotion_id,

@@ -25,3 +25,29 @@ export function channelMismatchMessage(channels: string[]): string {
 
 export const channelsOf = (p: { applicable_channels?: string[] | null }): string[] =>
   p.applicable_channels?.length ? p.applicable_channels : ["online", "instore"];
+
+/**
+ * สิทธิ์ใช้โค้ดต่อลูกค้า — ร้านไม่ตั้ง max_user_per_user (ว่าง/0) = ใช้ได้ "1 ครั้งต่อคน" (ใช้โค้ดซ้ำไม่ได้)
+ * ตั้งค่า > 0 = ใช้ได้ตามจำนวนนั้น · บัญชีลูกค้าทั่วไปของ POS ไม่นับสิทธิ์ต่อคน (ใช้ร่วมกันทุกบิล)
+ */
+export function perUserLimit(v: unknown): number {
+  return positiveLimit(v) ?? 1;
+}
+
+/**
+ * สิทธิ์ต่อลูกค้าตามช่องทาง — กฎ "ไม่ตั้ง = 1 ครั้งต่อคน" ใช้กับโค้ดที่ลูกค้าใช้หน้าเว็บ (online) เท่านั้น
+ * หน้าร้าน (instore · POS ใช้โปรให้สมาชิก เช่น ซื้อ 3 ลด 100) ใช้กติกาเดิม: ไม่ตั้ง = ไม่จำกัด (null)
+ */
+export function perUserLimitFor(v: unknown, channel: "online" | "instore" | null | undefined): number | null {
+  return channel === "instore" ? positiveLimit(v) : perUserLimit(v);
+}
+
+/** หน้าเว็บ: ใช้โค้ดส่วนลด + คูปองของฉัน รวมกันได้สูงสุดเท่านี้ต่อการสั่งซื้อ 1 ครั้ง */
+export const MAX_DISCOUNTS_PER_ORDER = 2;
+export const TOO_MANY_DISCOUNTS_MESSAGE = `ใช้โค้ดหรือส่วนลดได้สูงสุด ${MAX_DISCOUNTS_PER_ORDER} รายการต่อการสั่งซื้อ`;
+
+/** รวม promotion_code (ตัวเดียวแบบเดิม) + promotion_codes (หลายตัว) → โค้ดที่ normalize แล้ว ไม่ซ้ำ */
+export function discountCodesOf(input: { promotion_code?: string | null; promotion_codes?: readonly string[] | null }): string[] {
+  const all = [input.promotion_code ?? null, ...(input.promotion_codes ?? [])].map(normalizePromoCode).filter(Boolean);
+  return [...new Set(all)];
+}

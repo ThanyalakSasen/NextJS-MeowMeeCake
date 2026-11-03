@@ -19,7 +19,7 @@ import promotionModel from "../models/promotionModel";
 import promotionUsagesModel from "../models/promotionUsagesModel";
 import userCouponModel from "../models/userCouponModel";
 import * as pointsService from "./pointsService";
-import { channelMismatchMessage, channelsOf, normalizePromoCode, positiveLimit } from "../lib/promoCode";
+import { channelMismatchMessage, channelsOf, normalizePromoCode, perUserLimit, positiveLimit } from "../lib/promoCode";
 import { notifyCouponRedeemed } from "./couponNoticeService";
 import type { LoyaltyKind } from "./pointsService";
 
@@ -196,10 +196,11 @@ export async function checkPromotionCode(code: unknown, userId: string) {
   if (p.end_date && new Date(p.end_date) < now) throw unprocessable("โค้ดนี้หมดอายุแล้ว");
   const usageLimit = positiveLimit(p.usage_limit);
   if (usageLimit != null && (p.used_count ?? 0) >= usageLimit) throw unprocessable("โค้ดนี้ถูกใช้ครบจำนวนแล้ว");
-  const perUser = positiveLimit(p.max_user_per_user);
-  if (perUser != null) {
+  // ใช้โค้ดซ้ำไม่ได้: ไม่ตั้งสิทธิ์ต่อคน = 1 ครั้ง (lib/promoCode.perUserLimit)
+  const perUser = perUserLimit(p.max_user_per_user);
+  {
     const used = await promotionUsagesModel.countDocuments({ promotion_id: p._id, user_id: userId, deleted_at: null });
-    if (used >= perUser) throw unprocessable(`คุณใช้โค้ดนี้ครบ ${perUser} ครั้งแล้ว`);
+    if (used >= perUser) throw unprocessable(perUser === 1 ? "คุณใช้โค้ดนี้ไปแล้ว ใช้ซ้ำไม่ได้" : `คุณใช้โค้ดนี้ครบ ${perUser} ครั้งแล้ว`);
   }
   return {
     promotion_code: p.promotion_code,
@@ -235,6 +236,8 @@ export async function applyUserCoupon(opts: {
   delivery_fee: number;
   refType: LoyaltyKind;
   refId: unknown;
+  /** ลดได้ไม่เกินนี้ (บาท) — ยอดบิลที่เหลือหลังหักโค้ดส่วนลดอื่น · ไม่ส่ง = ไม่จำกัด */
+  max_discount?: number | null;
 }): Promise<AppliedCoupon> {
   await dbConnect();
   if (!isObjectId(opts.userCouponId)) throw badRequest("คูปองไม่ถูกต้อง");
@@ -279,6 +282,10 @@ export async function applyUserCoupon(opts: {
     },
     { lines: opts.lines, subtotal: opts.subtotal, delivery_fee: opts.delivery_fee, channel: "online" }
   );
+  // ส่วนลดรวมเกินยอดบิล → ลดเท่าที่เหลือ (ไม่แจ้ง error) · บันทึกการใช้ด้วยยอดที่ลดจริง
+  if (opts.max_discount != null && result.discount_amount > opts.max_discount) {
+    result.discount_amount = Math.max(0, Math.round(opts.max_discount * 100) / 100);
+  }
 
   const marked = await userCouponModel.updateOne(
     { _id: coupon._id, status: "available" },

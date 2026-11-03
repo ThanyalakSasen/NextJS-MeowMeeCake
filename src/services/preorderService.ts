@@ -33,9 +33,10 @@ import userModel from "../models/userModel";
 import * as preorderRoundService from "./preorderRoundService";
 import * as deliveryService from "./deliveryService";
 import * as recipeService from "./recipeService";
-import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
+import { chatEvent, customerMessages, customerWeb, notifyCustomerLater, postChatEventLater } from "./customerNotifyService";
 import { notificationService } from "./notificationService";
 import { computePaymentDueAt, onPreorderCancelled, onPreorderPaid } from "./preorderRoundLifecycleService";
+import { MAX_DISCOUNTS_PER_ORDER, TOO_MANY_DISCOUNTS_MESSAGE, discountCodesOf } from "../lib/promoCode";
 import { log } from "../lib/logger";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { nextDailyDocNo } from "./docNoService";
@@ -111,8 +112,9 @@ export interface CreatePreorderInput {
   pickup_date?: string | null;
   /** คูปองของฉัน (แลกด้วยแต้ม) + ใช้แต้มเป็นส่วนลด — หน้าเว็บลูกค้า (customer-backend-merge.md §8.11) */
   user_coupon_id?: string | null;
-  /** โค้ดส่วนลด (กรอกเอง · ช่องทาง online) — ใช้แทนคูปองของฉัน */
+  /** โค้ดส่วนลด (กรอกเอง · ช่องทาง online) — ใช้ร่วมกับคูปองของฉันได้ รวมไม่เกิน 2 */
   promotion_code?: string | null;
+  promotion_codes?: string[] | null;
   points_to_redeem?: number | null;
 }
 
@@ -343,10 +345,12 @@ export async function createPreorder(
   // ส่วนลดค่าส่ง (คูปองส่งฟรี) — ไม่ลดฐานคิดเพดานแต้ม (Q-BE14)
   let shippingDiscount = 0;
   // โค้ดส่วนลดที่ผ่านการตรวจ — บันทึกการใช้หลังสร้างเอกสาร (recordUsage จองโควตาแบบ atomic)
-  let appliedPromo: { promotion_id: string; discount_amount: number } | null = null;
+  const appliedPromos: Array<{ promotion_id: string; discount_amount: number }> = [];
+  const codes = discountCodesOf(input);
   try {
-    if (input.user_coupon_id && input.promotion_code) {
-      throw badRequest("ใช้คูปองของฉันกับโค้ดส่วนลดพร้อมกันไม่ได้ — เลือกอย่างใดอย่างหนึ่ง");
+    // โค้ด + คูปองของฉัน รวมกันได้สูงสุด 2 รายการต่อการสั่งซื้อ
+    if (codes.length + (input.user_coupon_id ? 1 : 0) > MAX_DISCOUNTS_PER_ORDER) {
+      throw badRequest(TOO_MANY_DISCOUNTS_MESSAGE);
     }
     // รายการสำหรับคิดส่วนลด (คูปอง/โค้ด) — หมวดสินค้าใช้ตรวจขอบเขตโปร
     const discountLines = async () => {
@@ -366,22 +370,28 @@ export async function createPreorder(
       }));
     };
     // โค้ดส่วนลด (หน้าเว็บ) — ตรวจเงื่อนไขทั้งหมดกับรายการ/ค่าส่งจริงของพรีออเดอร์นี้ (ราคาในรอบ · จังหวัด)
-    if (input.promotion_code) {
+    // ทุกตัวคิดจากรายการเดียวกัน (ไม่คิดทบจากยอดหลังหัก) แล้วรวมกัน · ส่งฟรีได้ 1 รายการ
+    for (const code of codes) {
       const r = await promotionService.validateForOrder({
-        code: input.promotion_code,
+        code,
         user_id: userId,
         lines: await discountLines(),
         subtotal: toBaht(subtotal),
         delivery_fee: toBaht(delivery_fee),
         channel: "online",
       });
-      discount_amount = toSatang(discount_amount + r.discount_amount);
-      if (r.free_shipping) shippingDiscount = toSatang(r.discount_amount);
-      appliedPromo = { promotion_id: r.promotion_id, discount_amount: toSatang(r.discount_amount) };
-      loyaltyFields = { ...loyaltyFields, promotion_id: r.promotion_id };
+      if (r.free_shipping && shippingDiscount > 0) throw unprocessable("ใช้โปรส่งฟรีได้บิลละ 1 โปร");
+      // ส่วนลดรวมไม่เกินยอดบิล (สินค้า + ค่าส่ง) — ตัวหลังลดเท่าที่เหลือ · เหลือ 0 = ไม่ใช้โค้ดนั้น (ไม่เสียสิทธิ์)
+      const amount = Math.min(toSatang(r.discount_amount), toSatang(subtotal + delivery_fee - discount_amount));
+      if (amount <= 0) continue;
+      discount_amount = toSatang(discount_amount + amount);
+      if (r.free_shipping) shippingDiscount = amount;
+      appliedPromos.push({ promotion_id: r.promotion_id, discount_amount: amount });
+      if (!loyaltyFields.promotion_id) loyaltyFields = { ...loyaltyFields, promotion_id: r.promotion_id };
     }
     // คูปองของฉัน + แต้ม (customer-backend-merge.md §8.11) — หักคูปองก่อน แล้วคิดเพดานแต้มจากยอดสินค้าที่เหลือ
-    if (input.user_coupon_id) {
+    // ยอดบิลถูกโค้ดลดหมดแล้ว = ไม่ใช้คูปอง (คูปองยังอยู่ ใช้ครั้งหน้าได้)
+    if (input.user_coupon_id && discount_amount < subtotal + delivery_fee) {
       const coupon = await couponService.applyUserCoupon({
         userId,
         userCouponId: input.user_coupon_id,
@@ -390,11 +400,18 @@ export async function createPreorder(
         delivery_fee: toBaht(delivery_fee),
         refType: "preorder",
         refId: preorderId,
+        max_discount: toBaht(subtotal + delivery_fee - discount_amount),
       });
       saga.onRollback("release-coupon", coupon.undo);
+      if (coupon.free_shipping && shippingDiscount > 0) throw unprocessable("ใช้โปรส่งฟรีได้บิลละ 1 โปร");
       discount_amount = toSatang(discount_amount + coupon.discount_amount);
       if (coupon.free_shipping) shippingDiscount = toSatang(coupon.discount_amount);
-      loyaltyFields = { ...loyaltyFields, user_coupon_id: coupon.user_coupon_id, coupon_discount: coupon.discount_amount, promotion_id: coupon.promotion_id };
+      loyaltyFields = {
+        ...loyaltyFields,
+        user_coupon_id: coupon.user_coupon_id,
+        coupon_discount: coupon.discount_amount,
+        promotion_id: loyaltyFields.promotion_id ?? coupon.promotion_id,
+      };
     }
     if (pointsToRedeem > 0) {
       const points_discount = await pointsService.redeemPoints({
@@ -471,15 +488,18 @@ export async function createPreorder(
     );
 
     // บันทึกการใช้โค้ดส่วนลด — ไม่สำเร็จ (เต็มโควตา / ใช้ครบสิทธิ์ต่อคน / DB ล่ม) = พรีออเดอร์ไม่สำเร็จ (saga คืนทุกอย่าง)
-    if (appliedPromo) {
+    if (appliedPromos.length) {
       saga.onRollback("revoke-promo-usage", () => promotionUsageService.revokeUsage({ preorder_id: String(preorder._id) }));
       try {
-        await promotionUsageService.recordUsage({
-          promotion_id: appliedPromo.promotion_id,
-          user_id: userId,
-          preorder_id: String(preorder._id),
-          discount_applied: appliedPromo.discount_amount,
-        });
+        for (const applied of appliedPromos) {
+          await promotionUsageService.recordUsage({
+            promotion_id: applied.promotion_id,
+            user_id: userId,
+            preorder_id: String(preorder._id),
+            discount_applied: applied.discount_amount,
+            channel: "online",
+          });
+        }
       } catch (e) {
         log.error("preorder.record_usage_failed", { preorder_id: String(preorder._id), err: e });
         if (isHttpError(e)) throw e;
@@ -756,6 +776,20 @@ export async function updatePreorderStatus(
       })
     );
   }
+  // ลงเหตุการณ์ในแชท — รวมลูกค้ายกเลิกเอง (ร้านเห็นในแชทด้วย)
+  postChatEventLater(
+    preorder.user_id,
+    "preorder",
+    preorder._id,
+    preorder.preorder_no,
+    chatEvent.orderStatus("preorder", preorder._id, preorder.preorder_no, next, {
+      reason: preorder.cancelled_reason,
+      orderType: preorder.order_type,
+      paymentStatus: preorder.payment_status,
+      byCustomer: selfCancel,
+    }),
+    selfCancel ? "staff" : "customer" // ลูกค้ายกเลิกเอง = แจ้งที่แชทหลังร้านแทน (ไม่นับฝั่งลูกค้า)
+  );
 
   // docs/BACKLOG4.md Y1 — ยกเลิกรายการที่ถูกนับเข้าใบผลิตแล้ว → ลดใบผลิต (best-effort ไม่ให้การยกเลิกล้ม)
   if (next === "cancelled") {

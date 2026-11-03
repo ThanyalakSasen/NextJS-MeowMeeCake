@@ -131,6 +131,7 @@ export async function checkout(userId: string, body: CheckoutBody): Promise<Chec
           pickup_date: p.pickup_date ?? null,
           user_coupon_id: p.user_coupon_id ?? null,
           promotion_code: p.promotion_code ?? null,
+          promotion_codes: p.promotion_codes ?? null,
           points_to_redeem: p.points_to_redeem ?? 0,
         },
         { storefront: true, waive_delivery_fee: waived.has(p.round_id) }
@@ -146,6 +147,7 @@ export async function checkout(userId: string, body: CheckoutBody): Promise<Chec
         order_type: o.order_type,
         delivery_address: orderAddress,
         promotion_code: o.promotion_code ?? null,
+        promotion_codes: o.promotion_codes ?? null,
         promotion_id: o.promotion_id ?? null,
         channel: "online",
         storefront: true,
