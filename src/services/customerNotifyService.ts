@@ -1,5 +1,8 @@
 /**
- * customerNotifyService — แจ้งเตือนลูกค้า: **กระดิ่งในเว็บ (CustomerNotifications) + LINE** (คู่กับ notificationService ที่แจ้งฝั่งร้าน)
+ * customerNotifyService — แจ้งเตือนลูกค้า: **กระดิ่งในเว็บ (CustomerNotifications) เท่านั้น** (คู่กับ notificationService ที่แจ้งฝั่งร้าน)
+ *
+ * ปิดการส่ง LINE หาลูกค้าทั้งหมด (ผู้ใช้ขอ 2026-11-03) — ค่าเริ่มต้นไม่ส่ง · เปิดกลับได้ด้วย env CUSTOMER_LINE_NOTIFY=true
+ * ข้อความ LINE (customerMessages) ยังสร้างอยู่แต่ไม่ถูกส่ง · คำอธิบายเรื่อง LINE ด้านล่างคือพฤติกรรมตอนเปิดใช้
  *
  * ผู้ใช้เลือก (customer-backend-merge.md §8.12): กระดิ่งในเว็บแจ้ง**ทุกสถานะ** ของออเดอร์เว็บ (ORD-) + พรีออเดอร์ (PRE-) ·
  * LINE ส่งเฉพาะบางสถานะตามเดิม (ประหยัดโควตา — customerMessages คืน null = ไม่ส่ง LINE) · บิลหน้าร้าน (POS-) ไม่แจ้งทั้งสองทาง ·
@@ -351,6 +354,9 @@ const userIdOf = (userId: unknown) =>
  * แจ้งลูกค้า 1 คน: บันทึกกระดิ่งในเว็บ (ถ้ามี notice) + ส่ง LINE (ถ้ามี text และผูก LINE แล้ว)
  * คืน true ถ้าส่ง LINE สำเร็จ · ไม่ throw · บิลหน้าร้าน (notice.doc_no ขึ้นต้น POS-) ไม่แจ้ง
  */
+/** ส่ง LINE หาลูกค้า — ปิดเป็นค่าเริ่มต้น (2026-11-03): ลูกค้าได้แจ้งเตือนทางกระดิ่งในเว็บอย่างเดียว · CUSTOMER_LINE_NOTIFY=true = เปิด */
+const customerLineEnabled = () => process.env.CUSTOMER_LINE_NOTIFY === "true";
+
 export async function notifyCustomer(userId: unknown, text: string | null, notice?: WebNotice | null): Promise<boolean> {
   if (!userId) return false;
   if (notice && isPosDoc(notice.doc_no)) return false;
@@ -362,7 +368,7 @@ export async function notifyCustomer(userId: unknown, text: string | null, notic
       log.warn("customer_notify.web_failed", { err });
     }
   }
-  if (!text) return false;
+  if (!text || !customerLineEnabled()) return false;
   // ยังไม่ตั้ง token (dev/test) → ไม่ต้อง query DB เลย
   if (!process.env.LINE_CHANNEL_ACCESS_TOKEN) return false;
   try {
@@ -453,7 +459,8 @@ export const customerNotifyService = { notifyCustomer, notifyCustomerLater, cust
 export default customerNotifyService;
 
 // ── เหตุการณ์คำสั่งซื้อในห้องแชท (chatService.postOrderEvent) ─────────
-/** ข้อความในแชทเมื่อสถานะคำสั่งซื้อเปลี่ยน — null = ไม่ลงแชท · บอกด้วยว่าใครยกเลิก (ร้าน / ลูกค้า / ระบบ) */
+/** ข้อความในแชทเมื่อสถานะคำสั่งซื้อเปลี่ยน — null = ไม่ลงแชท
+ *  ยกเลิกทุกแบบ (ลูกค้า / ร้าน / ระบบหมดเวลาชำระ) ไม่ลงแชท — ผู้ใช้ขอ 2026-11-03 · ลูกค้าดูที่กระดิ่ง/หน้าคำสั่งซื้อ */
 export const chatEvent = {
   orderStatus(
     kind: CustomerDocKind,
@@ -462,18 +469,7 @@ export const chatEvent = {
     status: string,
     opts: { reason?: string | null; orderType?: string | null; paymentStatus?: string | null; byCustomer?: boolean } = {}
   ): string | null {
-    if (status === "cancelled") {
-      const reason = opts.reason?.trim() ?? "";
-      const who = opts.byCustomer
-        ? `ลูกค้ายกเลิก${KIND_LABEL[kind]}`
-        : reason === PAYMENT_EXPIRED_REASON
-          ? `ระบบยกเลิก${KIND_LABEL[kind]}อัตโนมัติ (เกินเวลาชำระเงิน)`
-          : `ร้านยกเลิก${KIND_LABEL[kind]}`;
-      const lines = [`❌ ${who}`];
-      if (reason && reason !== PAYMENT_EXPIRED_REASON) lines.push(`เหตุผล: ${reason}`);
-      if (opts.paymentStatus === "paid") lines.push("ชำระเงินแล้ว — รอร้านโอนเงินคืน");
-      return lines.join("\n");
-    }
+    if (status === "cancelled") return null;
     return customerWeb.orderStatus(kind, id, docNo, status, opts)?.message ?? null;
   },
   paymentStatus(kind: CustomerDocKind, id: unknown, docNo: string, status: string): string | null {

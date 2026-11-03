@@ -7,6 +7,7 @@ import * as preorderRoundService from "@/services/preorderRoundService";
 import * as preorderService from "@/services/preorderService";
 import * as ingredientTransactionService from "@/services/ingredientTransactionService";
 import { flushBackground } from "@/lib/backgroundTasks";
+import { announcePlaced } from "@/services/placedNoticeService";
 import { makeUser, makeProduct, makeIngredient } from "./helpers";
 
 /**
@@ -51,6 +52,8 @@ async function placeOrder(uid: string, channel: "online" | "instore" = "online")
     storefront: channel === "online",
     items: [{ product_id: String(p._id), quantity: 1 }],
   })) as { _id: unknown; order_no: string; total_amount: number };
+  // ออเดอร์หน้าเว็บแจ้ง "ออเดอร์ใหม่" ตอนลูกค้าแนบสลิป/กดชำระเงินภายหลัง — จำลองกดชำระเงินภายหลัง
+  if (channel === "online") await announcePlaced("order", order._id);
   // ให้งานแจ้งเตือนตอนสร้างเสร็จก่อนเหตุการณ์ถัดไป — งานเบื้องหลังวิ่งพร้อมกัน ลำดับที่ยิงไม่แน่นอน (CI ช้ากว่าเครื่อง)
   await flushBackground();
   return { order, id: String(order._id) };
@@ -65,6 +68,7 @@ async function placeDeliveryOrder(uid: string) {
 
 beforeEach(() => {
   process.env.LINE_CHANNEL_ACCESS_TOKEN = "token-test";
+  process.env.CUSTOMER_LINE_NOTIFY = "true"; // LINE หาลูกค้าปิดเป็นค่าเริ่มต้น — เทสนี้ตรวจตอนเปิดใช้
   process.env.LINE_TARGET_ID = OWNER;
   fetchSpy = vi.fn().mockResolvedValue({ ok: true });
   vi.stubGlobal("fetch", fetchSpy);
@@ -73,6 +77,7 @@ beforeEach(() => {
 afterEach(async () => {
   await flushBackground();
   delete process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  delete process.env.CUSTOMER_LINE_NOTIFY;
   delete process.env.LINE_TARGET_ID;
   delete process.env.ADMIN_APP_URL;
   delete process.env.LINE_NOTIFY_NEW_ORDERS;

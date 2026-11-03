@@ -458,6 +458,7 @@ export async function createPreorder(
           ...loyaltyFields,
           // docs/preorder-round-flow.md ประเด็น 3 — เลยกำหนดแล้วยังไม่จ่าย (ไม่มีสลิปรอตรวจ) → ยกเลิกอัตโนมัติ
           payment_due_at: computePaymentDueAt(new Date(), round.close_date),
+          placed_notice_pending: !!opts.storefront,
         });
       } catch (err: any) {
         if (err?.code === 11000 && attempt < 4) continue;
@@ -521,6 +522,8 @@ export async function createPreorder(
     // ทุกขั้นสำเร็จ → ทิ้ง undo ก่อนอ่านผลลัพธ์ (getPreorderById อาจ throw โดยไม่ต้อง rollback)
     saga.commit();
 
+    // สั่งจากหน้าเว็บ = ยังไม่แจ้งทั้งร้านและลูกค้า — รอแนบสลิป / กดชำระเงินภายหลัง (placedNoticeService.announcePlaced)
+    if (opts.storefront) return getPreorderById(String(preorder._id));
     // แจ้งเจ้าของร้าน — คู่กับ orderService.persistOrder · best-effort ไม่ทำให้สร้างพรีออเดอร์ล้มเหลว
     // push LINE เฉพาะเมื่อตั้ง LINE_NOTIFY_NEW_ORDERS=true (ประหยัดโควตา ร้านได้ LINE ตอนสลิปเข้าแทน — docs/LINE.md §9.15)
     // link → หน้าพรีออเดอร์ (เปิด drawer ด้วย ?id= — frontend PR #16)
@@ -667,7 +670,8 @@ export async function updatePreorderStatus(
   id: string,
   next: PreorderStatus,
   /** skipAutoRefund = ยกเลิกแล้วคงสถานะ "ชำระแล้ว" (รอโอนคืน) แทนการตั้ง refunded ทันที — ร้านโอนจริงแล้วกดยืนยันเอง */
-  opts: { cancelled_by?: string; cancelled_reason?: string; skipAutoRefund?: boolean } = {}
+  /** silent = ไม่ลงเหตุการณ์ยกเลิกในแชทร้าน — ลูกค้ายกเลิกเพื่อกลับไปแก้ที่อยู่/วิธีรับแล้วสั่งใหม่ (ไม่ใช่การยกเลิกจริง) */
+  opts: { cancelled_by?: string; cancelled_reason?: string; skipAutoRefund?: boolean; silent?: boolean } = {}
 ) {
   await dbConnect();
   assertObjectId(id);
@@ -776,8 +780,8 @@ export async function updatePreorderStatus(
       })
     );
   }
-  // ลงเหตุการณ์ในแชท — รวมลูกค้ายกเลิกเอง (ร้านเห็นในแชทด้วย)
-  postChatEventLater(
+  // ลงเหตุการณ์ในแชท — รวมลูกค้ายกเลิกเอง (ร้านเห็นในแชทด้วย) · ยกเลิกเพื่อแก้ที่อยู่/วิธีรับ (silent) = ไม่ลง
+  if (!opts.silent) postChatEventLater(
     preorder.user_id,
     "preorder",
     preorder._id,
@@ -810,6 +814,8 @@ export async function cancelPreorder(
     cancelled_by?: string;
     cancelled_reason?: string;
     skipAutoRefund?: boolean;
+    /** silent = ไม่ลงเหตุการณ์ยกเลิกในแชทร้าน — ลูกค้ายกเลิกเพื่อกลับไปแก้ที่อยู่/วิธีรับแล้วสั่งใหม่ (ไม่ใช่การยกเลิกจริง) */
+    silent?: boolean;
     /** ถ้าระบุ: ยกเลิกได้เฉพาะเมื่อสถานะปัจจุบันอยู่ในลิสต์นี้ (ใช้จำกัดสิทธิ์ฝั่งลูกค้า — แอดมินไม่ส่ง = ยกเลิกได้ทุกสถานะที่ยังไม่ completed) */
     allowedFrom?: readonly PreorderStatus[];
   } = {}

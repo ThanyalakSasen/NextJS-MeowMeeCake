@@ -11,7 +11,7 @@
  * - ร้าน "ลบแชท" ได้ (chats.delete) = ซ่อนห้องจากรายการหลังร้าน (hidden_at) — ประวัติไม่ถูกลบ
  *   ลูกค้าส่งข้อความใหม่ = ห้องกลับมาในรายการพร้อมประวัติเก่าทั้งหมด
  * - แจ้งเตือน: แชทไม่ขึ้นกระดิ่งแจ้งเตือน (ทั้งร้านและลูกค้า) — ดูจากป้ายยังไม่อ่านของเมนู/ปุ่มแชทแทน
- *   ลูกค้าส่งข้อความตอนร้านอ่านครบแล้ว (staff_unread = 0) → push LINE เจ้าของร้านครั้งเดียวต่อรอบ (กันโควตา LINE หมด)
+ *   ไม่ส่งเข้า LINE (ผู้ใช้ขอ 2026-11-03 — เดิม push LINE เจ้าของร้านตอนข้อความแรกของรอบที่ยังไม่อ่าน)
  * - เหตุการณ์คำสั่งซื้อ (postOrderEvent): ยืนยันชำระเงิน · ยกเลิก (ร้าน/ลูกค้า/ระบบ) · เปลี่ยนสถานะ · จัดส่ง → ข้อความ sender_type "system"
  *   ในห้องของลูกค้า (สร้างห้องให้ถ้ายังไม่มี) พร้อมการ์ดคำสั่งซื้อ · นับเป็นข้อความยังไม่อ่านของลูกค้า (ป้ายแชท) ไม่นับฝั่งร้าน · แก้/ลบไม่ได้
  */
@@ -30,7 +30,6 @@ import orderItemModel from "../models/orderItemModel";
 import preorderItemModel from "../models/preorderItemModel";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
-import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -280,19 +279,8 @@ export async function sendCustomerMessage(customerId: string, input: SendInput |
       { upsert: true, returnDocument: "after" }
     )
     .lean<any>();
-  const { msg, wasUnread } = await saveMessage(conv._id, "customer", customerId, body, attachment);
-
-  // แจ้งร้านเฉพาะข้อความแรกของรอบที่ยังไม่อ่าน — ไม่ยิงทุกข้อความ (โควตา LINE)
-  if (wasUnread === 0) {
-    void notificationService.notify({
-      title: `แชทใหม่จากลูกค้า: ${user.user_fullname || "ลูกค้า"}`,
-      message: previewOf(body, attachment) || "ส่งข้อความใหม่",
-      module: "customer",
-      type: "info",
-      link: `${CHAT_ADMIN_PATH}?id=${String(conv._id)}`,
-      web: false, // แชทไม่ขึ้นกระดิ่งแจ้งเตือน — ดูจากป้ายยังไม่อ่านของเมนูแชทแทน (ยังส่ง LINE ให้ร้าน)
-    });
-  }
+  // แชทไม่ส่งเข้า LINE และไม่ขึ้นกระดิ่ง — ร้านดูจากป้ายยังไม่อ่านของเมนูแชท
+  const { msg } = await saveMessage(conv._id, "customer", customerId, body, attachment);
   return msg;
 }
 

@@ -119,7 +119,11 @@ export async function sendPickupReminders(
   await notificationService
     .notify({
       title: `เปิดรับพรีออเดอร์ถึงวันรับ ${pickupDateStr}: ${due.length} รายการ`,
-      message: `เตือนลูกค้าทาง LINE แล้ว จำนวน ${result.sent} ราย · ส่งไม่ถึงจำนวน ${result.skipped} ราย (ไม่ได้ผูก LINE / โควตาการส่งแจ้งเตือนใกล้หมด) — ${result.preorder_nos.join(", ")}`,
+      // LINE หาลูกค้าปิดเป็นค่าเริ่มต้น (customerNotifyService) — ลูกค้าได้เตือนทางกระดิ่งในเว็บทุกราย
+      message:
+        process.env.CUSTOMER_LINE_NOTIFY === "true"
+          ? `เตือนลูกค้าทาง LINE แล้ว จำนวน ${result.sent} ราย · ส่งไม่ถึงจำนวน ${result.skipped} ราย (ไม่ได้ผูก LINE / โควตาการส่งแจ้งเตือนใกล้หมด) — ${result.preorder_nos.join(", ")}`
+          : `เตือนลูกค้าทางการแจ้งเตือนในเว็บแล้ว จำนวน ${due.length} ราย — ${result.preorder_nos.join(", ")}`,
       module: "order",
       type: "info",
       link: adminLinks.preorderRounds,
