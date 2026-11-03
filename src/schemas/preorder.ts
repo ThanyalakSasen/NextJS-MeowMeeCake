@@ -71,3 +71,29 @@ export const listPreorderQuery = z.object({
   search: z.string().trim().max(100).optional(),
 });
 export type ListPreorderQuery = z.infer<typeof listPreorderQuery>;
+
+/** PATCH /api/admin/preorders/[id] — ร้านแก้ผู้รับ + ที่อยู่จัดส่ง (preorderEditService.updatePreorderAddress) */
+const addressText = (max: number) => z.string().trim().min(1).max(max);
+export const adminUpdatePreorderBody = z.object({
+  delivery_address: z.object({
+    recipient_name: addressText(200),
+    recipient_phone: phone,
+    house_no: addressText(300),
+    sub_district: addressText(100),
+    district: addressText(100),
+    province: addressText(100),
+    zip_code: z.string().trim().regex(/^\d{5}$/, "รหัสไปรษณีย์ต้องเป็นตัวเลข 5 หลัก"),
+  }),
+});
+
+/** PUT /api/admin/preorders/[id]/items — ร้านเปลี่ยนสินค้าในใบ (preorderEditService.editPreorderItems) */
+export const adminEditPreorderItemsBody = z
+  .object({
+    keep: z.array(z.object({ item_id: objectId, quantity: z.number().int().min(1).max(10_000) })).max(100).default([]),
+    add: z.array(preorderLine).max(50).default([]),
+    reason: z.string().trim().max(500).nullish(),
+  })
+  .refine((d) => d.keep.length + d.add.length > 0, {
+    message: "คำสั่งซื้อต้องเหลือสินค้าอย่างน้อย 1 รายการ",
+    path: ["keep"],
+  });

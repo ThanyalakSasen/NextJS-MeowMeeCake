@@ -87,7 +87,7 @@ async function assertNoBlockers(affected: AffectedPreorder[]): Promise<void> {
 }
 
 /** ส่วนลดค่าส่งในใบนี้ — ไม่ได้เก็บแยกไว้ หาจากชนิดของคูปอง/โปรที่ใช้ (discount_amount รวมส่วนลดค่าส่งแล้ว) */
-async function shippingDiscountOf(p: any): Promise<number> {
+export async function shippingDiscountOf(p: any): Promise<number> {
   if (!p.user_coupon_id && !p.promotion_id) return 0;
   const source = p.user_coupon_id
     ? await userCouponModel.findById(p.user_coupon_id).select("discount_type").lean<any>()
