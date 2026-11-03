@@ -11,7 +11,7 @@ import { makePreorder, makeUser } from "./helpers";
 const pg = { page: 1, limit: 20, skip: 0 };
 
 describe("แชทลูกค้า", () => {
-  it("ยังไม่เคยคุย = ไม่มีห้อง · ข้อความแรกสร้างห้อง + แจ้งร้านครั้งเดียวต่อรอบที่ยังไม่อ่าน", async () => {
+  it("ยังไม่เคยคุย = ไม่มีห้อง · ข้อความแรกสร้างห้อง · แชทไม่ขึ้นกระดิ่งหลังร้าน (ส่ง LINE อย่างเดียว)", async () => {
     const user = await makeUser({ user_fullname: "คุณมะลิ" });
     const uid = String(user._id);
     expect(await chatService.getMyChat(uid, {})).toMatchObject({ conversation: null, messages: [] });
@@ -22,10 +22,8 @@ describe("แชทลูกค้า", () => {
     await new Promise((r) => setTimeout(r, 50)); // notify() ทำงานเบื้องหลัง
 
     expect(await chatConversationModel.countDocuments({ customer_id: user._id })).toBe(1);
-    const notes = await notificationModel.find({ module: "customer" }).lean<{ title: string; link: string }[]>();
-    expect(notes).toHaveLength(1);
-    expect(notes[0].title).toBe("แชทใหม่จากลูกค้า: คุณมะลิ");
-    expect(notes[0].link).toMatch(/^\/owner\/chats\?id=/);
+    // แชทไม่บันทึกลงกระดิ่ง (web: false) — ร้านดูจากป้ายยังไม่อ่านของเมนูแชท
+    expect(await notificationModel.countDocuments({ module: "customer" })).toBe(0);
     expect(await chatService.staffUnreadSummary()).toEqual({ conversations: 1, messages: 2 });
 
     const mine = await chatService.getMyChat(uid, {});
@@ -50,7 +48,7 @@ describe("แชทลูกค้า", () => {
     await expect(chatService.sendCustomerMessage(String(user._id), { body: "ก".repeat(1001) })).rejects.toMatchObject({ status: 400 });
   });
 
-  it("ร้านตอบ → ลูกค้าเห็นตัวเลขยังไม่อ่าน + กระดิ่งในเว็บ · ข้อความลูกค้าถือว่าร้านอ่านแล้ว · ลูกค้าเปิดห้อง = อ่านแล้ว", async () => {
+  it("ร้านตอบ → ลูกค้าเห็นตัวเลขยังไม่อ่าน (ไม่ขึ้นกระดิ่ง) · ข้อความลูกค้าถือว่าร้านอ่านแล้ว · ลูกค้าเปิดห้อง = อ่านแล้ว", async () => {
     const user = await makeUser();
     const staff = await makeUser();
     const uid = String(user._id);
@@ -66,7 +64,7 @@ describe("แชทลูกค้า", () => {
 
     expect(await chatService.myUnread(uid)).toEqual({ unread: 1 });
     expect(await chatService.staffUnreadSummary()).toEqual({ conversations: 0, messages: 0 });
-    expect(await customerNotificationModel.countDocuments({ user_id: user._id, link: "/customer/chat" })).toBe(1);
+    expect(await customerNotificationModel.countDocuments({ user_id: user._id, link: "/customer/chat" })).toBe(0);
     expect(await chatMessageModel.countDocuments({ sender_type: "customer", read_at: null })).toBe(0);
 
     await chatService.markReadByCustomer(uid);

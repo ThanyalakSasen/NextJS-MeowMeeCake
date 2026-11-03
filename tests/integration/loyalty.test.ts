@@ -116,10 +116,10 @@ describe("คูปองส่วนตัว (แลกด้วยแต้�
     expect(overview.coupons[0].state).toBe("available");
 
     const p = await makeProduct({ product_price: 250, product_stock_quantity: 10 });
-    // โค้ดของโปรแลกแต้มกรอกตรง ๆ ไม่ได้ · ใช้คู่กับโค้ดไม่ได้
+    // โค้ดของโปรแลกแต้มกรอกตรง ๆ ไม่ได้ · ใช้คู่กับโค้ดได้ แต่รวมเกิน 2 รายการ = 400
     await expect(webOrder(uid, String(p._id), { promotion_code: promo.promotion_code })).rejects.toMatchObject({ status: 422 });
     await expect(
-      webOrder(uid, String(p._id), { user_coupon_id: String(coupon._id), promotion_code: "X" })
+      webOrder(uid, String(p._id), { user_coupon_id: String(coupon._id), promotion_codes: ["X", "Y"] })
     ).rejects.toMatchObject({ status: 400 });
 
     // 500 − คูปอง 50 = 450 → เพดานแต้ม 30% = 135 บาท · ใช้ 100 แต้ม = 10 บาท
