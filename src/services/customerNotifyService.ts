@@ -87,6 +87,21 @@ export const customerMessages = {
       ...(refund > 0 ? [`ร้านจะโอนคืน ${money(refund)}`] : []),
     ].join("\n");
   },
+  /** ร้านแก้รายการสินค้าในพรีออเดอร์ (ตกลงกับลูกค้าทางโทรศัพท์) */
+  preorderItemsChanged(docNo: string, items: string, total: number, refund: number): string {
+    const money = (n: number) => `${toBaht(n).toLocaleString("th-TH")} บาท`;
+    return [
+      header("preorder", docNo),
+      "ร้านแก้ไขรายการสินค้าตามที่ตกลงกับคุณแล้ว",
+      `รายการใหม่: ${items}`,
+      `ยอดใหม่: ${money(total)}`,
+      ...(refund > 0 ? [`ร้านจะโอนคืนส่วนต่าง ${money(refund)}`] : []),
+    ].join("\n");
+  },
+  /** ร้านแก้ผู้รับ/ที่อยู่จัดส่งของพรีออเดอร์ */
+  preorderAddressChanged(docNo: string, address: string): string {
+    return [header("preorder", docNo), "ร้านแก้ไขข้อมูลผู้รับ/ที่อยู่จัดส่งแล้ว", address].join("\n");
+  },
   orderStatus(
     kind: CustomerDocKind,
     docNo: string,
