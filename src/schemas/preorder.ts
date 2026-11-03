@@ -2,6 +2,8 @@
  * schemas/preorder — validation ของ /api/shop/preorders (BACKLOG2 §8 — เดิมยังไม่ zod-adopt เลย
  * ต่างจาก /api/shop/orders ที่ใช้ createOrderBody/listOrderQuery ใน schemas/order.ts)
  */
+import { MAX_DISCOUNTS_PER_ORDER, TOO_MANY_DISCOUNTS_MESSAGE } from "../lib/promoCode";
+import { discountCountOf } from "./order";
 import { z } from "zod";
 import { objectId, deliveryAddress, phone } from "./common";
 
@@ -28,10 +30,11 @@ export const createPreorderBody = z
     recipient_name: z.string().trim().min(1).max(200).nullish(),
     recipient_phone: phone.nullish(),
     delivery_address: deliveryAddress.nullish(),
-    // คูปองของฉัน (แลกด้วยแต้ม — ใช้ร่วมกับโค้ดส่วนลดไม่ได้) + ใช้แต้มเป็นส่วนลด (customer-backend-merge.md §8.11)
+    // คูปองของฉัน (แลกด้วยแต้ม) + ใช้แต้มเป็นส่วนลด (customer-backend-merge.md §8.11)
     user_coupon_id: objectId.nullish(),
-    // โค้ดส่วนลด (กรอกเอง) — ใช้แทนคูปองของฉัน ใช้พร้อมกันไม่ได้ · ตัดช่องว่าง/ตัวพิมพ์ใหญ่ที่ promotionService
+    // โค้ดส่วนลด (กรอกเอง) — ใช้ร่วมกับคูปองของฉันได้ รวมไม่เกิน MAX_DISCOUNTS_PER_ORDER (2) · ตัดช่องว่าง/ตัวพิมพ์ใหญ่ที่ promotionService
     promotion_code: z.string().trim().min(1).max(60).nullish(),
+    promotion_codes: z.array(z.string().trim().min(1).max(60)).max(MAX_DISCOUNTS_PER_ORDER).nullish(),
     points_to_redeem: z.number().int().min(0).max(1_000_000).nullish(),
     // takeaway: จุดรับ + วันรับ (ไม่บังคับ — ส่งมาแล้วตรวจกับหน้าร้านประจำสัปดาห์ · docs/customer-backend-merge.md §8.7)
     pickup_location_id: objectId.nullish(),
@@ -46,9 +49,9 @@ export const createPreorderBody = z
     message: "ใช้ address_id ต้องระบุ recipient_name และ recipient_phone มาด้วย",
     path: ["recipient_name"],
   })
-  .refine((d) => !(d.user_coupon_id && d.promotion_code), {
-    message: "ใช้คูปองของฉันกับโค้ดส่วนลดพร้อมกันไม่ได้ — เลือกอย่างใดอย่างหนึ่ง",
-    path: ["promotion_code"],
+  .refine((d) => discountCountOf(d) <= MAX_DISCOUNTS_PER_ORDER, {
+    message: TOO_MANY_DISCOUNTS_MESSAGE,
+    path: ["promotion_codes"],
   });
 export type CreatePreorderBody = z.infer<typeof createPreorderBody>;
 

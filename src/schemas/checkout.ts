@@ -2,10 +2,11 @@
  * schemas/checkout — POST /api/shop/checkout (สั่งซื้อรวม: สินค้าปกติในตะกร้า + พรีออเดอร์หลายรอบในครั้งเดียว)
  *   order     = ออเดอร์สินค้าปกติจากตะกร้า (รูปแบบเดียวกับ POST /api/shop/orders · source "cart" เท่านั้น)
  *   preorders = พรีออเดอร์ 1 ใบต่อรอบ (รูปแบบเดียวกับ POST /api/shop/preorders)
- * คูปอง/โค้ดส่วนลดใช้ได้กับบิลเดียว (หน้าเว็บเลือกบิลที่ลดได้มากที่สุดให้)
+ * คูปอง/โค้ดส่วนลดรวมกันได้สูงสุด 2 รายการต่อการสั่งซื้อ (หน้าเว็บเลือกบิลที่ลดได้มากที่สุดให้แต่ละตัว)
  */
 import { z } from "zod";
-import { createOrderBody } from "./order";
+import { createOrderBody, discountCountOf } from "./order";
+import { MAX_DISCOUNTS_PER_ORDER, TOO_MANY_DISCOUNTS_MESSAGE } from "../lib/promoCode";
 import { createPreorderBody } from "./preorder";
 
 export const MAX_CHECKOUT_PREORDERS = 10;
@@ -26,8 +27,8 @@ export const checkoutBody = z
   })
   .refine(
     (d) =>
-      [d.order, ...d.preorders].filter((b) => b && (b.user_coupon_id || b.promotion_code || ("promotion_id" in b && b.promotion_id)))
-        .length <= 1,
-    { message: "ใช้คูปองหรือโค้ดส่วนลดได้กับบิลเดียว", path: ["preorders"] }
+      [d.order, ...d.preorders].reduce((n, b) => n + (b ? discountCountOf({ ...b, promotion_id: "promotion_id" in b ? b.promotion_id : null }) : 0), 0) <=
+      MAX_DISCOUNTS_PER_ORDER,
+    { message: TOO_MANY_DISCOUNTS_MESSAGE, path: ["preorders"] }
   );
 export type CheckoutBody = z.infer<typeof checkoutBody>;

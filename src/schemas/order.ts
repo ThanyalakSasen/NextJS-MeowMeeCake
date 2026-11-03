@@ -1,6 +1,7 @@
 /**
  * schemas/order — validation ของ /api/shop/orders + /api/admin/orders (POST)
  */
+import { MAX_DISCOUNTS_PER_ORDER, TOO_MANY_DISCOUNTS_MESSAGE, discountCodesOf } from "../lib/promoCode";
 import { z } from "zod";
 import { objectId, deliveryAddress, phone } from "./common";
 import { SHIPPING_CARRIERS } from "../lib/shippingCarrier";
@@ -17,6 +18,16 @@ const orderLine = z.object({
   quantity: z.number().int().min(1),
 });
 
+/** จำนวนส่วนลดในบิล (โค้ดไม่ซ้ำ + promotion_id + คูปองของฉัน) — ใช้ตรวจเพดาน 2 รายการ (ใช้ใน checkout ด้วย) */
+export function discountCountOf(d: {
+  promotion_code?: string | null;
+  promotion_codes?: string[] | null;
+  promotion_id?: string | null;
+  user_coupon_id?: string | null;
+}): number {
+  return discountCodesOf(d).length + (d.promotion_id ? 1 : 0) + (d.user_coupon_id ? 1 : 0);
+}
+
 /** field ที่ทั้งฝั่งลูกค้าและแอดมินส่งเหมือนกัน — แอดมิน .extend() ทับด้วย field เพิ่มด้านล่าง */
 const orderBodyBase = z.object({
   // ไม่ส่ง source = "cart" (สร้างจากตะกร้า) · "items" = ระบุรายการเอง
@@ -30,8 +41,10 @@ const orderBodyBase = z.object({
   recipient_phone: phone.nullish(),
   delivery_address: deliveryAddress.nullish(),
   promotion_code: z.string().trim().min(1).nullish(),
+  // หน้าเว็บ: โค้ดส่วนลดหลายตัว — รวมกับ promotion_code / คูปองของฉัน ได้ไม่เกิน MAX_DISCOUNTS_PER_ORDER (2)
+  promotion_codes: z.array(z.string().trim().min(1).max(60)).max(MAX_DISCOUNTS_PER_ORDER).nullish(),
   promotion_id: objectId.nullish(),
-  // คูปองของฉัน (แลกด้วยแต้ม — ใช้ร่วมกับโค้ดส่วนลดไม่ได้) + ใช้แต้มเป็นส่วนลด (customer-backend-merge.md §8.11)
+  // คูปองของฉัน (แลกด้วยแต้ม — ใช้ร่วมกับโค้ดส่วนลดได้ รวมไม่เกิน 2) + ใช้แต้มเป็นส่วนลด (customer-backend-merge.md §8.11)
   user_coupon_id: objectId.nullish(),
   points_to_redeem: z.number().int().min(0).max(1_000_000).nullish(),
   // takeaway: จุดรับ + วันรับ (ไม่บังคับ — ส่งมาแล้วตรวจกับหน้าร้านประจำสัปดาห์ · docs/customer-backend-merge.md §8.7)
@@ -52,6 +65,10 @@ export const createOrderBody = orderBodyBase
   .refine((d) => !(d.promotion_code && d.promotion_id), {
     message: "ส่ง promotion_code หรือ promotion_id อย่างใดอย่างหนึ่ง",
     path: ["promotion_code"],
+  })
+  .refine((d) => discountCountOf(d) <= MAX_DISCOUNTS_PER_ORDER, {
+    message: TOO_MANY_DISCOUNTS_MESSAGE,
+    path: ["promotion_codes"],
   })
   .refine((d) => d.source !== "items" || (d.items?.length ?? 0) > 0, {
     message: "source=items ต้องมี items อย่างน้อย 1 รายการ",

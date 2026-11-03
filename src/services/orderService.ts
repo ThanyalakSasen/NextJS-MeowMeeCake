@@ -19,6 +19,7 @@
 import mongoose from "mongoose";
 import { ORDER_PAYMENT_WINDOW_MS, PAYMENT_EXPIRED_REASON } from "../lib/paymentDeadline";
 import dbConnect from "../lib/dbConnect";
+import { MAX_DISCOUNTS_PER_ORDER, TOO_MANY_DISCOUNTS_MESSAGE, discountCodesOf } from "../lib/promoCode";
 import { log } from "../lib/logger";
 import { Saga } from "../lib/compensation";
 import { badRequest, conflict, notFound, unprocessable, isHttpError } from "../lib/httpError";
@@ -55,7 +56,7 @@ import {
   type SelectedVariant,
 } from "./productCustomizationService";
 import { notificationService } from "./notificationService";
-import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
+import { chatEvent, customerMessages, customerWeb, notifyCustomerLater, postChatEventLater } from "./customerNotifyService";
 import { toSatang, toBaht, toBahtFields } from "../lib/money";
 import { isPreorderProduct } from "../lib/productCode";
 import { nextDailyDocNo } from "./docNoService";
@@ -121,6 +122,8 @@ export interface CreateOrderCommon {
   delivery_address?: Record<string, string> | null;
   /** ใช้โปรโมชัน: ส่ง promotion_code หรือ promotion_id อย่างใดอย่างหนึ่ง — ระบบคิดส่วนลดเอง */
   promotion_code?: string | null;
+  /** หน้าเว็บ: โค้ดส่วนลดหลายตัว — รวมกับ promotion_code / คูปองของฉัน ได้ไม่เกิน 2 (lib/promoCode.MAX_DISCOUNTS_PER_ORDER) */
+  promotion_codes?: string[] | null;
   promotion_id?: string | null;
   /** ซ้อนโปร (POS) — ทุกตัวต้องตั้ง stackable · ใช้แทน promotion_code/promotion_id */
   promotion_ids?: string[] | null;
@@ -151,7 +154,7 @@ export interface CreateOrderCommon {
   /** takeaway: จุดรับ (_id ของหน้าร้านประจำสัปดาห์) + วันรับ "YYYY-MM-DD" — ไม่ส่ง = รับที่ร้านแบบเดิม */
   pickup_location_id?: string | null;
   pickup_date?: string | null;
-  /** คูปองของฉัน (แลกด้วยแต้ม) — ใช้ร่วมกับ promotion_code/promotion_id ไม่ได้ (customer-backend-merge.md §8.11) */
+  /** คูปองของฉัน (แลกด้วยแต้ม) — หน้าเว็บใช้ร่วมกับโค้ดได้ รวมไม่เกิน 2 · POS (promotion_ids) ใช้ร่วมไม่ได้ (§8.11) */
   user_coupon_id?: string | null;
   /** ใช้แต้มเป็นส่วนลด (ทีละ 10 · ≤ 30% ของยอดสินค้าหลังหักคูปอง/โปร) — ใช้ร่วมกับคูปอง/โค้ดได้ */
   points_to_redeem?: number | null;
@@ -356,14 +359,18 @@ async function persistOrder(
   let discount_amount = 0;
   // ส่วนของ discount_amount ที่เป็นส่วนลดค่าส่ง (โปร/คูปองส่งฟรี) — ไม่ลดฐานคิดเพดานแต้ม (Q-BE14)
   let shippingDiscount = 0;
-  let appliedPromotions: Array<{ promotion_id: string; discount_amount: number }> = [];
-  // โปรที่ขอใช้ — promotion_ids (POS ซ้อนโปร) หรือ promotion_code/promotion_id ตัวเดียวแบบเดิม
+  const appliedPromotions: Array<{ promotion_id: string; discount_amount: number }> = [];
+  // โปรที่ขอใช้ — promotion_ids (POS ซ้อนโปร) · หน้าเว็บ: promotion_code + promotion_codes (หลายโค้ด) · หรือ promotion_id ตัวเดียว
+  const codes = discountCodesOf(opts);
   const promoRefs: Array<{ code?: string; promotion_id?: string }> = opts.promotion_ids?.length
     ? [...new Set(opts.promotion_ids)].map((id) => ({ promotion_id: id }))
-    : opts.promotion_code || opts.promotion_id
-      ? [{ code: opts.promotion_code ?? undefined, promotion_id: opts.promotion_id ?? undefined }]
-      : [];
-  if (opts.user_coupon_id && promoRefs.length) {
+    : [...codes.map((code) => ({ code })), ...(opts.promotion_id ? [{ promotion_id: opts.promotion_id }] : [])];
+  // หน้าเว็บ: โค้ด + คูปองของฉัน รวมกันได้สูงสุด 2 รายการ (ไม่ต้องตั้ง stackable) · POS ซ้อนโปรใช้กติกา stackable เดิม
+  const webStack = !opts.promotion_ids?.length;
+  if (webStack && promoRefs.length + (opts.user_coupon_id ? 1 : 0) > MAX_DISCOUNTS_PER_ORDER) {
+    throw badRequest(TOO_MANY_DISCOUNTS_MESSAGE);
+  }
+  if (!webStack && opts.user_coupon_id) {
     throw badRequest("ใช้คูปองของฉันกับโค้ดส่วนลดพร้อมกันไม่ได้ — เลือกอย่างใดอย่างหนึ่ง");
   }
   let discountLines: Array<{ product_id: string; category_id: string | null; quantity: number; line_total: number }> = [];
@@ -400,7 +407,7 @@ async function persistOrder(
         })
       );
     }
-    if (results.length > 1) {
+    if (results.length > 1 && !webStack) {
       const single = results.find((r) => !r.stackable);
       if (single) {
         throw unprocessable(`โปรโมชัน ${single.promotion_code} ใช้ร่วมกับโปรอื่นไม่ได้`);
@@ -412,12 +419,14 @@ async function persistOrder(
         const b = results.slice(i + 1).find((x) => !allows(a, x) || !allows(x, a));
         if (b) throw unprocessable(`โปรโมชัน ${a.promotion_code} ใช้ร่วมกับ ${b.promotion_code} ไม่ได้`);
       }
-      if (results.filter((r) => r.free_shipping).length > 1) {
-        throw unprocessable("ใช้โปรส่งฟรีได้บิลละ 1 โปร");
-      }
     }
+    if (results.filter((r) => r.free_shipping).length > 1) {
+      throw unprocessable("ใช้โปรส่งฟรีได้บิลละ 1 โปร");
+    }
+    // ส่วนลดรวมไม่เกินยอดบิล (สินค้า + ค่าส่ง) — ตัวหลังลดเท่าที่เหลือ · เหลือ 0 = ไม่ใช้โค้ดนั้น (ไม่เสียสิทธิ์)
     for (const r of results) {
-      const amount = toSatang(r.discount_amount);
+      const amount = Math.min(toSatang(r.discount_amount), toSatang(subtotal + delivery_fee - discount_amount));
+      if (amount <= 0) continue;
       discount_amount = toSatang(discount_amount + amount);
       if (r.free_shipping) shippingDiscount = amount;
       appliedPromotions.push({ promotion_id: r.promotion_id, discount_amount: amount });
@@ -449,7 +458,8 @@ async function persistOrder(
   let couponPromotionId: unknown = null;
   try {
     // 0) คูปองของฉัน + แต้ม (customer-backend-merge.md §8.11) — หักคูปองก่อน แล้วคิดเพดานแต้มจากยอดสินค้าที่เหลือ
-    if (opts.user_coupon_id) {
+    // ยอดบิลถูกโค้ดลดหมดแล้ว = ไม่ใช้คูปอง (คูปองยังอยู่ ใช้ครั้งหน้าได้)
+    if (opts.user_coupon_id && discount_amount < subtotal + delivery_fee) {
       const coupon = await couponService.applyUserCoupon({
         userId,
         userCouponId: opts.user_coupon_id,
@@ -458,13 +468,16 @@ async function persistOrder(
         delivery_fee: toBaht(delivery_fee),
         refType: "order",
         refId: orderId,
+        max_discount: toBaht(subtotal + delivery_fee - discount_amount),
       });
       saga.onRollback("release-coupon", coupon.undo);
-      discount_amount = toSatang(coupon.discount_amount);
-      shippingDiscount = coupon.free_shipping ? discount_amount : 0;
-      couponFields = { user_coupon_id: coupon.user_coupon_id, coupon_discount: discount_amount };
+      // รวมกับโค้ดส่วนลดที่หักไปแล้ว (หน้าเว็บใช้ได้ 2 รายการ) — คิดจากรายการเดียวกัน ไม่คิดทบจากยอดหลังหัก
+      const couponAmount = toSatang(coupon.discount_amount);
+      if (coupon.free_shipping && shippingDiscount > 0) throw unprocessable("ใช้โปรส่งฟรีได้บิลละ 1 โปร");
+      discount_amount = toSatang(discount_amount + couponAmount);
+      if (coupon.free_shipping) shippingDiscount = couponAmount;
+      couponFields = { user_coupon_id: coupon.user_coupon_id, coupon_discount: couponAmount };
       couponPromotionId = coupon.promotion_id;
-      appliedPromotions = [];
     }
     if (pointsToRedeem > 0) {
       const goodsDiscount = Math.min(discount_amount - shippingDiscount, subtotal); // ส่วนลดส่งฟรีไม่ลดฐานคิดแต้ม (Q-BE14)
@@ -946,6 +959,20 @@ export async function updateOrderStatus(
       })
     );
   }
+  // ลงเหตุการณ์ในแชท — รวมลูกค้ายกเลิกเอง (ร้านเห็นในแชทด้วย)
+  postChatEventLater(
+    order.user_id,
+    "order",
+    order._id,
+    order.order_no,
+    chatEvent.orderStatus("order", order._id, order.order_no, next, {
+      reason: order.cancelled_reason,
+      orderType: order.order_type,
+      paymentStatus: order.payment_status,
+      byCustomer: selfCancel,
+    }),
+    selfCancel ? "staff" : "customer" // ลูกค้ายกเลิกเอง = แจ้งที่แชทหลังร้านแทน (ไม่นับฝั่งลูกค้า)
+  );
   return presentOrderWithItems(order, cancelledItems);
 }
 

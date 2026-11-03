@@ -2,16 +2,20 @@
  * couponNoticeService — แจ้งเตือน "ในเว็บ" ของลูกค้าเรื่องคูปอง/โค้ดส่วนลด (กระดิ่งหน้าร้าน · ไม่ส่ง LINE = ไม่กินโควตา)
  *
  *   - notifyCouponRedeemed: ลูกค้าแลกแต้มเป็นคูปอง → แจ้งคนนั้นพร้อมรหัส (ref_type "coupon")
- *   - notifyCustomersOfNewCode: ร้านสร้างโค้ดส่วนลดใหม่ที่ใช้ในเว็บได้ → แจ้งลูกค้าทุกคนพร้อมรหัส (ref_type "promotion")
- *     แสดงตั้งแต่วันเริ่มโปร (visible_at) · โค้ดที่แลกด้วยแต้ม / หน้าร้านอย่างเดียว / ปิดอยู่ / หมดอายุแล้ว = ไม่แจ้ง
+ *   - notifyCustomersOfNewCode: ร้านสร้างโค้ดส่วนลดใหม่ที่ใช้ในเว็บได้ (ไม่ต้องใช้แต้ม) → แจ้งในกระดิ่ง + ห้องแชทของลูกค้า พร้อมรหัส
+ *     (ref_type "promotion") · ผู้รับ: โค้ดใช้ได้ทุกสินค้า = ลูกค้าทุกคน · จำกัดสินค้า/หมวด = เฉพาะลูกค้าที่กดถูกใจ
+ *     สินค้านั้น หรือสินค้าในหมวดนั้น (รายการโปรด) · แสดงตั้งแต่วันเริ่มโปร (visible_at) — แชทลงตอนลูกค้าเปิดแชทหลังถึงเวลา
+ *     โค้ดที่แลกด้วยแต้ม / หน้าร้านอย่างเดียว / ปิดอยู่ / หมดอายุแล้ว = ไม่แจ้ง
  *   - hidePromotionNotices / restorePromotionNotices: ลบโค้ด → ซ่อนแจ้งเตือนของโค้ดนั้น · กู้คืน → แสดงอีกครั้ง
- * หน้าเว็บอ่าน coupon_code ไปแสดงพร้อมปุ่มคัดลอก · ทุกฟังก์ชันไม่ throw (ไม่ให้การสร้างโปร/แลกคูปองล้มเพราะแจ้งเตือน)
+ * รหัสอยู่ในข้อความ (ไม่มีปุ่มคัดลอก) · ทุกฟังก์ชันไม่ throw (ไม่ให้การสร้างโปร/แลกคูปองล้มเพราะแจ้งเตือน)
  */
 import dbConnect from "../lib/dbConnect";
 import { log } from "../lib/logger";
 import { trackBackground } from "../lib/backgroundTasks";
 import { channelsOf, positiveLimit } from "../lib/promoCode";
 import customerNotificationModel from "../models/customerNotificationModel";
+import interactionModel from "../models/interactionModel";
+import productModel from "../models/productModel";
 import roleModel from "../models/roleModel";
 import userModel from "../models/userModel";
 
@@ -80,24 +84,41 @@ async function customerIds(): Promise<unknown[]> {
   return users.map((u) => u._id);
 }
 
+/** โค้ดจำกัดสินค้า/หมวด → ลูกค้าที่กดถูกใจสินค้านั้น หรือสินค้าในหมวดนั้น · ไม่จำกัด = null (ทุกคน) */
+async function interestedCustomerIds(promo: any): Promise<Set<string> | null> {
+  const products = (promo.applicable_products ?? []).map(String);
+  const categories = (promo.applicable_categories ?? []).map(String);
+  if (products.length === 0 && categories.length === 0) return null;
+  const inCategories = categories.length
+    ? await productModel.find({ category_id: { $in: categories }, deleted_at: null }).distinct("_id")
+    : [];
+  const productIds = [...new Set([...products, ...inCategories.map(String)])];
+  if (productIds.length === 0) return new Set();
+  const users = await interactionModel.distinct("user_id", { action_type: "wishlist", deleted_at: null, product_id: { $in: productIds } });
+  return new Set(users.map(String));
+}
+
 export async function notifyCustomersOfNewCodeNow(promo: any): Promise<number> {
   try {
     if (!isPublicWebCode(promo)) return 0;
     await dbConnect();
-    const ids = await customerIds();
+    const interested = await interestedCustomerIds(promo);
+    const ids = (await customerIds()).filter((id) => !interested || interested.has(String(id)));
     if (ids.length === 0) return 0;
     const now = new Date();
     const start = promo.start_date ? new Date(promo.start_date) : now;
+    const scope = interested ? " · ใช้ได้กับสินค้าที่คุณถูกใจ" : "";
     const docs = ids.map((user_id) => ({
       user_id,
       title: `โค้ดส่วนลดใหม่: ${promo.promotion_name}`,
-      message: `${describeDiscount(promo)} · ใช้ได้ถึง ${thaiDate(promo.end_date)} — กรอกโค้ดตอนชำระเงิน`,
+      message: `รหัส ${promo.promotion_code} · ${describeDiscount(promo)}${scope} · ใช้ได้ถึง ${thaiDate(promo.end_date)} — กรอกโค้ดตอนชำระเงิน`,
       type: "success",
       link: "/customer/product",
       ref_type: "promotion",
       ref_id: promo._id,
       coupon_code: promo.promotion_code,
       visible_at: start > now ? start : now,
+      post_to_chat: true,
     }));
     for (let i = 0; i < docs.length; i += INSERT_BATCH) {
       await customerNotificationModel.insertMany(docs.slice(i, i + INSERT_BATCH), { ordered: false });

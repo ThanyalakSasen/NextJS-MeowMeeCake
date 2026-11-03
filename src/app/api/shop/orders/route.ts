@@ -48,6 +48,7 @@ export const POST = withAuth(async (session, req) => {
     order_type: body.order_type,
     delivery_address,
     promotion_code: body.promotion_code ?? null,
+    promotion_codes: body.promotion_codes ?? null,
     promotion_id: body.promotion_id ?? null,
     channel: "online" as const,
     // หน้าเว็บลูกค้า: ค่าส่ง ShippingZones + กำหนดชำระ 30 นาที (docs/customer-backend-merge.md §8.7–8.8)

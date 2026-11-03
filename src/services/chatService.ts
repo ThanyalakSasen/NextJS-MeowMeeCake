@@ -10,8 +10,10 @@
  *   polling ?after= คืนทั้งข้อความใหม่และข้อความที่ "เปลี่ยน" ตั้งแต่เวลานั้น (updated_at — แก้ไข/ลบ/อ่านแล้ว) — client ใช้ updated_at ล่าสุดเป็น cursor
  * - ร้าน "ลบแชท" ได้ (chats.delete) = ซ่อนห้องจากรายการหลังร้าน (hidden_at) — ประวัติไม่ถูกลบ
  *   ลูกค้าส่งข้อความใหม่ = ห้องกลับมาในรายการพร้อมประวัติเก่าทั้งหมด
- * - แจ้งเตือน: ลูกค้าส่งข้อความตอนร้านอ่านครบแล้ว (staff_unread = 0) → แจ้งเตือนหลังร้าน หมวด "ลูกค้า" (+ LINE เจ้าของร้าน)
- *   ครั้งเดียวต่อรอบ ไม่ยิงทุกข้อความ (กันโควตา LINE หมด) · ร้านตอบ → กระดิ่งในเว็บของลูกค้า (ไม่ส่ง LINE ลูกค้า) เฉพาะข้อความแรกที่ยังไม่อ่าน
+ * - แจ้งเตือน: แชทไม่ขึ้นกระดิ่งแจ้งเตือน (ทั้งร้านและลูกค้า) — ดูจากป้ายยังไม่อ่านของเมนู/ปุ่มแชทแทน
+ *   ลูกค้าส่งข้อความตอนร้านอ่านครบแล้ว (staff_unread = 0) → push LINE เจ้าของร้านครั้งเดียวต่อรอบ (กันโควตา LINE หมด)
+ * - เหตุการณ์คำสั่งซื้อ (postOrderEvent): ยืนยันชำระเงิน · ยกเลิก (ร้าน/ลูกค้า/ระบบ) · เปลี่ยนสถานะ · จัดส่ง → ข้อความ sender_type "system"
+ *   ในห้องของลูกค้า (สร้างห้องให้ถ้ายังไม่มี) พร้อมการ์ดคำสั่งซื้อ · นับเป็นข้อความยังไม่อ่านของลูกค้า (ป้ายแชท) ไม่นับฝั่งร้าน · แก้/ลบไม่ได้
  */
 import dbConnect from "../lib/dbConnect";
 import { badRequest, notFound } from "../lib/httpError";
@@ -21,6 +23,7 @@ import { rateLimit } from "../lib/rateLimit";
 import { buildMeta, escapeRegExp, type Pagination } from "../lib/queryParams";
 import chatConversationModel from "../models/chatConversationModel";
 import chatMessageModel from "../models/chatMessageModel";
+import customerNotificationModel from "../models/customerNotificationModel";
 import orderModel from "../models/orderModel";
 import preorderModel from "../models/preorderModel";
 import orderItemModel from "../models/orderItemModel";
@@ -28,7 +31,7 @@ import preorderItemModel from "../models/preorderItemModel";
 import userModel from "../models/userModel";
 import roleModel from "../models/roleModel";
 import { notificationService } from "./notificationService";
-import { notifyCustomerLater } from "./customerNotifyService";
+import { log } from "../lib/logger";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -41,6 +44,8 @@ export const CHAT_ADMIN_PATH = "/owner/chats";
 export const CHAT_CUSTOMER_PATH = "/customer/chat";
 
 export type SenderType = "customer" | "staff";
+/** ผู้ส่งที่เก็บใน DB — "system" = เหตุการณ์คำสั่งซื้อที่ระบบลงห้องให้ (postOrderEvent) */
+export type MessageSenderType = SenderType | "system";
 export type AttachmentKind = "order" | "preorder";
 
 export interface SendInput {
@@ -65,7 +70,7 @@ function presentMessage(m: any) {
   return {
     _id: String(m._id),
     conversation_id: String(m.conversation_id),
-    sender_type: m.sender_type as SenderType,
+    sender_type: m.sender_type as MessageSenderType,
     body: deleted ? "" : m.body ?? "",
     attachment: !deleted && m.attachment
       ? {
@@ -235,6 +240,7 @@ async function saveMessage(conversationId: unknown, senderType: SenderType, send
 /** ห้องของฉัน + ข้อความ · ยังไม่เคยคุย = conversation null */
 export async function getMyChat(customerId: string, q: MessageQuery) {
   await dbConnect();
+  await postDueCouponNotices(customerId);
   const conv = await chatConversationModel.findOne({ customer_id: customerId }).lean<any>();
   if (!conv) return { conversation: null, messages: [], has_more: false };
   const { items, has_more } = await loadMessages(conv._id, q);
@@ -244,6 +250,8 @@ export async function getMyChat(customerId: string, q: MessageQuery) {
 /** จำนวนข้อความจากร้านที่ยังไม่อ่าน (ป้ายตัวเลขบน Navbar — polling เบา ๆ) */
 export async function myUnread(customerId: string) {
   await dbConnect();
+  // โค้ดส่วนลดที่ถึงเวลาแล้ว → ลงแชทก่อนนับ (ป้ายตัวเลขขึ้นได้โดยลูกค้ายังไม่ต้องเปิดแชท)
+  await postDueCouponNotices(customerId);
   const conv = await chatConversationModel.findOne({ customer_id: customerId }).select("customer_unread").lean<any>();
   return { unread: Number(conv?.customer_unread ?? 0) };
 }
@@ -282,6 +290,7 @@ export async function sendCustomerMessage(customerId: string, input: SendInput |
       module: "customer",
       type: "info",
       link: `${CHAT_ADMIN_PATH}?id=${String(conv._id)}`,
+      web: false, // แชทไม่ขึ้นกระดิ่งแจ้งเตือน — ดูจากป้ายยังไม่อ่านของเมนูแชทแทน (ยังส่ง LINE ให้ร้าน)
     });
   }
   return msg;
@@ -373,20 +382,11 @@ export async function sendStaffMessage(staffId: string, conversationId: string, 
   if (!body) throw badRequest("กรุณาพิมพ์ข้อความ");
   await dbConnect();
   const conv = await findConversation(conversationId);
-  const { msg, wasUnread } = await saveMessage(conv._id, "staff", staffId, body, null);
+  const { msg } = await saveMessage(conv._id, "staff", staffId, body, null);
   // ตอบแล้ว = ร้านเห็นข้อความลูกค้าแล้ว
   await markRead(conv._id, "customer");
 
-  if (wasUnread === 0) {
-    notifyCustomerLater(conv.customer_id?._id ?? conv.customer_id, null, {
-      title: "ร้านตอบกลับในแชท",
-      message: body.slice(0, 200),
-      type: "info",
-      link: CHAT_CUSTOMER_PATH,
-      ref_type: null,
-      ref_id: null,
-    });
-  }
+  // แชทไม่ขึ้นกระดิ่งแจ้งเตือนของลูกค้า — ลูกค้าเห็นจากป้ายยังไม่อ่านของปุ่มแชทแทน
   return msg;
 }
 
@@ -398,11 +398,22 @@ export async function markReadByStaff(conversationId: string) {
 }
 
 /**
+ * ข้อความที่ "ผู้อ่าน" ฝั่งนี้ต้องอ่าน (ใช้นับ/ตั้งอ่านแล้ว)
+ * ลูกค้า = ข้อความจากร้าน + ข้อความระบบ (สถานะคำสั่งซื้อ · โค้ดส่วนลด) · ร้าน = ข้อความจากลูกค้า + ข้อความระบบที่ unread_for "staff" (ลูกค้ายกเลิกเอง)
+ */
+function unreadMessagesFor(reader: SenderType) {
+  return reader === "customer"
+    ? { $or: [{ sender_type: "staff" }, { sender_type: "system", unread_for: { $ne: "staff" } }] }
+    : { $or: [{ sender_type: "customer" }, { sender_type: "system", unread_for: "staff" }] };
+}
+
+/**
  * ข้อความของ sender ฝั่งนี้ = อ่านแล้ว + ตั้งตัวนับของอีกฝั่งใหม่ → คืนจำนวนที่ยังไม่อ่าน
  * นับจากข้อความจริงแทนการตั้ง 0 — ข้อความที่เข้ามาระหว่าง updateMany กับ updateOne จะไม่หายจากตัวนับ
  */
 async function markRead(conversationId: unknown, senderOfMessages: SenderType): Promise<number> {
-  const unreadFilter = { conversation_id: conversationId, sender_type: senderOfMessages, read_at: null, deleted_at: null };
+  const reader: SenderType = senderOfMessages === "staff" ? "customer" : "staff";
+  const unreadFilter = { conversation_id: conversationId, ...unreadMessagesFor(reader), read_at: null, deleted_at: null };
   await chatMessageModel.updateMany(unreadFilter, { $set: { read_at: new Date() } });
   const remaining = await chatMessageModel.countDocuments(unreadFilter);
   await chatConversationModel.updateOne(
@@ -430,8 +441,8 @@ async function refreshConversationSummary(conversationId: unknown) {
     .sort({ created_at: -1, _id: -1 })
     .lean<any>();
   const [staffUnread, customerUnread] = await Promise.all([
-    chatMessageModel.countDocuments({ conversation_id: conversationId, sender_type: "customer", read_at: null, deleted_at: null }),
-    chatMessageModel.countDocuments({ conversation_id: conversationId, sender_type: "staff", read_at: null, deleted_at: null }),
+    chatMessageModel.countDocuments({ conversation_id: conversationId, ...unreadMessagesFor("staff"), read_at: null, deleted_at: null }),
+    chatMessageModel.countDocuments({ conversation_id: conversationId, ...unreadMessagesFor("customer"), read_at: null, deleted_at: null }),
   ]);
   await chatConversationModel.updateOne(
     { _id: conversationId },
@@ -527,4 +538,94 @@ export async function deleteConversation(conversationId: string) {
   await markRead(conv._id, "customer");
   await chatConversationModel.updateOne({ _id: conv._id }, { $set: { hidden_at: new Date() } });
   return { _id: String(conv._id), hidden: true };
+}
+
+
+// ── เหตุการณ์คำสั่งซื้อในห้องแชท ───────────────────────────────
+export interface OrderEventInput {
+  customerId: unknown;
+  kind: AttachmentKind;
+  refId: unknown;
+  text: string;
+  /** แจ้งฝั่งไหน (นับเป็นข้อความยังไม่อ่าน) — customer (ค่าเริ่มต้น) · staff = ลูกค้าทำเอง เช่น ยกเลิกคำสั่งซื้อเอง → ขึ้นที่แชทหลังร้าน */
+  unreadFor?: SenderType;
+}
+
+/** ลงข้อความระบบ (sender_type "system") ในห้องของลูกค้า พร้อมการ์ดคำสั่งซื้อ ณ ตอนนั้น — ไม่ throw */
+export async function postOrderEvent(input: OrderEventInput): Promise<void> {
+  try {
+    const customerId =
+      typeof input.customerId === "object" && input.customerId !== null && "_id" in input.customerId
+        ? String((input.customerId as { _id: unknown })._id)
+        : String(input.customerId ?? "");
+    const body = input.text.trim().slice(0, CHAT_MESSAGE_MAX_LENGTH);
+    if (!isObjectId(customerId) || !body) return;
+    await dbConnect();
+    const attachment = await buildAttachment(
+      customerId,
+      input.kind === "order" ? { order_id: String(input.refId) } : { preorder_id: String(input.refId) }
+    ).catch(() => null);
+    const conv = await chatConversationModel
+      .findOneAndUpdate(
+        { customer_id: customerId },
+        { $setOnInsert: { customer_id: customerId } },
+        { upsert: true, returnDocument: "after" }
+      )
+      .lean<any>();
+    const msg = await chatMessageModel.create({
+      conversation_id: conv._id,
+      sender_type: "system",
+      sender_id: null,
+      body,
+      attachment,
+      unread_for: input.unreadFor ?? "customer",
+    });
+    await chatConversationModel.updateOne(
+      { _id: conv._id },
+      { $set: { last_message_at: msg.created_at, last_message_preview: previewOf(body, null), last_sender_type: "system" }, $inc: { [input.unreadFor === "staff" ? "staff_unread" : "customer_unread"]: 1 },
+        // แจ้งร้าน = ห้องที่ร้านลบ (ซ่อน) ไว้กลับมาในรายการ
+        ...(input.unreadFor === "staff" ? { $unset: { hidden_at: 1 } } : {}) }
+    );
+  } catch (err) {
+    log.warn("chat.order_event_failed", { ref_id: String(input.refId), err });
+  }
+}
+
+// ── โค้ดส่วนลดใหม่ในห้องแชท ─────────────────────────────────────
+/**
+ * แจ้งเตือนโค้ดส่วนลดที่ติดธง post_to_chat และถึงเวลาแสดงแล้ว → ลงเป็นข้อความระบบในห้องของลูกค้า (ครั้งเดียวต่อแจ้งเตือน)
+ * เรียกตอนลูกค้าเปิด/ดึงแชท — โค้ดที่เริ่มในอนาคตจึงขึ้นในแชทตรงเวลาโดยไม่ต้องมีงานตั้งเวลา · ไม่ throw
+ */
+async function postDueCouponNotices(customerId: string): Promise<void> {
+  try {
+    const due = await customerNotificationModel
+      .find({
+        user_id: customerId,
+        post_to_chat: true,
+        chat_posted_at: null,
+        deleted_at: null,
+        $or: [{ visible_at: { $lte: new Date() } }, { visible_at: null }],
+      })
+      .sort({ visible_at: 1, _id: 1 })
+      .limit(20)
+      .lean<any[]>();
+    if (due.length === 0) return;
+    let conv: any = null;
+    for (const n of due) {
+      // จองก่อน (กันดึงพร้อมกันหลายคำขอแล้วลงซ้ำ)
+      const claimed = await customerNotificationModel.updateOne({ _id: n._id, chat_posted_at: null }, { $set: { chat_posted_at: new Date() } });
+      if (claimed.modifiedCount === 0) continue;
+      conv ??= await chatConversationModel
+        .findOneAndUpdate({ customer_id: customerId }, { $setOnInsert: { customer_id: customerId } }, { upsert: true, returnDocument: "after" })
+        .lean<any>();
+      const body = `🎟️ ${n.title}\n${n.message}`.slice(0, CHAT_MESSAGE_MAX_LENGTH);
+      const msg = await chatMessageModel.create({ conversation_id: conv._id, sender_type: "system", sender_id: null, body, attachment: null });
+      await chatConversationModel.updateOne(
+        { _id: conv._id },
+        { $set: { last_message_at: msg.created_at, last_message_preview: previewOf(body, null), last_sender_type: "system" }, $inc: { customer_unread: 1 } }
+      );
+    }
+  } catch (err) {
+    log.warn("chat.coupon_notice_failed", { customer_id: customerId, err });
+  }
 }

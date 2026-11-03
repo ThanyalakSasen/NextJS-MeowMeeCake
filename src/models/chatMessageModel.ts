@@ -24,8 +24,11 @@ const attachmentSchema = new mongoose.Schema(
 const chatMessageSchema = new mongoose.Schema(
   {
     conversation_id: { type: mongoose.Schema.Types.ObjectId, ref: "ChatConversations", required: true },
-    sender_type: { type: String, enum: ["customer", "staff"], required: true },
-    sender_id: { type: mongoose.Schema.Types.ObjectId, ref: "Users", required: true },
+    // system = เหตุการณ์ของคำสั่งซื้อ (ยืนยันชำระเงิน · ยกเลิก · จัดส่ง ฯลฯ) ที่ระบบลงในห้องให้เอง — แก้/ลบไม่ได้ · นับยังไม่อ่านฝั่งลูกค้าเท่านั้น
+    sender_type: { type: String, enum: ["customer", "staff", "system"], required: true },
+    sender_id: { type: mongoose.Schema.Types.ObjectId, ref: "Users", default: null },
+    /** ข้อความระบบนับเป็น "ยังไม่อ่าน" ของฝั่งไหน — customer (ค่าเริ่มต้น: ร้านเปลี่ยนสถานะ · โค้ดใหม่) · staff (ลูกค้ายกเลิกเอง) */
+    unread_for: { type: String, enum: ["customer", "staff", null], default: null },
     body: { type: String, default: "", maxlength: 1000 },
     attachment: { type: attachmentSchema, default: null },
     /** อีกฝั่งเปิดอ่านแล้วเมื่อไร (null = ยังไม่อ่าน) */
@@ -44,7 +47,13 @@ chatMessageSchema.index({ conversation_id: 1, updated_at: 1 });
 
 // dev server (hot reload) เก็บ model ที่ compile ไว้ก่อนเพิ่ม field ใหม่ — schema เก่าตัด field ใหม่ทิ้งเงียบ ๆ (strict)
 // เช่น "deleted_at" ไม่ถูกบันทึก → ลบ model เก่าทิ้งแล้วสร้างใหม่จาก schema ปัจจุบัน
-if (mongoose.models.ChatMessages && !mongoose.models.ChatMessages.schema.path("deleted_at")) mongoose.deleteModel("ChatMessages");
+if (
+  mongoose.models.ChatMessages &&
+  (!mongoose.models.ChatMessages.schema.path("deleted_at") ||
+    !(mongoose.models.ChatMessages.schema.path("sender_type") as { enumValues?: string[] } | undefined)?.enumValues?.includes("system") ||
+    !mongoose.models.ChatMessages.schema.path("unread_for"))
+)
+  mongoose.deleteModel("ChatMessages");
 
 const ChatMessage = mongoose.models.ChatMessages || mongoose.model("ChatMessages", chatMessageSchema);
 export default ChatMessage;

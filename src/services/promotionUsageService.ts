@@ -13,7 +13,8 @@ import { buildMeta, type Pagination } from "../lib/queryParams";
 import promotionUsagesModel from "../models/promotionUsagesModel";
 import promotionModel from "../models/promotionModel";
 import { toBahtFields } from "../lib/money";
-import { positiveLimit } from "../lib/promoCode";
+import { perUserLimit } from "../lib/promoCode";
+import { isPosGuestUser } from "../lib/posGuest";
 
 // discount_applied — เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) · presenter แค่ปัดก่อนคืน
 function presentUsage<T extends Record<string, unknown>>(usage: T): T {
@@ -74,8 +75,9 @@ export async function recordUsage(input: RecordUsageInput) {
       discount_applied: input.discount_applied,
     });
 
-    const perUser = positiveLimit(claimed.max_user_per_user);
-    if (perUser != null) {
+    // ใช้โค้ดซ้ำไม่ได้: ไม่ตั้งสิทธิ์ต่อคน = 1 ครั้ง · ลูกค้าทั่วไปของ POS ไม่นับ (ใช้บัญชีเดียวกันทุกบิล)
+    const perUser = perUserLimit(claimed.max_user_per_user);
+    if (!(await isPosGuestUser(input.user_id))) {
       // นับหลังสร้าง (optimistic — ผู้ยิงคำขอพร้อมกันคนหลังจะเป็นฝ่ายแพ้ แล้วถูก rollback)
       const userCount = await promotionUsagesModel.countDocuments({
         promotion_id: input.promotion_id,

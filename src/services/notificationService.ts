@@ -61,6 +61,8 @@ export interface NotifyInput {
   link?: string | null;
   /** false = บันทึกลง DB อย่างเดียว ไม่ push LINE (เช่น ออเดอร์หน้าร้าน POS — docs/LINE.md §9.5) · ค่าเริ่มต้น true */
   line?: boolean;
+  /** false = push LINE อย่างเดียว ไม่บันทึกลงกระดิ่งแจ้งเตือนในเว็บ (เช่น แชทใหม่ — มีป้ายยังไม่อ่านในเมนูแชทอยู่แล้ว) · ค่าเริ่มต้น true */
+  web?: boolean;
 }
 
 const base = createCrudService(notificationModel, {
@@ -99,6 +101,20 @@ function notify(input: NotifyInput) {
 }
 
 async function notifyNow(input: NotifyInput) {
+  if (input.web === false) {
+    if (input.line === false) return null;
+    const url = notificationLineUrl(input.link);
+    const result = await pushLineMessage(
+      `[${notificationModuleLabel(input.module)}] ${input.title}\n${input.message}` + (url ? `\n🔗 ${url}` : "")
+    );
+    if (result.ok) await recordPushed();
+    else {
+      log.warn("notification.line_push_failed", { error: result.error });
+      if (isQuotaExceededError(result.error)) await alertQuotaExhausted();
+    }
+    return null;
+  }
+
   const doc = await notificationModel.create({
     title: input.title,
     message: input.message,

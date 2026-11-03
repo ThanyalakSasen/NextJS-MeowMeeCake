@@ -436,3 +436,52 @@ export async function markRead(userId: string, id: string) {
 
 export const customerNotifyService = { notifyCustomer, notifyCustomerLater, customerMessages, customerWeb };
 export default customerNotifyService;
+
+// ── เหตุการณ์คำสั่งซื้อในห้องแชท (chatService.postOrderEvent) ─────────
+/** ข้อความในแชทเมื่อสถานะคำสั่งซื้อเปลี่ยน — null = ไม่ลงแชท · บอกด้วยว่าใครยกเลิก (ร้าน / ลูกค้า / ระบบ) */
+export const chatEvent = {
+  orderStatus(
+    kind: CustomerDocKind,
+    id: unknown,
+    docNo: string,
+    status: string,
+    opts: { reason?: string | null; orderType?: string | null; paymentStatus?: string | null; byCustomer?: boolean } = {}
+  ): string | null {
+    if (status === "cancelled") {
+      const reason = opts.reason?.trim() ?? "";
+      const who = opts.byCustomer
+        ? `ลูกค้ายกเลิก${KIND_LABEL[kind]}`
+        : reason === PAYMENT_EXPIRED_REASON
+          ? `ระบบยกเลิก${KIND_LABEL[kind]}อัตโนมัติ (เกินเวลาชำระเงิน)`
+          : `ร้านยกเลิก${KIND_LABEL[kind]}`;
+      const lines = [`❌ ${who}`];
+      if (reason && reason !== PAYMENT_EXPIRED_REASON) lines.push(`เหตุผล: ${reason}`);
+      if (opts.paymentStatus === "paid") lines.push("ชำระเงินแล้ว — รอร้านโอนเงินคืน");
+      return lines.join("\n");
+    }
+    return customerWeb.orderStatus(kind, id, docNo, status, opts)?.message ?? null;
+  },
+  paymentStatus(kind: CustomerDocKind, id: unknown, docNo: string, status: string): string | null {
+    return customerWeb.paymentStatus(kind, id, docNo, status)?.message ?? null;
+  },
+  deliveryStatus(kind: CustomerDocKind, id: unknown, docNo: string, status: string, trackingNo?: string | null, carrier?: string | null): string | null {
+    return customerWeb.deliveryStatus(kind, id, docNo, status, trackingNo, carrier)?.message ?? null;
+  },
+};
+
+/** ลงเหตุการณ์คำสั่งซื้อในห้องแชทของลูกค้า — fire-and-forget ไม่ throw · บิลหน้าร้าน (POS-) / ไม่มีข้อความ = ข้าม */
+export function postChatEventLater(
+  userId: unknown,
+  kind: CustomerDocKind,
+  refId: unknown,
+  docNo: string | null | undefined,
+  text: string | null,
+  /** แจ้งฝั่งไหนในแชท — customer (ค่าเริ่มต้น) · staff = ลูกค้าทำเอง (ยกเลิกเอง) ขึ้นที่แชทหลังร้านแทน */
+  unreadFor: "customer" | "staff" = "customer"
+): void {
+  if (!userId || !text || isPosDoc(docNo)) return;
+  // import ตอนเรียก — กัน import วน (chatService ← notificationService ← …)
+  void trackBackground(
+    import("./chatService").then(({ postOrderEvent }) => postOrderEvent({ customerId: userId, kind, refId, text, unreadFor }))
+  );
+}

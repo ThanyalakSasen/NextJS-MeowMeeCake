@@ -9,7 +9,7 @@ const chatConversationSchema = new mongoose.Schema(
     last_message_at: { type: Date, default: null },
     /** ข้อความล่าสุดแบบย่อ (ข้อความ หรือ "[แนบคำสั่งซื้อ …]") — แสดงในรายการห้องหลังร้าน */
     last_message_preview: { type: String, default: "", maxlength: 200 },
-    last_sender_type: { type: String, enum: ["customer", "staff", null], default: null },
+    last_sender_type: { type: String, enum: ["customer", "staff", "system", null], default: null },
     /** ข้อความจากร้านที่ลูกค้ายังไม่อ่าน */
     customer_unread: { type: Number, default: 0, min: 0 },
     /** ข้อความจากลูกค้าที่ร้านยังไม่อ่าน */
@@ -27,7 +27,12 @@ chatConversationSchema.index({ staff_unread: 1, last_message_at: -1 });
 
 // dev server (hot reload) เก็บ model ที่ compile ไว้ก่อนเพิ่ม field ใหม่ — schema เก่าตัด field ใหม่ทิ้งเงียบ ๆ (strict)
 // เช่น "hidden_at" ไม่ถูกบันทึก → ลบ model เก่าทิ้งแล้วสร้างใหม่จาก schema ปัจจุบัน
-if (mongoose.models.ChatConversations && !mongoose.models.ChatConversations.schema.path("hidden_at")) mongoose.deleteModel("ChatConversations");
+if (
+  mongoose.models.ChatConversations &&
+  (!mongoose.models.ChatConversations.schema.path("hidden_at") ||
+    !(mongoose.models.ChatConversations.schema.path("last_sender_type") as { enumValues?: string[] } | undefined)?.enumValues?.includes("system"))
+)
+  mongoose.deleteModel("ChatConversations");
 
 const ChatConversation =
   mongoose.models.ChatConversations || mongoose.model("ChatConversations", chatConversationSchema);
