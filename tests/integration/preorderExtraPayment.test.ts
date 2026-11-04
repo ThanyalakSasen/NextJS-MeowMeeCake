@@ -132,6 +132,20 @@ describe("preorder extra payment", () => {
     expect((await preorderModel.findById(ctx.p._id).lean<any>()).payment_id).toEqual(ctx.main._id);
   });
 
+  it("ต่ำกว่าขั้นต่ำต่อรายการ: preview เตือน (below_min) · ร้านบันทึกได้", async () => {
+    const ctx = await setup();
+    await preorderRoundItemModel.updateOne({ _id: ctx.breadItem._id }, { $set: { min_order_qty: 2 } });
+    const pv = await previewPreorderEdit(String(ctx.p._id), {
+      keep: [{ item_id: String(ctx.line._id), quantity: 2 }],
+      add: [{ round_item_id: String(ctx.breadItem._id), quantity: 1 }],
+      allow_extra_payment: true,
+    });
+    expect(pv.below_min).toEqual([{ name: "ขนมปังใหม่", min_qty: 2, quantity: 1 }]);
+    const r = await addBread(ctx, 1);
+    expect(r.extra).toBe(100);
+    expect(await preorderItemModel.countDocuments({ preorder_id: ctx.p._id, round_item_id: ctx.breadItem._id, quantity: 1, deleted_at: null })).toBe(1);
+  });
+
   it("preview: ยอดจริงก่อนบันทึก · ไม่เขียนอะไร · บอกโควตาไม่พอ", async () => {
     const ctx = await setup();
     const pv = await previewPreorderEdit(String(ctx.p._id), {

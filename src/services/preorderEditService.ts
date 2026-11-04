@@ -140,10 +140,12 @@ async function planEdit(id: string, input: EditPreorderItemsInput) {
     : [];
   const customizations = await getCustomizations(resolved.map(({ product }) => String(product._id)));
   const costByProduct = await recipeService.getUnitCostByProduct(resolved.map(({ product }) => String(product._id)));
+  // ขั้นต่ำต่อรายการ (กติกาตอนลูกค้าสั่งเอง) — ร้านข้ามได้ เพราะตกลงกับลูกค้าแล้ว · preview แจ้งเตือนใน below_min
+  const belowMin: Array<{ name: string; min_qty: number; quantity: number }> = [];
   const added = resolved.map(({ item, product, unit_price }, i) => {
     const qty = Number(add[i].quantity);
     const minQty = Math.max(item.min_order_qty ?? 1, product.preorder_config?.min_order_qty ?? 1);
-    if (qty < minQty) throw badRequest(`"${product.product_name_th}" สั่งขั้นต่ำ ${minQty} ชิ้นต่อรายการ`);
+    if (qty < minQty) belowMin.push({ name: product.product_name_th, min_qty: minQty, quantity: qty });
     const custom = resolveCustomization(customizations.get(String(product._id)) ?? { groups: [], options: [] }, add[i], product.product_name_th);
     const unit = round2(unit_price + custom.extra_price);
     return {
@@ -196,7 +198,7 @@ async function planEdit(id: string, input: EditPreorderItemsInput) {
   for (const l of current) bump(l.round_item_id, (keep.get(String(l._id)) ?? 0) - Number(l.quantity));
   for (const l of added) bump(l.round_item_id, l.quantity);
 
-  return { p, current, keep, keptTotal, added, amounts, paid, refundInc, extraInc, refund, extra, refundDueAfter, delta, newSubtotal, oldSubtotal };
+  return { p, current, keep, keptTotal, added, belowMin, amounts, paid, refundInc, extraInc, refund, extra, refundDueAfter, delta, newSubtotal, oldSubtotal };
 }
 
 const linesText = (lines: Array<{ name: string; quantity: number }>) => lines.map((l) => lineLabel(l.name, l.quantity)).join(", ");
@@ -217,6 +219,8 @@ export interface PreorderEditPreview {
   lines: Array<{ name: string; extras: string[]; unit_price: number; old_qty: number; new_qty: number; status: "kept" | "changed" | "removed" | "added" }>;
   /** สินค้าที่โควตาในรอบไม่พอ (บันทึกจะไม่ผ่าน) */
   quota_errors: string[];
+  /** สินค้าที่เพิ่มต่ำกว่าขั้นต่ำต่อรายการ — แจ้งเตือนเท่านั้น ร้านบันทึกได้ */
+  below_min: Array<{ name: string; min_qty: number; quantity: number }>;
   /** ข้อความที่จะส่งถึงลูกค้า (LINE / กระดิ่ง) */
   customer_message: string;
 }
@@ -274,6 +278,7 @@ export async function previewPreorderEdit(id: string, input: EditPreorderItemsIn
     extra_due_after: Math.max(0, extraDueAfter),
     lines,
     quota_errors,
+    below_min: plan.belowMin,
     customer_message: customerMessages.preorderItemsChanged(p.preorder_no, linesText(after), amounts.total_amount, plan.refund, Math.max(0, extraDueAfter)),
   };
 }
