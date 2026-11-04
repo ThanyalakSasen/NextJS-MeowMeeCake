@@ -13,9 +13,6 @@ import { Types } from "mongoose";
 import dbConnect from "../lib/dbConnect";
 import * as pointsService from "./pointsService";
 import { assertOwnReviewMedia } from "./reviewMediaService";
-import { notificationService } from "./notificationService";
-import { adminLinks } from "../lib/adminLinks";
-import { log } from "../lib/logger";
 import { badRequest, conflict, forbidden, HttpError, notFound } from "../lib/httpError";
 import { assertObjectId } from "../lib/objectId";
 import { buildMeta, type Pagination } from "../lib/queryParams";
@@ -176,33 +173,9 @@ async function createOne(userId: string, kind: ReviewTargetKind, itemId: string,
   }
 }
 
-/** รีวิวที่นับว่า "แย่" — แจ้งเจ้าของร้านทันที (เกณฑ์เดียวกับแดชบอร์ด/ตัวกรองรีวิวแย่) */
+/** รีวิวที่นับว่า "แย่" — เกณฑ์เดียวกับแดชบอร์ด/ตัวกรองรีวิวแย่
+ *  (เลิกแจ้งเตือนเจ้าของร้านตอนมีรีวิวแย่ใหม่แล้ว — ผู้ใช้ขอ 2026-11-03 · ดูที่หน้ารีวิว ตัวกรอง "แย่ + ยังไม่ตอบ") */
 export const NEGATIVE_REVIEW_MAX_RATING = 2;
-
-/**
- * รีวิว 1–2 ดาวใหม่ → แจ้งเจ้าของร้าน (หน้าแจ้งเตือนหลังร้าน + LINE) พร้อมลิงก์ไปหน้ารีวิวที่กรอง "แย่ + ยังไม่ตอบ"
- * รีวิวรวมหลายชิ้นในครั้งเดียว = แจ้งครั้งเดียว · fire-and-forget ไม่ทำให้การรีวิวล้ม
- */
-function notifyNegativeReviews(docs: Array<{ product_id: unknown; rating?: number; review_text?: string | null }>): void {
-  const negative = docs.filter((d) => typeof d.rating === "number" && d.rating <= NEGATIVE_REVIEW_MAX_RATING);
-  if (negative.length === 0) return;
-  void (async () => {
-    const names = await productModel
-      .find({ _id: { $in: negative.map((d) => d.product_id) } })
-      .select("product_name_th")
-      .lean<Array<{ product_name_th?: string }>>();
-    const first = negative[0];
-    const productLabel = names.map((p) => p.product_name_th).filter(Boolean).join(", ") || "สินค้า";
-    const text = (first.review_text ?? "").trim();
-    await notificationService.notify({
-      title: `รีวิว ${first.rating} ดาว — ${productLabel}`.slice(0, 200),
-      message: text ? (text.length > 200 ? `${text.slice(0, 200)}…` : text) : "ลูกค้าไม่ได้เขียนความเห็น — ควรตอบกลับลูกค้า",
-      module: "customer",
-      type: "warning",
-      link: adminLinks.reviewsNeedsReply,
-    });
-  })().catch((err) => log.error("review.negative_notify_failed", { err }));
-}
 
 /**
  * หลังสร้าง: คำนวณคะแนนสินค้า (ครั้งเดียวต่อสินค้า) แล้วให้แต้มทีละรีวิว — ไม่มีรูป 15 / มีรูป 20 ·
@@ -210,7 +183,6 @@ function notifyNegativeReviews(docs: Array<{ product_id: unknown; rating?: numbe
  */
 async function afterCreate(docs: Array<{ _id: unknown; user_id: unknown; product_id: unknown; order_item_id?: unknown; preorder_order_item_id?: unknown; image?: string[]; rating?: number; review_text?: string | null }>) {
   for (const productId of new Set(docs.map((d) => String(d.product_id)))) await recomputeProductRating(productId);
-  notifyNegativeReviews(docs);
   for (const doc of docs) {
     const withPhoto = (doc.image?.length ?? 0) > 0;
     const dedupeKey = doc.preorder_order_item_id

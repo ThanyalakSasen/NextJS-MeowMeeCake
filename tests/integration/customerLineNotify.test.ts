@@ -19,12 +19,14 @@ let fetchSpy: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   process.env.LINE_CHANNEL_ACCESS_TOKEN = "token-test";
+  process.env.CUSTOMER_LINE_NOTIFY = "true"; // LINE หาลูกค้าปิดเป็นค่าเริ่มต้น — เทสนี้ตรวจตอนเปิดใช้
   fetchSpy = vi.fn().mockResolvedValue({ ok: true });
   vi.stubGlobal("fetch", fetchSpy);
 });
 
 afterEach(() => {
   delete process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  delete process.env.CUSTOMER_LINE_NOTIFY;
   vi.unstubAllGlobals();
 });
 

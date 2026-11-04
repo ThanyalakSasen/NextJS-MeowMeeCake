@@ -51,12 +51,14 @@ const quotaAlerts = (prefix: string) =>
 beforeEach(async () => {
   await resetQuotaCache();
   process.env.LINE_CHANNEL_ACCESS_TOKEN = "token-test";
+  process.env.CUSTOMER_LINE_NOTIFY = "true"; // LINE หาลูกค้าปิดเป็นค่าเริ่มต้น — เทสนี้ตรวจตอนเปิดใช้
   process.env.LINE_TARGET_ID = "U_OWNER";
   delete process.env.LINE_OWNER_QUOTA_RESERVE;
 });
 
 afterEach(() => {
   delete process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  delete process.env.CUSTOMER_LINE_NOTIFY;
   delete process.env.LINE_TARGET_ID;
   delete process.env.LINE_OWNER_QUOTA_RESERVE;
   vi.unstubAllGlobals();

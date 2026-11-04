@@ -518,6 +518,7 @@ async function persistOrder(
           pickup_date: pickup?.pickup_date ?? null,
           pickup_point: pickup?.pickup_point ?? null,
           payment_due_at: opts.storefront ? new Date(Date.now() + ORDER_PAYMENT_WINDOW_MS) : null,
+          placed_notice_pending: !!opts.storefront,
           subtotal,
           discount_amount,
           delivery_fee,
@@ -575,6 +576,13 @@ async function persistOrder(
   // (พนักงานคีย์เองอยู่หน้าร้าน ร้านขายเยอะ LINE เจ้าของจะเด้งทุกบิล — docs/LINE.md §9.5)
   // ออเดอร์เว็บก็ไม่ push LINE เว้นแต่ตั้ง LINE_NOTIFY_NEW_ORDERS=true — ประหยัดโควตา ร้านได้ LINE ตอนสลิปเข้าแทน (§9.15)
   const isPos = orderNoPrefix(opts.channel) === "POS";
+  // สั่งจากหน้าเว็บ = ยังไม่แจ้งทั้งร้านและลูกค้า — รอแนบสลิป / กดชำระเงินภายหลัง (placedNoticeService.announcePlaced)
+  if (opts.storefront) {
+    return presentOrderWithItems(
+      order,
+      insertedItems.map((it: any) => it.toObject())
+    );
+  }
   notificationService
     .notify({
       title: `ออเดอร์ใหม่ ${order.order_no}`,
@@ -841,6 +849,8 @@ export async function updateOrderStatus(
      * แล้วร้านกดคืนเงินเอง (นโยบายฝั่งลูกค้า · cancelOrderByCustomer · docs/customer-backend-merge.md §8.8)
      */
     skipAutoRefund?: boolean;
+    /** silent = ไม่ลงเหตุการณ์ยกเลิกในแชทร้าน — ลูกค้ายกเลิกเพื่อกลับไปแก้ที่อยู่/วิธีรับแล้วสั่งใหม่ (ไม่ใช่การยกเลิกจริง) */
+    silent?: boolean;
   } = {}
 ) {
   await dbConnect();
@@ -962,8 +972,8 @@ export async function updateOrderStatus(
       })
     );
   }
-  // ลงเหตุการณ์ในแชท — รวมลูกค้ายกเลิกเอง (ร้านเห็นในแชทด้วย)
-  postChatEventLater(
+  // ลงเหตุการณ์ในแชท — รวมลูกค้ายกเลิกเอง (ร้านเห็นในแชทด้วย) · ยกเลิกเพื่อแก้ที่อยู่/วิธีรับ (silent) = ไม่ลง
+  if (!opts.silent) postChatEventLater(
     order.user_id,
     "order",
     order._id,
@@ -1059,7 +1069,7 @@ export async function deleteOrder(id: string) {
  *     แจ้งเจ้าของร้าน · ร้านโอนคืนแล้วกดคืนเงินเอง (POST /api/admin/payments/[id]/refund) ตัวเลขบัญชีจึงตรงความจริง
  * ผู้เรียก (route) ต้องตรวจว่าเป็นเจ้าของออเดอร์แล้ว
  */
-export async function cancelOrderByCustomer(id: string, userId: string, reason?: string | null) {
+export async function cancelOrderByCustomer(id: string, userId: string, reason?: string | null, opts: { silent?: boolean } = {}) {
   await dbConnect();
   assertObjectId(id);
   const doc = await orderModel
@@ -1081,6 +1091,7 @@ export async function cancelOrderByCustomer(id: string, userId: string, reason?:
     cancelled_by: userId,
     cancelled_reason: reason?.trim() || "ลูกค้ายกเลิกเอง",
     skipAutoRefund: true,
+    silent: opts.silent,
   });
   if (paid) {
     notificationService

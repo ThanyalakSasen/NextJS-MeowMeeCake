@@ -20,6 +20,7 @@ import preorderModel from "../models/preorderModel";
 import userModel from "../models/userModel";
 import { notificationService } from "./notificationService";
 import { log } from "../lib/logger";
+import { announcePlacedLater } from "./placedNoticeService";
 import { trackBackground } from "../lib/backgroundTasks";
 import * as orderService from "./orderService";
 import * as preorderService from "./preorderService";
@@ -105,6 +106,9 @@ async function reconcileAfterSlip(payment: { _id: unknown; order_id?: unknown; p
   } catch (err) {
     log.error("payment.reconcile_after_slip_failed", { payment_id: String(payment._id), err });
   }
+  // แนบสลิปแล้ว = ถึงเวลาแจ้ง "ออเดอร์ใหม่" ของบิลที่สั่งจากหน้าเว็บ (ครั้งเดียว — บิลที่แจ้งไปแล้วข้าม)
+  if (payment.order_id) announcePlacedLater("order", payment.order_id);
+  else if (payment.preorder_id) announcePlacedLater("preorder", payment.preorder_id);
 }
 
 // ── CREATE ──────────────────────────────────────────────────

@@ -81,6 +81,9 @@ const preorderSchema = new mongoose.Schema(
     // ยอดที่ลูกค้าต้องชำระเพิ่ม (ร้านเปลี่ยนสินค้าในใบที่ชำระแล้วจนยอดเกิน — preorderExtraPaymentService)
     // total_amount รวมยอดนี้แล้ว · payment_status คง "paid" · ชำระผ่าน payment ใบ is_extra
     extra_due_amount: { type: Number, default: 0, min: 0 },
+    // สั่งจากหน้าเว็บ: ยังไม่แจ้ง "ออเดอร์ใหม่" (ร้าน) / "ได้รับคำสั่งซื้อ" (กระดิ่งลูกค้า) — แจ้งตอนลูกค้าแนบสลิปหรือกด
+    // "ชำระเงินภายหลัง" (placedNoticeService.announcePlaced) · true = รอแจ้ง · ข้อมูลเก่า/หลังร้าน/POS = false (แจ้งไปแล้วตอนสร้าง)
+    placed_notice_pending: { type: Boolean, default: false },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }

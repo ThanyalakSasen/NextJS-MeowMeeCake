@@ -4,6 +4,10 @@ import orderModel from "@/models/orderModel";
 import * as orderService from "@/services/orderService";
 import * as customerNotifyService from "@/services/customerNotifyService";
 import { flushBackground } from "@/lib/backgroundTasks";
+import notificationModel from "@/models/notificationModel";
+import chatConversationModel from "@/models/chatConversationModel";
+import chatMessageModel from "@/models/chatMessageModel";
+import { announcePlaced } from "@/services/placedNoticeService";
 import { makeUser, makeProduct } from "./helpers";
 
 /** กระดิ่งแจ้งเตือนในเว็บของลูกค้า (customer-backend-merge.md §8.12) — ไม่ได้ตั้ง LINE token ในเทส = กระดิ่งอย่างเดียว */
@@ -20,7 +24,8 @@ async function waitNotices(userId: unknown, count: number): Promise<Notice[]> {
   return customerNotificationModel.find({ user_id: userId }).sort({ created_at: 1, _id: 1 }).lean<Notice[]>();
 }
 
-async function webOrder(channel: "online" | "instore" = "online") {
+/** สร้างออเดอร์ · online = จำลองลูกค้ากดชำระเงินภายหลัง (ถึงเวลาแจ้ง "ได้รับออเดอร์") — announce: false = ยังไม่กด */
+async function webOrder(channel: "online" | "instore" = "online", announce = true) {
   const user = await makeUser();
   const p = await makeProduct({ product_price: 100, product_stock_quantity: 10 });
   const order = (await orderService.createOrder(String(user._id), {
@@ -29,8 +34,50 @@ async function webOrder(channel: "online" | "instore" = "online") {
     storefront: channel === "online",
     items: [{ product_id: String(p._id), quantity: 1 }],
   })) as { _id: unknown; order_no: string };
+  if (channel === "online" && announce) await announcePlaced("order", order._id);
   return { user, order, oid: String(order._id) };
 }
+
+describe("แจ้งออเดอร์ใหม่หลังแนบสลิป / กดชำระเงินภายหลัง (2026-11-03)", () => {
+  it("กดสั่งจากหน้าเว็บ → ยังไม่แจ้งทั้งร้านและลูกค้า · กดชำระเงินภายหลัง → แจ้งครั้งเดียว · เรียกซ้ำไม่แจ้งซ้ำ", async () => {
+    const { user, order } = await webOrder("online", false);
+    await flushBackground();
+    expect(await customerNotificationModel.countDocuments({ user_id: user._id })).toBe(0);
+    expect(await notificationModel.exists({ title: `ออเดอร์ใหม่ ${order.order_no}` })).toBeNull();
+
+    expect(await announcePlaced("order", order._id)).toBe(true);
+    expect(await announcePlaced("order", order._id)).toBe(false);
+    await flushBackground();
+    expect(await customerNotificationModel.countDocuments({ user_id: user._id })).toBe(1);
+    expect(await notificationModel.countDocuments({ title: `ออเดอร์ใหม่ ${order.order_no}` })).toBe(1);
+  });
+
+  it("ยกเลิกก่อนแนบสลิป/กดชำระภายหลัง (เช่น กลับไปแก้ที่อยู่) → ไม่แจ้งเลย", async () => {
+    const { user, order, oid } = await webOrder("online", false);
+    await orderService.cancelOrderByCustomer(oid, String(user._id), "แก้ที่อยู่", { silent: true });
+    expect(await announcePlaced("order", order._id)).toBe(false);
+    await flushBackground();
+    expect(await notificationModel.exists({ title: `ออเดอร์ใหม่ ${order.order_no}` })).toBeNull();
+  });
+
+  it("ยกเลิกทุกแบบไม่ลงข้อความในแชท (ลูกค้ายกเลิกเอง · ร้านยกเลิก · ระบบยกเลิกเพราะหมดเวลา)", async () => {
+    const a = await webOrder();
+    await orderService.cancelOrderByCustomer(a.oid, String(a.user._id), "เปลี่ยนใจ");
+    const b = await webOrder();
+    await orderService.updateOrderStatus(b.oid, "cancelled", { cancelled_reason: "ของหมด" });
+    const c = await webOrder();
+    await orderService.expireUnpaidOrders({ now: new Date(Date.now() + 31 * 60 * 1000) });
+    await flushBackground();
+    const convs = await chatConversationModel.find({ customer_id: { $in: [a.user._id, b.user._id, c.user._id] } }).select("_id").lean();
+    expect(await chatMessageModel.countDocuments({ conversation_id: { $in: convs.map((x) => x._id) } })).toBe(0);
+  });
+
+  it("บิลหน้าร้าน (POS) → แจ้งร้านทันทีตอนสร้างเหมือนเดิม", async () => {
+    const { order } = await webOrder("instore");
+    await flushBackground();
+    expect(await notificationModel.exists({ title: `ออเดอร์ใหม่ ${order.order_no}` })).toBeTruthy();
+  });
+});
 
 describe("กระดิ่งในเว็บของลูกค้า", () => {
   it("แจ้งทุกสถานะของออเดอร์เว็บ (รวมกำลังเตรียม/สำเร็จที่ไม่ส่ง LINE) · ลิงก์ไปหน้ารายละเอียด", async () => {

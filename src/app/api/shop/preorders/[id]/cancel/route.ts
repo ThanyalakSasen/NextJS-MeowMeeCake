@@ -1,6 +1,6 @@
 /**
  * POST /api/shop/preorders/[id]/cancel — ลูกค้ายกเลิกพรีออเดอร์ของตัวเอง
- *   body: { reason? }
+ *   body: { reason?, edit_checkout? } — edit_checkout: true = ยกเลิกเพื่อกลับไปแก้ที่อยู่/วิธีรับแล้วสั่งใหม่ → ไม่ลงแชทร้าน
  *   ลูกค้ายกเลิกเองได้เฉพาะสถานะ pending / confirmed (CUSTOMER_CANCELABLE_STATUSES)
  *   และเฉพาะพรีออเดอร์ที่ยังไม่ได้ชำระเงิน (payment_status != "paid") —
  *   พอร้านเริ่มเตรียม (preparing ขึ้นไป) หรือจ่ายเงินแล้ว ต้องให้แอดมินยกเลิก + คืนเงิน
@@ -24,6 +24,7 @@ export const POST = withAuth(async (session, req, ctx: Ctx) => {
     cancelled_by: session.user_id,
     cancelled_reason: body.reason ?? "ลูกค้ายกเลิกเอง",
     allowedFrom: preorderService.CUSTOMER_CANCELABLE_STATUSES,
+    silent: body.edit_checkout === true,
   });
   audit(req, {
     action: "ลูกค้ายกเลิกพรีออเดอร์",
