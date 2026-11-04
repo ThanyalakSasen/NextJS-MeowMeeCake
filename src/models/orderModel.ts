@@ -68,6 +68,9 @@ const orderSchema = new mongoose.Schema(
     cancelled_by: { type: mongoose.Schema.Types.ObjectId, ref: "Users", default: null },
     cancelled_reason: { type: String, default: null },
     cancelled_at: { type: Date, default: null },
+    // สั่งจากหน้าเว็บ: ยังไม่แจ้ง "ออเดอร์ใหม่" (ร้าน) / "ได้รับคำสั่งซื้อ" (กระดิ่งลูกค้า) — แจ้งตอนลูกค้าแนบสลิปหรือกด
+    // "ชำระเงินภายหลัง" (placedNoticeService.announcePlaced) · true = รอแจ้ง · ข้อมูลเก่า/หลังร้าน/POS = false (แจ้งไปแล้วตอนสร้าง)
+    placed_notice_pending: { type: Boolean, default: false },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }

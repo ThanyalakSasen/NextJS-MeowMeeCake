@@ -1,6 +1,6 @@
 /**
  * POST /api/shop/orders/[id]/cancel — ลูกค้ายกเลิกออเดอร์ของตัวเอง
- *   body: { reason? }
+ *   body: { reason?, edit_checkout? } — edit_checkout: true = ยกเลิกเพื่อกลับไปแก้ที่อยู่/วิธีรับแล้วสั่งใหม่ → ไม่ลงแชทร้าน
  *   นโยบายฝั่งลูกค้า (docs/customer-backend-merge.md §8.8 — orderService.cancelOrderByCustomer):
  *   - ยกเลิกเองได้เฉพาะสถานะ pending / confirmed / preparing · ออเดอร์หน้าร้าน (POS-) ยกเลิกผ่านร้านเท่านั้น
  *   - ชำระแล้วก็ยกเลิกได้ → "ยกเลิก + ชำระแล้ว" = รอร้านโอนคืน (ไม่ตั้ง refunded ให้อัตโนมัติ) + แจ้งเจ้าของร้าน
@@ -20,7 +20,9 @@ export const POST = withAuth(async (session, req, ctx: Ctx) => {
   requireOwner(session, order.user_id);
 
   const body = await req.json().catch(() => ({}));
-  const result = await orderService.cancelOrderByCustomer(id, session.user_id, body.reason ?? null);
+  const result = await orderService.cancelOrderByCustomer(id, session.user_id, body.reason ?? null, {
+    silent: body.edit_checkout === true,
+  });
   audit(req, {
     action: "ลูกค้ายกเลิกออเดอร์",
     action_type: "UPDATE",

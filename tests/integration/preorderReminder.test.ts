@@ -36,6 +36,7 @@ async function makeRound(pickup: string, over: Record<string, unknown> = {}) {
 beforeEach(async () => {
   await resetQuotaCache();
   process.env.LINE_CHANNEL_ACCESS_TOKEN = "token-test";
+  process.env.CUSTOMER_LINE_NOTIFY = "true"; // LINE หาลูกค้าปิดเป็นค่าเริ่มต้น — เทสนี้ตรวจตอนเปิดใช้
   // quota API ตอบ error → fail-open (ไม่ใช่เรื่องที่เทสนี้ตรวจ) · push ตอบสำเร็จ
   fetchSpy = vi.fn(async (url: string) =>
     url === PUSH_URL ? { ok: true } : { ok: false, status: 500, json: async () => ({}) }
@@ -48,6 +49,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   delete process.env.LINE_CHANNEL_ACCESS_TOKEN;
+  delete process.env.CUSTOMER_LINE_NOTIFY;
   delete process.env.PREORDER_REMINDER_DAYS_BEFORE;
   vi.unstubAllGlobals();
 });

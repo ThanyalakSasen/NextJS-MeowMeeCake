@@ -41,6 +41,7 @@ export async function sendContactMessage(userId: string, body: { topic?: unknown
     message: `${user.user_fullname || "ลูกค้า"}${contact ? ` (${contact})` : ""}: ${message}`,
     module: "customer",
     type: "info",
+    line: false, // แจ้งเตือนเกี่ยวกับลูกค้าไม่ส่งเข้า LINE (ผู้ใช้ขอ 2026-11-03) — ดูที่หน้าแจ้งเตือนหลังร้าน
   });
   return { sent: true };
 }

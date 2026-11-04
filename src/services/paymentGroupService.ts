@@ -32,6 +32,12 @@ export async function assertGroupOwner(groupId: string, userId: string): Promise
   await loadGroup(groupId, userId);
 }
 
+/** บิลในกลุ่ม (ของผู้ใช้นี้ — ไม่ใช่ = 404) — route "ชำระเงินภายหลัง" ใช้แจ้งออเดอร์ใหม่ทุกบิล */
+export async function groupMembers(groupId: string, userId: string): Promise<Array<{ kind: "order" | "preorder"; id: string }>> {
+  const group = await loadGroup(groupId, userId);
+  return group.members.map((m) => ({ kind: m.kind, id: String(m.ref_id) }));
+}
+
 async function loadGroup(groupId: string, userId: string): Promise<{ _id: unknown; members: Member[] }> {
   await dbConnect();
   if (!isObjectId(groupId)) throw notFound("ไม่พบรายการชำระรวม");
