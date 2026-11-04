@@ -92,7 +92,11 @@ export const customerMessages = {
     ].join("\n");
   },
   /** ร้านแก้รายการสินค้าในพรีออเดอร์ (ตกลงกับลูกค้าทางโทรศัพท์) */
-  preorderItemsChanged(docNo: string, items: string, total: number, refund: number, extraDue = 0): string {
+  preorderItemsChanged(docNo: string, items: string, total: number, refund: number, extraDue = 0, dueAt?: Date | null): string {
+    // เวลาที่ต้องชำระให้ทัน (เวลาไทย) — ลูกค้าเห็นชัดกว่า "ภายใน 30 นาที" ตอนเปิดอ่านทีหลัง
+    const by = dueAt
+      ? ` (ก่อน ${dueAt.toLocaleTimeString("th-TH", { timeZone: "Asia/Bangkok", hour: "2-digit", minute: "2-digit" })} น.)`
+      : "";
     const money = (n: number) => `${toBaht(n).toLocaleString("th-TH")} บาท`;
     return [
       header("preorder", docNo),
@@ -100,7 +104,12 @@ export const customerMessages = {
       `รายการใหม่: ${items}`,
       `ยอดใหม่: ${money(total)}`,
       ...(refund > 0 ? [`ร้านจะโอนคืนส่วนต่าง ${money(refund)}`] : []),
-      ...(extraDue > 0 ? [`กรุณาชำระเงินเพิ่ม ${money(extraDue)} และแนบสลิปที่หน้าคำสั่งซื้อ`] : []),
+      ...(extraDue > 0
+        ? [
+            `กรุณาชำระเงินเพิ่ม ${money(extraDue)} และแนบสลิปที่หน้าคำสั่งซื้อภายใน 30 นาที${by}`,
+            "⚠️ หากไม่ชำระตามกำหนด ระบบจะเปลี่ยนกลับเป็นสินค้าแบบเดิมโดยอัตโนมัติ",
+          ]
+        : []),
     ].join("\n");
   },
   /** ผลตรวจสลิปยอดชำระเพิ่ม (preorderExtraPaymentService) */
@@ -280,6 +289,10 @@ export const customerWeb = {
     if (status === "delivered") return web(kind, id, docNo, "🏠 สินค้าจัดส่งถึงแล้ว", "success");
     if (status === "failed") return web(kind, id, docNo, "⚠️ การจัดส่งมีปัญหา ร้านจะติดต่อกลับโดยเร็ว", "warning");
     return null;
+  },
+  /** ไม่ชำระส่วนต่างภายในเวลา → ระบบคืนรายการเดิม (preorderExtraRevertService) */
+  extraReverted(id: unknown, docNo: string, message: string): WebNotice {
+    return web("preorder", id, docNo, message, "warning");
   },
   /** ร้านเปลี่ยนสินค้าแล้วยอดเกินที่ชำระ — หัวข้อบอกยอดที่ต้องจ่าย (เห็นทันทีบนแจ้งเตือนเครื่อง) · กดแล้วเลื่อนไปส่วนชำระเงิน */
   extraPaymentDue(notice: WebNotice, amount: number): WebNotice {

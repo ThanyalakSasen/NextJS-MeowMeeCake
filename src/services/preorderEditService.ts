@@ -26,6 +26,7 @@ import preorderRoundItemModel from "../models/preorderRoundItemModel";
 import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 import { shippingDiscountOf } from "./preorderItemCancelService";
 import { splitPaidDelta, syncExtraPayment } from "./preorderExtraPaymentService";
+import { buildRevertSnapshot, EXTRA_PAYMENT_WINDOW_MS } from "./preorderExtraRevertService";
 import * as preorderRoundService from "./preorderRoundService";
 import * as recipeService from "./recipeService";
 import { assertCustomizationIds, getCustomizations, resolveCustomization, type CustomizationInput } from "./productCustomizationService";
@@ -279,7 +280,7 @@ export async function previewPreorderEdit(id: string, input: EditPreorderItemsIn
     lines,
     quota_errors,
     below_min: plan.belowMin,
-    customer_message: customerMessages.preorderItemsChanged(p.preorder_no, linesText(after), amounts.total_amount, plan.refund, Math.max(0, extraDueAfter)),
+    customer_message: customerMessages.preorderItemsChanged(p.preorder_no, linesText(after), amounts.total_amount, plan.refund, Math.max(0, extraDueAfter), new Date(Date.now() + EXTRA_PAYMENT_WINDOW_MS)),
   };
 }
 
@@ -301,7 +302,10 @@ export async function editPreorderItems(id: string, input: EditPreorderItemsInpu
       saga.onRollback(`releaseQty:${rid}`, () => preorderRoundService.releaseQty(rid, n));
     }
 
-    const before = { subtotal: p.subtotal, discount_amount: p.discount_amount, total_amount: p.total_amount, refund_due_note: p.refund_due_note ?? null };
+    const before = { subtotal: p.subtotal, discount_amount: p.discount_amount, total_amount: p.total_amount, refund_due_note: p.refund_due_note ?? null, extra_revert: p.extra_revert ?? null };
+    // ชำระแล้วและยังมียอดเพิ่มค้าง = เก็บรายการ/ยอดก่อนเปลี่ยน + ให้เวลาชำระ 30 นาที (ไม่จ่าย = คืนรายการเดิม)
+    const extraDueAfter = round2(Number(p.extra_due_amount ?? 0) + extraInc);
+    const revertSet = paid ? { extra_revert: extraDueAfter > 0.005 ? buildRevertSnapshot(p, current) : null } : {};
     const removedLabels = current
       .filter((l) => !keep.has(String(l._id)))
       .map((l) => lineLabel(l.product_snapshot?.product_name_th ?? "", Number(l.quantity)));
@@ -320,6 +324,7 @@ export async function editPreorderItems(id: string, input: EditPreorderItemsInpu
           discount_amount: amounts.discount_amount,
           total_amount: amounts.total_amount,
           ...noteSet,
+          ...revertSet,
         },
         $inc: { refund_due_amount: refundInc, extra_due_amount: extraInc },
       },
@@ -369,7 +374,7 @@ export async function editPreorderItems(id: string, input: EditPreorderItemsInpu
     );
   }
 
-  const fresh = await preorderModel.findById(p._id).select("extra_due_amount").lean<any>();
+  const fresh = await preorderModel.findById(p._id).select("extra_due_amount extra_revert.expires_at").lean<any>();
   const extraDue = round2(Number(fresh?.extra_due_amount ?? 0));
   const lines = await preorderItemModel.find({ preorder_id: p._id, deleted_at: null }).lean<any[]>();
   const text = customerMessages.preorderItemsChanged(
@@ -377,7 +382,8 @@ export async function editPreorderItems(id: string, input: EditPreorderItemsInpu
     lines.map((l) => lineLabel(l.product_snapshot?.product_name_th ?? "", Number(l.quantity))).join(", "),
     amounts.total_amount,
     refund,
-    extraDue
+    extraDue,
+    fresh?.extra_revert?.expires_at ?? null
   );
   const notice = customerWeb.fromLineText("preorder", p._id, p.preorder_no, text, "warning");
   notifyCustomerLater(p.user_id, text, extraDue > 0 && notice ? customerWeb.extraPaymentDue(notice, extraDue) : notice);

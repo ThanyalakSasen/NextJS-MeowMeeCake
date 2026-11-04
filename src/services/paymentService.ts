@@ -522,6 +522,9 @@ export async function expireIfDue(kind: PaymentPageKind, id: string, userId: str
     if (own) {
       const { cancelUnpaidPreorders } = await import("./preorderRoundLifecycleService");
       await cancelUnpaidPreorders({ preorderId: id });
+      // เลยกำหนดชำระส่วนต่าง (ร้านเปลี่ยนสินค้า) → คืนรายการเดิมทันที
+      const { revertExpiredExtraEdits } = await import("./preorderExtraRevertService");
+      await revertExpiredExtraEdits({ preorderId: id });
     }
   }
 }
@@ -543,7 +546,7 @@ export async function getPaymentPage(
   const numberField = kind === "order" ? "order_no" : "preorder_no";
   const doc = await model
     .findOne({ _id: id, user_id: userId, deleted_at: null })
-    .select(`${numberField} order_status payment_status total_amount payment_id payment_due_at cancelled_reason points_redeemed user_coupon_id${kind === "preorder" ? " extra_due_amount" : ""}`)
+    .select(`${numberField} order_status payment_status total_amount payment_id payment_due_at cancelled_reason points_redeemed user_coupon_id${kind === "preorder" ? " extra_due_amount extra_revert.expires_at" : ""}`)
     .lean();
   if (!doc) throw notFound("ไม่พบคำสั่งซื้อ");
 
@@ -585,7 +588,8 @@ export async function getPaymentPage(
     payment_record_status: payment?.status ?? null,
     slip_url: payment?.slip_image_url ?? null,
     // หมดเขตชำระ + เวลา server — หน้าเว็บนับถอยหลังได้แม่นแม้นาฬิกาเครื่องลูกค้าเพี้ยน
-    payment_due_at: extraDue > 0 ? null : (doc.payment_due_at ?? null),
+    // ยอดเพิ่ม = กำหนดชำระส่วนต่าง 30 นาที (เลยแล้วระบบคืนรายการเดิม — preorderExtraRevertService)
+    payment_due_at: extraDue > 0 ? (doc.extra_revert?.expires_at ?? null) : (doc.payment_due_at ?? null),
     server_time: new Date(),
     // สั่งพร้อมบิลอื่น (ตะกร้ารวม) — หน้าเว็บแสดงลิงก์ไปชำระรวม /customer/account/payment-group/{group_id}
     // ยอดที่ต้องชำระเพิ่ม (> 0 = amount คือยอดเพิ่ม ไม่ใช่ยอดทั้งใบ)

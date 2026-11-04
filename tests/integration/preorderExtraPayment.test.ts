@@ -10,6 +10,9 @@ import { editPreorderItems, previewPreorderEdit } from "@/services/preorderEditS
 import { createPayment, getPaymentPage, submitSlip, verifyPayment } from "@/services/paymentService";
 import { cancelPreorder } from "@/services/preorderService";
 import { makePreorder, makeProduct, makeUser } from "./helpers";
+import { revertExpiredExtraEdits } from "@/services/preorderExtraRevertService";
+import customerNotificationModel from "@/models/customerNotificationModel";
+import { flushBackground } from "@/lib/backgroundTasks";
 
 const DAY = 24 * 60 * 60 * 1000;
 const SLIP = "/api/files/slips/extra.jpg";
@@ -72,7 +75,8 @@ describe("preorder extra payment", () => {
     expect(extra).toMatchObject({ amount: 100, status: "pending" });
 
     const page = await getPaymentPage("preorder", String(ctx.p._id), String(ctx.customer._id));
-    expect(page).toMatchObject({ can_pay: true, amount: 100, extra_due: 100, payment_id: String(extra._id), payment_due_at: null, group_id: null });
+    expect(page).toMatchObject({ can_pay: true, amount: 100, extra_due: 100, payment_id: String(extra._id), group_id: null });
+    expect(page.payment_due_at).toBeTruthy(); // กำหนดชำระส่วนต่าง 30 นาที
 
     await submitSlip(String(extra._id), { slip_image_url: SLIP }, { notify: false });
     await verifyPayment(String(extra._id), { verified_by: String(ctx.admin._id), approved: true });
@@ -182,6 +186,86 @@ describe("preorder extra payment", () => {
     const pays = await paymentModel.find({ preorder_id: ctx.p._id, deleted_at: null }).lean<any[]>();
     expect(pays.map((x) => x.status).sort()).toEqual(["refunded", "refunded"]);
     expect((await preorderModel.findById(ctx.p._id).lean<any>()).payment_status).toBe("refunded");
+  });
+});
+
+describe("กำหนดชำระส่วนต่าง 30 นาที", () => {
+  const later = () => new Date(Date.now() + 31 * 60 * 1000);
+
+  it("ไม่ชำระภายใน 30 นาที → คืนรายการ ยอด โควตาเดิม · ลบใบชำระเพิ่ม · แจ้งลูกค้า", async () => {
+    const ctx = await setup();
+    await addBread(ctx);
+    const p1 = await preorderModel.findById(ctx.p._id).lean<any>();
+    expect(p1.extra_revert.expires_at.getTime() - Date.now()).toBeGreaterThan(29 * 60 * 1000);
+    const page = await getPaymentPage("preorder", String(ctx.p._id), String(ctx.customer._id));
+    expect(new Date(page.payment_due_at as any).getTime()).toBe(p1.extra_revert.expires_at.getTime());
+
+    expect(await revertExpiredExtraEdits()).toEqual({ reverted: 0 }); // ยังไม่หมดเวลา
+    await flushBackground();
+    const changed = await customerNotificationModel.findOne({ user_id: ctx.customer._id, message: /กรุณาชำระเงินเพิ่ม/ }).lean<any>();
+    expect(changed?.message).toMatch(/ภายใน 30 นาที \(ก่อน \d{2}:\d{2} น\.\)/);
+    expect(changed?.message).toContain("ระบบจะเปลี่ยนกลับเป็นสินค้าแบบเดิม");
+    expect(await revertExpiredExtraEdits({ now: later() })).toEqual({ reverted: 1 });
+    await flushBackground();
+
+    expect(await preorderModel.findById(ctx.p._id).lean<any>()).toMatchObject({
+      subtotal: 300, discount_amount: 30, total_amount: 320, extra_due_amount: 0, extra_revert: null, payment_status: "paid",
+    });
+    const lines = await preorderItemModel.find({ preorder_id: ctx.p._id, deleted_at: null }).lean<any[]>();
+    expect(lines.map((l) => [String(l._id), l.quantity])).toEqual([[String(ctx.line._id), 2]]);
+    expect((await preorderRoundItemModel.findById(ctx.breadItem._id).lean<any>()).current_qty).toBe(0);
+    expect(await extraPayments(ctx.p._id)).toHaveLength(0);
+    const notice = await customerNotificationModel.findOne({ user_id: ctx.customer._id, message: /คืนรายการเดิม/ }).lean<any>();
+    expect(notice?.message).toContain("เค้กเดิม ×2");
+  });
+
+  it("เปลี่ยนแทนรายการเดิมแล้วไม่จ่าย → รายการเดิมกลับมา + จองโควตาคืน", async () => {
+    const ctx = await setup();
+    await editPreorderItems(String(ctx.p._id), { keep: [], add: [{ round_item_id: String(ctx.breadItem._id), quantity: 4 }], allow_extra_payment: true });
+    expect((await preorderRoundItemModel.findOne({ product_id: ctx.line.product_id }).lean<any>()).current_qty).toBe(0);
+    await revertExpiredExtraEdits({ now: later() });
+    const lines = await preorderItemModel.find({ preorder_id: ctx.p._id, deleted_at: null }).lean<any[]>();
+    expect(lines.map((l) => l.product_snapshot.product_name_th)).toEqual(["เค้กเดิม"]);
+    expect((await preorderRoundItemModel.findOne({ product_id: ctx.line.product_id }).lean<any>()).current_qty).toBe(2);
+    expect((await preorderRoundItemModel.findById(ctx.breadItem._id).lean<any>()).current_qty).toBe(0);
+    expect(await preorderModel.findById(ctx.p._id).lean<any>()).toMatchObject({ total_amount: 320, extra_due_amount: 0 });
+  });
+
+  it("สลิปรอตรวจตอนหมดเวลา = ไม่คืน · ปฏิเสธทีหลัง = คืนทันที", async () => {
+    const ctx = await setup();
+    await addBread(ctx);
+    const [extra] = await extraPayments(ctx.p._id);
+    await submitSlip(String(extra._id), { slip_image_url: SLIP }, { notify: false });
+    await preorderModel.updateOne({ _id: ctx.p._id }, { $set: { "extra_revert.expires_at": new Date(Date.now() - 1000) } });
+    expect(await revertExpiredExtraEdits()).toEqual({ reverted: 0 });
+    await verifyPayment(String(extra._id), { verified_by: String(ctx.admin._id), approved: false });
+    expect(await preorderModel.findById(ctx.p._id).lean<any>()).toMatchObject({ total_amount: 320, extra_due_amount: 0, extra_revert: null });
+  });
+
+  it("ชำระส่วนต่างแล้ว = ล้างกำหนด ไม่คืน", async () => {
+    const ctx = await setup();
+    await addBread(ctx);
+    const [extra] = await extraPayments(ctx.p._id);
+    await submitSlip(String(extra._id), { slip_image_url: SLIP }, { notify: false });
+    await verifyPayment(String(extra._id), { verified_by: String(ctx.admin._id), approved: true });
+    expect((await preorderModel.findById(ctx.p._id).lean<any>()).extra_revert).toBeNull();
+    expect(await revertExpiredExtraEdits({ now: later() })).toEqual({ reverted: 0 });
+    expect(await preorderModel.findById(ctx.p._id).lean<any>()).toMatchObject({ total_amount: 420 });
+  });
+
+  it("แก้ซ้ำระหว่างรอ = คืนไปสถานะก่อนแก้ครั้งแรก", async () => {
+    const ctx = await setup();
+    await addBread(ctx, 1);
+    const [bread] = await preorderItemModel.find({ preorder_id: ctx.p._id, round_item_id: ctx.breadItem._id }).lean<any[]>();
+    await editPreorderItems(String(ctx.p._id), {
+      keep: [{ item_id: String(ctx.line._id), quantity: 2 }, { item_id: String(bread._id), quantity: 3 }],
+      add: [],
+      allow_extra_payment: true,
+    });
+    await revertExpiredExtraEdits({ now: later() });
+    expect(await preorderModel.findById(ctx.p._id).lean<any>()).toMatchObject({ total_amount: 320, extra_due_amount: 0 });
+    expect(await preorderItemModel.countDocuments({ preorder_id: ctx.p._id, deleted_at: null })).toBe(1);
+    expect((await preorderRoundItemModel.findById(ctx.breadItem._id).lean<any>()).current_qty).toBe(0);
   });
 });
 

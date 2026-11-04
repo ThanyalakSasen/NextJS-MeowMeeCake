@@ -12,6 +12,7 @@ import { log } from "../lib/logger";
 import paymentModel from "../models/paymentModel";
 import preorderModel from "../models/preorderModel";
 import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
+import { clearRevertIfSettled, revertExpiredExtraEdits } from "./preorderExtraRevertService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -72,6 +73,10 @@ export async function onExtraPaymentStatus(payment: any, status: string): Promis
     await preorderModel.updateOne({ _id: payment.preorder_id }, { $inc: { extra_due_amount: -amount } });
     // ปัดเศษทศนิยมที่ค้างจาก $inc + กันติดลบ (ยอดสลิปตรงกับยอดค้างเสมอ — ใบเดียวต่อครั้ง)
     await preorderModel.updateOne({ _id: payment.preorder_id, extra_due_amount: { $lt: 0.005 } }, { $set: { extra_due_amount: 0 } });
+    await clearRevertIfSettled(payment.preorder_id);
+  } else {
+    // สลิปถูกปฏิเสธหลังหมดเวลาชำระส่วนต่าง = คืนรายการเดิมทันที (ยังไม่หมดเวลา = แนบใหม่ได้)
+    await revertExpiredExtraEdits({ preorderId: String(payment.preorder_id) });
   }
   const p = await preorderModel.findById(payment.preorder_id).lean<any>();
   if (!p) {

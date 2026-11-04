@@ -115,6 +115,8 @@ async function cancelLinesFromPreorder(p: any, target: any[], reason: string): P
         discount_amount: next.discount_amount,
         total_amount: next.total_amount,
         ...(refund > 0 ? { refund_due_note: p.refund_due_note ? `${p.refund_due_note}, ${items}` : items } : {}),
+        // ร้านยกเลิกบางรายการระหว่างรอชำระส่วนต่าง = รายการเปลี่ยนจาก snapshot แล้ว — ไม่คืนรายการเดิมอัตโนมัติ (ร้านตามเอง)
+        extra_revert: null,
       },
       $inc: { refund_due_amount: refund, extra_due_amount: extraInc },
     },
