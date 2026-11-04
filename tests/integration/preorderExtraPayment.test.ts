@@ -259,6 +259,7 @@ describe("กำหนดชำระส่วนต่าง 30 นาที", 
     const [bread] = await preorderItemModel.find({ preorder_id: ctx.p._id, round_item_id: ctx.breadItem._id }).lean<any[]>();
     await editPreorderItems(String(ctx.p._id), {
       keep: [{ item_id: String(ctx.line._id), quantity: 2 }, { item_id: String(bread._id), quantity: 3 }],
+      add: [],
       allow_extra_payment: true,
     });
     await revertExpiredExtraEdits({ now: later() });
