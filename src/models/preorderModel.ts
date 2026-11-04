@@ -78,6 +78,9 @@ const preorderSchema = new mongoose.Schema(
     refund_due_amount: { type: Number, default: 0, min: 0 },
     refund_due_note: { type: String, default: null },
     refund_done_amount: { type: Number, default: 0, min: 0 },
+    // ยอดที่ลูกค้าต้องชำระเพิ่ม (ร้านเปลี่ยนสินค้าในใบที่ชำระแล้วจนยอดเกิน — preorderExtraPaymentService)
+    // total_amount รวมยอดนี้แล้ว · payment_status คง "paid" · ชำระผ่าน payment ใบ is_extra
+    extra_due_amount: { type: Number, default: 0, min: 0 },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }

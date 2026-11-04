@@ -545,7 +545,7 @@ export async function createPreorder(
 
 // ── READ ─────────────────────────────────────────────────────
 // เงินเก็บเป็นบาท ทศนิยม 2 ตำแหน่ง (docs/money-units.md) — ปัดก่อนส่งออก (เหมือน orderService)
-const PREORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount", "refund_due_amount", "refund_done_amount"] as const;
+const PREORDER_MONEY_FIELDS = ["subtotal", "discount_amount", "delivery_fee", "total_amount", "refund_due_amount", "refund_done_amount", "extra_due_amount"] as const;
 // cost_per_unit (บาท) — เหตุผลเดียวกับ orderService (ORDER_ITEM_MONEY_FIELDS)
 const PREORDER_ITEM_MONEY_FIELDS = ["unit_price", "total_price", "cost_per_unit"] as const;
 

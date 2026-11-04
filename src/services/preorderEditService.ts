@@ -4,8 +4,9 @@
 // updatePreorderAddress: แก้ชื่อ/เบอร์ผู้รับ + ที่อยู่จัดส่ง (เฉพาะแบบจัดส่ง ยังไม่ส่งของ) — ค่าส่งคงเดิม
 // editPreorderItems: ร้านโทรคุยกับลูกค้าแล้วเปลี่ยนสินค้าในใบ (ลด/เพิ่มจำนวน · เอาออก · เพิ่มสินค้าอื่นในรอบเดียวกัน)
 //   - เฉพาะรอบที่ตั้งเวลาไว้/เปิดรับอยู่ (ยังไม่ออกใบสั่งผลิต — roundDemand นับตอนปิดรอบ)
-//   - ชำระแล้ว: ยอดสินค้าใหม่ต้องไม่เกินยอดเดิม · ถูกลง = ส่วนต่าง (หักส่วนลดตามสัดส่วน) เข้า refund_due_amount
-//     ใช้ขั้นตอน "รอโอนคืน" เดิม (markRefundDone) · ยังไม่ชำระ: เปลี่ยนได้ทุกยอด QR ออกยอดใหม่
+//   - ชำระแล้ว: ถูกลง = ส่วนต่าง (หักส่วนลดตามสัดส่วน) เข้า refund_due_amount (ขั้นตอน "รอโอนคืน" เดิม — markRefundDone)
+//     แพงขึ้น = ร้านต้องยืนยัน (allow_extra_payment) → ส่วนต่างเข้า extra_due_amount + payment ยอดเพิ่มให้ลูกค้าโอน
+//     (preorderExtraPaymentService) · ยังไม่ชำระ: เปลี่ยนได้ทุกยอด QR ออกยอดใหม่
 //   - ส่วนลดเป็นยอดคงที่ ไม่ตรวจขั้นต่ำของโปรซ้ำ (เหมือน preorderItemCancellation) · ค่าส่งคงเดิม
 //   - รายการที่คงไว้ใช้ราคาเดิมตอนสั่ง · รายการใหม่ใช้ราคาปัจจุบันของรอบ + ตัวเลือก
 //   - ไม่ตรวจเพดานต่อคนต่อรอบ (ร้านเป็นคนตัดสินใจ) แต่ตรวจขั้นต่ำต่อรายการ + โควตาของรอบเสมอ
@@ -21,8 +22,10 @@ import paymentModel from "../models/paymentModel";
 import preorderItemModel from "../models/preorderItemModel";
 import preorderModel from "../models/preorderModel";
 import preorderRoundModel from "../models/preorderRoundModel";
+import preorderRoundItemModel from "../models/preorderRoundItemModel";
 import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 import { shippingDiscountOf } from "./preorderItemCancelService";
+import { splitPaidDelta, syncExtraPayment } from "./preorderExtraPaymentService";
 import * as preorderRoundService from "./preorderRoundService";
 import * as recipeService from "./recipeService";
 import { assertCustomizationIds, getCustomizations, resolveCustomization, type CustomizationInput } from "./productCustomizationService";
@@ -40,12 +43,18 @@ export interface EditPreorderItemsInput {
   /** สินค้าที่เพิ่ม (ในรอบเดียวกัน) */
   add: Array<CustomizationInput & { round_item_id: string; quantity: number; special_request?: string | null }>;
   reason?: string | null;
+  /** ชำระแล้วแต่ยอดใหม่เกิน — ร้านยืนยันแล้วว่าให้ลูกค้าชำระเพิ่ม (ไม่ส่ง = ปฏิเสธ 422 EXTRA_PAYMENT_REQUIRED) */
+  allow_extra_payment?: boolean;
 }
 
 export interface EditPreorderItemsResult {
   preorder: any;
   /** ยอดที่เพิ่มเข้า "รอโอนคืน" รอบนี้ (ชำระแล้วและยอดลดลง) */
   refund: number;
+  /** ยอดที่เพิ่มเข้า "รอชำระเพิ่ม" รอบนี้ (ชำระแล้วและยอดเกิน) */
+  extra: number;
+  /** ยอดรอชำระเพิ่มทั้งหมดหลังแก้ */
+  extra_due: number;
 }
 
 const lineLabel = (name: string, qty: number) => `${name} × ${qty}`;
@@ -91,7 +100,8 @@ async function assertNoPaymentBlocker(p: any) {
   if (waiting) throw conflict("ตรวจสลิปของคำสั่งซื้อนี้ก่อน แล้วค่อยแก้ไขรายการสินค้า");
 }
 
-export async function editPreorderItems(id: string, input: EditPreorderItemsInput): Promise<EditPreorderItemsResult> {
+/** คำนวณผลการเปลี่ยนสินค้า (ยังไม่เขียนอะไร) — ใช้ทั้งหน้า "ตรวจสอบยอด" (previewPreorderEdit) และตอนบันทึกจริง */
+async function planEdit(id: string, input: EditPreorderItemsInput) {
   await dbConnect();
   assertObjectId(id);
   const p = await preorderModel.findOne({ _id: id, deleted_at: null }).lean<any>();
@@ -166,24 +176,117 @@ export async function editPreorderItems(id: string, input: EditPreorderItemsInpu
   if (!changed) throw badRequest("ไม่มีรายการที่เปลี่ยนแปลง");
 
   const paid = p.payment_status === "paid";
-  if (paid && newSubtotal > oldSubtotal) {
-    throw unprocessable(
-      `ยอดสินค้าใหม่ ${newSubtotal.toLocaleString("th-TH")} บาท เกินยอดที่ลูกค้าชำระไว้ (${oldSubtotal.toLocaleString("th-TH")} บาท) — เลือกสินค้าที่ราคาไม่เกินยอดเดิม`
-    );
-  }
   let amounts = { subtotal: newSubtotal, discount_amount: Number(p.discount_amount), total_amount: Number(p.total_amount), refund: 0 };
   if (newSubtotal < oldSubtotal) {
     amounts = computeItemCancellation(p, round2(oldSubtotal - newSubtotal), await shippingDiscountOf(p));
   } else if (newSubtotal > oldSubtotal) {
     amounts.total_amount = round2(Math.max(0, newSubtotal - Number(p.discount_amount) + Number(p.delivery_fee ?? 0)));
   }
-  const refund = paid ? amounts.refund : 0;
+  // ชำระแล้ว: ยอดลด → หักรอชำระเพิ่มก่อน เหลือเป็นรอโอนคืน · ยอดเพิ่ม → หักรอโอนคืนก่อน เหลือเป็นรอชำระเพิ่ม
+  const { refundInc, extraInc } = paid
+    ? splitPaidDelta(p, round2(amounts.total_amount - Number(p.total_amount)))
+    : { refundInc: 0, extraInc: 0 };
+  const refund = Math.max(0, refundInc);
+  const extra = Math.max(0, extraInc);
+  const refundDueAfter = round2(Number(p.refund_due_amount ?? 0) + refundInc);
 
   // ── โควตาของรอบต่อ round_item (เพิ่ม = จองก่อน · ลด = คืนหลังสำเร็จ) ──
   const delta = new Map<string, number>();
   const bump = (rid: unknown, n: number) => delta.set(String(rid), (delta.get(String(rid)) ?? 0) + n);
   for (const l of current) bump(l.round_item_id, (keep.get(String(l._id)) ?? 0) - Number(l.quantity));
   for (const l of added) bump(l.round_item_id, l.quantity);
+
+  return { p, current, keep, keptTotal, added, amounts, paid, refundInc, extraInc, refund, extra, refundDueAfter, delta, newSubtotal, oldSubtotal };
+}
+
+const linesText = (lines: Array<{ name: string; quantity: number }>) => lines.map((l) => lineLabel(l.name, l.quantity)).join(", ");
+
+export interface PreorderEditPreview {
+  before: { subtotal: number; discount_amount: number; delivery_fee: number; total_amount: number };
+  after: { subtotal: number; discount_amount: number; delivery_fee: number; total_amount: number };
+  paid: boolean;
+  /** ยอดที่ลูกค้าโอนมาแล้ว (ใบที่ชำระแล้ว = ยอดสุทธิเดิม − รอชำระเพิ่มที่ค้าง) · ยังไม่ชำระ = 0 */
+  paid_amount: number;
+  /** ผลของการเปลี่ยน: ไม่มีส่วนต่าง / ร้านโอนคืน / ลูกค้าชำระเพิ่ม / ยังไม่ชำระ (QR ยอดใหม่) */
+  outcome: "none" | "refund" | "extra" | "unpaid";
+  refund: number;
+  extra: number;
+  refund_due_after: number;
+  extra_due_after: number;
+  /** รายการ เดิม → ใหม่ ต่อบรรทัด */
+  lines: Array<{ name: string; extras: string[]; unit_price: number; old_qty: number; new_qty: number; status: "kept" | "changed" | "removed" | "added" }>;
+  /** สินค้าที่โควตาในรอบไม่พอ (บันทึกจะไม่ผ่าน) */
+  quota_errors: string[];
+  /** ข้อความที่จะส่งถึงลูกค้า (LINE / กระดิ่ง) */
+  customer_message: string;
+}
+
+const extrasOf = (l: any): string[] => [
+  ...(l.product_snapshot?.variant_name ? [l.product_snapshot.variant_name] : []),
+  ...(l.selected_options ?? []).map((o: any) => (o.text_value ? `${o.option_name}: ${o.text_value}` : o.option_name)),
+];
+
+/** POST /admin/preorders/:id/items/preview — ยอดจริงจาก backend ก่อนกดยืนยัน (กติกาเดียวกับ editPreorderItems ทุกอย่าง) */
+export async function previewPreorderEdit(id: string, input: EditPreorderItemsInput): Promise<PreorderEditPreview> {
+  const plan = await planEdit(id, input);
+  const { p, current, keep, added, amounts, paid } = plan;
+
+  const quota_errors: string[] = [];
+  const need = [...plan.delta].filter(([, n]) => n > 0);
+  if (need.length) {
+    const items = await preorderRoundItemModel
+      .find({ _id: { $in: need.map(([rid]) => rid) } })
+      .populate("product_id", "product_name_th")
+      .lean<any[]>();
+    for (const [rid, n] of need) {
+      const it = items.find((x) => String(x._id) === rid);
+      const left = it ? Math.max(0, Number(it.max_qty_total ?? 0) - Number(it.current_qty ?? 0)) : 0;
+      if (!it || !it.is_active || n > left) quota_errors.push(`${it?.product_id?.product_name_th ?? "สินค้า"} เหลือในรอบ ${left} ชิ้น (ต้องการเพิ่ม ${n})`);
+    }
+  }
+
+  const lines: PreorderEditPreview["lines"] = [
+    ...current.map((l) => {
+      const q = keep.get(String(l._id)) ?? 0;
+      return {
+        name: l.product_snapshot?.product_name_th ?? "",
+        extras: extrasOf(l),
+        unit_price: Number(l.unit_price),
+        old_qty: Number(l.quantity),
+        new_qty: q,
+        status: (q === 0 ? "removed" : q === Number(l.quantity) ? "kept" : "changed") as "kept" | "changed" | "removed",
+      };
+    }),
+    ...added.map((l) => ({ name: l.product_snapshot.product_name_th, extras: extrasOf(l), unit_price: l.unit_price, old_qty: 0, new_qty: l.quantity, status: "added" as const })),
+  ];
+
+  const extraDueAfter = round2(Number(p.extra_due_amount ?? 0) + plan.extraInc);
+  const after = lines.filter((l) => l.new_qty > 0).map((l) => ({ name: l.name, quantity: l.new_qty }));
+  return {
+    before: { subtotal: Number(p.subtotal), discount_amount: Number(p.discount_amount ?? 0), delivery_fee: Number(p.delivery_fee ?? 0), total_amount: Number(p.total_amount) },
+    after: { subtotal: amounts.subtotal, discount_amount: amounts.discount_amount, delivery_fee: Number(p.delivery_fee ?? 0), total_amount: amounts.total_amount },
+    paid,
+    paid_amount: paid ? round2(Number(p.total_amount) - Number(p.extra_due_amount ?? 0)) : 0,
+    outcome: !paid ? "unpaid" : plan.extra > 0 ? "extra" : plan.refund > 0 ? "refund" : "none",
+    refund: plan.refund,
+    extra: plan.extra,
+    refund_due_after: Math.max(0, plan.refundDueAfter),
+    extra_due_after: Math.max(0, extraDueAfter),
+    lines,
+    quota_errors,
+    customer_message: customerMessages.preorderItemsChanged(p.preorder_no, linesText(after), amounts.total_amount, plan.refund, Math.max(0, extraDueAfter)),
+  };
+}
+
+export async function editPreorderItems(id: string, input: EditPreorderItemsInput): Promise<EditPreorderItemsResult> {
+  const { p, current, keep, keptTotal, added, amounts, paid, refundInc, extraInc, refund, extra, refundDueAfter, delta, newSubtotal, oldSubtotal } =
+    await planEdit(id, input);
+  if (paid && extra > 0 && !input.allow_extra_payment) {
+    throw unprocessable(
+      `ยอดสินค้าใหม่ ${newSubtotal.toLocaleString("th-TH")} บาท เกินยอดที่ลูกค้าชำระไว้ (${oldSubtotal.toLocaleString("th-TH")} บาท) — ยืนยันให้ลูกค้าชำระเพิ่มก่อน`,
+      { code: "EXTRA_PAYMENT_REQUIRED" }
+    );
+  }
 
   const saga = new Saga();
   try {
@@ -198,6 +301,11 @@ export async function editPreorderItems(id: string, input: EditPreorderItemsInpu
       .filter((l) => !keep.has(String(l._id)))
       .map((l) => lineLabel(l.product_snapshot?.product_name_th ?? "", Number(l.quantity)));
     const note = refund > 0 ? `เปลี่ยนสินค้า${removedLabels.length ? ` (${removedLabels.join(", ")})` : ""}` : null;
+    const noteSet = note
+      ? { refund_due_note: p.refund_due_note ? `${p.refund_due_note}, ${note}` : note }
+      : refundInc < 0 && refundDueAfter <= 0
+        ? { refund_due_note: null } // ยอดเพิ่มหักรอโอนคืนจนหมด
+        : {};
     // subtotal เป็นเงื่อนไข — กันแก้ซ้อนกันสองหน้าจอ
     const claimed = await preorderModel.findOneAndUpdate(
       { _id: p._id, deleted_at: null, order_status: p.order_status, subtotal: p.subtotal },
@@ -206,15 +314,15 @@ export async function editPreorderItems(id: string, input: EditPreorderItemsInpu
           subtotal: amounts.subtotal,
           discount_amount: amounts.discount_amount,
           total_amount: amounts.total_amount,
-          ...(note ? { refund_due_note: p.refund_due_note ? `${p.refund_due_note}, ${note}` : note } : {}),
+          ...noteSet,
         },
-        $inc: { refund_due_amount: refund },
+        $inc: { refund_due_amount: refundInc, extra_due_amount: extraInc },
       },
       { returnDocument: "after" }
     );
     if (!claimed) throw conflict("คำสั่งซื้อเปลี่ยนไปแล้ว กรุณาโหลดใหม่แล้วลองอีกครั้ง");
     saga.onRollback("restore-preorder", () =>
-      preorderModel.updateOne({ _id: p._id }, { $set: before, $inc: { refund_due_amount: -refund } })
+      preorderModel.updateOne({ _id: p._id }, { $set: before, $inc: { refund_due_amount: -refundInc, extra_due_amount: -extraInc } })
     );
 
     // รายการเดิม: เอาออก = soft delete (เก็บประวัติ) · เปลี่ยนจำนวน = คิดยอดบรรทัดใหม่จากราคาเดิม
@@ -245,19 +353,28 @@ export async function editPreorderItems(id: string, input: EditPreorderItemsInpu
   }
 
   for (const [rid, n] of delta) if (n < 0) await preorderRoundService.releaseQty(rid, -n);
-  // ยังไม่จ่าย = QR ต้องออกยอดใหม่ · ใบที่จ่ายแล้วคง payment.amount ไว้ตามยอดที่รับจริง
-  await paymentModel.updateMany(
-    { preorder_id: p._id, status: "pending", deleted_at: null, slip_image_url: { $in: [null, ""] }, group_id: null },
-    { $set: { amount: amounts.total_amount } }
-  );
+  if (paid) {
+    // ชำระแล้ว: payment เดิมคงยอดที่รับจริง · ยอดรอชำระเพิ่มเปลี่ยน → ออก/แก้/ลบ payment ยอดเพิ่ม
+    if (extraInc !== 0) await syncExtraPayment(p._id);
+  } else {
+    // ยังไม่จ่าย = QR ต้องออกยอดใหม่
+    await paymentModel.updateMany(
+      { preorder_id: p._id, status: "pending", deleted_at: null, slip_image_url: { $in: [null, ""] }, group_id: null, is_extra: { $ne: true } },
+      { $set: { amount: amounts.total_amount } }
+    );
+  }
 
+  const fresh = await preorderModel.findById(p._id).select("extra_due_amount").lean<any>();
+  const extraDue = round2(Number(fresh?.extra_due_amount ?? 0));
   const lines = await preorderItemModel.find({ preorder_id: p._id, deleted_at: null }).lean<any[]>();
   const text = customerMessages.preorderItemsChanged(
     p.preorder_no,
     lines.map((l) => lineLabel(l.product_snapshot?.product_name_th ?? "", Number(l.quantity))).join(", "),
     amounts.total_amount,
-    refund
+    refund,
+    extraDue
   );
-  notifyCustomerLater(p.user_id, text, customerWeb.fromLineText("preorder", p._id, p.preorder_no, text, "warning"));
-  return { preorder: await getPreorderById(id), refund };
+  const notice = customerWeb.fromLineText("preorder", p._id, p.preorder_no, text, "warning");
+  notifyCustomerLater(p.user_id, text, extraDue > 0 && notice ? customerWeb.extraPaymentDue(notice, extraDue) : notice);
+  return { preorder: await getPreorderById(id), refund, extra, extra_due: extraDue };
 }

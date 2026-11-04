@@ -14,6 +14,9 @@ const paymentSchema = new mongoose.Schema(
     verified_at: { type: Date, default: null },
     // ชำระรวมหลายบิล (สลิปเดียว — paymentGroupService) · ยืนยัน/ปฏิเสธใบหนึ่ง = ทุกใบในกลุ่ม
     group_id: { type: mongoose.Schema.Types.ObjectId, ref: "PaymentGroups", default: null },
+    // ยอดชำระเพิ่มของพรีออเดอร์ที่ชำระแล้ว (ร้านเปลี่ยนสินค้าแล้วยอดเกิน — preorderExtraPaymentService)
+    // ยืนยัน/ปฏิเสธใบนี้ไม่เปลี่ยน payment_status ของพรีออเดอร์ · หัก preorder.extra_due_amount แทน
+    is_extra: { type: Boolean, default: false },
     deleted_at: { type: Date, default: null },
   },
   { timestamps: { createdAt: "created_at", updatedAt: "updated_at" } }

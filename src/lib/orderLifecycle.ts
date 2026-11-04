@@ -49,16 +49,20 @@ export async function registerAutoRefundOnCancel(opts: {
 }): Promise<void> {
   if (opts.currentPaymentStatus !== "paid") return;
 
-  const paidPayment = await paymentModel
-    .findOne({ ...opts.paymentFilter, status: "paid", deleted_at: null })
-    .lean<{ _id: unknown } | null>();
+  // พรีออเดอร์ที่ชำระยอดเพิ่มแล้ว (preorderExtraPaymentService) มี payment ที่ paid มากกว่าหนึ่งใบ — คืนทุกใบ
+  // ใบยอดเพิ่มคืนก่อน (ไม่แตะสถานะใบ) · ใบยอดหลักคืนท้ายสุด → payment_status = refunded
+  const paidPayments = await paymentModel
+    .find({ ...opts.paymentFilter, status: "paid", deleted_at: null })
+    .select("_id is_extra")
+    .lean<Array<{ _id: unknown; is_extra?: boolean }>>();
 
-  if (paidPayment && opts.cancelledBy) {
+  if (paidPayments.length && opts.cancelledBy) {
     const verifiedBy = opts.cancelledBy;
+    const ordered = [...paidPayments].sort((a, b) => Number(!!b.is_extra) - Number(!!a.is_extra));
     opts.saga.onRollback("auto-refund", async () => {
       // dynamic import — เลี่ยง circular import (paymentService → order/preorderService → lib ตัวนี้)
       const { refundPayment } = await import("../services/paymentService");
-      await refundPayment(String(paidPayment._id), { verified_by: verifiedBy });
+      for (const pay of ordered) await refundPayment(String(pay._id), { verified_by: verifiedBy });
     });
   } else {
     log.warn(`${opts.entityKind}.auto_refund_skipped`, {
