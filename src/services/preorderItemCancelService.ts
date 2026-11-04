@@ -26,6 +26,7 @@ import promotionModel from "../models/promotionModel";
 import userCouponModel from "../models/userCouponModel";
 import { customerMessages, customerWeb, notifyCustomerLater } from "./customerNotifyService";
 import { notificationService } from "./notificationService";
+import { splitPaidDelta, syncExtraPayment } from "./preorderExtraPaymentService";
 import * as preorderRoundService from "./preorderRoundService";
 import { cancelPreorder } from "./preorderService";
 
@@ -100,7 +101,9 @@ export async function shippingDiscountOf(p: any): Promise<number> {
 async function cancelLinesFromPreorder(p: any, target: any[], reason: string): Promise<number> {
   const removed = round2(target.reduce((s, l) => s + Number(l.total_price), 0));
   const next = computeItemCancellation(p, removed, await shippingDiscountOf(p));
-  const refund = p.payment_status === "paid" ? next.refund : 0;
+  // ชำระแล้ว: หักยอดรอชำระเพิ่ม (ถ้ามี) ก่อน เหลือเป็นรอโอนคืน
+  const { refundInc: refund, extraInc } =
+    p.payment_status === "paid" ? splitPaidDelta(p, -next.refund) : { refundInc: 0, extraInc: 0 };
   const items = target.map(lineLabel).join(", ");
 
   // subtotal เป็นเงื่อนไข — กันกดซ้ำพร้อมกันแล้วหักยอดสองรอบ
@@ -113,7 +116,7 @@ async function cancelLinesFromPreorder(p: any, target: any[], reason: string): P
         total_amount: next.total_amount,
         ...(refund > 0 ? { refund_due_note: p.refund_due_note ? `${p.refund_due_note}, ${items}` : items } : {}),
       },
-      $inc: { refund_due_amount: refund },
+      $inc: { refund_due_amount: refund, extra_due_amount: extraInc },
     },
     { returnDocument: "after" }
   );
@@ -126,11 +129,15 @@ async function cancelLinesFromPreorder(p: any, target: any[], reason: string): P
   );
   for (const l of target) await preorderRoundService.releaseQty(String(l.round_item_id), l.quantity);
 
-  // ยังไม่จ่าย = QR ต้องออกยอดใหม่ · ใบที่จ่ายแล้วคง payment.amount ไว้ตามยอดที่รับจริง
-  await paymentModel.updateMany(
-    { preorder_id: p._id, status: "pending", deleted_at: null, slip_image_url: { $in: [null, ""] }, group_id: null },
-    { $set: { amount: next.total_amount } }
-  );
+  // ยังไม่จ่าย = QR ต้องออกยอดใหม่ · ใบที่จ่ายแล้วคง payment.amount ไว้ตามยอดที่รับจริง (ยอดรอชำระเพิ่มลด → แก้ใบยอดเพิ่ม)
+  if (p.payment_status === "paid") {
+    if (extraInc !== 0) await syncExtraPayment(p._id);
+  } else {
+    await paymentModel.updateMany(
+      { preorder_id: p._id, status: "pending", deleted_at: null, slip_image_url: { $in: [null, ""] }, group_id: null, is_extra: { $ne: true } },
+      { $set: { amount: next.total_amount } }
+    );
+  }
 
   const text = customerMessages.preorderItemCancelled(p.preorder_no, items, next.total_amount, refund, reason);
   notifyCustomerLater(p.user_id, text, customerWeb.fromLineText("preorder", p._id, p.preorder_no, text, "warning"));

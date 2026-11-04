@@ -91,6 +91,8 @@ export const adminEditPreorderItemsBody = z
   .object({
     keep: z.array(z.object({ item_id: objectId, quantity: z.number().int().min(1).max(10_000) })).max(100).default([]),
     add: z.array(preorderLine).max(50).default([]),
+    // ชำระแล้วแต่ยอดใหม่เกิน — ร้านยืนยันให้ลูกค้าชำระเพิ่ม (preorderExtraPaymentService)
+    allow_extra_payment: z.boolean().optional(),
     reason: z.string().trim().max(500).nullish(),
   })
   .refine((d) => d.keep.length + d.add.length > 0, {

@@ -39,6 +39,7 @@ import { trackBackground } from "../lib/backgroundTasks";
 import { notFound } from "../lib/httpError";
 import { storefrontBase } from "../lib/storefront";
 import { SHIPPING_CARRIER_TEXT, type ShippingCarrier } from "../lib/shippingCarrier";
+import { pushToUser } from "./pushService";
 
 export type CustomerDocKind = "order" | "preorder";
 
@@ -91,7 +92,7 @@ export const customerMessages = {
     ].join("\n");
   },
   /** ร้านแก้รายการสินค้าในพรีออเดอร์ (ตกลงกับลูกค้าทางโทรศัพท์) */
-  preorderItemsChanged(docNo: string, items: string, total: number, refund: number): string {
+  preorderItemsChanged(docNo: string, items: string, total: number, refund: number, extraDue = 0): string {
     const money = (n: number) => `${toBaht(n).toLocaleString("th-TH")} บาท`;
     return [
       header("preorder", docNo),
@@ -99,6 +100,17 @@ export const customerMessages = {
       `รายการใหม่: ${items}`,
       `ยอดใหม่: ${money(total)}`,
       ...(refund > 0 ? [`ร้านจะโอนคืนส่วนต่าง ${money(refund)}`] : []),
+      ...(extraDue > 0 ? [`กรุณาชำระเงินเพิ่ม ${money(extraDue)} และแนบสลิปที่หน้าคำสั่งซื้อ`] : []),
+    ].join("\n");
+  },
+  /** ผลตรวจสลิปยอดชำระเพิ่ม (preorderExtraPaymentService) */
+  preorderExtraPayment(docNo: string, status: "paid" | "failed" | string, amount: number): string {
+    const money = `${toBaht(amount).toLocaleString("th-TH")} บาท`;
+    return [
+      header("preorder", docNo),
+      status === "paid"
+        ? `ร้านยืนยันการชำระเงินเพิ่ม ${money} แล้ว`
+        : `สลิปชำระเงินเพิ่ม ${money} ไม่ผ่านการตรวจสอบ กรุณาอัปโหลดสลิปใหม่`,
     ].join("\n");
   },
   /** ร้านแก้ผู้รับ/ที่อยู่จัดส่งของพรีออเดอร์ */
@@ -269,6 +281,14 @@ export const customerWeb = {
     if (status === "failed") return web(kind, id, docNo, "⚠️ การจัดส่งมีปัญหา ร้านจะติดต่อกลับโดยเร็ว", "warning");
     return null;
   },
+  /** ร้านเปลี่ยนสินค้าแล้วยอดเกินที่ชำระ — หัวข้อบอกยอดที่ต้องจ่าย (เห็นทันทีบนแจ้งเตือนเครื่อง) · กดแล้วเลื่อนไปส่วนชำระเงิน */
+  extraPaymentDue(notice: WebNotice, amount: number): WebNotice {
+    return {
+      ...notice,
+      title: `💳 ชำระเงินเพิ่ม ${toBaht(amount).toLocaleString("th-TH")} บาท · ${notice.title}`,
+      link: `${notice.link}#payment`,
+    };
+  },
   /** ข้อความ LINE (customerMessages) ใช้เป็นข้อความกระดิ่งตรง ๆ — ตัดหัว "🧁 MeowMeeCake / เลขเอกสาร" ออก */
   fromLineText(kind: CustomerDocKind, id: unknown, docNo: string, lineText: string | null, type: WebNoticeType = "info"): WebNotice | null {
     if (!lineText) return null;
@@ -364,6 +384,13 @@ export async function notifyCustomer(userId: unknown, text: string | null, notic
     try {
       await dbConnect();
       await recordWebNotice(userIdOf(userId), notice);
+      // แจ้งเตือนบนเครื่อง (Web Push) — ข้อความเดียวกับกระดิ่ง กดแล้วเปิดหน้าที่เกี่ยวข้อง · ไม่ได้เปิดรับ/ไม่ตั้ง key = ข้าม
+      await pushToUser(userIdOf(userId), {
+        title: notice.title,
+        body: notice.message,
+        url: notice.link && notice.link.startsWith("/") ? notice.link : "/customer/account/notifications",
+        tag: notice.ref_id ? `${notice.ref_type}:${String(notice.ref_id)}` : undefined,
+      });
     } catch (err) {
       log.warn("customer_notify.web_failed", { err });
     }

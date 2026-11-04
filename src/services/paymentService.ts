@@ -31,6 +31,7 @@ import type { PaymentStatus } from "./orderService";
 import { adminLinks } from "../lib/adminLinks";
 import { buildPromptPayQr } from "./promptpayService";
 import { warnSlipOnCancelledPreorder } from "./preorderRoundLifecycleService";
+import { onExtraPaymentStatus } from "./preorderExtraPaymentService";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -81,6 +82,11 @@ export interface ListPaymentQuery {
 // orderService.setPaymentStatus() — ไม่งั้น auto-advance order_status pending→confirmed
 // ตอนจ่ายเงินจะไม่ทำงาน (เดิมเขียน payment_status ตรงผ่าน preorderModel.updateOne เฉย ๆ)
 async function propagateStatus(payment: any, status: PaymentStatus) {
+  // ยอดชำระเพิ่มของพรีออเดอร์ที่ชำระแล้ว — ไม่เปลี่ยน payment_status ของใบ (หัก extra_due_amount แทน)
+  if (payment.is_extra && payment.preorder_id) {
+    await onExtraPaymentStatus(payment, status);
+    return;
+  }
   if (payment.order_id) {
     await orderService.setPaymentStatus(String(payment.order_id), status, String(payment._id));
   } else if (payment.preorder_id) {
@@ -126,6 +132,7 @@ export async function createPayment(input: CreatePaymentInput) {
 
   // ออเดอร์เว็บที่ถูกยกเลิกเพราะหมดเวลาชำระ + แนบสลิปมา → เปิดกลับก่อนบันทึก (docs/customer-backend-merge.md §8.8)
   let reopenOrder = false;
+  let isExtra = false;
   if (hasOrder) {
     assertObjectId(input.order_id as string, "order_id");
     const order = await orderModel
@@ -156,10 +163,18 @@ export async function createPayment(input: CreatePaymentInput) {
     if (String(preorder.user_id) !== String(input.user_id)) {
       throw badRequest("พรีออเดอร์นี้ไม่ได้เป็นของผู้ใช้ที่ระบุ");
     }
-    if (preorder.payment_status === "paid") throw conflict("พรีออเดอร์นี้ชำระเงินแล้ว");
     if (preorder.order_status === "cancelled") throw conflict("พรีออเดอร์นี้ถูกยกเลิกแล้ว");
-    if (Math.abs(amount - preorder.total_amount) > AMOUNT_TOLERANCE) {
-      throw badRequest(`ยอดชำระต้องเท่ากับยอดพรีออเดอร์ (${toBaht(preorder.total_amount)} บาท)`);
+    // ชำระแล้วแต่ร้านเปลี่ยนสินค้าจนยอดเกิน → ชำระได้เฉพาะยอดเพิ่ม (preorderExtraPaymentService)
+    const extraDue = Number(preorder.extra_due_amount ?? 0);
+    isExtra = preorder.payment_status === "paid" && extraDue > 0;
+    if (preorder.payment_status === "paid" && !isExtra) throw conflict("พรีออเดอร์นี้ชำระเงินแล้ว");
+    const expected = isExtra ? extraDue : preorder.total_amount;
+    if (Math.abs(amount - expected) > AMOUNT_TOLERANCE) {
+      throw badRequest(
+        isExtra
+          ? `ยอดชำระต้องเท่ากับยอดที่ต้องชำระเพิ่ม (${toBaht(extraDue)} บาท)`
+          : `ยอดชำระต้องเท่ากับยอดพรีออเดอร์ (${toBaht(preorder.total_amount)} บาท)`
+      );
     }
   }
 
@@ -191,6 +206,7 @@ export async function createPayment(input: CreatePaymentInput) {
       promptpay_ref: input.promptpay_ref ?? null,
       slip_image_url: input.slip_image_url ?? null,
       group_id: input.group_id ?? null,
+      is_extra: isExtra,
     });
   } catch (err: any) {
     // ชน partial unique index (race กับอีกคำขอที่สร้าง pending พร้อมกัน)
@@ -198,8 +214,10 @@ export async function createPayment(input: CreatePaymentInput) {
     throw err;
   }
 
-  // ผูก payment_id กลับไปที่ order/preorder (สถานะยัง pending)
-  if (payment.order_id) {
+  // ผูก payment_id กลับไปที่ order/preorder (สถานะยัง pending) · ใบยอดเพิ่มไม่ผูก (payment_id คงใบที่ชำระยอดหลัก)
+  if (isExtra) {
+    // ไม่ผูก
+  } else if (payment.order_id) {
     await orderModel.updateOne({ _id: payment.order_id }, { $set: { payment_id: payment._id } });
   } else if (payment.preorder_id) {
     await preorderModel.updateOne(
@@ -484,7 +502,7 @@ function paymentBlockedReason(doc: any, kind: PaymentPageKind): string | null {
     return "คำสั่งซื้อนี้ถูกยกเลิกแล้ว";
   }
   if (doc.order_status === "completed") return "คำสั่งซื้อนี้เสร็จสิ้นแล้ว";
-  if (doc.payment_status === "paid") return "คำสั่งซื้อนี้ชำระเงินเรียบร้อยแล้ว";
+  if (doc.payment_status === "paid" && !(Number(doc.extra_due_amount ?? 0) > 0)) return "คำสั่งซื้อนี้ชำระเงินเรียบร้อยแล้ว";
   if (doc.payment_status === "refunded") return "คำสั่งซื้อนี้คืนเงินแล้ว";
   return null;
 }
@@ -525,7 +543,7 @@ export async function getPaymentPage(
   const numberField = kind === "order" ? "order_no" : "preorder_no";
   const doc = await model
     .findOne({ _id: id, user_id: userId, deleted_at: null })
-    .select(`${numberField} order_status payment_status total_amount payment_id payment_due_at cancelled_reason points_redeemed user_coupon_id`)
+    .select(`${numberField} order_status payment_status total_amount payment_id payment_due_at cancelled_reason points_redeemed user_coupon_id${kind === "preorder" ? " extra_due_amount" : ""}`)
     .lean();
   if (!doc) throw notFound("ไม่พบคำสั่งซื้อ");
 
@@ -535,7 +553,9 @@ export async function getPaymentPage(
     .select("status slip_image_url")
     .lean<{ _id: unknown; status: string; slip_image_url?: string | null } | null>();
 
-  const amount = toBaht(Number(doc.total_amount ?? 0));
+  // ชำระแล้วแต่มียอดรอชำระเพิ่ม (ร้านเปลี่ยนสินค้า) → หน้าชำระเงินออก QR เฉพาะยอดเพิ่ม · ไม่มีกำหนดเวลา/ชำระรวม
+  const extraDue = doc.payment_status === "paid" ? toBaht(Number(doc.extra_due_amount ?? 0)) : 0;
+  const amount = extraDue > 0 ? extraDue : toBaht(Number(doc.total_amount ?? 0));
   const blocked = paymentBlockedReason(doc, kind);
   const lateUpload = kind === "order" && orderService.canReopenWithLateSlip(doc);
   let qr: { qr_image: string; account_name: string } | null = null;
@@ -565,10 +585,12 @@ export async function getPaymentPage(
     payment_record_status: payment?.status ?? null,
     slip_url: payment?.slip_image_url ?? null,
     // หมดเขตชำระ + เวลา server — หน้าเว็บนับถอยหลังได้แม่นแม้นาฬิกาเครื่องลูกค้าเพี้ยน
-    payment_due_at: doc.payment_due_at ?? null,
+    payment_due_at: extraDue > 0 ? null : (doc.payment_due_at ?? null),
     server_time: new Date(),
     // สั่งพร้อมบิลอื่น (ตะกร้ารวม) — หน้าเว็บแสดงลิงก์ไปชำระรวม /customer/account/payment-group/{group_id}
-    group_id: opts.forGroup ? null : await (await import("./paymentGroupService")).groupIdOf(doc._id),
+    // ยอดที่ต้องชำระเพิ่ม (> 0 = amount คือยอดเพิ่ม ไม่ใช่ยอดทั้งใบ)
+    extra_due: extraDue,
+    group_id: opts.forGroup || extraDue > 0 ? null : await (await import("./paymentGroupService")).groupIdOf(doc._id),
   };
 }
 
