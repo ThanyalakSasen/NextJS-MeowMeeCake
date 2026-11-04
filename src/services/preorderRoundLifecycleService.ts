@@ -492,6 +492,8 @@ export async function runRoundScheduler(opts: { now?: Date } = {}): Promise<Sche
   }
 
   // scheduled ที่เลย close_date ไปแล้วทั้งช่วง (ไม่เคยเปิด) ก็ปิดด้วย — ไม่มีใครสั่งได้อยู่แล้ว
+  // ไม่ชำระส่วนต่างภายในเวลา → คืนรายการเดิมก่อนปิดรอบ (ปิดแล้วเข้าผลิต)
+  await (await import("./preorderExtraRevertService")).revertExpiredExtraEdits({ now });
   const toClose = await preorderRoundModel
     .find({ deleted_at: null, round_status: { $in: ["open", "scheduled"] }, close_date: { $lte: now } })
     .select("_id round_name round_status")
